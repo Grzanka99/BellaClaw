@@ -1,8 +1,8 @@
 import { Client, Events, GatewayIntentBits, type Message, Partials } from "discord.js";
 import { Logger } from "../../utils/logger";
+import { OpenrouterAiProvider } from "../ai-providers/openrouter";
 import { Memory } from "../memory";
 import { EMemoryAuthor, EMemoryImportance } from "../memory/types";
-import { OpenrouterAiProvider } from "../ai-providers/openrouter";
 
 class DiscordSingleton extends Logger {
   private static _instance: DiscordSingleton;
@@ -81,7 +81,7 @@ class DiscordSingleton extends Logger {
   public setup() {
     this.client.once(Events.ClientReady, this.onReady.bind(this));
     this.client.on(Events.MessageCreate, this.messageHandler.bind(this));
-    this.client.login(Bun.env.DISCROD_TOKEN);
+    this.client.login(Bun.env.DISCORD_TOKEN);
   }
 }
 
