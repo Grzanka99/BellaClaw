@@ -4,7 +4,7 @@ import { OpenrouterAiProvider } from "../ai-providers/openrouter";
 import { Memory } from "../memory";
 import { EMemoryAuthor, EMemoryImportance } from "../memory/types";
 
-class DiscordSingleton extends Logger {
+export class DiscordSingleton extends Logger {
   private static _instance: DiscordSingleton;
 
   private client: Client;
@@ -52,7 +52,7 @@ class DiscordSingleton extends Logger {
       return;
     }
 
-    const res = await this.openrouter.chat(
+    const res = await this.openrouter.chatWithTools(
       {
         role: "user",
         content: [
@@ -63,6 +63,11 @@ class DiscordSingleton extends Logger {
         ],
       },
       [],
+      {
+        id: message.author.id,
+        username: message.author.username,
+        displayName: message.author.displayName,
+      },
     );
 
     if (!res) {
@@ -84,7 +89,3 @@ class DiscordSingleton extends Logger {
     this.client.login(Bun.env.DISCORD_TOKEN);
   }
 }
-
-const discord = DiscordSingleton.instance;
-
-discord.setup();

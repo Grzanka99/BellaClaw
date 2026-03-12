@@ -1,10 +1,12 @@
 import { OpenRouter } from "@openrouter/sdk";
-import type { Message } from "@openrouter/sdk/models";
+import type { AssistantMessage, Message, ToolResponseMessage } from "@openrouter/sdk/models";
+import type { User } from "discord.js";
 import type { TOption } from "../../../types";
+import { TOOL_HANDLERS, TOOLS } from "./tools.ts";
 
 const OPENROUTER_API_KEY = Bun.env.OPENROUTER_API_KEY as string;
 
-const MODEL = "google/gemini-3-flash-preview" as const;
+const MODEL = "google/gemini-3.1-pro-preview" as const;
 
 type THistoryItem = {
   content: string;
@@ -19,7 +21,7 @@ type TPrompt = {
   }>;
 };
 
-const SYSTEM_MESSAGE: TPrompt = {
+const BASE_SYSTEM_MESSAGE: TPrompt = {
   role: "system",
   content: [
     {
@@ -33,6 +35,20 @@ const SYSTEM_MESSAGE: TPrompt = {
     { type: "text", text: "Don't mention your capabilities unless asked." },
   ],
 };
+
+function buildUserContextMessage(user: TUserData): TPrompt {
+  return {
+    role: "system",
+    content: [
+      {
+        type: "text",
+        text: `Current user context - always use this user_id for tool calls:\n- user_id: ${user.id}\n- username: ${user.username}\n- displayName: ${user.displayName}`,
+      },
+    ],
+  };
+}
+
+export type TUserData = Pick<User, "username" | "id" | "displayName">;
 
 export class OpenrouterAiProvider {
   private static _instance: OpenrouterAiProvider;
@@ -49,8 +65,12 @@ export class OpenrouterAiProvider {
     return OpenrouterAiProvider._instance;
   }
 
-  public async chat(prompt: TPrompt, history: THistoryItem[]): Promise<TOption<string>> {
-    const messages: Message[] = [SYSTEM_MESSAGE, ...history];
+  public async chat(
+    prompt: TPrompt,
+    history: THistoryItem[],
+    user: TUserData,
+  ): Promise<TOption<string>> {
+    const messages: Message[] = [BASE_SYSTEM_MESSAGE, buildUserContextMessage(user), ...history];
     messages.push(prompt);
 
     const res = await this.openrouter.chat.send({
@@ -60,7 +80,69 @@ export class OpenrouterAiProvider {
     });
 
     const data = res.choices[0]?.message.content;
-    console.log(data);
+
+    if (!data) {
+      return undefined;
+    }
+
+    return data.toString();
+  }
+
+  public async chatWithTools(
+    prompt: TPrompt,
+    history: THistoryItem[],
+    user: TUserData,
+  ): Promise<TOption<string>> {
+    const messages: Message[] = [
+      BASE_SYSTEM_MESSAGE,
+      buildUserContextMessage(user),
+      ...history,
+      prompt,
+    ];
+
+    let res = await this.openrouter.chat.send({
+      stream: false,
+      model: MODEL,
+      messages,
+      tools: [...TOOLS],
+    });
+
+    while (res.choices[0]?.finishReason === "tool_calls") {
+      const assistantMessage = res.choices[0].message as AssistantMessage;
+      const toolCalls = assistantMessage.toolCalls ?? [];
+
+      messages.push(assistantMessage);
+
+      for (const toolCall of toolCalls) {
+        const handler = TOOL_HANDLERS[toolCall.function.name];
+        let result: string;
+
+        if (handler) {
+          const args: unknown = JSON.parse(toolCall.function.arguments);
+          const success = handler(args, user);
+          result = JSON.stringify({ success });
+        } else {
+          result = JSON.stringify({ error: `Unknown tool: ${toolCall.function.name}` });
+        }
+
+        const toolResponse: ToolResponseMessage = {
+          role: "tool",
+          toolCallId: toolCall.id,
+          content: result,
+        };
+
+        messages.push(toolResponse);
+      }
+
+      res = await this.openrouter.chat.send({
+        stream: false,
+        model: MODEL,
+        messages,
+        tools: [...TOOLS],
+      });
+    }
+
+    const data = res.choices[0]?.message.content;
 
     if (!data) {
       return undefined;
