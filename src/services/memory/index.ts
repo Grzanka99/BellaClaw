@@ -49,6 +49,39 @@ export class Memory extends Logger {
     return Memory._instance;
   }
 
+  public async readFullMemory(userId: string): Promise<TOption<TMemory[]>> {
+    const res = await this.queue.enqueue(async () => {
+      const queryStr = `SELECT * FROM memories WHERE userId = $userId ORDER BY createdAt DESC`;
+      const results = this.db.query(queryStr).all({ $userId: userId });
+
+      console.log(userId, results);
+      const parsed = z.array(SMemory).safeParse(results);
+
+      if (!parsed.success) {
+        this.logger.error("Failed to parse memory results");
+        console.log(parsed.error);
+        return undefined;
+      }
+
+      return parsed.data;
+    });
+
+    if (!res) {
+      return undefined;
+    }
+
+    return res.map((row) => ({
+      id: row.id,
+      userId: row.userId,
+      author: row.author,
+      guild: row.guild,
+      importance: row.importance as EMemoryImportance,
+      message: row.message,
+      createdAt: new Date(row.createdAt),
+      lastReadAt: new Date(row.lastReadAt),
+    }));
+  }
+
   public remember(args: TRemember): boolean {
     const query = `
       INSERT INTO

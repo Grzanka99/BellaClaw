@@ -49,8 +49,15 @@ export class DiscordSingleton extends Logger {
     console.log(`<${message.author.username}> ${message.content}`);
 
     if (message.author.id === this.client.user?.id) {
+      this.remember(message, true);
       return;
     }
+
+    if (!this.client.user?.id) {
+      return;
+    }
+
+    const memories = await this.memory.readFullMemory(message.author.id);
 
     const res = await this.openrouter.chatWithTools(
       {
@@ -62,7 +69,12 @@ export class DiscordSingleton extends Logger {
           },
         ],
       },
-      [],
+      memories?.map((el) => {
+        return {
+          content: el.message,
+          role: el.author === EMemoryAuthor.Bot ? "assistant" : "user",
+        };
+      }) || [],
       {
         id: message.author.id,
         username: message.author.username,
