@@ -55,7 +55,7 @@ export class OpenrouterAiProvider {
 
   private readonly openrouter: OpenRouter = new OpenRouter({ apiKey: OPENROUTER_API_KEY });
 
-  private constructor() {}
+  private constructor() { }
 
   public static get instance(): OpenrouterAiProvider {
     if (!OpenrouterAiProvider._instance) {
@@ -87,6 +87,8 @@ export class OpenrouterAiProvider {
 
     return data.toString();
   }
+
+  public async toolCall(prompt: TPrompt, model: string, tool: unknown) { }
 
   public async chatWithTools(
     prompt: TPrompt,
