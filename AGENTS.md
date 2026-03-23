@@ -70,3 +70,4 @@ Use `Bun.env.*` — never `process.env`.
 - If a type error in an unrelated file blocks your task, report it instead of silently fixing it.
 - Do not modify stub methods (those with `throw "Not implemented"`) unless explicitly asked to implement them.
 - Do not modify existing test files under any circumstances.
+- NEVER use types cast - 'as Type' - outside of tests
