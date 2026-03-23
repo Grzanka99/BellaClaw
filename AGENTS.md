@@ -2,78 +2,71 @@
 
 ## Purpose
 
-This is a small Bun + TypeScript Discord assistant project.
-Prefer small, targeted changes that preserve the current structure and naming style.
+Small Bun + TypeScript Discord assistant. Prefer small, targeted changes that preserve the current structure and naming style.
 
-## Project Layout
-
-- `src/index.ts` is the Bun entrypoint.
-- `src/services/memory/` contains persistent memory logic and helpers.
-- `src/services/sqlite-storage/index.ts` contains a simple SQLite-backed key-value store.
-- `src/utils/` contains shared utilities like logging and async queueing.
-
-## Bun Commands
+## Commands
 
 - Install dependencies: `bun install`
 - Start once: `bun run src/index.ts`
 - Start via script: `bun run start`
 - Dev/watch mode: `bun run dev`
-- Run tests: `bun test`
-- Run tests via script: `bun run test`
-- Run one test file: `bun test path/to/file.test.ts`
+- Run all tests: `bun test`
+- Run one test file: `bun test src/services/memory/index.test.ts`
 - Run tests by name: `bun test --test-name-pattern "my case"`
 - Typecheck: `bunx tsc --noEmit`
 - Biome check: `bunx @biomejs/biome check .`
 - Biome auto-fix: `bunx @biomejs/biome check . --write`
 
-## Test Notes
+## Naming Conventions
 
-- This repository currently has no test files.
-- Bun only discovers files like `*.test.ts`, `*.spec.ts`, `*_test_*.ts`, or `*_spec_*.ts`.
-- Do not assume new work requires tests; add them only when explicitly requested.
+- Type aliases: `T*` prefix (e.g. `TMemory`, `TOption<T>`)
+- Enums: `E*` prefix (e.g. `EMemoryImportance`, `EMemoryAuthor`)
+- Zod schemas: `S*` prefix (e.g. `SMemory`, `SSaveArgs`)
+- Singleton accessor: `public static get instance()` — always this name, no variants
 
-## Validation Expectations
+## Singleton Pattern
 
-- This is a pet project; keep validation lightweight and practical.
-- Do not assume lint, typecheck, or tests are always fully green.
-- Lint and formatting cleanup may be handled manually by the maintainer.
-- If an unrelated issue blocks a command, mention it briefly instead of broad cleanup.
+All singletons follow this exact shape:
 
-## Project-Specific Conventions
+```ts
+export class FooSingleton extends Logger {
+  private static _instance: FooSingleton;
 
-- Package manager/runtime is `bun`.
-- TypeScript uses ESM (`"type": "module"`) with `strict: true` and `noEmit: true`.
-- Module resolution is `bundler` with `allowImportingTsExtensions: true`.
-- Formatting and linting are handled by Biome.
-- SQLite usage relies on `bun:sqlite`.
+  private constructor() {
+    super("FOO");
+  }
 
-## Naming And Types
+  public static get instance(): FooSingleton {
+    if (!FooSingleton._instance) {
+      FooSingleton._instance = new FooSingleton();
+    }
+    return FooSingleton._instance;
+  }
+}
+```
 
-- Shared type aliases use `T*` prefixes.
-- Enums use `E*` names.
-- Zod schemas use `S*` names.
-- Singleton accessors use `instance` getters.
-- Reuse existing shared aliases like `TOption<T>` when they fit.
+## AsyncQueue
 
-## Code Style
+All SQLite operations must go through `this.queue.enqueue()`. Never call `this.db.*` directly outside of an enqueued callback.
 
-- Use double quotes and semicolons, matching the current codebase.
-- Keep imports sorted the way Biome expects.
-- Use `import type` for type-only imports.
-- Prefer relative imports within `src/`.
-- Use `as const` for stable constants when helpful.
-- Avoid `any`; prefer `unknown` at boundaries.
+## Zod Usage
 
-## Error Handling And State
+Always use `safeParse` and branch on `.success` — never use `.parse` (throws on failure).
 
-- Prefer explicit early returns.
-- Preserve current API style when methods return `undefined` or `boolean` for recoverable failures.
-- Use the shared `Logger` base class or `logger` utility for operational logs when practical.
-- Be careful with queueing and singleton state; this codebase uses both.
-- Keep SQLite queries parameterized.
+## Environment Variables
 
-## Cursor / Copilot Rules
+Use `Bun.env.*` — never `process.env`.
 
-- No `.cursor/rules/` rules were found.
-- No `.cursorrules` file was found.
-- No `.github/copilot-instructions.md` file was found.
+## Logging
+
+- In classes: extend `Logger` and use `this.logger.info/warning/error/message()`
+- Outside classes: import and use the `logger` utility directly
+- Never use raw `console.log` inside service files
+
+## Scope Rules
+
+- Do not change anything not directly asked.
+- Do not fix type errors in files outside the current task's scope, even if you notice them.
+- If a type error in an unrelated file blocks your task, report it instead of silently fixing it.
+- Do not modify stub methods (those with `throw "Not implemented"`) unless explicitly asked to implement them.
+- Do not modify existing test files under any circumstances.
