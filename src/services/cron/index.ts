@@ -1,11 +1,10 @@
-import { Logger } from "../../utils/logger";
+import { createLogger, type TLogger } from "../../utils/logger";
 
-export class CronSingleton extends Logger {
+export class CronSingleton {
   private static _instance: CronSingleton;
+  private logger: TLogger = createLogger("CRON");
 
-  private constructor() {
-    super("CRON");
-  }
+  private constructor() {}
 
   public static get instance() {
     if (!CronSingleton._instance) {

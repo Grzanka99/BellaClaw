@@ -15,19 +15,18 @@ export const logger = {
   message: (msg: string) => console.log(`${time()} [MESG] ${msg}`),
 };
 
-export abstract class Logger {
-  private prefix = this.constructor.name;
+export type TLogger = {
+  info: (msg: string) => void;
+  warning: (msg: string) => void;
+  error: (msg: string) => void;
+  message: (msg: string) => void;
+};
 
-  public constructor(prefix?: string) {
-    if (prefix) {
-      this.prefix = prefix;
-    }
-  }
-
-  public logger = {
-    info: (msg: string) => logger.info(`[${this.prefix}] ${msg}`),
-    warning: (msg: string) => logger.warning(`[${this.prefix}] ${msg}`),
-    error: (msg: string) => logger.error(`[${this.prefix}] ${msg}`),
-    message: (msg: string) => logger.message(`[${this.prefix}] ${msg}`),
+export function createLogger(prefix: string): TLogger {
+  return {
+    info: (msg: string) => logger.info(`[${prefix}] ${msg}`),
+    warning: (msg: string) => logger.warning(`[${prefix}] ${msg}`),
+    error: (msg: string) => logger.error(`[${prefix}] ${msg}`),
+    message: (msg: string) => logger.message(`[${prefix}] ${msg}`),
   };
 }

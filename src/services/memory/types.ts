@@ -27,11 +27,19 @@ export const SSaveArgs = SMemory.omit({ id: true, createdAt: true, lastReadAt: t
 export type TMemory = z.infer<typeof SMemory>;
 export type TSaveArgs = z.infer<typeof SSaveArgs>;
 
-export type TFindMemoryArgs = {
-  userId: string;
-  searchString: string;
-  timeRange?: {
-    start: Date;
-    end: Date;
-  };
-};
+export const SFindMemoryArgs = z.object({
+  userId: z.string(),
+  author: z.enum(EMemoryAuthor).optional(),
+  guild: z.string().optional(),
+  importance: z.array(z.enum(EMemoryImportance)).optional(),
+  searchString: z.string().optional(),
+  timeRange: z
+    .object({
+      start: z.coerce.date(),
+      end: z.coerce.date(),
+    })
+    .optional(),
+  limit: z.number().int().positive().optional(),
+});
+
+export type TFindMemoryArgs = z.infer<typeof SFindMemoryArgs>;

@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite";
 import { z } from "zod";
 import { AsyncQueue } from "../../utils/async-queue";
-import { Logger } from "../../utils/logger";
+import { createLogger, type TLogger } from "../../utils/logger";
 import { type EMemoryImportance, SMemory, type TMemory, type TSaveArgs } from "./types";
 
 export const PERSISTENT_MEMORY_DB = "persistent-memory.db" as const;
@@ -24,16 +24,16 @@ type TMemoryError = {
   error: unknown;
 };
 
-export class Memory extends Logger {
+export class Memory {
   private static _instance: Memory;
   private db: Database;
   private queue: AsyncQueue;
+  private logger: TLogger = createLogger("MEMORY");
 
   // NOTE: To simplify and improve tests setup
   private static MEMORY_FILE = PERSISTENT_MEMORY_DB;
 
   private constructor() {
-    super("MEMORY");
     this.queue = new AsyncQueue();
     this.db = new Database(Memory.MEMORY_FILE);
 
@@ -49,7 +49,9 @@ export class Memory extends Logger {
     return Memory._instance;
   }
 
-  public async find(): Promise<TMemory[] | TMemoryError> { }
+  public async find(args): Promise<TMemory[] | TMemoryError> {
+    throw "Not implemented";
+  }
 
   public async readFullMemory(userId: string): Promise<TMemory[] | TMemoryError> {
     const res = await this.queue.enqueue(async () => {

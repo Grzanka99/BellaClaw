@@ -1,17 +1,16 @@
 import { Client, Events, GatewayIntentBits, type Message, Partials } from "discord.js";
-import { Logger } from "../../utils/logger";
+import { createLogger, type TLogger } from "../../utils/logger";
 import { OpenrouterAiProvider } from "../ai-providers/openrouter";
 import { Memory } from "../memory";
 
-export class DiscordSingleton extends Logger {
+export class DiscordSingleton {
   private static _instance: DiscordSingleton;
-
+  private logger: TLogger = createLogger("DISCORD");
   private client: Client;
   private memory: Memory;
   private openrouter: OpenrouterAiProvider;
 
   private constructor() {
-    super("DISCORD");
     this.client = new Client({
       intents: [
         GatewayIntentBits.Guilds,

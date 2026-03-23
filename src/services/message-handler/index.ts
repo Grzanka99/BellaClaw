@@ -1,11 +1,13 @@
 import type { TOption } from "../../types";
-import { Logger } from "../../utils/logger";
+import { createLogger, type TLogger } from "../../utils/logger";
 
-export class MessageHandler extends Logger {
+export class MessageHandler {
   private static _instances = new Map<string, MessageHandler>();
+  private logger: TLogger;
 
   constructor(chatId: string) {
-    super(`AbstractMessageHandle (cid: ${chatId})`);
+    this.logger = createLogger(`AbstractMessageHandler (cid: ${chatId})`);
+    this.logger.info("created abstract message handler");
     this.logger.info("handler is up");
   }
 
