@@ -2,7 +2,6 @@ import { OpenRouter } from "@openrouter/sdk";
 import type { AssistantMessage, Message, ToolResponseMessage } from "@openrouter/sdk/models";
 import type { User } from "discord.js";
 import type { TOption } from "../../../types";
-import { TOOL_HANDLERS, TOOLS } from "./tools.ts";
 
 const OPENROUTER_API_KEY = Bun.env.OPENROUTER_API_KEY as string;
 
@@ -88,68 +87,5 @@ export class OpenrouterAiProvider {
     return data.toString();
   }
 
-  public async toolCall(prompt: TPrompt, model: string, tool: unknown) { }
-
-  public async chatWithTools(
-    prompt: TPrompt,
-    history: THistoryItem[],
-    user: TUserData,
-  ): Promise<TOption<string>> {
-    const messages: Message[] = [
-      BASE_SYSTEM_MESSAGE,
-      buildUserContextMessage(user),
-      ...history,
-      prompt,
-    ];
-
-    let res = await this.openrouter.chat.send({
-      stream: false,
-      model: MODEL,
-      messages,
-      tools: [...TOOLS],
-    });
-
-    while (res.choices[0]?.finishReason === "tool_calls") {
-      const assistantMessage = res.choices[0].message as AssistantMessage;
-      const toolCalls = assistantMessage.toolCalls ?? [];
-
-      messages.push(assistantMessage);
-
-      for (const toolCall of toolCalls) {
-        const handler = TOOL_HANDLERS[toolCall.function.name];
-        let result: string;
-
-        if (handler) {
-          const args: unknown = JSON.parse(toolCall.function.arguments);
-          const success = handler(args, user);
-          result = JSON.stringify({ success });
-        } else {
-          result = JSON.stringify({ error: `Unknown tool: ${toolCall.function.name}` });
-        }
-
-        const toolResponse: ToolResponseMessage = {
-          role: "tool",
-          toolCallId: toolCall.id,
-          content: result,
-        };
-
-        messages.push(toolResponse);
-      }
-
-      res = await this.openrouter.chat.send({
-        stream: false,
-        model: MODEL,
-        messages,
-        tools: [...TOOLS],
-      });
-    }
-
-    const data = res.choices[0]?.message.content;
-
-    if (!data) {
-      return undefined;
-    }
-
-    return data.toString();
-  }
+  public async toolCall(prompt: TPrompt, model: string, tool: string) { }
 }

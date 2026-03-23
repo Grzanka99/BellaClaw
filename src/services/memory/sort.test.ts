@@ -1,0 +1,49 @@
+import { describe, expect, test } from "bun:test";
+import { sortByImportanceAndDates } from "./sort";
+import type { TMemory } from "./types";
+import { EMemoryAuthor } from "./types";
+
+function createMemory(overrides: Partial<TMemory>): TMemory {
+  return {
+    id: 1,
+    userId: "test-user",
+    author: EMemoryAuthor.User,
+    guild: null,
+    importance: 1,
+    message: "test message",
+    createdAt: new Date(),
+    lastReadAt: new Date(),
+    ...overrides,
+  };
+}
+
+describe("sortByImportanceAndDates", () => {
+  test("sorts by importance when it differs", () => {
+    const a = createMemory({ importance: 2 });
+    const b = createMemory({ importance: 1 });
+
+    expect(sortByImportanceAndDates(a, b)).toBeLessThan(0);
+    expect(sortByImportanceAndDates(b, a)).toBeGreaterThan(0);
+  });
+
+  test("sorts by lastReadAt when importance is equal", () => {
+    const older = new Date("2024-01-01");
+    const newer = new Date("2024-01-02");
+    const a = createMemory({ importance: 1, lastReadAt: newer });
+    const b = createMemory({ importance: 1, lastReadAt: older });
+
+    expect(sortByImportanceAndDates(a, b)).toBeLessThan(0);
+    expect(sortByImportanceAndDates(b, a)).toBeGreaterThan(0);
+  });
+
+  test("sorts by createdAt when importance and lastReadAt are equal", () => {
+    const same = new Date("2024-01-03");
+    const older = new Date("2024-01-01");
+    const newer = new Date("2024-01-02");
+    const a = createMemory({ importance: 1, lastReadAt: same, createdAt: newer });
+    const b = createMemory({ importance: 1, lastReadAt: same, createdAt: older });
+
+    expect(sortByImportanceAndDates(a, b)).toBeLessThan(0);
+    expect(sortByImportanceAndDates(b, a)).toBeGreaterThan(0);
+  });
+});

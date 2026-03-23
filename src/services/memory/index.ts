@@ -1,16 +1,8 @@
 import { Database } from "bun:sqlite";
 import { z } from "zod";
-import type { TOption } from "../../types";
 import { AsyncQueue } from "../../utils/async-queue";
 import { Logger } from "../../utils/logger";
-import {
-  type EMemoryImportance,
-  SMemory,
-  type TFindMemoryArgs,
-  type TMemory,
-  type TRemember,
-} from "./types";
-import { sortByImportanceAndDates } from "./sort";
+import { type EMemoryImportance, SMemory, type TMemory, type TSaveArgs } from "./types";
 
 export const PERSISTENT_MEMORY_DB = "persistent-memory.db" as const;
 
@@ -27,15 +19,23 @@ export const CREATE_MEMORIES_TABLE = `
   )
 `;
 
+type TMemoryError = {
+  operation: "write" | "read" | "update" | "delete";
+  error: unknown;
+};
+
 export class Memory extends Logger {
   private static _instance: Memory;
   private db: Database;
   private queue: AsyncQueue;
 
+  // NOTE: To simplify and improve tests setup
+  private static MEMORY_FILE = PERSISTENT_MEMORY_DB;
+
   private constructor() {
     super("MEMORY");
     this.queue = new AsyncQueue();
-    this.db = new Database(PERSISTENT_MEMORY_DB);
+    this.db = new Database(Memory.MEMORY_FILE);
 
     this.queue.enqueue(async () => {
       this.db.run(CREATE_MEMORIES_TABLE);
@@ -49,17 +49,17 @@ export class Memory extends Logger {
     return Memory._instance;
   }
 
-  public async readFullMemory(userId: string): Promise<TOption<TMemory[]>> {
+  public async find(): Promise<TMemory[] | TMemoryError> { }
+
+  public async readFullMemory(userId: string): Promise<TMemory[] | TMemoryError> {
     const res = await this.queue.enqueue(async () => {
       const queryStr = `SELECT * FROM memories WHERE userId = $userId ORDER BY createdAt DESC`;
       const results = this.db.query(queryStr).all({ $userId: userId });
 
-      console.log(userId, results);
       const parsed = z.array(SMemory).safeParse(results);
 
       if (!parsed.success) {
-        this.logger.error("Failed to parse memory results");
-        console.log(parsed.error);
+        this.logger.error("Failed to parse memory from DB");
         return undefined;
       }
 
@@ -67,7 +67,10 @@ export class Memory extends Logger {
     });
 
     if (!res) {
-      return undefined;
+      return {
+        operation: "read",
+        error: "Failed to read memory",
+      };
     }
 
     return res.map((row) => ({
@@ -82,7 +85,7 @@ export class Memory extends Logger {
     }));
   }
 
-  public remember(args: TRemember): boolean {
+  public async save(args: TSaveArgs): Promise<Omit<TMemory, "id"> | TMemoryError> {
     const query = `
       INSERT INTO
         memories (userId, author, guild, importance, message, createdAt, lastReadAt)
@@ -90,94 +93,94 @@ export class Memory extends Logger {
         ($userId, $author, $guild, $importance, $message, $createdAt, $lastReadAt)
     `;
 
+    const now = Date.now();
+
     try {
-      this.queue.enqueue(async () => {
-        this.db.query(query).run({
+      const res = await this.queue.enqueue(async () => {
+        return this.db.query(query).run({
           $userId: args.userId,
           $author: args.author,
           $guild: args.guild ?? null,
           $importance: args.importance,
           $message: args.message,
-          $createdAt: Date.now(),
-          $lastReadAt: Date.now(),
+          $createdAt: now,
+          $lastReadAt: now,
         });
       });
-      return true;
-    } catch (_) {
-      this.logger.error("Failed to save memory");
-      return false;
+
+      if (res.changes > 0) {
+        return {
+          userId: args.userId,
+          author: args.author,
+          guild: args.guild,
+          importance: args.importance,
+          message: args.message,
+          createdAt: new Date(now),
+          lastReadAt: new Date(now),
+        };
+      }
+
+      this.logger.error(`changes: ${res.changes}`);
+      return {
+        operation: "write",
+        error: "changes size is 0",
+      };
+    } catch (error) {
+      this.logger.error(`Something went wrong while saving memory: ${String(error)}`);
+      return {
+        operation: "write",
+        error,
+      };
     }
   }
 
-  public async find(args: TFindMemoryArgs): Promise<TOption<TMemory[]>> {
-    const res = await this.queue.enqueue(async () => {
-      let queryStr = `
-      SELECT * FROM memories
-      WHERE userId = $userId
-      AND message LIKE $query
+  public async remove(id: string): Promise<TMemory | TMemoryError> {
+    const query = `
+      DELETE FROM memories
+      WHERE id = $id
+      RETURNING *
     `;
 
-      const params: Record<string, string | number> = {
-        $userId: args.userId,
-        $query: `%${args.query}%`,
-      };
+    try {
+      const res = await this.queue.enqueue(async () =>
+        this.db.query(query).get({
+          $id: id,
+        }),
+      );
 
-      if (args.timeRange) {
-        queryStr += ` AND (createdAt >= $startCA AND createdAt <= $endCA`;
-        params.$startCA = args.timeRange.start.getTime();
-        params.$endCA = args.timeRange.end.getTime();
-
-        queryStr += ` OR lastReadAt >= $startLR AND lastReadAt <= $endLR)`;
-        params.$startLR = args.timeRange.start.getTime();
-        params.$endLR = args.timeRange.end.getTime();
+      if (!res) {
+        return {
+          operation: "delete",
+          error: "No memory found with the given id",
+        };
       }
 
-      queryStr += ` ORDER BY createdAt DESC`;
-
-      const query = this.db.query(queryStr);
-      const results = query.all(params);
-
-      const parsed = z.array(SMemory).safeParse(results);
+      const parsed = SMemory.safeParse(res);
 
       if (!parsed.success) {
-        this.logger.error("Failed to parse memory results");
-        console.log(parsed.error);
-        return undefined;
+        this.logger.error("Failed to parse removed memory result");
+        return {
+          operation: "delete",
+          error: parsed.error,
+        };
       }
 
-      const res = parsed.data;
-
-      if (res.length > 0) {
-        const updateQuery = `
-          UPDATE memories
-          SET lastReadAt = ?
-          WHERE id IN (${res.map(() => "?").join(", ")})
-        `;
-        this.db.query(updateQuery).run(Date.now(), ...res.map((r) => r.id));
-      }
-
-      return res;
-    });
-
-    if (!res) {
-      return undefined;
+      return {
+        id: parsed.data.id,
+        userId: parsed.data.userId,
+        author: parsed.data.author,
+        guild: parsed.data.guild,
+        importance: parsed.data.importance as EMemoryImportance,
+        message: parsed.data.message,
+        createdAt: new Date(parsed.data.createdAt),
+        lastReadAt: new Date(parsed.data.lastReadAt),
+      };
+    } catch (error) {
+      this.logger.error(`Something went wrong while removing memory: ${String(error)}`);
+      return {
+        operation: "delete",
+        error,
+      };
     }
-
-    return res
-      .map((row) => ({
-        id: row.id,
-        userId: row.userId,
-        author: row.author,
-        guild: row.guild,
-        importance: row.importance as EMemoryImportance,
-        message: row.message,
-        createdAt: new Date(row.createdAt),
-        lastReadAt: new Date(row.lastReadAt),
-      }))
-      .sort(sortByImportanceAndDates);
-  }
-
-  public forget(args: TFindMemoryArgs): boolean {
-    return true;
   }
 }
