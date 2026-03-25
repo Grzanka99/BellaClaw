@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, unlinkSync } from "node:fs";
 import { Memory, PERSISTENT_MEMORY_DB } from "./index";
-import { EMemoryAuthor } from "./types";
+import { EMemoryAuthor, EMemoryImportance } from "./types";
 
 const TEST_DB = "test-memory.db";
 
@@ -228,6 +228,324 @@ describe("Memory", () => {
       expect(result[0].message).toBe("User A memory");
       // @ts-expect-error
       expect(result[0].userId).toBe("user-a");
+    });
+  });
+
+  describe("find", () => {
+    test("returns memories for a user", async () => {
+      const memory = Memory.instance;
+      await memory.save({
+        userId: "user-find",
+        author: EMemoryAuthor.User,
+        guild: "guild-1",
+        importance: EMemoryImportance.High,
+        message: "Test memory",
+      });
+
+      const result = await memory.find({ userId: "user-find" });
+
+      expect(result).not.toHaveProperty("operation");
+      // @ts-expect-error
+      expect(result.length).toBe(1);
+      // @ts-expect-error
+      expect(result[0].message).toBe("Test memory");
+    });
+
+    test("returns empty array when no memories match", async () => {
+      const memory = Memory.instance;
+      const result = await memory.find({ userId: "nonexistent" });
+
+      expect(result).toEqual([]);
+    });
+
+    test("filters by author", async () => {
+      const memory = Memory.instance;
+      await memory.save({
+        userId: "user-author",
+        author: EMemoryAuthor.User,
+        guild: null,
+        importance: EMemoryImportance.Low,
+        message: "User message",
+      });
+      await memory.save({
+        userId: "user-author",
+        author: EMemoryAuthor.Bot,
+        guild: null,
+        importance: EMemoryImportance.Low,
+        message: "Bot message",
+      });
+
+      const result = await memory.find({
+        userId: "user-author",
+        author: EMemoryAuthor.User,
+      });
+
+      // @ts-expect-error
+      expect(result.length).toBe(1);
+      // @ts-expect-error
+      expect(result[0].author).toBe(EMemoryAuthor.User);
+      // @ts-expect-error
+      expect(result[0].message).toBe("User message");
+    });
+
+    test("filters by guild", async () => {
+      const memory = Memory.instance;
+      await memory.save({
+        userId: "user-guild",
+        author: EMemoryAuthor.User,
+        guild: "guild-alpha",
+        importance: EMemoryImportance.Low,
+        message: "Alpha memory",
+      });
+      await memory.save({
+        userId: "user-guild",
+        author: EMemoryAuthor.User,
+        guild: "guild-beta",
+        importance: EMemoryImportance.Low,
+        message: "Beta memory",
+      });
+
+      const result = await memory.find({
+        userId: "user-guild",
+        guild: "guild-alpha",
+      });
+
+      // @ts-expect-error
+      expect(result.length).toBe(1);
+      // @ts-expect-error
+      expect(result[0].guild).toBe("guild-alpha");
+      // @ts-expect-error
+      expect(result[0].message).toBe("Alpha memory");
+    });
+
+    test("filters by importance levels", async () => {
+      const memory = Memory.instance;
+      await memory.save({
+        userId: "user-importance",
+        author: EMemoryAuthor.User,
+        guild: null,
+        importance: EMemoryImportance.Low,
+        message: "Low importance",
+      });
+      await memory.save({
+        userId: "user-importance",
+        author: EMemoryAuthor.User,
+        guild: null,
+        importance: EMemoryImportance.Medium,
+        message: "Medium importance",
+      });
+      await memory.save({
+        userId: "user-importance",
+        author: EMemoryAuthor.User,
+        guild: null,
+        importance: EMemoryImportance.High,
+        message: "High importance",
+      });
+
+      const result = await memory.find({
+        userId: "user-importance",
+        importance: [EMemoryImportance.Low, EMemoryImportance.High],
+      });
+
+      // @ts-expect-error
+      expect(result.length).toBe(2);
+      // @ts-expect-error
+      const messages = result.map((m) => m.message);
+      expect(messages).toContain("Low importance");
+      expect(messages).toContain("High importance");
+      expect(messages).not.toContain("Medium importance");
+    });
+
+    test("filters by searchString (partial match)", async () => {
+      const memory = Memory.instance;
+      await memory.save({
+        userId: "user-search",
+        author: EMemoryAuthor.User,
+        guild: null,
+        importance: EMemoryImportance.Low,
+        message: "Hello world",
+      });
+      await memory.save({
+        userId: "user-search",
+        author: EMemoryAuthor.User,
+        guild: null,
+        importance: EMemoryImportance.Low,
+        message: "Goodbye world",
+      });
+      await memory.save({
+        userId: "user-search",
+        author: EMemoryAuthor.User,
+        guild: null,
+        importance: EMemoryImportance.Low,
+        message: "Hello there",
+      });
+
+      const result = await memory.find({
+        userId: "user-search",
+        searchString: "Hello",
+      });
+
+      // @ts-expect-error
+      expect(result.length).toBe(2);
+      // @ts-expect-error
+      const messages = result.map((m) => m.message);
+      expect(messages).toContain("Hello world");
+      expect(messages).toContain("Hello there");
+      expect(messages).not.toContain("Goodbye world");
+    });
+
+    test("filters by timeRange", async () => {
+      const memory = Memory.instance;
+      const now = new Date();
+      const threeHoursAgo = new Date(now.getTime() - 3 * 60 * 60 * 1000);
+
+      await memory.save({
+        userId: "user-timerange",
+        author: EMemoryAuthor.User,
+        guild: null,
+        importance: EMemoryImportance.Low,
+        message: "Recent memory",
+      });
+
+      const result = await memory.find({
+        userId: "user-timerange",
+        timeRange: {
+          start: threeHoursAgo,
+          end: now,
+        },
+      });
+
+      // @ts-expect-error
+      expect(result.length).toBe(1);
+      // @ts-expect-error
+      expect(result[0].message).toBe("Recent memory");
+    });
+
+    test("excludes memories outside timeRange", async () => {
+      const memory = Memory.instance;
+      const now = new Date();
+      const oneHourAgo = new Date(now.getTime() - 1 * 60 * 60 * 1000);
+      const twoHoursAgo = new Date(now.getTime() - 2 * 60 * 60 * 1000);
+
+      await memory.save({
+        userId: "user-timerange-exclude",
+        author: EMemoryAuthor.User,
+        guild: null,
+        importance: EMemoryImportance.Low,
+        message: "Recent memory",
+      });
+
+      const result = await memory.find({
+        userId: "user-timerange-exclude",
+        timeRange: {
+          start: twoHoursAgo,
+          end: oneHourAgo,
+        },
+      });
+
+      // @ts-expect-error
+      expect(result.length).toBe(0);
+    });
+
+    test("applies limit", async () => {
+      const memory = Memory.instance;
+      for (let i = 0; i < 5; i++) {
+        await memory.save({
+          userId: "user-limit",
+          author: EMemoryAuthor.User,
+          guild: null,
+          importance: EMemoryImportance.Low,
+          message: `Memory ${i}`,
+        });
+      }
+
+      const result = await memory.find({
+        userId: "user-limit",
+        limit: 3,
+      });
+
+      // @ts-expect-error
+      expect(result.length).toBe(3);
+    });
+
+    test("combines multiple filters", async () => {
+      const memory = Memory.instance;
+      await memory.save({
+        userId: "user-multi",
+        author: EMemoryAuthor.User,
+        guild: "guild-multi",
+        importance: EMemoryImportance.High,
+        message: "Matching all filters",
+      });
+      await memory.save({
+        userId: "user-multi",
+        author: EMemoryAuthor.Bot,
+        guild: "guild-multi",
+        importance: EMemoryImportance.High,
+        message: "Wrong author",
+      });
+      await memory.save({
+        userId: "user-multi",
+        author: EMemoryAuthor.User,
+        guild: "guild-other",
+        importance: EMemoryImportance.High,
+        message: "Wrong guild",
+      });
+      await memory.save({
+        userId: "user-multi",
+        author: EMemoryAuthor.User,
+        guild: "guild-multi",
+        importance: EMemoryImportance.Low,
+        message: "Wrong importance",
+      });
+
+      const result = await memory.find({
+        userId: "user-multi",
+        author: EMemoryAuthor.User,
+        guild: "guild-multi",
+        importance: [EMemoryImportance.High],
+      });
+
+      // @ts-expect-error
+      expect(result.length).toBe(1);
+      // @ts-expect-error
+      expect(result[0].message).toBe("Matching all filters");
+    });
+
+    test("returns memories ordered by createdAt DESC", async () => {
+      const memory = Memory.instance;
+      await memory.save({
+        userId: "user-order",
+        author: EMemoryAuthor.User,
+        guild: null,
+        importance: EMemoryImportance.Low,
+        message: "First memory",
+      });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      await memory.save({
+        userId: "user-order",
+        author: EMemoryAuthor.User,
+        guild: null,
+        importance: EMemoryImportance.Low,
+        message: "Second memory",
+      });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      await memory.save({
+        userId: "user-order",
+        author: EMemoryAuthor.User,
+        guild: null,
+        importance: EMemoryImportance.Low,
+        message: "Third memory",
+      });
+
+      const result = await memory.find({ userId: "user-order" });
+
+      // @ts-expect-error
+      expect(result.length).toBe(3);
+      // @ts-expect-error
+      expect(result[0].message).toBe("Third memory");
+      // @ts-expect-error
+      expect(result[2].message).toBe("First memory");
     });
   });
 });

@@ -2,7 +2,7 @@ import { Database } from "bun:sqlite";
 import { z } from "zod";
 import { AsyncQueue } from "../../utils/async-queue";
 import { createLogger, type TLogger } from "../../utils/logger";
-import { type EMemoryImportance, SMemory, type TMemory, type TSaveArgs } from "./types";
+import { SMemory, type TFindMemoryArgs, type TMemory, type TSaveArgs } from "./types";
 
 export const PERSISTENT_MEMORY_DB = "persistent-memory.db" as const;
 
@@ -49,8 +49,79 @@ export class Memory {
     return Memory._instance;
   }
 
-  public async find(args): Promise<TMemory[] | TMemoryError> {
-    throw "Not implemented";
+  public async find(args: TFindMemoryArgs): Promise<TMemory[] | TMemoryError> {
+    const res = await this.queue.enqueue(async () => {
+      const conditions: string[] = ["userId = $userId"];
+      const params: Record<string, string | number | null> = { $userId: args.userId };
+
+      if (args.author !== undefined) {
+        conditions.push("author = $author");
+        params.$author = args.author;
+      }
+
+      if (args.guild !== undefined) {
+        conditions.push("guild = $guild");
+        params.$guild = args.guild;
+      }
+
+      if (args.importance !== undefined && args.importance.length > 0) {
+        const placeholders = args.importance.map((_, i) => `$importance${i}`).join(", ");
+        conditions.push(`importance IN (${placeholders})`);
+        for (let i = 0; i < args.importance.length; i++) {
+          const val = args.importance[i];
+          if (val !== undefined) {
+            params[`$importance${i}`] = val;
+          }
+        }
+      }
+
+      if (args.searchString !== undefined) {
+        conditions.push("message LIKE $searchString");
+        params.$searchString = `%${args.searchString}%`;
+      }
+
+      if (args.timeRange !== undefined) {
+        conditions.push("createdAt >= $timeStart AND createdAt <= $timeEnd");
+        params.$timeStart = args.timeRange.start.getTime();
+        params.$timeEnd = args.timeRange.end.getTime();
+      }
+
+      let queryStr = `SELECT * FROM memories WHERE ${conditions.join(" AND ")} ORDER BY createdAt DESC`;
+
+      if (args.limit !== undefined) {
+        queryStr += ` LIMIT $limit`;
+        params.$limit = args.limit;
+      }
+
+      const results = this.db.query(queryStr).all(params);
+
+      const parsed = z.array(SMemory).safeParse(results);
+
+      if (!parsed.success) {
+        this.logger.error("Failed to parse memory from DB");
+        return undefined;
+      }
+
+      return parsed.data;
+    });
+
+    if (!res) {
+      return {
+        operation: "read",
+        error: "Failed to read memory",
+      };
+    }
+
+    return res.map((row) => ({
+      id: row.id,
+      userId: row.userId,
+      author: row.author,
+      guild: row.guild,
+      importance: row.importance,
+      message: row.message,
+      createdAt: new Date(row.createdAt),
+      lastReadAt: new Date(row.lastReadAt),
+    }));
   }
 
   public async readFullMemory(userId: string): Promise<TMemory[] | TMemoryError> {
@@ -80,7 +151,7 @@ export class Memory {
       userId: row.userId,
       author: row.author,
       guild: row.guild,
-      importance: row.importance as EMemoryImportance,
+      importance: row.importance,
       message: row.message,
       createdAt: new Date(row.createdAt),
       lastReadAt: new Date(row.lastReadAt),
@@ -172,7 +243,7 @@ export class Memory {
         userId: parsed.data.userId,
         author: parsed.data.author,
         guild: parsed.data.guild,
-        importance: parsed.data.importance as EMemoryImportance,
+        importance: parsed.data.importance,
         message: parsed.data.message,
         createdAt: new Date(parsed.data.createdAt),
         lastReadAt: new Date(parsed.data.lastReadAt),
