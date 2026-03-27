@@ -1,0 +1,88 @@
+<instructions>
+
+  <purpose>
+    Analyze incoming messages and determine their importance level for memory storage.
+    This helps prioritize which messages should be retained long-term versus discarded.
+  </purpose>
+
+  <tool>
+    <name>define-message-importance</name>
+    <description>
+      Evaluates a message's significance based on content, context, and potential future value.
+      Returns an importance level (low, medium, high) with a brief reasoning.
+    </description>
+  </tool>
+
+  <language_note>
+    The message to be analyzed may be in any language (e.g., Polish, English, Spanish).
+    Analyze the semantic meaning and context regardless of the language used.
+    Always provide reasoning in English.
+  </language_note>
+
+  <importance_levels>
+    <level name="low">
+      <criteria>
+        - Casual greetings or pleasantries ("hey", "hi", "hello", "siema", "cześć")
+        - Acknowledgments without substantive content ("ok", "got it", "understood", "rozumiem")
+        - Temporary or time-sensitive information that will not matter later
+        - Repetitive confirmations or clarifications
+        - Emotional reactions without context ("lol", "haha", "xd")
+      </criteria>
+      <retention>Discard after short-term context window</retention>
+    </level>
+
+    <level name="medium">
+      <criteria>
+        - Preferences mentioned in passing ("I prefer", "I like", "I dislike", "wolę", "lubię")
+        - Scheduling discussions without firm commitments
+        - References to ongoing tasks or plans without concrete details
+        - Questions and answers about general knowledge
+        - Casual mentions of activities or interests
+      </criteria>
+      <retention>Keep for several weeks, review periodically</retention>
+    </level>
+
+    <level name="high">
+      <criteria>
+        - Explicit preferences or strong opinions ("I always want", "I never", "zawsze chcę", "nigdy nie")
+        - Important personal information (work schedule, health, family details)
+        - Firm commitments or promises made by either party
+        - Recurring issues or patterns mentioned by the user
+        - Significant decisions or changes in plans
+        - Emotional states that indicate important context
+        - Instructions for how the assistant should behave or address the user
+      </criteria>
+      <retention>Keep indefinitely, reference in future conversations</retention>
+    </level>
+  </importance_levels>
+
+  <usage_rules>
+    <rule>Call this tool for every incoming message before responding</rule>
+    <rule>Provide concise reasoning explaining the importance assignment</rule>
+    <rule>When in doubt between two levels, choose the higher one</rule>
+    <rule>Consider the user's emotional state and context, not just keywords</rule>
+    <rule>The same phrase in different contexts may have different importance</rule>
+    <rule>Always analyze messages in their original language - do not translate before evaluating</rule>
+  </usage_rules>
+
+  <examples>
+    <example>
+      <message>"Ehh, w sumie to fajnie by było jakbyś czasem zwracał się do mnie Misiu"</message>
+      <importance>high</importance>
+      <reasoning>User is sharing a preference about how they want to be addressed (nickname "Misiu"). This is a behavioral instruction that should be remembered for future interactions.</reasoning>
+    </example>
+
+    <example>
+      <message>"siema, co słychać?" / "hey, what's up?"</message>
+      <importance>low</importance>
+      <reasoning>Casual greeting without substantive content. No need to retain long-term.</reasoning>
+    </example>
+
+    <example>
+      <message>"bardziej lubię herbatę niż kawę" / "I prefer tea over coffee"</message>
+      <importance>medium</importance>
+      <reasoning>Preference mentioned in passing. May be relevant for future beverage recommendations or when offering drinks.</reasoning>
+    </example>
+  </examples>
+
+</instructions>

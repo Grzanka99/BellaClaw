@@ -1,9 +1,13 @@
 import type { TOption } from "../../types";
 import { createLogger, type TLogger } from "../../utils/logger";
+import { OpenrouterAiProvider } from "../ai-providers/openrouter";
+import { defineMessageImportanceTool } from "../ai-providers/tools/definitions/define-message-importance";
+import type { THistoryItem, TPrompt } from "../ai-providers/types";
 
 export class MessageHandler {
   private static _instances = new Map<string, MessageHandler>();
   private logger: TLogger;
+  private ai = OpenrouterAiProvider.instance;
 
   constructor(chatId: string) {
     this.logger = createLogger(`AbstractMessageHandler (cid: ${chatId})`);
@@ -30,8 +34,24 @@ export class MessageHandler {
 
   // NOTE: Define how important is message, maybe with llm or some alg,
   // I think llm like gemini 3.1 flash or something small
-  private async defineMessageImportance() {
-    throw "Not implemented";
+  private async defineMessageImportance(message: string) {
+    const INSTRUCTIONS = await Bun.file(
+      "./src/services/ai-providers/instructions/define-message-importance.xml",
+    ).text();
+
+    const system: THistoryItem = {
+      role: "system",
+      content: INSTRUCTIONS,
+    };
+
+    const uMessage: TPrompt = {
+      role: "user",
+      content: [{ type: "text", text: message }],
+    };
+
+    const res = await this.ai.toolCall(uMessage, [system], [defineMessageImportanceTool]);
+
+    return res;
   }
 
   private async saveMessageToDatabase() {
@@ -54,3 +74,6 @@ export class MessageHandler {
     throw "Not implemented";
   }
 }
+
+const handler = MessageHandler.getInstance("123");
+console.log(await handler.defineMessageImportance("test"));

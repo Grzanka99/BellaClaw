@@ -1,24 +1,13 @@
 import { OpenRouter } from "@openrouter/sdk";
-import type { AssistantMessage, Message, ToolResponseMessage } from "@openrouter/sdk/models";
+import type { AssistantMessage, Message, ToolDefinitionJson } from "@openrouter/sdk/models";
 import type { User } from "discord.js";
 import type { TOption } from "../../../types";
+import { handleDefineMessageImportance } from "../tools/handlers/define-message-importance";
+import type { THistoryItem, TPrompt, TToolCallResponse } from "../types";
 
 const OPENROUTER_API_KEY = Bun.env.OPENROUTER_API_KEY as string;
 
-const MODEL = "google/gemini-3.1-pro-preview" as const;
-
-type THistoryItem = {
-  content: string;
-  role: "system" | "user" | "assistant";
-};
-
-type TPrompt = {
-  role: "system" | "user" | "assistant";
-  content: Array<{
-    type: "text";
-    text: string;
-  }>;
-};
+const MODEL = "google/gemini-3-flash-preview" as const;
 
 const BASE_SYSTEM_MESSAGE: TPrompt = {
   role: "system",
@@ -87,5 +76,47 @@ export class OpenrouterAiProvider {
     return data.toString();
   }
 
-  public async toolCall(prompt: TPrompt, model: string, tool: string) { }
+  public async toolCall<T>(
+    prompt: TPrompt,
+    instructions: THistoryItem[],
+    tools: ToolDefinitionJson[],
+    model: string = MODEL,
+  ): Promise<TOption<TToolCallResponse<T>>> {
+    const messages: Message[] = [...instructions];
+    messages.push(prompt);
+
+    const res = await this.openrouter.chat.send({
+      stream: false,
+      model,
+      messages,
+      tools,
+    });
+
+    const message = res.choices[0]?.message;
+
+    if (!message) {
+      return undefined;
+    }
+
+    const assistantMessage = message as AssistantMessage;
+    const toolCalls = assistantMessage.toolCalls ?? [];
+    const toolCallsResults = [];
+
+    for (const toolCall of toolCalls) {
+      switch (toolCall.function?.name) {
+        case "define-message-importance":
+          toolCallsResults.push(handleDefineMessageImportance(toolCall));
+          break;
+      }
+    }
+
+    const content = assistantMessage.content;
+    const responseText = typeof content === "string" ? content : "";
+
+    return {
+      response: responseText,
+      toolCalls: toolCalls,
+      toolCallsResults,
+    };
+  }
 }
