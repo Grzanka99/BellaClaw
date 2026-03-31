@@ -6,6 +6,7 @@ import type { TTools } from "../tools";
 import { DEFINE_MESSAGE_IMPORTANCE_TOOL } from "../tools/define-message-importance/definition";
 import { handleDefineMessageImportance } from "../tools/define-message-importance/handler";
 import type { THistoryItem, TPrompt, TToolCallResponse, TToolCallResult } from "../types";
+import { createLogger } from "../../../utils/logger";
 
 const OPENROUTER_API_KEY = Bun.env.OPENROUTER_API_KEY as string;
 
@@ -42,10 +43,10 @@ export type TUserData = Pick<User, "username" | "id" | "displayName">;
 
 export class OpenrouterAiProvider {
   private static _instance: OpenrouterAiProvider;
-
+  private logger = createLogger("OPENROUTER PROVIDER");
   private readonly openrouter: OpenRouter = new OpenRouter({ apiKey: OPENROUTER_API_KEY });
 
-  private constructor() {}
+  private constructor() { }
 
   public static get instance(): OpenrouterAiProvider {
     if (!OpenrouterAiProvider._instance) {
@@ -78,12 +79,12 @@ export class OpenrouterAiProvider {
     return data.toString();
   }
 
-  public async toolCall(
+  public async toolCall<T = unknown>(
     prompt: TPrompt,
     instructions: THistoryItem[],
     tools: ToolDefinitionJson[],
     model: string = MODEL,
-  ): Promise<TOption<TToolCallResponse>> {
+  ): Promise<TOption<TToolCallResponse<T>>> {
     const messages: Message[] = [...instructions];
     messages.push(prompt);
 
@@ -102,16 +103,23 @@ export class OpenrouterAiProvider {
 
     const assistantMessage = message as AssistantMessage;
     const toolCalls = assistantMessage.toolCalls ?? [];
-    const toolCallsResults: TToolCallResult[] = [];
+    const toolCallsResults: TToolCallResult<T>[] = [];
 
     for (const toolCall of toolCalls) {
       switch (toolCall.function?.name as TTools) {
-        case DEFINE_MESSAGE_IMPORTANCE_TOOL:
+        case DEFINE_MESSAGE_IMPORTANCE_TOOL: {
+          const toolRes = handleDefineMessageImportance(toolCall);
+          if (!toolRes) {
+            this.logger.error(`Invalid arguments for tool: ${DEFINE_MESSAGE_IMPORTANCE_TOOL}`)
+            continue;
+          }
           toolCallsResults.push({
             tool: DEFINE_MESSAGE_IMPORTANCE_TOOL,
-            data: handleDefineMessageImportance(toolCall),
+            // NOTE: Thats thr acceptable exception for type cast!
+            data: toolRes as T,
           });
           break;
+        }
       }
     }
 

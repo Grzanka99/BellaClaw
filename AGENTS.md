@@ -65,3 +65,4 @@ src/services/ai-providers/tools/<tool-name>/
 - Do not modify stub methods (those with `throw "Not implemented"`) unless explicitly asked to implement them.
 - Do not modify existing test files unless asked directly
 - NEVER use types cast - 'as Type' - outside of tests
+- Instead of `some-type | undefined` use `TOption<some-type>`

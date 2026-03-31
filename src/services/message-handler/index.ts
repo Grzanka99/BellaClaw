@@ -6,7 +6,9 @@ import {
   DEFINE_MESSAGE_IMPORTANCE_TOOL,
   defineMessageImportanceTool,
 } from "../ai-providers/tools/define-message-importance/definition";
+import type { TDefineMessageImportance } from "../ai-providers/tools/define-message-importance/handler";
 import type { THistoryItem, TPrompt } from "../ai-providers/types";
+import { EMemoryImportance } from "../memory/types";
 
 export class MessageHandler {
   private static _instances = new Map<string, MessageHandler>();
@@ -36,9 +38,7 @@ export class MessageHandler {
     return "";
   }
 
-  // NOTE: Define how important is message, maybe with llm or some alg,
-  // I think llm like gemini 3.1 flash or something small
-  private async defineMessageImportance(message: string) {
+  private async defineMessageImportance(message: string): Promise<EMemoryImportance> {
     const INSTRUCTIONS = await Bun.file(
       "./src/services/ai-providers/tools/define-message-importance/instructions.xml",
     ).text();
@@ -53,7 +53,7 @@ export class MessageHandler {
       content: [{ type: "text", text: message }],
     };
 
-    const res = await this.ai.toolCall(
+    const res = await this.ai.toolCall<TDefineMessageImportance>(
       uMessage,
       [system],
       [defineMessageImportanceTool],
@@ -61,23 +61,20 @@ export class MessageHandler {
     );
 
     if (!res) {
-      this.logger.error("Failed to define message importance, defaulting to low");
-      return "low";
+      this.logger.error("Failed to determine message importance, defaulting to low");
+      return EMemoryImportance.Low;
     }
 
-    const realRes =
-      res.toolCallsResults[0]?.tool === DEFINE_MESSAGE_IMPORTANCE_TOOL
-        ? res.toolCallsResults[0]
-        : undefined;
+    const realRes = res.toolCallsResults.find((el) => el.tool === DEFINE_MESSAGE_IMPORTANCE_TOOL);
 
     if (!realRes) {
       this.logger.error(
-        "Result from tool call invalid for defining message importance, defaulting to low",
+        "Cannot find correct tool call result for message importance, defaulting to low",
       );
-      return "low";
+      return EMemoryImportance.Low;
     }
 
-    return realRes?.data;
+    return realRes.data.importance;
   }
 
   private async saveMessageToDatabase() {

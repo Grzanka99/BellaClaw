@@ -1,3 +1,5 @@
+import type { TOption } from "../../types";
+
 export type THistoryItem = {
   content: string;
   role: "system" | "user" | "assistant";
@@ -11,17 +13,17 @@ export type TPrompt = {
   }>;
 };
 
-export type TToolCallResult = {
+export type TToolCallResult<T = unknown> = {
   tool: string;
-  data: unknown;
+  data: T;
 };
 
-export type TToolCallResponse = {
+export type TToolCallResponse<T = unknown> = {
   response: string;
   toolCalls: Array<{
     id: string;
     type: "function";
     function: unknown;
   }>;
-  toolCallsResults: TToolCallResult[];
+  toolCallsResults: TToolCallResult<T>[];
 };
