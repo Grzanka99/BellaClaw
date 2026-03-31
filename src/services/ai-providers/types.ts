@@ -11,6 +11,11 @@ export type TPrompt = {
   }>;
 };
 
+export type TToolCallResult = {
+  tool: string;
+  data: unknown;
+};
+
 export type TToolCallResponse = {
   response: string;
   toolCalls: Array<{
@@ -18,5 +23,5 @@ export type TToolCallResponse = {
     type: "function";
     function: unknown;
   }>;
-  toolCallsResults: unknown[];
+  toolCallsResults: TToolCallResult[];
 };

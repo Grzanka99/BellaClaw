@@ -2,8 +2,10 @@ import { OpenRouter } from "@openrouter/sdk";
 import type { AssistantMessage, Message, ToolDefinitionJson } from "@openrouter/sdk/models";
 import type { User } from "discord.js";
 import type { TOption } from "../../../types";
+import type { TTools } from "../tools";
+import { DEFINE_MESSAGE_IMPORTANCE_TOOL } from "../tools/define-message-importance/definition";
 import { handleDefineMessageImportance } from "../tools/define-message-importance/handler";
-import type { THistoryItem, TPrompt, TToolCallResponse } from "../types";
+import type { THistoryItem, TPrompt, TToolCallResponse, TToolCallResult } from "../types";
 
 const OPENROUTER_API_KEY = Bun.env.OPENROUTER_API_KEY as string;
 
@@ -76,7 +78,7 @@ export class OpenrouterAiProvider {
     return data.toString();
   }
 
-  public async toolCall<T>(
+  public async toolCall(
     prompt: TPrompt,
     instructions: THistoryItem[],
     tools: ToolDefinitionJson[],
@@ -100,12 +102,15 @@ export class OpenrouterAiProvider {
 
     const assistantMessage = message as AssistantMessage;
     const toolCalls = assistantMessage.toolCalls ?? [];
-    const toolCallsResults: unknown[] = [];
+    const toolCallsResults: TToolCallResult[] = [];
 
     for (const toolCall of toolCalls) {
-      switch (toolCall.function?.name) {
-        case "define-message-importance":
-          toolCallsResults.push(handleDefineMessageImportance(toolCall));
+      switch (toolCall.function?.name as TTools) {
+        case DEFINE_MESSAGE_IMPORTANCE_TOOL:
+          toolCallsResults.push({
+            tool: DEFINE_MESSAGE_IMPORTANCE_TOOL,
+            data: handleDefineMessageImportance(toolCall),
+          });
           break;
       }
     }

@@ -1,7 +1,11 @@
+import { MODEL_GEMINI_3_FLASH_PREVIEW } from "../../models";
 import type { TOption } from "../../types";
 import { createLogger, type TLogger } from "../../utils/logger";
 import { OpenrouterAiProvider } from "../ai-providers/openrouter";
-import { defineMessageImportanceTool } from "../ai-providers/tools/define-message-importance/definition";
+import {
+  DEFINE_MESSAGE_IMPORTANCE_TOOL,
+  defineMessageImportanceTool,
+} from "../ai-providers/tools/define-message-importance/definition";
 import type { THistoryItem, TPrompt } from "../ai-providers/types";
 
 export class MessageHandler {
@@ -49,9 +53,31 @@ export class MessageHandler {
       content: [{ type: "text", text: message }],
     };
 
-    const res = await this.ai.toolCall(uMessage, [system], [defineMessageImportanceTool]);
+    const res = await this.ai.toolCall(
+      uMessage,
+      [system],
+      [defineMessageImportanceTool],
+      MODEL_GEMINI_3_FLASH_PREVIEW,
+    );
 
-    return res;
+    if (!res) {
+      this.logger.error("Failed to define message importance, defaulting to low");
+      return "low";
+    }
+
+    const realRes =
+      res.toolCallsResults[0]?.tool === DEFINE_MESSAGE_IMPORTANCE_TOOL
+        ? res.toolCallsResults[0]
+        : undefined;
+
+    if (!realRes) {
+      this.logger.error(
+        "Result from tool call invalid for defining message importance, defaulting to low",
+      );
+      return "low";
+    }
+
+    return realRes?.data;
   }
 
   private async saveMessageToDatabase() {

@@ -49,7 +49,7 @@ describe("Memory", () => {
         userId: "user-123",
         author: EMemoryAuthor.User,
         guild: "guild-456",
-        importance: 1,
+        importance: EMemoryImportance.Medium,
         message: "Test memory",
       });
 
@@ -58,7 +58,7 @@ describe("Memory", () => {
         userId: "user-123",
         author: EMemoryAuthor.User,
         guild: "guild-456",
-        importance: 1,
+        importance: EMemoryImportance.Medium,
         message: "Test memory",
         createdAt: expect.any(Date),
         lastReadAt: expect.any(Date),
@@ -71,7 +71,7 @@ describe("Memory", () => {
         userId: "user-789",
         author: EMemoryAuthor.Bot,
         guild: null,
-        importance: 2,
+        importance: EMemoryImportance.High,
         message: "Memory without guild",
       });
 
@@ -80,7 +80,7 @@ describe("Memory", () => {
         userId: "user-789",
         author: EMemoryAuthor.Bot,
         guild: null,
-        importance: 2,
+        importance: EMemoryImportance.High,
         message: "Memory without guild",
         createdAt: expect.any(Date),
         lastReadAt: expect.any(Date),
@@ -93,7 +93,7 @@ describe("Memory", () => {
         userId: "user-timestamp",
         author: EMemoryAuthor.User,
         guild: null,
-        importance: 0,
+        importance: EMemoryImportance.Low,
         message: "Timestamp test",
       });
 
@@ -111,7 +111,7 @@ describe("Memory", () => {
         userId: "user-remove",
         author: EMemoryAuthor.User,
         guild: "guild-remove",
-        importance: 1,
+        importance: EMemoryImportance.Medium,
         message: "Memory to remove",
       });
 
@@ -123,7 +123,7 @@ describe("Memory", () => {
         userId: "user-remove",
         author: EMemoryAuthor.User,
         guild: "guild-remove",
-        importance: 1,
+        importance: EMemoryImportance.Medium,
         message: "Memory to remove",
         createdAt: expect.any(Date),
         lastReadAt: expect.any(Date),
@@ -147,35 +147,35 @@ describe("Memory", () => {
         userId: "user-read",
         author: EMemoryAuthor.User,
         guild: "guild-1",
-        importance: 1,
+        importance: EMemoryImportance.Medium,
         message: "First memory",
       });
       await memory.save({
         userId: "user-read",
         author: EMemoryAuthor.Bot,
         guild: "guild-1",
-        importance: 2,
+        importance: EMemoryImportance.High,
         message: "Second memory",
       });
       await memory.save({
         userId: "user-read",
         author: EMemoryAuthor.User,
         guild: "guild-1",
-        importance: 0,
+        importance: EMemoryImportance.Low,
         message: "Third memory",
       });
       await memory.save({
         userId: "user-read",
         author: EMemoryAuthor.Bot,
         guild: null,
-        importance: 1,
+        importance: EMemoryImportance.Medium,
         message: "Fourth memory",
       });
       await memory.save({
         userId: "user-read",
         author: EMemoryAuthor.User,
         guild: "guild-2",
-        importance: 2,
+        importance: EMemoryImportance.High,
         message: "Fifth memory",
       });
 
@@ -208,14 +208,14 @@ describe("Memory", () => {
         userId: "user-a",
         author: EMemoryAuthor.User,
         guild: null,
-        importance: 1,
+        importance: EMemoryImportance.Medium,
         message: "User A memory",
       });
       await memory.save({
         userId: "user-b",
         author: EMemoryAuthor.User,
         guild: null,
-        importance: 1,
+        importance: EMemoryImportance.Medium,
         message: "User B memory",
       });
 

@@ -1,7 +1,7 @@
 import type { ChatMessageToolCall } from "@openrouter/sdk/models";
 import z from "zod";
 
-const SArguments = z.object({
+const SDefineMessageImportance = z.object({
   reasoning: z.string(),
   importance: z.string().transform((el) => {
     console.log(el);
@@ -11,7 +11,7 @@ const SArguments = z.object({
 
 export function handleDefineMessageImportance(toolCall: ChatMessageToolCall) {
   const argsJson = JSON.parse(toolCall.function.arguments);
-  const parsed = SArguments.safeParse(argsJson);
+  const parsed = SDefineMessageImportance.safeParse(argsJson);
 
   if (!parsed.success) {
     console.log(parsed.error);

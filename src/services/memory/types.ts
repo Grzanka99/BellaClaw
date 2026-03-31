@@ -1,9 +1,9 @@
 import { z } from "zod";
 
 export enum EMemoryImportance {
-  Low = 0,
-  Medium = 1,
-  High = 2,
+  Low = "low",
+  Medium = "medium",
+  High = "high",
 }
 
 export enum EMemoryAuthor {

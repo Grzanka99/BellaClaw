@@ -63,5 +63,5 @@ src/services/ai-providers/tools/<tool-name>/
 - Do not fix type errors in files outside the current task's scope, even if you notice them.
 - If a type error in an unrelated file blocks your task, report it instead of silently fixing it.
 - Do not modify stub methods (those with `throw "Not implemented"`) unless explicitly asked to implement them.
-- Do not modify existing test files under any circumstances.
+- Do not modify existing test files unless asked directly
 - NEVER use types cast - 'as Type' - outside of tests

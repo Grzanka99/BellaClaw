@@ -1,9 +1,11 @@
 import type { ToolDefinitionJson } from "@openrouter/sdk/models";
 
+export const DEFINE_MESSAGE_IMPORTANCE_TOOL = "define-message-importance" as const;
+
 export const defineMessageImportanceTool: ToolDefinitionJson = {
   type: "function",
   function: {
-    name: "define-message-importance",
+    name: DEFINE_MESSAGE_IMPORTANCE_TOOL,
     description:
       "Analyzes a message and assigns an importance level (low, medium, high) based on its content and relevance",
     parameters: {

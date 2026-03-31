@@ -12,7 +12,7 @@ export const CREATE_MEMORIES_TABLE = `
     userId TEXT NOT NULL,
     author TEXT NOT NULL,
     guild TEXT NULLABLE,
-    importance INTEGER NOT NULL,
+    importance TEXT NOT NULL,
     message TEXT NOT NULL,
     createdAt INTEGER NOT NULL,
     lastReadAt INTEGER NOT NULL
