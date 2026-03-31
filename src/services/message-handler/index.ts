@@ -1,7 +1,7 @@
 import type { TOption } from "../../types";
 import { createLogger, type TLogger } from "../../utils/logger";
 import { OpenrouterAiProvider } from "../ai-providers/openrouter";
-import { defineMessageImportanceTool } from "../ai-providers/tools/definitions/define-message-importance";
+import { defineMessageImportanceTool } from "../ai-providers/tools/define-message-importance/definition";
 import type { THistoryItem, TPrompt } from "../ai-providers/types";
 
 export class MessageHandler {
@@ -36,7 +36,7 @@ export class MessageHandler {
   // I think llm like gemini 3.1 flash or something small
   private async defineMessageImportance(message: string) {
     const INSTRUCTIONS = await Bun.file(
-      "./src/services/ai-providers/instructions/define-message-importance.xml",
+      "./src/services/ai-providers/tools/define-message-importance/instructions.xml",
     ).text();
 
     const system: THistoryItem = {
