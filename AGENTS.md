@@ -24,27 +24,6 @@ Small Bun + TypeScript Discord assistant. Prefer small, targeted changes that pr
 - Zod schemas: `S*` prefix (e.g. `SMemory`, `SSaveArgs`)
 - Singleton accessor: `public static get instance()` — always this name, no variants
 
-## Singleton Pattern
-
-All singletons follow this exact shape:
-
-```ts
-export class FooSingleton extends Logger {
-  private static _instance: FooSingleton;
-
-  private constructor() {
-    super("FOO");
-  }
-
-  public static get instance(): FooSingleton {
-    if (!FooSingleton._instance) {
-      FooSingleton._instance = new FooSingleton();
-    }
-    return FooSingleton._instance;
-  }
-}
-```
-
 ## AsyncQueue
 
 All SQLite operations must go through `this.queue.enqueue()`. Never call `this.db.*` directly outside of an enqueued callback.
@@ -59,9 +38,24 @@ Use `Bun.env.*` — never `process.env`.
 
 ## Logging
 
-- In classes: extend `Logger` and use `this.logger.info/warning/error/message()`
+- In classes: use `private logger = createLogger("PREFIX")` and call `this.logger.info/warning/error/message()`
 - Outside classes: import and use the `logger` utility directly
 - Never use raw `console.log` inside service files
+
+## Tool Definitions Pattern
+
+Each tool lives in its own directory under `src/services/ai-providers/tools/`:
+
+```
+src/services/ai-providers/tools/<tool-name>/
+  definition.ts    — exports a ToolDefinitionJson (name, description, parameters)
+  handler.ts       — parses arguments with Zod, returns parsed data
+  instructions.xml — detailed instructions for the AI on when/how to use the tool
+```
+
+- `definition.ts`: Use `@openrouter/sdk/models` `ToolDefinitionJson` type. Parameters use Zod schemas via `S*` prefix naming.
+- `handler.ts`: Parse `toolCall.function.arguments` with `JSON.parse`, then use `SArguments.safeParse()`. Branch on `.success`.
+- `instructions.xml`: XML format with `<purpose>`, `<tool>`, `<usage_rules>`, and `<examples>` sections.
 
 ## Scope Rules
 
