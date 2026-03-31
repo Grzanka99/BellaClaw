@@ -11,12 +11,12 @@ export type TPrompt = {
   }>;
 };
 
-export type TToolCallResponse<T> = {
+export type TToolCallResponse = {
   response: string;
   toolCalls: Array<{
     id: string;
     type: "function";
     function: unknown;
   }>;
-  toolCallsResults: T;
+  toolCallsResults: unknown[];
 };

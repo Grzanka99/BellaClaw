@@ -2,7 +2,7 @@ import { OpenRouter } from "@openrouter/sdk";
 import type { AssistantMessage, Message, ToolDefinitionJson } from "@openrouter/sdk/models";
 import type { User } from "discord.js";
 import type { TOption } from "../../../types";
-import { handleDefineMessageImportance } from "../tools/handlers/define-message-importance";
+import { handleDefineMessageImportance } from "../tools/define-message-importance/handler";
 import type { THistoryItem, TPrompt, TToolCallResponse } from "../types";
 
 const OPENROUTER_API_KEY = Bun.env.OPENROUTER_API_KEY as string;
@@ -43,7 +43,7 @@ export class OpenrouterAiProvider {
 
   private readonly openrouter: OpenRouter = new OpenRouter({ apiKey: OPENROUTER_API_KEY });
 
-  private constructor() { }
+  private constructor() {}
 
   public static get instance(): OpenrouterAiProvider {
     if (!OpenrouterAiProvider._instance) {
@@ -81,7 +81,7 @@ export class OpenrouterAiProvider {
     instructions: THistoryItem[],
     tools: ToolDefinitionJson[],
     model: string = MODEL,
-  ): Promise<TOption<TToolCallResponse<T>>> {
+  ): Promise<TOption<TToolCallResponse>> {
     const messages: Message[] = [...instructions];
     messages.push(prompt);
 
@@ -100,7 +100,7 @@ export class OpenrouterAiProvider {
 
     const assistantMessage = message as AssistantMessage;
     const toolCalls = assistantMessage.toolCalls ?? [];
-    const toolCallsResults = [];
+    const toolCallsResults: unknown[] = [];
 
     for (const toolCall of toolCalls) {
       switch (toolCall.function?.name) {
