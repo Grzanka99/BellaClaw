@@ -27,11 +27,13 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .cache
 *.tsbuildinfo
 
-# IntelliJ based IDEs
+# IDEs
 .idea
+.nvim.lua
 
 # Finder (MacOS) folder config
 .DS_Store
 
 *.db
 tmp/
+
