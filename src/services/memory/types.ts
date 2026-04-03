@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ERole } from "../ai-providers/types";
 
 export enum EMemoryImportance {
   Low = "low",
@@ -6,16 +7,10 @@ export enum EMemoryImportance {
   High = "high",
 }
 
-export enum EMemoryAuthor {
-  User = "user",
-  Bot = "bot",
-}
-
 export const SMemory = z.object({
   id: z.number(),
-  userId: z.string(),
-  author: z.enum(EMemoryAuthor),
-  guild: z.string().or(z.null()),
+  chatId: z.string(),
+  author: z.enum(ERole),
   importance: z.enum(EMemoryImportance),
   message: z.string(),
   createdAt: z.coerce.date(),
@@ -28,9 +23,8 @@ export type TMemory = z.infer<typeof SMemory>;
 export type TSaveArgs = z.infer<typeof SSaveArgs>;
 
 export const SFindMemoryArgs = z.object({
-  userId: z.string(),
-  author: z.enum(EMemoryAuthor).optional(),
-  guild: z.string().optional(),
+  chatId: z.string(),
+  author: z.enum(ERole).optional(),
   importance: z.array(z.enum(EMemoryImportance)).optional(),
   searchString: z.string().optional(),
   timeRange: z

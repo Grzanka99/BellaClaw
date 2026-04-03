@@ -1,12 +1,16 @@
-import type { TOption } from "../../types";
+export enum ERole {
+  System = "system",
+  User = "user",
+  Assistant = "assistant",
+}
 
 export type THistoryItem = {
   content: string;
-  role: "system" | "user" | "assistant";
+  role: ERole;
 };
 
 export type TPrompt = {
-  role: "system" | "user" | "assistant";
+  role: ERole;
   content: Array<{
     type: "text";
     text: string;

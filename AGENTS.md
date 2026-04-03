@@ -61,8 +61,9 @@ src/services/ai-providers/tools/<tool-name>/
 
 - Do not change anything not directly asked.
 - Do not fix type errors in files outside the current task's scope, even if you notice them.
+- If you find errors that are caused by current task changes, ask for permission to fix them
 - If a type error in an unrelated file blocks your task, report it instead of silently fixing it.
 - Do not modify stub methods (those with `throw "Not implemented"`) unless explicitly asked to implement them.
-- Do not modify existing test files unless asked directly
+- Do not modify existing test files unless given direct permission
 - NEVER use types cast - 'as Type' - outside of tests
 - Instead of `some-type | undefined` use `TOption<some-type>`

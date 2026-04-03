@@ -1,14 +1,14 @@
 import { describe, expect, test } from "bun:test";
+import { ERole } from "../ai-providers/types";
 import { sortByImportanceAndDates } from "./sort";
 import type { TMemory } from "./types";
-import { EMemoryAuthor, EMemoryImportance } from "./types";
+import { EMemoryImportance } from "./types";
 
 function createMemory(overrides: Partial<TMemory>): TMemory {
   return {
     id: 1,
-    userId: "test-user",
-    author: EMemoryAuthor.User,
-    guild: null,
+    chatId: "test-chat",
+    author: ERole.User,
     importance: EMemoryImportance.Medium,
     message: "test message",
     createdAt: new Date(),

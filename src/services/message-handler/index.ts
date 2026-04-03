@@ -1,3 +1,4 @@
+import { Role } from "discord.js";
 import { MODEL_GEMINI_3_FLASH_PREVIEW } from "../../models";
 import type { TOption } from "../../types";
 import { createLogger, type TLogger } from "../../utils/logger";
@@ -8,12 +9,16 @@ import {
 } from "../ai-providers/tools/define-message-importance/definition";
 import type { TDefineMessageImportance } from "../ai-providers/tools/define-message-importance/handler";
 import type { THistoryItem, TPrompt } from "../ai-providers/types";
+import { ERole } from "../ai-providers/types";
+import { Memory } from "../memory";
 import { EMemoryImportance } from "../memory/types";
+import type { TIncommingMessage, TOutcommingMessage } from "./types";
 
 export class MessageHandler {
   private static _instances = new Map<string, MessageHandler>();
   private logger: TLogger;
   private ai = OpenrouterAiProvider.instance;
+  private memory = Memory.instance;
 
   constructor(chatId: string) {
     this.logger = createLogger(`AbstractMessageHandler (cid: ${chatId})`);
@@ -34,7 +39,10 @@ export class MessageHandler {
     return newInstance;
   }
 
-  public async handleMessage(): Promise<TOption<string>> {
+  public async handleMessage(message: TIncommingMessage): Promise<TOption<string>> {
+    const importance = await this.defineMessageImportance(message.message.content);
+    this.saveMessageToDatabase(message, importance);
+    console.log(importance);
     return "";
   }
 
@@ -44,12 +52,12 @@ export class MessageHandler {
     ).text();
 
     const system: THistoryItem = {
-      role: "system",
+      role: ERole.System,
       content: INSTRUCTIONS,
     };
 
     const uMessage: TPrompt = {
-      role: "user",
+      role: ERole.User,
       content: [{ type: "text", text: message }],
     };
 
@@ -77,12 +85,36 @@ export class MessageHandler {
     return realRes.data.importance;
   }
 
-  private async saveMessageToDatabase() {
-    throw "Not implemented";
+  private async saveMessageToDatabase(
+    message: TIncommingMessage | TOutcommingMessage,
+    importance: EMemoryImportance,
+  ): Promise<boolean> {
+    switch (message.author.type) {
+      case ERole.User: {
+        const res = await this.memory.save({
+          chatId: message.author.id,
+          author: ERole.User,
+          importance,
+          message: message.message.content,
+        });
+        console.log(res);
+        return true;
+      }
+      case ERole.Assistant: {
+        const res = await this.memory.save({
+          chatId: message.chatId,
+          author: ERole.Assistant,
+          importance,
+          message: message.message.content,
+        });
+        console.log(res);
+        return true;
+      }
+    }
   }
 
   // NOTE: Ask proper LLM to call tool to read database for more memories,
-  // Can be done with not that last 30 messages will be included regardless
+  // Can be done with note that last 30 messages will be included regardless
   private async checkForMemoryFetch() {
     throw "Not implemented";
   }
@@ -97,6 +129,3 @@ export class MessageHandler {
     throw "Not implemented";
   }
 }
-
-const handler = MessageHandler.getInstance("123");
-console.log(await handler.defineMessageImportance("test"));

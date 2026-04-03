@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, unlinkSync } from "node:fs";
+import { ERole } from "../ai-providers/types";
 import { Memory, PERSISTENT_MEMORY_DB } from "./index";
-import { EMemoryAuthor, EMemoryImportance } from "./types";
+import { EMemoryImportance } from "./types";
 
 const TEST_DB = "test-memory.db";
 
@@ -46,42 +47,18 @@ describe("Memory", () => {
     test("saves a memory and returns the saved data", async () => {
       const memory = Memory.instance;
       const result = await memory.save({
-        userId: "user-123",
-        author: EMemoryAuthor.User,
-        guild: "guild-456",
+        chatId: "chat-123",
+        author: ERole.User,
         importance: EMemoryImportance.Medium,
         message: "Test memory",
       });
 
       expect(result).not.toHaveProperty("operation");
       expect(result).toEqual({
-        userId: "user-123",
-        author: EMemoryAuthor.User,
-        guild: "guild-456",
+        chatId: "chat-123",
+        author: ERole.User,
         importance: EMemoryImportance.Medium,
         message: "Test memory",
-        createdAt: expect.any(Date),
-        lastReadAt: expect.any(Date),
-      });
-    });
-
-    test("saves a memory without guild (null)", async () => {
-      const memory = Memory.instance;
-      const result = await memory.save({
-        userId: "user-789",
-        author: EMemoryAuthor.Bot,
-        guild: null,
-        importance: EMemoryImportance.High,
-        message: "Memory without guild",
-      });
-
-      expect(result).not.toHaveProperty("operation");
-      expect(result).toEqual({
-        userId: "user-789",
-        author: EMemoryAuthor.Bot,
-        guild: null,
-        importance: EMemoryImportance.High,
-        message: "Memory without guild",
         createdAt: expect.any(Date),
         lastReadAt: expect.any(Date),
       });
@@ -90,9 +67,8 @@ describe("Memory", () => {
     test("sets createdAt and lastReadAt to the same timestamp", async () => {
       const memory = Memory.instance;
       const result = await memory.save({
-        userId: "user-timestamp",
-        author: EMemoryAuthor.User,
-        guild: null,
+        chatId: "chat-timestamp",
+        author: ERole.User,
         importance: EMemoryImportance.Low,
         message: "Timestamp test",
       });
@@ -108,9 +84,8 @@ describe("Memory", () => {
     test("removes a memory and returns it", async () => {
       const memory = Memory.instance;
       await memory.save({
-        userId: "user-remove",
-        author: EMemoryAuthor.User,
-        guild: "guild-remove",
+        chatId: "chat-remove",
+        author: ERole.User,
         importance: EMemoryImportance.Medium,
         message: "Memory to remove",
       });
@@ -120,9 +95,8 @@ describe("Memory", () => {
       expect(result).not.toHaveProperty("operation");
       expect(result).toEqual({
         id: 1,
-        userId: "user-remove",
-        author: EMemoryAuthor.User,
-        guild: "guild-remove",
+        chatId: "chat-remove",
+        author: ERole.User,
         importance: EMemoryImportance.Medium,
         message: "Memory to remove",
         createdAt: expect.any(Date),
@@ -140,46 +114,41 @@ describe("Memory", () => {
   });
 
   describe("readFullMemory", () => {
-    test("returns all memories for a user", async () => {
+    test("returns all memories for a chat", async () => {
       const memory = Memory.instance;
 
       await memory.save({
-        userId: "user-read",
-        author: EMemoryAuthor.User,
-        guild: "guild-1",
+        chatId: "chat-read",
+        author: ERole.User,
         importance: EMemoryImportance.Medium,
         message: "First memory",
       });
       await memory.save({
-        userId: "user-read",
-        author: EMemoryAuthor.Bot,
-        guild: "guild-1",
+        chatId: "chat-read",
+        author: ERole.Assistant,
         importance: EMemoryImportance.High,
         message: "Second memory",
       });
       await memory.save({
-        userId: "user-read",
-        author: EMemoryAuthor.User,
-        guild: "guild-1",
+        chatId: "chat-read",
+        author: ERole.User,
         importance: EMemoryImportance.Low,
         message: "Third memory",
       });
       await memory.save({
-        userId: "user-read",
-        author: EMemoryAuthor.Bot,
-        guild: null,
+        chatId: "chat-read",
+        author: ERole.Assistant,
         importance: EMemoryImportance.Medium,
         message: "Fourth memory",
       });
       await memory.save({
-        userId: "user-read",
-        author: EMemoryAuthor.User,
-        guild: "guild-2",
+        chatId: "chat-read",
+        author: ERole.User,
         importance: EMemoryImportance.High,
         message: "Fifth memory",
       });
 
-      const result = await memory.readFullMemory("user-read");
+      const result = await memory.readFullMemory("chat-read");
 
       expect(result).toBeDefined();
       // @ts-expect-error
@@ -194,55 +163,52 @@ describe("Memory", () => {
       expect(messages).toContain("Fifth memory");
     });
 
-    test("returns empty array when no memories exist for user", async () => {
+    test("returns empty array when no memories exist for chat", async () => {
       const memory = Memory.instance;
-      const result = await memory.readFullMemory("nonexistent-user");
+      const result = await memory.readFullMemory("nonexistent-chat");
 
       expect(result).toEqual([]);
     });
 
-    test("returns only memories for the specified user", async () => {
+    test("returns only memories for the specified chat", async () => {
       const memory = Memory.instance;
 
       await memory.save({
-        userId: "user-a",
-        author: EMemoryAuthor.User,
-        guild: null,
+        chatId: "chat-a",
+        author: ERole.User,
         importance: EMemoryImportance.Medium,
-        message: "User A memory",
+        message: "Chat A memory",
       });
       await memory.save({
-        userId: "user-b",
-        author: EMemoryAuthor.User,
-        guild: null,
+        chatId: "chat-b",
+        author: ERole.User,
         importance: EMemoryImportance.Medium,
-        message: "User B memory",
+        message: "Chat B memory",
       });
 
-      const result = await memory.readFullMemory("user-a");
+      const result = await memory.readFullMemory("chat-a");
 
       expect(result).toBeDefined();
       // @ts-expect-error
       expect(result?.length).toBe(1);
       // @ts-expect-error
-      expect(result[0].message).toBe("User A memory");
+      expect(result[0].message).toBe("Chat A memory");
       // @ts-expect-error
-      expect(result[0].userId).toBe("user-a");
+      expect(result[0].chatId).toBe("chat-a");
     });
   });
 
   describe("find", () => {
-    test("returns memories for a user", async () => {
+    test("returns memories for a chat", async () => {
       const memory = Memory.instance;
       await memory.save({
-        userId: "user-find",
-        author: EMemoryAuthor.User,
-        guild: "guild-1",
+        chatId: "chat-find",
+        author: ERole.User,
         importance: EMemoryImportance.High,
         message: "Test memory",
       });
 
-      const result = await memory.find({ userId: "user-find" });
+      const result = await memory.find({ chatId: "chat-find" });
 
       expect(result).not.toHaveProperty("operation");
       // @ts-expect-error
@@ -253,7 +219,7 @@ describe("Memory", () => {
 
     test("returns empty array when no memories match", async () => {
       const memory = Memory.instance;
-      const result = await memory.find({ userId: "nonexistent" });
+      const result = await memory.find({ chatId: "nonexistent" });
 
       expect(result).toEqual([]);
     });
@@ -261,89 +227,54 @@ describe("Memory", () => {
     test("filters by author", async () => {
       const memory = Memory.instance;
       await memory.save({
-        userId: "user-author",
-        author: EMemoryAuthor.User,
-        guild: null,
+        chatId: "chat-author",
+        author: ERole.User,
         importance: EMemoryImportance.Low,
         message: "User message",
       });
       await memory.save({
-        userId: "user-author",
-        author: EMemoryAuthor.Bot,
-        guild: null,
+        chatId: "chat-author",
+        author: ERole.Assistant,
         importance: EMemoryImportance.Low,
         message: "Bot message",
       });
 
       const result = await memory.find({
-        userId: "user-author",
-        author: EMemoryAuthor.User,
+        chatId: "chat-author",
+        author: ERole.User,
       });
 
       // @ts-expect-error
       expect(result.length).toBe(1);
       // @ts-expect-error
-      expect(result[0].author).toBe(EMemoryAuthor.User);
+      expect(result[0].author).toBe(ERole.User);
       // @ts-expect-error
       expect(result[0].message).toBe("User message");
-    });
-
-    test("filters by guild", async () => {
-      const memory = Memory.instance;
-      await memory.save({
-        userId: "user-guild",
-        author: EMemoryAuthor.User,
-        guild: "guild-alpha",
-        importance: EMemoryImportance.Low,
-        message: "Alpha memory",
-      });
-      await memory.save({
-        userId: "user-guild",
-        author: EMemoryAuthor.User,
-        guild: "guild-beta",
-        importance: EMemoryImportance.Low,
-        message: "Beta memory",
-      });
-
-      const result = await memory.find({
-        userId: "user-guild",
-        guild: "guild-alpha",
-      });
-
-      // @ts-expect-error
-      expect(result.length).toBe(1);
-      // @ts-expect-error
-      expect(result[0].guild).toBe("guild-alpha");
-      // @ts-expect-error
-      expect(result[0].message).toBe("Alpha memory");
     });
 
     test("filters by importance levels", async () => {
       const memory = Memory.instance;
       await memory.save({
-        userId: "user-importance",
-        author: EMemoryAuthor.User,
-        guild: null,
+        chatId: "chat-importance",
+        author: ERole.User,
         importance: EMemoryImportance.Low,
         message: "Low importance",
       });
       await memory.save({
-        userId: "user-importance",
-        author: EMemoryAuthor.User,
-        guild: null,
+        chatId: "chat-importance",
+        author: ERole.User,
         importance: EMemoryImportance.Medium,
         message: "Medium importance",
       });
       await memory.save({
-        userId: "user-importance",
-        author: EMemoryAuthor.User,
-        guild: null,
+        chatId: "chat-importance",
+        author: ERole.User,
         importance: EMemoryImportance.High,
         message: "High importance",
       });
 
       const result = await memory.find({
-        userId: "user-importance",
+        chatId: "chat-importance",
         importance: [EMemoryImportance.Low, EMemoryImportance.High],
       });
 
@@ -359,29 +290,26 @@ describe("Memory", () => {
     test("filters by searchString (partial match)", async () => {
       const memory = Memory.instance;
       await memory.save({
-        userId: "user-search",
-        author: EMemoryAuthor.User,
-        guild: null,
+        chatId: "chat-search",
+        author: ERole.User,
         importance: EMemoryImportance.Low,
         message: "Hello world",
       });
       await memory.save({
-        userId: "user-search",
-        author: EMemoryAuthor.User,
-        guild: null,
+        chatId: "chat-search",
+        author: ERole.User,
         importance: EMemoryImportance.Low,
         message: "Goodbye world",
       });
       await memory.save({
-        userId: "user-search",
-        author: EMemoryAuthor.User,
-        guild: null,
+        chatId: "chat-search",
+        author: ERole.User,
         importance: EMemoryImportance.Low,
         message: "Hello there",
       });
 
       const result = await memory.find({
-        userId: "user-search",
+        chatId: "chat-search",
         searchString: "Hello",
       });
 
@@ -400,15 +328,14 @@ describe("Memory", () => {
       const threeHoursAgo = new Date(now.getTime() - 3 * 60 * 60 * 1000);
 
       await memory.save({
-        userId: "user-timerange",
-        author: EMemoryAuthor.User,
-        guild: null,
+        chatId: "chat-timerange",
+        author: ERole.User,
         importance: EMemoryImportance.Low,
         message: "Recent memory",
       });
 
       const result = await memory.find({
-        userId: "user-timerange",
+        chatId: "chat-timerange",
         timeRange: {
           start: threeHoursAgo,
           end: now,
@@ -428,15 +355,14 @@ describe("Memory", () => {
       const twoHoursAgo = new Date(now.getTime() - 2 * 60 * 60 * 1000);
 
       await memory.save({
-        userId: "user-timerange-exclude",
-        author: EMemoryAuthor.User,
-        guild: null,
+        chatId: "chat-timerange-exclude",
+        author: ERole.User,
         importance: EMemoryImportance.Low,
         message: "Recent memory",
       });
 
       const result = await memory.find({
-        userId: "user-timerange-exclude",
+        chatId: "chat-timerange-exclude",
         timeRange: {
           start: twoHoursAgo,
           end: oneHourAgo,
@@ -451,16 +377,15 @@ describe("Memory", () => {
       const memory = Memory.instance;
       for (let i = 0; i < 5; i++) {
         await memory.save({
-          userId: "user-limit",
-          author: EMemoryAuthor.User,
-          guild: null,
+          chatId: "chat-limit",
+          author: ERole.User,
           importance: EMemoryImportance.Low,
           message: `Memory ${i}`,
         });
       }
 
       const result = await memory.find({
-        userId: "user-limit",
+        chatId: "chat-limit",
         limit: 3,
       });
 
@@ -471,38 +396,27 @@ describe("Memory", () => {
     test("combines multiple filters", async () => {
       const memory = Memory.instance;
       await memory.save({
-        userId: "user-multi",
-        author: EMemoryAuthor.User,
-        guild: "guild-multi",
+        chatId: "chat-multi",
+        author: ERole.User,
         importance: EMemoryImportance.High,
         message: "Matching all filters",
       });
       await memory.save({
-        userId: "user-multi",
-        author: EMemoryAuthor.Bot,
-        guild: "guild-multi",
+        chatId: "chat-multi",
+        author: ERole.Assistant,
         importance: EMemoryImportance.High,
         message: "Wrong author",
       });
       await memory.save({
-        userId: "user-multi",
-        author: EMemoryAuthor.User,
-        guild: "guild-other",
-        importance: EMemoryImportance.High,
-        message: "Wrong guild",
-      });
-      await memory.save({
-        userId: "user-multi",
-        author: EMemoryAuthor.User,
-        guild: "guild-multi",
+        chatId: "chat-multi",
+        author: ERole.User,
         importance: EMemoryImportance.Low,
         message: "Wrong importance",
       });
 
       const result = await memory.find({
-        userId: "user-multi",
-        author: EMemoryAuthor.User,
-        guild: "guild-multi",
+        chatId: "chat-multi",
+        author: ERole.User,
         importance: [EMemoryImportance.High],
       });
 
@@ -515,30 +429,27 @@ describe("Memory", () => {
     test("returns memories ordered by createdAt DESC", async () => {
       const memory = Memory.instance;
       await memory.save({
-        userId: "user-order",
-        author: EMemoryAuthor.User,
-        guild: null,
+        chatId: "chat-order",
+        author: ERole.User,
         importance: EMemoryImportance.Low,
         message: "First memory",
       });
       await new Promise((resolve) => setTimeout(resolve, 10));
       await memory.save({
-        userId: "user-order",
-        author: EMemoryAuthor.User,
-        guild: null,
+        chatId: "chat-order",
+        author: ERole.User,
         importance: EMemoryImportance.Low,
         message: "Second memory",
       });
       await new Promise((resolve) => setTimeout(resolve, 10));
       await memory.save({
-        userId: "user-order",
-        author: EMemoryAuthor.User,
-        guild: null,
+        chatId: "chat-order",
+        author: ERole.User,
         importance: EMemoryImportance.Low,
         message: "Third memory",
       });
 
-      const result = await memory.find({ userId: "user-order" });
+      const result = await memory.find({ chatId: "chat-order" });
 
       // @ts-expect-error
       expect(result.length).toBe(3);

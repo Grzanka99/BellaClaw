@@ -9,9 +9,8 @@ export const PERSISTENT_MEMORY_DB = "persistent-memory.db" as const;
 export const CREATE_MEMORIES_TABLE = `
   CREATE TABLE IF NOT EXISTS memories (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    userId TEXT NOT NULL,
+    chatId TEXT NOT NULL,
     author TEXT NOT NULL,
-    guild TEXT NULLABLE,
     importance TEXT NOT NULL,
     message TEXT NOT NULL,
     createdAt INTEGER NOT NULL,
@@ -51,17 +50,12 @@ export class Memory {
 
   public async find(args: TFindMemoryArgs): Promise<TMemory[] | TMemoryError> {
     const res = await this.queue.enqueue(async () => {
-      const conditions: string[] = ["userId = $userId"];
-      const params: Record<string, string | number | null> = { $userId: args.userId };
+      const conditions: string[] = ["chatId = $chatId"];
+      const params: Record<string, string | number | null> = { $chatId: args.chatId };
 
       if (args.author !== undefined) {
         conditions.push("author = $author");
         params.$author = args.author;
-      }
-
-      if (args.guild !== undefined) {
-        conditions.push("guild = $guild");
-        params.$guild = args.guild;
       }
 
       if (args.importance !== undefined && args.importance.length > 0) {
@@ -114,9 +108,8 @@ export class Memory {
 
     return res.map((row) => ({
       id: row.id,
-      userId: row.userId,
+      chatId: row.chatId,
       author: row.author,
-      guild: row.guild,
       importance: row.importance,
       message: row.message,
       createdAt: new Date(row.createdAt),
@@ -124,10 +117,10 @@ export class Memory {
     }));
   }
 
-  public async readFullMemory(userId: string): Promise<TMemory[] | TMemoryError> {
+  public async readFullMemory(chatId: string): Promise<TMemory[] | TMemoryError> {
     const res = await this.queue.enqueue(async () => {
-      const queryStr = `SELECT * FROM memories WHERE userId = $userId ORDER BY createdAt DESC`;
-      const results = this.db.query(queryStr).all({ $userId: userId });
+      const queryStr = `SELECT * FROM memories WHERE chatId = $chatId ORDER BY createdAt DESC`;
+      const results = this.db.query(queryStr).all({ $chatId: chatId });
 
       const parsed = z.array(SMemory).safeParse(results);
 
@@ -148,9 +141,8 @@ export class Memory {
 
     return res.map((row) => ({
       id: row.id,
-      userId: row.userId,
+      chatId: row.chatId,
       author: row.author,
-      guild: row.guild,
       importance: row.importance,
       message: row.message,
       createdAt: new Date(row.createdAt),
@@ -161,9 +153,9 @@ export class Memory {
   public async save(args: TSaveArgs): Promise<Omit<TMemory, "id"> | TMemoryError> {
     const query = `
       INSERT INTO
-        memories (userId, author, guild, importance, message, createdAt, lastReadAt)
+        memories (chatId, author, importance, message, createdAt, lastReadAt)
       VALUES
-        ($userId, $author, $guild, $importance, $message, $createdAt, $lastReadAt)
+        ($chatId, $author, $importance, $message, $createdAt, $lastReadAt)
     `;
 
     const now = Date.now();
@@ -171,9 +163,8 @@ export class Memory {
     try {
       const res = await this.queue.enqueue(async () => {
         return this.db.query(query).run({
-          $userId: args.userId,
+          $chatId: args.chatId,
           $author: args.author,
-          $guild: args.guild ?? null,
           $importance: args.importance,
           $message: args.message,
           $createdAt: now,
@@ -183,9 +174,8 @@ export class Memory {
 
       if (res.changes > 0) {
         return {
-          userId: args.userId,
+          chatId: args.chatId,
           author: args.author,
-          guild: args.guild,
           importance: args.importance,
           message: args.message,
           createdAt: new Date(now),
@@ -240,9 +230,8 @@ export class Memory {
 
       return {
         id: parsed.data.id,
-        userId: parsed.data.userId,
+        chatId: parsed.data.chatId,
         author: parsed.data.author,
-        guild: parsed.data.guild,
         importance: parsed.data.importance,
         message: parsed.data.message,
         createdAt: new Date(parsed.data.createdAt),

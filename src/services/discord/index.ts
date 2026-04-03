@@ -2,6 +2,8 @@ import { Client, Events, GatewayIntentBits, type Message, Partials } from "disco
 import { createLogger, type TLogger } from "../../utils/logger";
 import { OpenrouterAiProvider } from "../ai-providers/openrouter";
 import { Memory } from "../memory";
+import { MessageHandler } from "../message-handler";
+import { ERole } from "../ai-providers/types";
 
 export class DiscordSingleton {
   private static _instance: DiscordSingleton;
@@ -33,7 +35,7 @@ export class DiscordSingleton {
     return DiscordSingleton._instance;
   }
 
-  private async messageHandler(message: Message) {
+  private async handleMessage(message: Message) {
     console.log(`<${message.author.username}> ${message.content}`);
 
     if (message.author.id === this.client.user?.id) {
@@ -43,6 +45,21 @@ export class DiscordSingleton {
     if (!this.client.user?.id) {
       return;
     }
+
+    const messageHandler = MessageHandler.getInstance(message.author.id);
+
+    messageHandler.handleMessage({
+      chatId: message.author.id,
+      author: {
+        type: ERole.User,
+        username: message.author.username,
+        id: message.author.id,
+      },
+      message: {
+        type: "text",
+        content: message.content,
+      },
+    });
   }
 
   private async onReady(c: Client<true>) {
@@ -51,7 +68,7 @@ export class DiscordSingleton {
 
   public setup() {
     this.client.once(Events.ClientReady, this.onReady.bind(this));
-    this.client.on(Events.MessageCreate, this.messageHandler.bind(this));
+    this.client.on(Events.MessageCreate, this.handleMessage.bind(this));
     this.client.login(Bun.env.DISCORD_TOKEN);
   }
 }
