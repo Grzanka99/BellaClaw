@@ -1,9 +1,9 @@
 import { Database } from "bun:sqlite";
+import type { PrivateKeyExportType } from "crypto";
 import { z } from "zod";
 import { AsyncQueue } from "../../utils/async-queue";
 import { createLogger, type TLogger } from "../../utils/logger";
 import { SMemory, type TFindMemoryArgs, type TMemory, type TSaveArgs } from "./types";
-import type { PrivateKeyExportType } from "crypto";
 
 export const PERSISTENT_MEMORY_DB = "persistent-memory.db" as const;
 
@@ -31,7 +31,7 @@ type TMemoryResult =
     }
   | {
       success: false;
-      error: TMemory;
+      error: TMemoryError;
     };
 
 export class Memory {
@@ -128,7 +128,44 @@ export class Memory {
     }));
   }
 
-  // public async findRecent(chatId: string, limit: number): Promise<TMemoryResult> {}
+  public async findRecent(chatId: string, limit: number): Promise<TMemoryResult> {
+    const res = await this.queue.enqueue(async () => {
+      const queryStr = `SELECT * FROM memories WHERE chatId = $chatId ORDER BY createdAt DESC LIMIT $limit`;
+      const results = this.db.query(queryStr).all({ $chatId: chatId, $limit: limit });
+
+      const parsed = z.array(SMemory).safeParse(results);
+
+      if (!parsed.success) {
+        this.logger.error("Failed to parse memory from DB");
+        return undefined;
+      }
+
+      return parsed.data;
+    });
+
+    if (!res) {
+      return {
+        success: false,
+        error: {
+          operation: "read",
+          error: "Failed to read memory",
+        },
+      };
+    }
+
+    return {
+      success: true,
+      data: res.map((row) => ({
+        id: row.id,
+        chatId: row.chatId,
+        author: row.author,
+        importance: row.importance,
+        message: row.message,
+        createdAt: new Date(row.createdAt),
+        lastReadAt: new Date(row.lastReadAt),
+      })),
+    };
+  }
 
   public async readFullMemory(chatId: string): Promise<TMemory[] | TMemoryError> {
     const res = await this.queue.enqueue(async () => {

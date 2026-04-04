@@ -48,7 +48,7 @@ export class DiscordSingleton {
 
     const messageHandler = MessageHandler.getInstance(message.author.id);
 
-    messageHandler.handleMessage({
+    const res = await messageHandler.handleMessage({
       chatId: message.author.id,
       author: {
         type: ERole.User,
@@ -60,6 +60,8 @@ export class DiscordSingleton {
         content: message.content,
       },
     });
+
+    message.author.send(`res: ${res}`);
   }
 
   private async onReady(c: Client<true>) {

@@ -1,4 +1,3 @@
-import { resourceLimits } from "node:worker_threads";
 import { MODEL_GEMINI_3_FLASH_PREVIEW } from "../../models";
 import type { TOption } from "../../types";
 import { createLogger, type TLogger } from "../../utils/logger";
@@ -46,8 +45,16 @@ export class MessageHandler {
 
   public async handleMessage(message: TIncommingMessage): Promise<TOption<string>> {
     const importance = await this.defineMessageImportance(message.message.content);
+
+    const last30 = await this.retrieveMemory(message.chatId);
+    const byAiDecision = await this.searchMemories(message);
+
     this.saveMessageToDatabase(message, importance);
-    console.log(importance);
+    console.log({
+      importance,
+      last30,
+      byAiDecision,
+    });
     return "";
   }
 
@@ -120,7 +127,7 @@ export class MessageHandler {
 
   // NOTE: Ask proper LLM to call tool to read database for more memories,
   // Can be done with note that last 30 messages will be included regardless
-  private async searchMemories(message: TIncommingMessage): unknown[] {
+  private async searchMemories(message: TIncommingMessage): Promise<TMemory[]> {
     if (message.author.type !== ERole.User) {
       return [];
     }
@@ -169,8 +176,15 @@ export class MessageHandler {
   }
 
   // NOTE: Retrieve memory based on tool call response, always retrieve last 30 messages
-  private async retrieveMemory() {
-    throw "Not implemented";
+  private async retrieveMemory(chatId: string): Promise<TMemory[]> {
+    const res = await this.memory.findRecent(chatId, 30);
+
+    if (!res.success) {
+      this.logger.error("Failed to retrieve last 30 memories from memory");
+      return [];
+    }
+
+    return res.data;
   }
 
   // NOTE: tbd, I think tool calls would require another handler to generate response message
@@ -178,17 +192,3 @@ export class MessageHandler {
     throw "Not implemented";
   }
 }
-
-const ai = MessageHandler.getInstance("test");
-ai.searchMemories({
-  author: {
-    type: ERole.User,
-    id: "123",
-    username: "test",
-  },
-  chatId: "test-chat",
-  message: {
-    type: "text",
-    content: "co lubię jeść na obiad?",
-  },
-});
