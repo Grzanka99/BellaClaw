@@ -23,12 +23,14 @@ import {
   MODEL_OPENROUTER_GEMINI_3_1_PRO_PREVIEW,
   MODEL_OPENROUTER_GEMINI_3_FLASH_PREVIEW,
   MODEL_OPENROUTER_GPT_5_4_MINI,
+  MODEL_OPENROUTER_GPT_5_4_NANO,
 } from "./models";
 
 export type TOpenrouterModel =
   | typeof MODEL_OPENROUTER_FREE
   | typeof MODEL_OPENROUTER_GEMINI_3_FLASH_PREVIEW
   | typeof MODEL_OPENROUTER_GPT_5_4_MINI
+  | typeof MODEL_OPENROUTER_GPT_5_4_NANO
   | typeof MODEL_OPENROUTER_GEMINI_3_1_PRO_PREVIEW;
 
 const OPENROUTER_API_KEY = Bun.env.OPENROUTER_API_KEY as string;
@@ -70,7 +72,9 @@ export class OpenrouterAiProvider {
   private logger = createLogger("OPENROUTER PROVIDER");
   private readonly openrouter: OpenRouter = new OpenRouter({ apiKey: OPENROUTER_API_KEY });
 
-  private constructor() {}
+  private constructor() {
+    this.logger.info("provider initialized");
+  }
 
   public static get instance(): OpenrouterAiProvider {
     if (!OpenrouterAiProvider._instance) {
@@ -83,6 +87,7 @@ export class OpenrouterAiProvider {
   public getModel(purpose: EModelPurpose): TOpenrouterModel {
     switch (purpose) {
       case EModelPurpose.ToolCheap:
+        return MODEL_OPENROUTER_GPT_5_4_NANO;
       case EModelPurpose.General:
         return MODEL_OPENROUTER_FREE;
       case EModelPurpose.ToolAccurate:

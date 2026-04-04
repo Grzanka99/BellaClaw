@@ -1,5 +1,4 @@
 import { Database } from "bun:sqlite";
-import type { PrivateKeyExportType } from "crypto";
 import { z } from "zod";
 import { AsyncQueue } from "../../utils/async-queue";
 import { createLogger, type TLogger } from "../../utils/logger";

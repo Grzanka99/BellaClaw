@@ -1,4 +1,5 @@
 import type { TOption } from "../../types";
+import { AsyncQueue } from "../../utils/async-queue";
 import { createLogger, type TLogger } from "../../utils/logger";
 import { OllamaAiProvider } from "../ai-providers/ollama";
 import { OpenrouterAiProvider } from "../ai-providers/openrouter";
@@ -22,6 +23,7 @@ export class MessageHandler {
   private static _instances = new Map<string, MessageHandler>();
   private logger: TLogger;
   private ai = OpenrouterAiProvider.instance;
+  private queue = new AsyncQueue();
   private memory = Memory.instance;
 
   constructor(chatId: string) {
@@ -44,27 +46,20 @@ export class MessageHandler {
   }
 
   public async handleMessage(message: TIncommingMessage): Promise<TOption<string>> {
+    const handleMessageStart = performance.now();
     this.logger.info("handleMessage: start");
 
-    const importanceStart = performance.now();
-    const importance = await this.defineMessageImportance(message.message.content);
+    const parallelStart = performance.now();
+    const [importance, last30, byAiDecision] = await Promise.all([
+      this.defineMessageImportance(message.message.content),
+      this.retrieveMemory(message.chatId),
+      this.searchMemories(message),
+    ]);
     this.logger.info(
-      `handleMessage: incoming message importance: ${importance} (${(performance.now() - importanceStart).toFixed(0)}ms)`,
+      `handleMessage: parallel ops completed (${(performance.now() - parallelStart).toFixed(0)}ms) — importance: ${importance}, recent: ${last30.length}, search: ${byAiDecision.length}`,
     );
 
-    const retrieveStart = performance.now();
-    const last30 = await this.retrieveMemory(message.chatId);
-    this.logger.info(
-      `handleMessage: retrieved ${last30.length} recent memories (${(performance.now() - retrieveStart).toFixed(0)}ms)`,
-    );
-
-    const searchStart = performance.now();
-    const byAiDecision = await this.searchMemories(message);
-    this.logger.info(
-      `handleMessage: AI memory search found ${byAiDecision.length} memories (${(performance.now() - searchStart).toFixed(0)}ms)`,
-    );
-
-    this.saveMessageToDatabase(message, importance);
+    this.queue.enqueue(() => this.saveMessageToDatabase(message, importance));
 
     const history: THistoryItem[] = [];
 
@@ -115,31 +110,37 @@ export class MessageHandler {
       return undefined;
     }
 
-    const respImpStart = performance.now();
-    const responseImportance = await this.defineMessageImportance(aiRes.response);
+    this.queue.enqueue(async () => {
+      const respImpStart = performance.now();
+      const responseImportance = await this.defineMessageImportance(aiRes.response);
+      this.logger.info(
+        `handleMessage: response importance: ${responseImportance} (${(performance.now() - respImpStart).toFixed(0)}ms)`,
+      );
+
+      await this.saveMessageToDatabase(
+        {
+          chatId: message.chatId,
+          message: {
+            type: "text",
+            content: aiRes.response,
+          },
+          author: {
+            type: ERole.Assistant,
+          },
+        },
+        responseImportance,
+      );
+    });
+
     this.logger.info(
-      `handleMessage: response importance: ${responseImportance} (${(performance.now() - respImpStart).toFixed(0)}ms)`,
+      `handleMessage: done (${(performance.now() - handleMessageStart).toFixed(0)}ms)`,
     );
-
-    this.saveMessageToDatabase(
-      {
-        chatId: message.chatId,
-        message: {
-          type: "text",
-          content: aiRes.response,
-        },
-        author: {
-          type: ERole.Assistant,
-        },
-      },
-      responseImportance,
-    );
-
-    this.logger.info("handleMessage: done");
     return aiRes.response;
   }
 
   private async defineMessageImportance(message: string): Promise<EMemoryImportance> {
+    const start = performance.now();
+
     const INSTRUCTIONS = await Bun.file(
       "./src/services/ai-providers/tools/define-message-importance/instructions.xml",
     ).text();
@@ -162,7 +163,9 @@ export class MessageHandler {
     });
 
     if (!res) {
-      this.logger.error("Failed to determine message importance, defaulting to low");
+      this.logger.error(
+        `defineMessageImportance: failed, defaulting to low (${(performance.now() - start).toFixed(0)}ms)`,
+      );
       return EMemoryImportance.Low;
     }
 
@@ -170,11 +173,12 @@ export class MessageHandler {
 
     if (!realRes) {
       this.logger.error(
-        "Cannot find correct tool call result for message importance, defaulting to low",
+        `defineMessageImportance: no tool call result found, defaulting to low (${(performance.now() - start).toFixed(0)}ms)`,
       );
       return EMemoryImportance.Low;
     }
 
+    this.logger.info(`defineMessageImportance: done (${(performance.now() - start).toFixed(0)}ms)`);
     return realRes.data.importance;
   }
 
@@ -207,7 +211,12 @@ export class MessageHandler {
   // NOTE: Ask proper LLM to call tool to read database for more memories,
   // Can be done with note that last 30 messages will be included regardless
   private async searchMemories(message: TIncommingMessage): Promise<TMemory[]> {
+    const start = performance.now();
+
     if (message.author.type !== ERole.User) {
+      this.logger.info(
+        `searchMemories: done (${(performance.now() - start).toFixed(0)}ms) — skipped, not a user message`,
+      );
       return [];
     }
 
@@ -234,7 +243,9 @@ export class MessageHandler {
     });
 
     if (!res) {
-      this.logger.error("Failed to determine if memory should be searched");
+      this.logger.error(
+        `searchMemories: failed to determine if memory should be searched (${(performance.now() - start).toFixed(0)}ms)`,
+      );
       return [];
     }
 
@@ -251,18 +262,24 @@ export class MessageHandler {
       }
     }
 
+    this.logger.info(`searchMemories: done (${(performance.now() - start).toFixed(0)}ms)`);
     return allFound;
   }
 
   // NOTE: Retrieve memory based on tool call response, always retrieve last 30 messages
   private async retrieveMemory(chatId: string): Promise<TMemory[]> {
+    const start = performance.now();
+
     const res = await this.memory.findRecent(chatId, 30);
 
     if (!res.success) {
-      this.logger.error("Failed to retrieve last 30 memories from memory");
+      this.logger.error(
+        `retrieveMemory: failed to retrieve last 30 memories (${(performance.now() - start).toFixed(0)}ms)`,
+      );
       return [];
     }
 
+    this.logger.info(`retrieveMemory: done (${(performance.now() - start).toFixed(0)}ms)`);
     return res.data;
   }
 
