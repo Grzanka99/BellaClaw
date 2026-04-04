@@ -1,32 +1,33 @@
 import { OpenRouter } from "@openrouter/sdk";
 import type { AssistantMessage, Message, ToolDefinitionJson } from "@openrouter/sdk/models";
 import type { User } from "discord.js";
+import { MODEL_OPENROUTER_FREE } from "../../../models";
 import type { TOption } from "../../../types";
-import { handleDefineMessageImportance } from "../tools/handlers/define-message-importance";
-import type { THistoryItem, TPrompt, TToolCallResponse } from "../types";
+import { createLogger } from "../../../utils/logger";
+import type { TTools } from "../tools";
+import { DEFINE_MESSAGE_IMPORTANCE_TOOL } from "../tools/define-message-importance/definition";
+import { handleDefineMessageImportance } from "../tools/define-message-importance/handler";
+import { SEARCH_MEMORY_TOOL } from "../tools/search-memory/definition";
+import { handleSearchMemory } from "../tools/search-memory/handler";
+import type {
+  TChatWithTools,
+  THistoryItem,
+  TPrompt,
+  TToolCallResponse,
+  TToolCallResult,
+  TToolEntry,
+} from "../types";
+import { ERole } from "../types";
 
 const OPENROUTER_API_KEY = Bun.env.OPENROUTER_API_KEY as string;
 
-const MODEL = "google/gemini-3-flash-preview" as const;
+const MODEL = MODEL_OPENROUTER_FREE;
 
-const BASE_SYSTEM_MESSAGE: TPrompt = {
-  role: "system",
-  content: [
-    {
-      type: "text",
-      text: "You are a helpful personal assistant. You communicate with your supervisor via discord direct messages, you will be able to schedule reminders, find informasions in past messages, cooperate with user",
-    },
-    {
-      type: "text",
-      text: "You should always reply in Polish language. You should always use Europe/Warsaw time.",
-    },
-    { type: "text", text: "Don't mention your capabilities unless asked." },
-  ],
-};
+const BASE_SYSTEM_INSTRUCTIONS_PATH = "./src/services/ai-providers/instructions/base-system.xml";
 
 function buildUserContextMessage(user: TUserData): TPrompt {
   return {
-    role: "system",
+    role: ERole.System,
     content: [
       {
         type: "text",
@@ -40,10 +41,10 @@ export type TUserData = Pick<User, "username" | "id" | "displayName">;
 
 export class OpenrouterAiProvider {
   private static _instance: OpenrouterAiProvider;
-
+  private logger = createLogger("OPENROUTER PROVIDER");
   private readonly openrouter: OpenRouter = new OpenRouter({ apiKey: OPENROUTER_API_KEY });
 
-  private constructor() { }
+  private constructor() {}
 
   public static get instance(): OpenrouterAiProvider {
     if (!OpenrouterAiProvider._instance) {
@@ -58,7 +59,9 @@ export class OpenrouterAiProvider {
     history: THistoryItem[],
     user: TUserData,
   ): Promise<TOption<string>> {
-    const messages: Message[] = [BASE_SYSTEM_MESSAGE, buildUserContextMessage(user), ...history];
+    const baseSystemText = await Bun.file(BASE_SYSTEM_INSTRUCTIONS_PATH).text();
+    const baseSystemMessage: THistoryItem = { role: ERole.System, content: baseSystemText };
+    const messages: Message[] = [baseSystemMessage, buildUserContextMessage(user), ...history];
     messages.push(prompt);
 
     const res = await this.openrouter.chat.send({
@@ -67,6 +70,7 @@ export class OpenrouterAiProvider {
       messages,
     });
 
+    console.log(res.choices);
     const data = res.choices[0]?.message.content;
 
     if (!data) {
@@ -76,11 +80,55 @@ export class OpenrouterAiProvider {
     return data.toString();
   }
 
-  public async toolCall<T>(
+  public async chatWithTools(
+    prompt: TPrompt,
+    history: THistoryItem[],
+    user: TUserData,
+    tools: TToolEntry[],
+  ): Promise<TOption<TChatWithTools>> {
+    const baseSystemText = await Bun.file(BASE_SYSTEM_INSTRUCTIONS_PATH).text();
+    const baseSystemMessage: THistoryItem = { role: ERole.System, content: baseSystemText };
+    const messages: Message[] = [baseSystemMessage, buildUserContextMessage(user), ...history];
+
+    for (const tool of tools) {
+      if (tool.instructions) {
+        messages.push({ role: ERole.System, content: tool.instructions });
+      }
+    }
+
+    messages.push(prompt);
+
+    const definitions = tools.map((t) => t.definition);
+
+    const res = await this.openrouter.chat.send({
+      stream: false,
+      model: MODEL,
+      messages,
+      tools: definitions,
+    });
+
+    const message = res.choices[0]?.message;
+
+    if (!message) {
+      return undefined;
+    }
+
+    const assistantMessage = message as AssistantMessage;
+    const content = assistantMessage.content;
+    const responseText = typeof content === "string" ? content : "";
+
+    return {
+      response: responseText,
+      toolCalls: assistantMessage.toolCalls ?? [],
+    };
+  }
+
+  public async toolCall<T = unknown>(
     prompt: TPrompt,
     instructions: THistoryItem[],
     tools: ToolDefinitionJson[],
     model: string = MODEL,
+    chatId?: string,
   ): Promise<TOption<TToolCallResponse<T>>> {
     const messages: Message[] = [...instructions];
     messages.push(prompt);
@@ -100,13 +148,40 @@ export class OpenrouterAiProvider {
 
     const assistantMessage = message as AssistantMessage;
     const toolCalls = assistantMessage.toolCalls ?? [];
-    const toolCallsResults = [];
+    const toolCallsResults: TToolCallResult<T>[] = [];
 
     for (const toolCall of toolCalls) {
-      switch (toolCall.function?.name) {
-        case "define-message-importance":
-          toolCallsResults.push(handleDefineMessageImportance(toolCall));
+      switch (toolCall.function?.name as TTools) {
+        case DEFINE_MESSAGE_IMPORTANCE_TOOL: {
+          const toolRes = handleDefineMessageImportance(toolCall);
+          if (!toolRes) {
+            this.logger.error(`Invalid arguments for tool: ${DEFINE_MESSAGE_IMPORTANCE_TOOL}`);
+            continue;
+          }
+          toolCallsResults.push({
+            tool: DEFINE_MESSAGE_IMPORTANCE_TOOL,
+            // NOTE: Thats the acceptable exception for type cast!
+            data: toolRes as T,
+          });
           break;
+        }
+        case SEARCH_MEMORY_TOOL: {
+          if (!chatId) {
+            this.logger.error(`chatId is required for tool: ${SEARCH_MEMORY_TOOL}`);
+            continue;
+          }
+          const toolRes = await handleSearchMemory(toolCall, chatId);
+          if (!toolRes) {
+            this.logger.error(`Invalid arguments for tool: ${SEARCH_MEMORY_TOOL}`);
+            continue;
+          }
+          toolCallsResults.push({
+            tool: SEARCH_MEMORY_TOOL,
+            // NOTE: Thats the acceptable exception for type cast!
+            data: toolRes as T,
+          });
+          break;
+        }
       }
     }
 

@@ -24,27 +24,6 @@ Small Bun + TypeScript Discord assistant. Prefer small, targeted changes that pr
 - Zod schemas: `S*` prefix (e.g. `SMemory`, `SSaveArgs`)
 - Singleton accessor: `public static get instance()` — always this name, no variants
 
-## Singleton Pattern
-
-All singletons follow this exact shape:
-
-```ts
-export class FooSingleton extends Logger {
-  private static _instance: FooSingleton;
-
-  private constructor() {
-    super("FOO");
-  }
-
-  public static get instance(): FooSingleton {
-    if (!FooSingleton._instance) {
-      FooSingleton._instance = new FooSingleton();
-    }
-    return FooSingleton._instance;
-  }
-}
-```
-
 ## AsyncQueue
 
 All SQLite operations must go through `this.queue.enqueue()`. Never call `this.db.*` directly outside of an enqueued callback.
@@ -59,15 +38,32 @@ Use `Bun.env.*` — never `process.env`.
 
 ## Logging
 
-- In classes: extend `Logger` and use `this.logger.info/warning/error/message()`
+- In classes: use `private logger = createLogger("PREFIX")` and call `this.logger.info/warning/error/message()`
 - Outside classes: import and use the `logger` utility directly
 - Never use raw `console.log` inside service files
+
+## Tool Definitions Pattern
+
+Each tool lives in its own directory under `src/services/ai-providers/tools/`:
+
+```
+src/services/ai-providers/tools/<tool-name>/
+  definition.ts    — exports a ToolDefinitionJson (name, description, parameters)
+  handler.ts       — parses arguments with Zod, returns parsed data
+  instructions.xml — detailed instructions for the AI on when/how to use the tool
+```
+
+- `definition.ts`: Use `@openrouter/sdk/models` `ToolDefinitionJson` type. Parameters use Zod schemas via `S*` prefix naming.
+- `handler.ts`: Parse `toolCall.function.arguments` with `JSON.parse`, then use `SArguments.safeParse()`. Branch on `.success`.
+- `instructions.xml`: XML format with `<purpose>`, `<tool>`, `<usage_rules>`, and `<examples>` sections.
 
 ## Scope Rules
 
 - Do not change anything not directly asked.
 - Do not fix type errors in files outside the current task's scope, even if you notice them.
+- If you find errors that are caused by current task changes, ask for permission to fix them
 - If a type error in an unrelated file blocks your task, report it instead of silently fixing it.
 - Do not modify stub methods (those with `throw "Not implemented"`) unless explicitly asked to implement them.
-- Do not modify existing test files under any circumstances.
+- Do not modify existing test files unless given direct permission
 - NEVER use types cast - 'as Type' - outside of tests
+- Instead of `some-type | undefined` use `TOption<some-type>`

@@ -1,4 +1,5 @@
 import { Database } from "bun:sqlite";
+import type { PrivateKeyExportType } from "crypto";
 import { z } from "zod";
 import { AsyncQueue } from "../../utils/async-queue";
 import { createLogger, type TLogger } from "../../utils/logger";
@@ -9,10 +10,9 @@ export const PERSISTENT_MEMORY_DB = "persistent-memory.db" as const;
 export const CREATE_MEMORIES_TABLE = `
   CREATE TABLE IF NOT EXISTS memories (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    userId TEXT NOT NULL,
+    chatId TEXT NOT NULL,
     author TEXT NOT NULL,
-    guild TEXT NULLABLE,
-    importance INTEGER NOT NULL,
+    importance TEXT NOT NULL,
     message TEXT NOT NULL,
     createdAt INTEGER NOT NULL,
     lastReadAt INTEGER NOT NULL
@@ -23,6 +23,16 @@ type TMemoryError = {
   operation: "write" | "read" | "update" | "delete";
   error: unknown;
 };
+
+type TMemoryResult =
+  | {
+      success: true;
+      data: TMemory[];
+    }
+  | {
+      success: false;
+      error: TMemoryError;
+    };
 
 export class Memory {
   private static _instance: Memory;
@@ -51,17 +61,12 @@ export class Memory {
 
   public async find(args: TFindMemoryArgs): Promise<TMemory[] | TMemoryError> {
     const res = await this.queue.enqueue(async () => {
-      const conditions: string[] = ["userId = $userId"];
-      const params: Record<string, string | number | null> = { $userId: args.userId };
+      const conditions: string[] = ["chatId = $chatId"];
+      const params: Record<string, string | number | null> = { $chatId: args.chatId };
 
       if (args.author !== undefined) {
         conditions.push("author = $author");
         params.$author = args.author;
-      }
-
-      if (args.guild !== undefined) {
-        conditions.push("guild = $guild");
-        params.$guild = args.guild;
       }
 
       if (args.importance !== undefined && args.importance.length > 0) {
@@ -114,9 +119,8 @@ export class Memory {
 
     return res.map((row) => ({
       id: row.id,
-      userId: row.userId,
+      chatId: row.chatId,
       author: row.author,
-      guild: row.guild,
       importance: row.importance,
       message: row.message,
       createdAt: new Date(row.createdAt),
@@ -124,10 +128,49 @@ export class Memory {
     }));
   }
 
-  public async readFullMemory(userId: string): Promise<TMemory[] | TMemoryError> {
+  public async findRecent(chatId: string, limit: number): Promise<TMemoryResult> {
     const res = await this.queue.enqueue(async () => {
-      const queryStr = `SELECT * FROM memories WHERE userId = $userId ORDER BY createdAt DESC`;
-      const results = this.db.query(queryStr).all({ $userId: userId });
+      const queryStr = `SELECT * FROM memories WHERE chatId = $chatId ORDER BY createdAt DESC LIMIT $limit`;
+      const results = this.db.query(queryStr).all({ $chatId: chatId, $limit: limit });
+
+      const parsed = z.array(SMemory).safeParse(results);
+
+      if (!parsed.success) {
+        this.logger.error("Failed to parse memory from DB");
+        return undefined;
+      }
+
+      return parsed.data;
+    });
+
+    if (!res) {
+      return {
+        success: false,
+        error: {
+          operation: "read",
+          error: "Failed to read memory",
+        },
+      };
+    }
+
+    return {
+      success: true,
+      data: res.map((row) => ({
+        id: row.id,
+        chatId: row.chatId,
+        author: row.author,
+        importance: row.importance,
+        message: row.message,
+        createdAt: new Date(row.createdAt),
+        lastReadAt: new Date(row.lastReadAt),
+      })),
+    };
+  }
+
+  public async readFullMemory(chatId: string): Promise<TMemory[] | TMemoryError> {
+    const res = await this.queue.enqueue(async () => {
+      const queryStr = `SELECT * FROM memories WHERE chatId = $chatId ORDER BY createdAt DESC`;
+      const results = this.db.query(queryStr).all({ $chatId: chatId });
 
       const parsed = z.array(SMemory).safeParse(results);
 
@@ -148,9 +191,8 @@ export class Memory {
 
     return res.map((row) => ({
       id: row.id,
-      userId: row.userId,
+      chatId: row.chatId,
       author: row.author,
-      guild: row.guild,
       importance: row.importance,
       message: row.message,
       createdAt: new Date(row.createdAt),
@@ -161,9 +203,9 @@ export class Memory {
   public async save(args: TSaveArgs): Promise<Omit<TMemory, "id"> | TMemoryError> {
     const query = `
       INSERT INTO
-        memories (userId, author, guild, importance, message, createdAt, lastReadAt)
+        memories (chatId, author, importance, message, createdAt, lastReadAt)
       VALUES
-        ($userId, $author, $guild, $importance, $message, $createdAt, $lastReadAt)
+        ($chatId, $author, $importance, $message, $createdAt, $lastReadAt)
     `;
 
     const now = Date.now();
@@ -171,9 +213,8 @@ export class Memory {
     try {
       const res = await this.queue.enqueue(async () => {
         return this.db.query(query).run({
-          $userId: args.userId,
+          $chatId: args.chatId,
           $author: args.author,
-          $guild: args.guild ?? null,
           $importance: args.importance,
           $message: args.message,
           $createdAt: now,
@@ -183,9 +224,8 @@ export class Memory {
 
       if (res.changes > 0) {
         return {
-          userId: args.userId,
+          chatId: args.chatId,
           author: args.author,
-          guild: args.guild,
           importance: args.importance,
           message: args.message,
           createdAt: new Date(now),
@@ -240,9 +280,8 @@ export class Memory {
 
       return {
         id: parsed.data.id,
-        userId: parsed.data.userId,
+        chatId: parsed.data.chatId,
         author: parsed.data.author,
-        guild: parsed.data.guild,
         importance: parsed.data.importance,
         message: parsed.data.message,
         createdAt: new Date(parsed.data.createdAt),

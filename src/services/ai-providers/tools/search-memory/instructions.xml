@@ -1,0 +1,71 @@
+<instructions>
+
+  <purpose>
+    Search through stored conversation memories to recall past messages, preferences,
+    or information shared by the user. Use this tool when the user asks about something
+    they previously mentioned, or when recalling past context would improve your response.
+  </purpose>
+
+  <tool>
+    <name>search-memory</name>
+    <description>
+      Queries the memory database for the current conversation. The chat context is handled
+      automatically - you only need to provide optional filters.
+      Results are sorted by importance (high first), then by last read date, then by creation date.
+      Returns the matching memories or an empty list if nothing is found.
+    </description>
+  </tool>
+
+  <response_handling>
+    If the search is not needed or no memories match the query, return an empty array or
+    do not call the tool. Do not fabricate memories.
+  </response_handling>
+
+  <filter_priority>
+    Prefer the following order of filters, but you do not need to use a previous filter
+    to use the next one:
+    1. searchString - partial text match on message content
+    2. timeRange - filter by creation date range (start and end in ISO 8601 format)
+    3. limit - cap the number of results
+    4. importance - filter by one or more importance levels (low, medium, high)
+  </filter_priority>
+
+  <usage_rules>
+    <rule>Only call this tool when the user explicitly asks about past information or when recalling context is essential</rule>
+    <rule>Use searchString to narrow results when the user references a specific topic</rule>
+    <rule>Use timeRange when the user mentions a specific time period</rule>
+    <rule>Use limit to avoid overwhelming context with too many results (prefer 5-10)</rule>
+    <rule>Use importance to prioritize high-value memories when the query is broad</rule>
+    <rule>When no filters are needed, simply return an empty array or do not call the tool</rule>
+  </usage_rules>
+
+  <examples>
+    <example>
+      <context>User says: "Przypomnij mi co mówiłem o moim ulubionym jedzeniu"</context>
+      <toolCall>
+        <searchString>ulubion</searchString>
+        <limit>5</limit>
+      </toolCall>
+      <reasoning>Search for memories mentioning favorite food, limited to 5 results.</reasoning>
+    </example>
+
+    <example>
+      <context>User says: "What did I tell you about my job last week?"</context>
+      <toolCall>
+        <searchString>job</searchString>
+        <timeRange>
+          <start>2025-01-20T00:00:00Z</start>
+          <end>2025-01-27T23:59:59Z</end>
+        </timeRange>
+        <importance>["medium", "high"]</importance>
+      </toolCall>
+      <reasoning>User is asking about work-related information from last week. Search with text filter and time range.</reasoning>
+    </example>
+
+    <example>
+      <context>User says: "hey co tam?"</context>
+      <reasoning>Casual greeting with no need to search past memories. Do not call the search tool.</reasoning>
+    </example>
+  </examples>
+
+</instructions>
