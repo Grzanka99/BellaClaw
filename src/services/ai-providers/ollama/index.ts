@@ -105,7 +105,7 @@ export class OllamaAiProvider {
   }
 
   public async chatWithTools(args: TChatWithToolsArgs): Promise<TOption<TChatWithTools>> {
-    this.logger.info(`Calling ${args.model}`);
+    this.logger.info(`chatWithTools: start, model=${args.model}`);
     const baseSystemText = await Bun.file(BASE_SYSTEM_INSTRUCTIONS_PATH).text();
     const toolInstructions = args.tools
       .filter((t) => t.instructions)
@@ -131,13 +131,16 @@ export class OllamaAiProvider {
     const message = res.message;
 
     if (!message) {
+      this.logger.warning("chatWithTools: no message in response");
       return undefined;
     }
 
     const responseText = message.content ?? "";
-
     const toolCalls = convertOllamaToolCalls(message.tool_calls ?? []);
 
+    this.logger.info(
+      `chatWithTools: done, response length=${responseText.length}, toolCalls=${toolCalls.length}`,
+    );
     return {
       response: responseText,
       toolCalls,
@@ -145,7 +148,7 @@ export class OllamaAiProvider {
   }
 
   public async toolCall<T = unknown>(args: TToolCallArgs): Promise<TOption<TToolCallResponse<T>>> {
-    this.logger.info(`Calling ${args.model}`);
+    this.logger.info(`toolCall: start, model=${args.model}`);
     const messages = buildMessages(args.instructions, args.prompt);
 
     const ollamaTools = convertToolsForOllama(args.tools);
@@ -160,6 +163,7 @@ export class OllamaAiProvider {
     const message = res.message;
 
     if (!message) {
+      this.logger.warning("toolCall: no message in response");
       return undefined;
     }
 
@@ -215,6 +219,7 @@ export class OllamaAiProvider {
 
     const responseText = message.content ?? "";
 
+    this.logger.info(`toolCall: done, ${toolCallsResults.length} tool results`);
     return {
       response: responseText,
       toolCalls,

@@ -25,6 +25,7 @@ export function handleDefineMessageImportance(
   const parsed = SDefineMessageImportance.safeParse(argsJson);
 
   if (!parsed.success) {
+    logger.error("handleDefineMessageImportance: Zod validation failed");
     return undefined;
   }
 

@@ -44,10 +44,25 @@ export class MessageHandler {
   }
 
   public async handleMessage(message: TIncommingMessage): Promise<TOption<string>> {
-    const importance = await this.defineMessageImportance(message.message.content);
+    this.logger.info("handleMessage: start");
 
+    const importanceStart = performance.now();
+    const importance = await this.defineMessageImportance(message.message.content);
+    this.logger.info(
+      `handleMessage: incoming message importance: ${importance} (${(performance.now() - importanceStart).toFixed(0)}ms)`,
+    );
+
+    const retrieveStart = performance.now();
     const last30 = await this.retrieveMemory(message.chatId);
+    this.logger.info(
+      `handleMessage: retrieved ${last30.length} recent memories (${(performance.now() - retrieveStart).toFixed(0)}ms)`,
+    );
+
+    const searchStart = performance.now();
     const byAiDecision = await this.searchMemories(message);
+    this.logger.info(
+      `handleMessage: AI memory search found ${byAiDecision.length} memories (${(performance.now() - searchStart).toFixed(0)}ms)`,
+    );
 
     this.saveMessageToDatabase(message, importance);
 
@@ -76,6 +91,7 @@ export class MessageHandler {
       });
     }
 
+    const chatStart = performance.now();
     const aiRes = await this.ai.chatWithTools({
       prompt: {
         role: ERole.User,
@@ -90,12 +106,20 @@ export class MessageHandler {
       tools: [],
       model: this.ai.getModel(EModelPurpose.ChatAccurate),
     });
+    this.logger.info(
+      `handleMessage: AI chat completed (${(performance.now() - chatStart).toFixed(0)}ms)`,
+    );
 
     if (!aiRes) {
+      this.logger.warning("handleMessage: AI returned undefined, aborting");
       return undefined;
     }
 
+    const respImpStart = performance.now();
     const responseImportance = await this.defineMessageImportance(aiRes.response);
+    this.logger.info(
+      `handleMessage: response importance: ${responseImportance} (${(performance.now() - respImpStart).toFixed(0)}ms)`,
+    );
 
     this.saveMessageToDatabase(
       {
@@ -111,6 +135,7 @@ export class MessageHandler {
       responseImportance,
     );
 
+    this.logger.info("handleMessage: done");
     return aiRes.response;
   }
 
