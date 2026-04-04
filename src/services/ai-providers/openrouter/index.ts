@@ -1,6 +1,7 @@
 import { OpenRouter } from "@openrouter/sdk";
 import type { AssistantMessage, Message, ToolDefinitionJson } from "@openrouter/sdk/models";
 import type { User } from "discord.js";
+import { MODEL_OPENROUTER_FREE } from "../../../models";
 import type { TOption } from "../../../types";
 import { createLogger } from "../../../utils/logger";
 import type { TTools } from "../tools";
@@ -13,22 +14,9 @@ import { ERole } from "../types";
 
 const OPENROUTER_API_KEY = Bun.env.OPENROUTER_API_KEY as string;
 
-const MODEL = "google/gemini-3-flash-preview" as const;
+const MODEL = MODEL_OPENROUTER_FREE;
 
-const BASE_SYSTEM_MESSAGE: TPrompt = {
-  role: ERole.System,
-  content: [
-    {
-      type: "text",
-      text: "You are a helpful personal assistant. You communicate with your supervisor via discord direct messages, you will be able to schedule reminders, find informasions in past messages, cooperate with user",
-    },
-    {
-      type: "text",
-      text: "You should always reply in Polish language. You should always use Europe/Warsaw time.",
-    },
-    { type: "text", text: "Don't mention your capabilities unless asked." },
-  ],
-};
+const BASE_SYSTEM_INSTRUCTIONS_PATH = "./src/services/ai-providers/instructions/base-system.xml";
 
 function buildUserContextMessage(user: TUserData): TPrompt {
   return {
@@ -64,7 +52,9 @@ export class OpenrouterAiProvider {
     history: THistoryItem[],
     user: TUserData,
   ): Promise<TOption<string>> {
-    const messages: Message[] = [BASE_SYSTEM_MESSAGE, buildUserContextMessage(user), ...history];
+    const baseSystemText = await Bun.file(BASE_SYSTEM_INSTRUCTIONS_PATH).text();
+    const baseSystemMessage: THistoryItem = { role: ERole.System, content: baseSystemText };
+    const messages: Message[] = [baseSystemMessage, buildUserContextMessage(user), ...history];
     messages.push(prompt);
 
     const res = await this.openrouter.chat.send({
@@ -73,6 +63,7 @@ export class OpenrouterAiProvider {
       messages,
     });
 
+    console.log(res.choices);
     const data = res.choices[0]?.message.content;
 
     if (!data) {
