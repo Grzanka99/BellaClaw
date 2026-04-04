@@ -9,7 +9,14 @@ import { DEFINE_MESSAGE_IMPORTANCE_TOOL } from "../tools/define-message-importan
 import { handleDefineMessageImportance } from "../tools/define-message-importance/handler";
 import { SEARCH_MEMORY_TOOL } from "../tools/search-memory/definition";
 import { handleSearchMemory } from "../tools/search-memory/handler";
-import type { THistoryItem, TPrompt, TToolCallResponse, TToolCallResult } from "../types";
+import type {
+  TChatWithTools,
+  THistoryItem,
+  TPrompt,
+  TToolCallResponse,
+  TToolCallResult,
+  TToolEntry,
+} from "../types";
 import { ERole } from "../types";
 
 const OPENROUTER_API_KEY = Bun.env.OPENROUTER_API_KEY as string;
@@ -71,6 +78,49 @@ export class OpenrouterAiProvider {
     }
 
     return data.toString();
+  }
+
+  public async chatWithTools(
+    prompt: TPrompt,
+    history: THistoryItem[],
+    user: TUserData,
+    tools: TToolEntry[],
+  ): Promise<TOption<TChatWithTools>> {
+    const baseSystemText = await Bun.file(BASE_SYSTEM_INSTRUCTIONS_PATH).text();
+    const baseSystemMessage: THistoryItem = { role: ERole.System, content: baseSystemText };
+    const messages: Message[] = [baseSystemMessage, buildUserContextMessage(user), ...history];
+
+    for (const tool of tools) {
+      if (tool.instructions) {
+        messages.push({ role: ERole.System, content: tool.instructions });
+      }
+    }
+
+    messages.push(prompt);
+
+    const definitions = tools.map((t) => t.definition);
+
+    const res = await this.openrouter.chat.send({
+      stream: false,
+      model: MODEL,
+      messages,
+      tools: definitions,
+    });
+
+    const message = res.choices[0]?.message;
+
+    if (!message) {
+      return undefined;
+    }
+
+    const assistantMessage = message as AssistantMessage;
+    const content = assistantMessage.content;
+    const responseText = typeof content === "string" ? content : "";
+
+    return {
+      response: responseText,
+      toolCalls: assistantMessage.toolCalls ?? [],
+    };
   }
 
   public async toolCall<T = unknown>(

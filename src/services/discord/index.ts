@@ -1,9 +1,9 @@
 import { Client, Events, GatewayIntentBits, type Message, Partials } from "discord.js";
 import { createLogger, type TLogger } from "../../utils/logger";
 import { OpenrouterAiProvider } from "../ai-providers/openrouter";
+import { ERole } from "../ai-providers/types";
 import { Memory } from "../memory";
 import { MessageHandler } from "../message-handler";
-import { ERole } from "../ai-providers/types";
 
 export class DiscordSingleton {
   private static _instance: DiscordSingleton;
@@ -61,7 +61,7 @@ export class DiscordSingleton {
       },
     });
 
-    message.author.send(`res: ${res}`);
+    message.author.send(String(res));
   }
 
   private async onReady(c: Client<true>) {

@@ -1,3 +1,5 @@
+import type { ChatMessageToolCall, ToolDefinitionJson } from "@openrouter/sdk/models";
+
 export enum ERole {
   System = "system",
   User = "user",
@@ -30,4 +32,14 @@ export type TToolCallResponse<T = unknown> = {
     function: unknown;
   }>;
   toolCallsResults: TToolCallResult<T>[];
+};
+
+export type TChatWithTools = {
+  response: string;
+  toolCalls: ChatMessageToolCall[];
+};
+
+export type TToolEntry = {
+  definition: ToolDefinitionJson;
+  instructions?: string;
 };

@@ -12,10 +12,23 @@ export type TMessageAuthor =
 export type TIncommingMessage = {
   chatId: string;
   message: {
-    type: 'text', // NOTE: Later maybe multimodal
-    content: string
+    type: "text"; // NOTE: Later maybe multimodal
+    content: string;
   };
-  author: TMessageAuthor;
+  author: {
+    type: ERole.User;
+    id: Snowflake;
+    username: string;
+  };
 };
 
-export type TOutcommingMessage = TIncommingMessage
+export type TOutgoingMessage = {
+  chatId: string;
+  message: {
+    type: "text";
+    content: string;
+  };
+  author: {
+    type: ERole.Assistant;
+  };
+};

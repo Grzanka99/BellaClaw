@@ -16,7 +16,7 @@ import type { THistoryItem, TPrompt } from "../ai-providers/types";
 import { ERole } from "../ai-providers/types";
 import { Memory } from "../memory";
 import { EMemoryImportance, type TMemory } from "../memory/types";
-import type { TIncommingMessage, TOutcommingMessage } from "./types";
+import type { TIncommingMessage, TOutgoingMessage } from "./types";
 
 export class MessageHandler {
   private static _instances = new Map<string, MessageHandler>();
@@ -50,12 +50,67 @@ export class MessageHandler {
     const byAiDecision = await this.searchMemories(message);
 
     this.saveMessageToDatabase(message, importance);
-    console.log({
-      importance,
-      last30,
-      byAiDecision,
-    });
-    return "";
+
+    const history: THistoryItem[] = [];
+
+    for (const el of last30.toReversed()) {
+      history.push({
+        role: el.author,
+        content: el.message,
+      });
+    }
+
+    const foundHistory = [];
+
+    for (const el of byAiDecision.toReversed()) {
+      foundHistory.push({
+        role: el.author,
+        content: el.message,
+      });
+    }
+
+    if (foundHistory.length) {
+      history.push({
+        role: ERole.System,
+        content: `messages you asked to receive for context: ${foundHistory}`,
+      });
+    }
+
+    const aiRes = await this.ai.chatWithTools(
+      {
+        role: ERole.User,
+        content: [{ type: "text", text: message.message.content }],
+      },
+      history,
+      {
+        username: message.author.username,
+        id: message.author.id,
+        displayName: message.author.username,
+      },
+      [],
+    );
+
+    if (!aiRes) {
+      return undefined;
+    }
+
+    const responseImportance = await this.defineMessageImportance(aiRes.response);
+
+    this.saveMessageToDatabase(
+      {
+        chatId: message.chatId,
+        message: {
+          type: "text",
+          content: aiRes.response,
+        },
+        author: {
+          type: ERole.Assistant,
+        },
+      },
+      responseImportance,
+    );
+
+    return aiRes.response;
   }
 
   private async defineMessageImportance(message: string): Promise<EMemoryImportance> {
@@ -98,28 +153,26 @@ export class MessageHandler {
   }
 
   private async saveMessageToDatabase(
-    message: TIncommingMessage | TOutcommingMessage,
+    message: TIncommingMessage | TOutgoingMessage,
     importance: EMemoryImportance,
   ): Promise<boolean> {
     switch (message.author.type) {
       case ERole.User: {
-        const res = await this.memory.save({
+        await this.memory.save({
           chatId: message.author.id,
           author: ERole.User,
           importance,
           message: message.message.content,
         });
-        console.log(res);
         return true;
       }
       case ERole.Assistant: {
-        const res = await this.memory.save({
+        await this.memory.save({
           chatId: message.chatId,
           author: ERole.Assistant,
           importance,
           message: message.message.content,
         });
-        console.log(res);
         return true;
       }
     }
