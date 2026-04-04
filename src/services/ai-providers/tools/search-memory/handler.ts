@@ -39,6 +39,7 @@ export async function handleSearchMemory(
   const parsed = SSearchMemoryArgs.safeParse(argsJson);
 
   if (!parsed.success) {
+    logger.error("handleSearchMemory: Zod validation failed");
     return undefined;
   }
 
