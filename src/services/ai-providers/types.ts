@@ -43,3 +43,11 @@ export type TToolEntry = {
   definition: ToolDefinitionJson;
   instructions?: string;
 };
+
+export enum EModelPurpose {
+  ToolCheap = "ToolCheap",
+  ToolAccurate = "ToolAccurate",
+  General = "General",
+  Chat = "Chat",
+  ChatAccurate = "ChatAccurate",
+}

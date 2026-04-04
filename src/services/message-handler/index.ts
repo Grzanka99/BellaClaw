@@ -1,7 +1,6 @@
-import { MODEL_GEMINI_3_FLASH_PREVIEW } from "../../models";
 import type { TOption } from "../../types";
 import { createLogger, type TLogger } from "../../utils/logger";
-import { OpenrouterAiProvider } from "../ai-providers/openrouter";
+import { OllamaAiProvider } from "../ai-providers/ollama";
 import {
   DEFINE_MESSAGE_IMPORTANCE_TOOL,
   defineMessageImportanceTool,
@@ -13,7 +12,7 @@ import {
 } from "../ai-providers/tools/search-memory/definition";
 import type { TSearchMemory } from "../ai-providers/tools/search-memory/handler";
 import type { THistoryItem, TPrompt } from "../ai-providers/types";
-import { ERole } from "../ai-providers/types";
+import { EModelPurpose, ERole } from "../ai-providers/types";
 import { Memory } from "../memory";
 import { EMemoryImportance, type TMemory } from "../memory/types";
 import type { TIncommingMessage, TOutgoingMessage } from "./types";
@@ -21,7 +20,7 @@ import type { TIncommingMessage, TOutgoingMessage } from "./types";
 export class MessageHandler {
   private static _instances = new Map<string, MessageHandler>();
   private logger: TLogger;
-  private ai = OpenrouterAiProvider.instance;
+  private ai = OllamaAiProvider.instance;
   private memory = Memory.instance;
 
   constructor(chatId: string) {
@@ -88,6 +87,7 @@ export class MessageHandler {
         displayName: message.author.username,
       },
       [],
+      this.ai.getModel(EModelPurpose.ChatAccurate),
     );
 
     if (!aiRes) {
@@ -132,7 +132,7 @@ export class MessageHandler {
       uMessage,
       [system],
       [defineMessageImportanceTool],
-      MODEL_GEMINI_3_FLASH_PREVIEW,
+      this.ai.getModel(EModelPurpose.ToolCheap),
     );
 
     if (!res) {
@@ -203,7 +203,7 @@ export class MessageHandler {
       uMessage,
       [system],
       [searchMemoryTool],
-      MODEL_GEMINI_3_FLASH_PREVIEW,
+      this.ai.getModel(EModelPurpose.ToolCheap),
       message.chatId,
     );
 
