@@ -36,8 +36,6 @@ export class DiscordSingleton {
   }
 
   private async handleMessage(message: Message) {
-    console.log(`<${message.author.username}> ${message.content}`);
-
     if (message.author.id === this.client.user?.id) {
       return;
     }

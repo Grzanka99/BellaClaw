@@ -49,6 +49,22 @@ function buildUserContextMessage(user: TUserData): TPrompt {
 
 export type TUserData = Pick<User, "username" | "id" | "displayName">;
 
+type TChatWithToolsArgs = {
+  prompt: TPrompt;
+  history: THistoryItem[];
+  user: TUserData;
+  tools: TToolEntry[];
+  model: TOpenrouterModel;
+};
+
+type TToolCallArgs = {
+  prompt: TPrompt;
+  instructions: THistoryItem[];
+  tools: ToolDefinitionJson[];
+  model: TOpenrouterModel;
+  chatId?: string;
+};
+
 export class OpenrouterAiProvider {
   private static _instance: OpenrouterAiProvider;
   private logger = createLogger("OPENROUTER PROVIDER");
@@ -78,59 +94,29 @@ export class OpenrouterAiProvider {
     }
   }
 
-  public async chat(
-    prompt: TPrompt,
-    history: THistoryItem[],
-    user: TUserData,
-    model: TOpenrouterModel,
-  ): Promise<TOption<string>> {
-    this.logger.info(`Calling ${model}`);
+  public async chatWithTools(args: TChatWithToolsArgs): Promise<TOption<TChatWithTools>> {
+    this.logger.info(`Calling ${args.model}`);
     const baseSystemText = await Bun.file(BASE_SYSTEM_INSTRUCTIONS_PATH).text();
     const baseSystemMessage: THistoryItem = { role: ERole.System, content: baseSystemText };
-    const messages: Message[] = [baseSystemMessage, buildUserContextMessage(user), ...history];
-    messages.push(prompt);
+    const messages: Message[] = [
+      baseSystemMessage,
+      buildUserContextMessage(args.user),
+      ...args.history,
+    ];
 
-    const res = await this.openrouter.chat.send({
-      stream: false,
-      model,
-      messages,
-    });
-
-    console.log(res.choices);
-    const data = res.choices[0]?.message.content;
-
-    if (!data) {
-      return undefined;
-    }
-
-    return data.toString();
-  }
-
-  public async chatWithTools(
-    prompt: TPrompt,
-    history: THistoryItem[],
-    user: TUserData,
-    tools: TToolEntry[],
-    model: TOpenrouterModel,
-  ): Promise<TOption<TChatWithTools>> {
-    this.logger.info(`Calling ${model}`);
-    const baseSystemText = await Bun.file(BASE_SYSTEM_INSTRUCTIONS_PATH).text();
-    const baseSystemMessage: THistoryItem = { role: ERole.System, content: baseSystemText };
-    const messages: Message[] = [baseSystemMessage, buildUserContextMessage(user), ...history];
-
-    for (const tool of tools) {
+    for (const tool of args.tools) {
       if (tool.instructions) {
         messages.push({ role: ERole.System, content: tool.instructions });
       }
     }
 
-    messages.push(prompt);
+    messages.push(args.prompt);
 
-    const definitions = tools.map((t) => t.definition);
+    const definitions = args.tools.map((t) => t.definition);
 
     const res = await this.openrouter.chat.send({
       stream: false,
-      model,
+      model: args.model,
       messages,
       tools: definitions,
     });
@@ -141,32 +127,25 @@ export class OpenrouterAiProvider {
       return undefined;
     }
 
-    const assistantMessage = message as AssistantMessage;
-    const content = assistantMessage.content;
+    const content = message.content;
     const responseText = typeof content === "string" ? content : "";
 
     return {
       response: responseText,
-      toolCalls: assistantMessage.toolCalls ?? [],
+      toolCalls: message.toolCalls ?? [],
     };
   }
 
-  public async toolCall<T = unknown>(
-    prompt: TPrompt,
-    instructions: THistoryItem[],
-    tools: ToolDefinitionJson[],
-    model: TOpenrouterModel,
-    chatId?: string,
-  ): Promise<TOption<TToolCallResponse<T>>> {
-    this.logger.info(`Calling ${model}`);
-    const messages: Message[] = [...instructions];
-    messages.push(prompt);
+  public async toolCall<T = unknown>(args: TToolCallArgs): Promise<TOption<TToolCallResponse<T>>> {
+    this.logger.info(`Calling ${args.model}`);
+    const messages: Message[] = [...args.instructions];
+    messages.push(args.prompt);
 
     const res = await this.openrouter.chat.send({
       stream: false,
-      model,
+      model: args.model,
       messages,
-      tools,
+      tools: args.tools,
     });
 
     const message = res.choices[0]?.message;
@@ -195,11 +174,11 @@ export class OpenrouterAiProvider {
           break;
         }
         case SEARCH_MEMORY_TOOL: {
-          if (!chatId) {
+          if (!args.chatId) {
             this.logger.error(`chatId is required for tool: ${SEARCH_MEMORY_TOOL}`);
             continue;
           }
-          const toolRes = await handleSearchMemory(toolCall, chatId);
+          const toolRes = await handleSearchMemory(toolCall, args.chatId);
           if (!toolRes) {
             this.logger.error(`Invalid arguments for tool: ${SEARCH_MEMORY_TOOL}`);
             continue;

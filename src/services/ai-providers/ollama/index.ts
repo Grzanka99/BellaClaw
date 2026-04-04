@@ -17,6 +17,13 @@ import {
   type TToolEntry,
 } from "../types";
 import {
+  buildMessages,
+  convertOllamaToolCalls,
+  convertToolsForOllama,
+  flattenMessages,
+  type TOllamaMessage,
+} from "./converters";
+import {
   MODEL_OLLAMA_GLM_5,
   MODEL_OLLAMA_MINIMAX_M2_7,
   MODEL_OLLAMA_NEMOTRON_3_SUPER,
@@ -33,15 +40,20 @@ const BASE_SYSTEM_INSTRUCTIONS_PATH = "./src/services/ai-providers/instructions/
 
 export type TUserData = Pick<User, "username" | "id" | "displayName">;
 
-type TOllamaMessage = {
-  role: string;
-  content: string;
-  tool_calls?: Array<{
-    function: {
-      name: string;
-      arguments: Record<string, unknown>;
-    };
-  }>;
+type TChatWithToolsArgs = {
+  prompt: TPrompt;
+  history: THistoryItem[];
+  user: TUserData;
+  tools: TToolEntry[];
+  model: TOllamaModel;
+};
+
+type TToolCallArgs = {
+  prompt: TPrompt;
+  instructions: THistoryItem[];
+  tools: ToolDefinitionJson[];
+  model: TOllamaModel;
+  chatId?: string;
 };
 
 type TOllamaChatResponse = {
@@ -49,45 +61,6 @@ type TOllamaChatResponse = {
   message: TOllamaMessage;
   done: boolean;
 };
-
-function buildUserContextMessage(user: TUserData): string {
-  return `Current user context - always use this user_id for tool calls:\n- user_id: ${user.id}\n- username: ${user.username}\n- displayName: ${user.displayName}`;
-}
-
-function flattenMessages(
-  baseSystemText: string,
-  user: TUserData,
-  history: THistoryItem[],
-  prompt: TPrompt,
-  toolInstructions: string[] = [],
-): { messages: Array<{ role: string; content: string }>; systemContent: string } {
-  const userContext = buildUserContextMessage(user);
-  const systemContent = [baseSystemText, userContext, ...toolInstructions].join("\n\n");
-
-  const messages: Array<{ role: string; content: string }> = [];
-
-  for (const item of history) {
-    messages.push({ role: item.role, content: item.content });
-  }
-
-  const promptText = prompt.content.map((c) => c.text).join("\n");
-  messages.push({ role: prompt.role, content: promptText });
-
-  return { messages, systemContent };
-}
-
-function convertToolsForOllama(
-  tools: ToolDefinitionJson[],
-): Array<{ type: string; function: { name: string; description: string; parameters: unknown } }> {
-  return tools.map((t) => ({
-    type: t.type ?? "function",
-    function: {
-      name: t.function.name,
-      description: t.function.description ?? "",
-      parameters: t.function.parameters ?? { type: "object", properties: {} },
-    },
-  }));
-}
 
 async function ollamaChat(body: Record<string, unknown>): Promise<TOllamaChatResponse> {
   const res = await fetch(`${OLLAMA_BASE_URL}/api/chat`, {
@@ -122,64 +95,33 @@ export class OllamaAiProvider {
       case EModelPurpose.ToolCheap:
         return MODEL_OLLAMA_NEMOTRON_3_SUPER;
       case EModelPurpose.General:
+        return MODEL_OLLAMA_GLM_5;
       case EModelPurpose.Chat:
+      case EModelPurpose.ChatAccurate:
         return MODEL_OLLAMA_MINIMAX_M2_7;
       case EModelPurpose.ToolAccurate:
-      case EModelPurpose.ChatAccurate:
-        return MODEL_OLLAMA_GLM_5;
+        return MODEL_OLLAMA_MINIMAX_M2_7;
     }
   }
 
-  public async chat(
-    prompt: TPrompt,
-    history: THistoryItem[],
-    user: TUserData,
-    model: TOllamaModel,
-  ): Promise<TOption<string>> {
-    this.logger.info(`Calling ${model}`);
+  public async chatWithTools(args: TChatWithToolsArgs): Promise<TOption<TChatWithTools>> {
+    this.logger.info(`Calling ${args.model}`);
     const baseSystemText = await Bun.file(BASE_SYSTEM_INSTRUCTIONS_PATH).text();
-    const { messages, systemContent } = flattenMessages(baseSystemText, user, history, prompt);
-
-    const res = await ollamaChat({
-      model,
-      system: systemContent,
-      messages,
-      stream: false,
-    });
-
-    const data = res.message?.content;
-
-    if (!data) {
-      return undefined;
-    }
-
-    return data;
-  }
-
-  public async chatWithTools(
-    prompt: TPrompt,
-    history: THistoryItem[],
-    user: TUserData,
-    tools: TToolEntry[],
-    model: TOllamaModel,
-  ): Promise<TOption<TChatWithTools>> {
-    this.logger.info(`Calling ${model}`);
-    const baseSystemText = await Bun.file(BASE_SYSTEM_INSTRUCTIONS_PATH).text();
-    const toolInstructions = tools
+    const toolInstructions = args.tools
       .filter((t) => t.instructions)
       .map((t) => t.instructions as string);
     const { messages, systemContent } = flattenMessages(
       baseSystemText,
-      user,
-      history,
-      prompt,
+      args.user,
+      args.history,
+      args.prompt,
       toolInstructions,
     );
 
-    const ollamaTools = convertToolsForOllama(tools.map((t) => t.definition));
+    const ollamaTools = convertToolsForOllama(args.tools.map((t) => t.definition));
 
     const res = await ollamaChat({
-      model,
+      model: args.model,
       system: systemContent,
       messages,
       tools: ollamaTools,
@@ -194,14 +136,7 @@ export class OllamaAiProvider {
 
     const responseText = message.content ?? "";
 
-    const toolCalls = (message.tool_calls ?? []).map((tc, index) => ({
-      id: `ollama-tool-${index}`,
-      type: "function" as const,
-      function: {
-        name: tc.function.name,
-        arguments: JSON.stringify(tc.function.arguments),
-      },
-    }));
+    const toolCalls = convertOllamaToolCalls(message.tool_calls ?? []);
 
     return {
       response: responseText,
@@ -209,27 +144,14 @@ export class OllamaAiProvider {
     };
   }
 
-  public async toolCall<T = unknown>(
-    prompt: TPrompt,
-    instructions: THistoryItem[],
-    tools: ToolDefinitionJson[],
-    model: TOllamaModel,
-    chatId?: string,
-  ): Promise<TOption<TToolCallResponse<T>>> {
-    this.logger.info(`Calling ${model}`);
-    const messages: Array<{ role: string; content: string }> = [];
+  public async toolCall<T = unknown>(args: TToolCallArgs): Promise<TOption<TToolCallResponse<T>>> {
+    this.logger.info(`Calling ${args.model}`);
+    const messages = buildMessages(args.instructions, args.prompt);
 
-    for (const item of instructions) {
-      messages.push({ role: item.role, content: item.content });
-    }
-
-    const promptText = prompt.content.map((c) => c.text).join("\n");
-    messages.push({ role: prompt.role, content: promptText });
-
-    const ollamaTools = convertToolsForOllama(tools);
+    const ollamaTools = convertToolsForOllama(args.tools);
 
     const res = await ollamaChat({
-      model,
+      model: args.model,
       messages,
       tools: ollamaTools,
       stream: false,
@@ -243,20 +165,13 @@ export class OllamaAiProvider {
 
     const ollamaToolCalls = message.tool_calls ?? [];
 
-    const toolCalls = ollamaToolCalls.map((tc, index) => ({
-      id: `ollama-tool-${index}`,
-      type: "function" as const,
-      function: {
-        name: tc.function.name,
-        arguments: JSON.stringify(tc.function.arguments),
-      },
-    }));
+    const toolCalls = convertOllamaToolCalls(ollamaToolCalls);
 
     const toolCallsResults: TToolCallResult<T>[] = [];
 
     for (const tc of ollamaToolCalls) {
-      const toolCallForHandler = {
-        id: `ollama-tool-handler`,
+      const handlerArgs = {
+        id: `ollama-${tc.function.name}`,
         type: "function" as const,
         function: {
           name: tc.function.name,
@@ -266,7 +181,7 @@ export class OllamaAiProvider {
 
       switch (tc.function.name as TTools) {
         case DEFINE_MESSAGE_IMPORTANCE_TOOL: {
-          const toolRes = handleDefineMessageImportance(toolCallForHandler);
+          const toolRes = handleDefineMessageImportance(handlerArgs);
           if (!toolRes) {
             this.logger.error(`Invalid arguments for tool: ${DEFINE_MESSAGE_IMPORTANCE_TOOL}`);
             continue;
@@ -279,11 +194,11 @@ export class OllamaAiProvider {
           break;
         }
         case SEARCH_MEMORY_TOOL: {
-          if (!chatId) {
+          if (!args.chatId) {
             this.logger.error(`chatId is required for tool: ${SEARCH_MEMORY_TOOL}`);
             continue;
           }
-          const toolRes = await handleSearchMemory(toolCallForHandler, chatId);
+          const toolRes = await handleSearchMemory(handlerArgs, args.chatId);
           if (!toolRes) {
             this.logger.error(`Invalid arguments for tool: ${SEARCH_MEMORY_TOOL}`);
             continue;

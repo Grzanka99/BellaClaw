@@ -1,6 +1,7 @@
 import type { TOption } from "../../types";
 import { createLogger, type TLogger } from "../../utils/logger";
 import { OllamaAiProvider } from "../ai-providers/ollama";
+import { OpenrouterAiProvider } from "../ai-providers/openrouter";
 import {
   DEFINE_MESSAGE_IMPORTANCE_TOOL,
   defineMessageImportanceTool,
@@ -20,7 +21,7 @@ import type { TIncommingMessage, TOutgoingMessage } from "./types";
 export class MessageHandler {
   private static _instances = new Map<string, MessageHandler>();
   private logger: TLogger;
-  private ai = OllamaAiProvider.instance;
+  private ai = OpenrouterAiProvider.instance;
   private memory = Memory.instance;
 
   constructor(chatId: string) {
@@ -75,20 +76,20 @@ export class MessageHandler {
       });
     }
 
-    const aiRes = await this.ai.chatWithTools(
-      {
+    const aiRes = await this.ai.chatWithTools({
+      prompt: {
         role: ERole.User,
         content: [{ type: "text", text: message.message.content }],
       },
       history,
-      {
+      user: {
         username: message.author.username,
         id: message.author.id,
         displayName: message.author.username,
       },
-      [],
-      this.ai.getModel(EModelPurpose.ChatAccurate),
-    );
+      tools: [],
+      model: this.ai.getModel(EModelPurpose.ChatAccurate),
+    });
 
     if (!aiRes) {
       return undefined;
@@ -128,12 +129,12 @@ export class MessageHandler {
       content: [{ type: "text", text: message }],
     };
 
-    const res = await this.ai.toolCall<TDefineMessageImportance>(
-      uMessage,
-      [system],
-      [defineMessageImportanceTool],
-      this.ai.getModel(EModelPurpose.ToolCheap),
-    );
+    const res = await this.ai.toolCall<TDefineMessageImportance>({
+      prompt: uMessage,
+      instructions: [system],
+      tools: [defineMessageImportanceTool],
+      model: this.ai.getModel(EModelPurpose.ToolCheap),
+    });
 
     if (!res) {
       this.logger.error("Failed to determine message importance, defaulting to low");
@@ -199,13 +200,13 @@ export class MessageHandler {
       content: [{ type: "text", text: message.message.content }],
     };
 
-    const res = await this.ai.toolCall<TSearchMemory>(
-      uMessage,
-      [system],
-      [searchMemoryTool],
-      this.ai.getModel(EModelPurpose.ToolCheap),
-      message.chatId,
-    );
+    const res = await this.ai.toolCall<TSearchMemory>({
+      prompt: uMessage,
+      instructions: [system],
+      tools: [searchMemoryTool],
+      model: this.ai.getModel(EModelPurpose.ToolCheap),
+      chatId: message.chatId,
+    });
 
     if (!res) {
       this.logger.error("Failed to determine if memory should be searched");
