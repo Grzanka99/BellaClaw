@@ -1,4 +1,4 @@
-import { Role } from "discord.js";
+import { resourceLimits } from "node:worker_threads";
 import { MODEL_GEMINI_3_FLASH_PREVIEW } from "../../models";
 import type { TOption } from "../../types";
 import { createLogger, type TLogger } from "../../utils/logger";
@@ -8,10 +8,15 @@ import {
   defineMessageImportanceTool,
 } from "../ai-providers/tools/define-message-importance/definition";
 import type { TDefineMessageImportance } from "../ai-providers/tools/define-message-importance/handler";
+import {
+  SEARCH_MEMORY_TOOL,
+  searchMemoryTool,
+} from "../ai-providers/tools/search-memory/definition";
+import type { TSearchMemory } from "../ai-providers/tools/search-memory/handler";
 import type { THistoryItem, TPrompt } from "../ai-providers/types";
 import { ERole } from "../ai-providers/types";
 import { Memory } from "../memory";
-import { EMemoryImportance } from "../memory/types";
+import { EMemoryImportance, type TMemory } from "../memory/types";
 import type { TIncommingMessage, TOutcommingMessage } from "./types";
 
 export class MessageHandler {
@@ -115,8 +120,52 @@ export class MessageHandler {
 
   // NOTE: Ask proper LLM to call tool to read database for more memories,
   // Can be done with note that last 30 messages will be included regardless
-  private async checkForMemoryFetch() {
-    throw "Not implemented";
+  private async searchMemories(message: TIncommingMessage): unknown[] {
+    if (message.author.type !== ERole.User) {
+      return [];
+    }
+
+    const INSTRUCTIONS = await Bun.file(
+      "./src/services/ai-providers/tools/search-memory/instructions.xml",
+    ).text();
+
+    const system: THistoryItem = {
+      role: ERole.System,
+      content: INSTRUCTIONS,
+    };
+
+    const uMessage: TPrompt = {
+      role: ERole.User,
+      content: [{ type: "text", text: message.message.content }],
+    };
+
+    const res = await this.ai.toolCall<TSearchMemory>(
+      uMessage,
+      [system],
+      [searchMemoryTool],
+      MODEL_GEMINI_3_FLASH_PREVIEW,
+      message.chatId,
+    );
+
+    if (!res) {
+      this.logger.error("Failed to determine if memory should be searched");
+      return [];
+    }
+
+    const filtered = res.toolCallsResults.filter((el) => el.tool === SEARCH_MEMORY_TOOL);
+    const allFound: TMemory[] = [];
+
+    const seen = new Set<number>();
+    for (const f of filtered) {
+      for (const m of f.data.memories) {
+        if (!seen.has(m.id)) {
+          seen.add(m.id);
+          allFound.push(m);
+        }
+      }
+    }
+
+    return allFound;
   }
 
   // NOTE: Retrieve memory based on tool call response, always retrieve last 30 messages
@@ -129,3 +178,17 @@ export class MessageHandler {
     throw "Not implemented";
   }
 }
+
+const ai = MessageHandler.getInstance("test");
+ai.searchMemories({
+  author: {
+    type: ERole.User,
+    id: "123",
+    username: "test",
+  },
+  chatId: "test-chat",
+  message: {
+    type: "text",
+    content: "co lubię jeść na obiad?",
+  },
+});

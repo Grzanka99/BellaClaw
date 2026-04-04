@@ -6,6 +6,8 @@ import { createLogger } from "../../../utils/logger";
 import type { TTools } from "../tools";
 import { DEFINE_MESSAGE_IMPORTANCE_TOOL } from "../tools/define-message-importance/definition";
 import { handleDefineMessageImportance } from "../tools/define-message-importance/handler";
+import { SEARCH_MEMORY_TOOL } from "../tools/search-memory/definition";
+import { handleSearchMemory } from "../tools/search-memory/handler";
 import type { THistoryItem, TPrompt, TToolCallResponse, TToolCallResult } from "../types";
 import { ERole } from "../types";
 
@@ -85,6 +87,7 @@ export class OpenrouterAiProvider {
     instructions: THistoryItem[],
     tools: ToolDefinitionJson[],
     model: string = MODEL,
+    chatId?: string,
   ): Promise<TOption<TToolCallResponse<T>>> {
     const messages: Message[] = [...instructions];
     messages.push(prompt);
@@ -116,7 +119,24 @@ export class OpenrouterAiProvider {
           }
           toolCallsResults.push({
             tool: DEFINE_MESSAGE_IMPORTANCE_TOOL,
-            // NOTE: Thats thr acceptable exception for type cast!
+            // NOTE: Thats the acceptable exception for type cast!
+            data: toolRes as T,
+          });
+          break;
+        }
+        case SEARCH_MEMORY_TOOL: {
+          if (!chatId) {
+            this.logger.error(`chatId is required for tool: ${SEARCH_MEMORY_TOOL}`);
+            continue;
+          }
+          const toolRes = await handleSearchMemory(toolCall, chatId);
+          if (!toolRes) {
+            this.logger.error(`Invalid arguments for tool: ${SEARCH_MEMORY_TOOL}`);
+            continue;
+          }
+          toolCallsResults.push({
+            tool: SEARCH_MEMORY_TOOL,
+            // NOTE: Thats the acceptable exception for type cast!
             data: toolRes as T,
           });
           break;

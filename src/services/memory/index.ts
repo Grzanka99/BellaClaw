@@ -3,6 +3,7 @@ import { z } from "zod";
 import { AsyncQueue } from "../../utils/async-queue";
 import { createLogger, type TLogger } from "../../utils/logger";
 import { SMemory, type TFindMemoryArgs, type TMemory, type TSaveArgs } from "./types";
+import type { PrivateKeyExportType } from "crypto";
 
 export const PERSISTENT_MEMORY_DB = "persistent-memory.db" as const;
 
@@ -22,6 +23,16 @@ type TMemoryError = {
   operation: "write" | "read" | "update" | "delete";
   error: unknown;
 };
+
+type TMemoryResult =
+  | {
+      success: true;
+      data: TMemory[];
+    }
+  | {
+      success: false;
+      error: TMemory;
+    };
 
 export class Memory {
   private static _instance: Memory;
@@ -116,6 +127,8 @@ export class Memory {
       lastReadAt: new Date(row.lastReadAt),
     }));
   }
+
+  // public async findRecent(chatId: string, limit: number): Promise<TMemoryResult> {}
 
   public async readFullMemory(chatId: string): Promise<TMemory[] | TMemoryError> {
     const res = await this.queue.enqueue(async () => {
