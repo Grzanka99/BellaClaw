@@ -80,7 +80,9 @@ export class OllamaAiProvider {
   private static _instance: OllamaAiProvider;
   private logger = createLogger("OLLAMA PROVIDER");
 
-  private constructor() {}
+  private constructor() {
+    this.logger.info("provider initialized");
+  }
 
   public static get instance(): OllamaAiProvider {
     if (!OllamaAiProvider._instance) {
