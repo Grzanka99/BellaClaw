@@ -1,5 +1,5 @@
 {
-  "name": "bellabot",
+  "name": "bellaclaw",
   "module": "src/index.ts",
   "devDependencies": {
     "@biomejs/biome": "^2.3.14",
