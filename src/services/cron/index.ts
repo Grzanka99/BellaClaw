@@ -54,6 +54,10 @@ export class CronSingleton extends EventEmitter {
   }
 
   public setup(pollIntervalMs = 10_000) {
+    if (this.tickInterval) {
+      return;
+    }
+
     this.tickInterval = setInterval(() => this.tick(), pollIntervalMs);
     this.tick();
   }
@@ -252,15 +256,14 @@ export class CronSingleton extends EventEmitter {
 
       const parsed = SCronJob.safeParse(row);
       if (!parsed.success) {
-        this.logger.warning(
-          `Failed to parse cron job row for '${name}': ${JSON.stringify(parsed.error.issues)}`,
-        );
         return undefined;
       }
       return parsed.data;
     });
 
-    if (!res) return undefined;
+    if (!res) {
+      return undefined;
+    }
 
     return {
       id: res.id,
@@ -272,35 +275,6 @@ export class CronSingleton extends EventEmitter {
       lastRunAt: res.lastRunAt,
       createdAt: res.createdAt,
     };
-  }
-
-  public async getAllJobs(): Promise<TCronJob[] | TCronError> {
-    try {
-      const res = await this.queue.enqueue(async () => {
-        const results = this.db.query("SELECT * FROM cron_jobs ORDER BY nextRunAt ASC").all();
-
-        const parsed = z.array(SCronJob).safeParse(results);
-        if (!parsed.success) {
-          this.logger.error("Failed to parse jobs from DB");
-          return [];
-        }
-        return parsed.data;
-      });
-
-      return res.map((row) => ({
-        id: row.id,
-        name: row.name,
-        group: row.group,
-        type: row.type,
-        pattern: row.pattern,
-        nextRunAt: row.nextRunAt,
-        lastRunAt: row.lastRunAt,
-        createdAt: row.createdAt,
-      }));
-    } catch (error) {
-      this.logger.error(`Failed to get all jobs: ${String(error)}`);
-      return { operation: "read", error };
-    }
   }
 
   public destroy() {

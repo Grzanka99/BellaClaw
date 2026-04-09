@@ -67,3 +67,9 @@ src/services/ai-providers/tools/<tool-name>/
 - Do not modify existing test files unless given direct permission
 - NEVER use types cast - 'as Type' - outside of tests
 - Instead of `some-type | undefined` use `TOption<some-type>`
+- Prefer braces even if statement has one line
+    ```
+    return {
+        undefined
+    }
+    ```
