@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, unlinkSync } from "node:fs";
 import { CronSingleton } from "./index";
+import { getNextFireTime } from "./parser";
 import type { TJobContext } from "./types";
 import { ECronJobType } from "./types";
 
@@ -214,7 +215,6 @@ describe("CronSingleton", () => {
 
   describe("parser — getNextFireTime", () => {
     test('"* * * * *" from any time → next minute', () => {
-      const { getNextFireTime } = require("./parser");
       const from = new Date(2025, 0, 1, 12, 30, 45, 0);
       const next = getNextFireTime("* * * * *", from);
       expect(next.getMinutes()).toBe(31);
@@ -222,7 +222,6 @@ describe("CronSingleton", () => {
     });
 
     test('"0 9 * * 1-5" → next weekday at 09:00', () => {
-      const { getNextFireTime } = require("./parser");
       const from = new Date(2025, 0, 3, 10, 0, 0, 0);
       const next = getNextFireTime("0 9 * * 1-5", from);
       expect(next.getDay()).toBeGreaterThanOrEqual(1);

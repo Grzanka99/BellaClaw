@@ -96,8 +96,8 @@ export class CronSingleton extends EventEmitter {
           group: job.group,
           type: job.type,
           pattern: job.pattern ?? undefined,
-          lastRunAt: job.lastRunAt ? new Date(job.lastRunAt) : undefined,
-          nextRunAt: new Date(job.nextRunAt),
+          lastRunAt: job.lastRunAt ?? undefined,
+          nextRunAt: job.nextRunAt,
         };
         this.emit(job.name, ctx);
       } catch (error) {
@@ -236,9 +236,9 @@ export class CronSingleton extends EventEmitter {
         group: res.group,
         type: res.type,
         pattern: res.pattern,
-        nextRunAt: new Date(res.nextRunAt),
-        lastRunAt: res.lastRunAt ? new Date(res.lastRunAt) : null,
-        createdAt: new Date(res.createdAt),
+        nextRunAt: res.nextRunAt,
+        lastRunAt: res.lastRunAt,
+        createdAt: res.createdAt,
       };
     } catch (error) {
       this.logger.error(`Failed to unschedule job: ${String(error)}`);
@@ -252,6 +252,9 @@ export class CronSingleton extends EventEmitter {
 
       const parsed = SCronJob.safeParse(row);
       if (!parsed.success) {
+        this.logger.warning(
+          `Failed to parse cron job row for '${name}': ${JSON.stringify(parsed.error.issues)}`,
+        );
         return undefined;
       }
       return parsed.data;
@@ -265,9 +268,9 @@ export class CronSingleton extends EventEmitter {
       group: res.group,
       type: res.type,
       pattern: res.pattern,
-      nextRunAt: new Date(res.nextRunAt),
-      lastRunAt: res.lastRunAt ? new Date(res.lastRunAt) : null,
-      createdAt: new Date(res.createdAt),
+      nextRunAt: res.nextRunAt,
+      lastRunAt: res.lastRunAt,
+      createdAt: res.createdAt,
     };
   }
 
@@ -290,9 +293,9 @@ export class CronSingleton extends EventEmitter {
         group: row.group,
         type: row.type,
         pattern: row.pattern,
-        nextRunAt: new Date(row.nextRunAt),
-        lastRunAt: row.lastRunAt ? new Date(row.lastRunAt) : null,
-        createdAt: new Date(row.createdAt),
+        nextRunAt: row.nextRunAt,
+        lastRunAt: row.lastRunAt,
+        createdAt: row.createdAt,
       }));
     } catch (error) {
       this.logger.error(`Failed to get all jobs: ${String(error)}`);

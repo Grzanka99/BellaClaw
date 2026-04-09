@@ -75,6 +75,9 @@ export function getNextFireTime(pattern: string, from: Date): Date {
 
   const MAX_ITERATIONS = 525_600 * 4; // 4 years in minutes
 
+  const domIsWildcard = parts[2] === "*";
+  const dowIsWildcard = parts[4] === "*";
+
   for (let i = 0; i < MAX_ITERATIONS; i++) {
     if (!monthSet.has(d.getMonth() + 1)) {
       d.setMonth(d.getMonth() + 1, 1);
@@ -82,17 +85,29 @@ export function getNextFireTime(pattern: string, from: Date): Date {
       continue;
     }
 
-    if (!domSet.has(d.getDate())) {
-      d.setDate(d.getDate() + 1);
-      d.setHours(0, 0, 0, 0);
-      continue;
-    }
+    const domMatch = domSet.has(d.getDate());
+    const dowMatch = dowSet.has(d.getDay());
 
-    const dow = d.getDay();
-    if (!dowSet.has(dow)) {
-      d.setDate(d.getDate() + 1);
-      d.setHours(0, 0, 0, 0);
-      continue;
+    if (domIsWildcard && dowIsWildcard) {
+      // both wildcard — any day matches
+    } else if (domIsWildcard) {
+      if (!dowMatch) {
+        d.setDate(d.getDate() + 1);
+        d.setHours(0, 0, 0, 0);
+        continue;
+      }
+    } else if (dowIsWildcard) {
+      if (!domMatch) {
+        d.setDate(d.getDate() + 1);
+        d.setHours(0, 0, 0, 0);
+        continue;
+      }
+    } else {
+      if (!domMatch && !dowMatch) {
+        d.setDate(d.getDate() + 1);
+        d.setHours(0, 0, 0, 0);
+        continue;
+      }
     }
 
     if (!hourSet.has(d.getHours())) {
