@@ -1,0 +1,45 @@
+<instructions>
+
+  <purpose>
+    Retrieve the full list of currently scheduled cron jobs. Use this tool to discover
+    what reminders and recurring tasks are active, so you can inform the user about them
+    or follow up with an unschedule-recurring call if the user wants to remove them.
+  </purpose>
+
+  <tool>
+    <name>list-cron-jobs</name>
+    <description>
+      Returns all scheduled cron jobs with their name, group, type, pattern, next fire time,
+      last run time, and creation time. Takes no parameters.
+    </description>
+  </tool>
+
+  <usage_rules>
+    <rule>Call this tool whenever the user asks about their current reminders, scheduled tasks, or active cron jobs</rule>
+    <rule>After receiving the results, present each job clearly to the user — include the name, schedule pattern, and next fire time</rule>
+    <rule>If the user wants to remove one or more jobs, use the unschedule-recurring tool with the exact job name</rule>
+    <rule>If there are no jobs, inform the user that no scheduled jobs exist</rule>
+    <rule>Do not call this tool repeatedly in a short time span — cache the results within a conversation turn</rule>
+  </usage_rules>
+
+  <examples>
+    <example>
+      <context>User says: "What reminders do I have set up?"</context>
+      <toolCall />
+      <reasoning>User wants to know about their active cron jobs. Call list-cron-jobs with no parameters.</reasoning>
+    </example>
+
+    <example>
+      <context>User says: "Cancel all my reminders"</context>
+      <toolCall />
+      <reasoning>First list all jobs to see what exists, then call unschedule-recurring for each one the user confirms.</reasoning>
+    </example>
+
+    <example>
+      <context>User says: "Do I have any scheduled tasks?"</context>
+      <toolCall />
+      <reasoning>User is checking if any cron jobs exist. Call list-cron-jobs to find out.</reasoning>
+    </example>
+  </examples>
+
+</instructions>

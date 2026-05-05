@@ -6,6 +6,7 @@ import type { TJobContext } from "./types";
 import { ECronJobType } from "./types";
 
 const TEST_DB = "test-cron.db";
+const TEST_USER_ID = "test-user-1";
 
 function resetCronInstance(dbPath: string) {
   const CronWithPrivate = CronSingleton as unknown as {
@@ -36,12 +37,17 @@ describe("CronSingleton", () => {
   describe("schedule", () => {
     test("returns a TCronJob with correct fields", async () => {
       const cron = CronSingleton.instance;
-      const result = await cron.schedule({ name: "test-job", pattern: "*/5 * * * *" });
+      const result = await cron.schedule({
+        name: "test-job",
+        userId: TEST_USER_ID,
+        pattern: "*/5 * * * *",
+      });
 
       expect("error" in result).toBe(false);
       if ("error" in result) return;
 
       expect(result.name).toBe("test-job");
+      expect(result.userId).toBe(TEST_USER_ID);
       expect(result.type).toBe(ECronJobType.Recurring);
       expect(result.pattern).toBe("*/5 * * * *");
       expect(result.nextRunAt).toBeInstanceOf(Date);
@@ -54,12 +60,17 @@ describe("CronSingleton", () => {
     test("returns a TCronJob with type onetime", async () => {
       const cron = CronSingleton.instance;
       const futureDate = new Date(Date.now() + 60_000);
-      const result = await cron.scheduleOnce({ name: "one-off", fireAt: futureDate });
+      const result = await cron.scheduleOnce({
+        name: "one-off",
+        userId: TEST_USER_ID,
+        fireAt: futureDate,
+      });
 
       expect("error" in result).toBe(false);
       if ("error" in result) return;
 
       expect(result.name).toBe("one-off");
+      expect(result.userId).toBe(TEST_USER_ID);
       expect(result.type).toBe(ECronJobType.OneTime);
       expect(result.pattern).toBeNull();
       expect(result.nextRunAt).toEqual(futureDate);
@@ -68,7 +79,11 @@ describe("CronSingleton", () => {
     test("returns TCronError when fireAt is in the past", async () => {
       const cron = CronSingleton.instance;
       const pastDate = new Date(Date.now() - 60_000);
-      const result = await cron.scheduleOnce({ name: "past-job", fireAt: pastDate });
+      const result = await cron.scheduleOnce({
+        name: "past-job",
+        userId: TEST_USER_ID,
+        fireAt: pastDate,
+      });
 
       expect("error" in result).toBe(true);
     });
@@ -77,7 +92,7 @@ describe("CronSingleton", () => {
   describe("tick — event fires (recurring)", () => {
     test("emits event with TJobContext for recurring job", async () => {
       const cron = CronSingleton.instance;
-      await cron.schedule({ name: "recurring-test", pattern: "*/5 * * * *" });
+      await cron.schedule({ name: "recurring-test", userId: TEST_USER_ID, pattern: "*/5 * * * *" });
 
       const db = (cron as unknown as { db: import("bun:sqlite").Database }).db;
       db.query("UPDATE cron_jobs SET nextRunAt = $ts WHERE name = $name").run({
@@ -95,6 +110,7 @@ describe("CronSingleton", () => {
       const ctx = await emitted;
 
       expect(ctx.name).toBe("recurring-test");
+      expect(ctx.userId).toBe(TEST_USER_ID);
       expect(ctx.type).toBe(ECronJobType.Recurring);
       expect(ctx.pattern).toBe("*/5 * * * *");
       expect(ctx.nextRunAt).toBeInstanceOf(Date);
@@ -107,9 +123,10 @@ describe("CronSingleton", () => {
 
       const db = (cron as unknown as { db: import("bun:sqlite").Database }).db;
       db.query(
-        `INSERT INTO cron_jobs (name, type, pattern, nextRunAt, lastRunAt, createdAt) VALUES ($name, $type, $pattern, $nextRunAt, $lastRunAt, $createdAt)`,
+        `INSERT INTO cron_jobs (name, userId, type, pattern, nextRunAt, lastRunAt, createdAt) VALUES ($name, $userId, $type, $pattern, $nextRunAt, $lastRunAt, $createdAt)`,
       ).run({
         $name: "onetime-test",
+        $userId: TEST_USER_ID,
         $type: "onetime",
         $pattern: null,
         $nextRunAt: Date.now() - 1000,
@@ -130,7 +147,7 @@ describe("CronSingleton", () => {
       expect(ctx.type).toBe(ECronJobType.OneTime);
       expect(ctx.pattern).toBeUndefined();
 
-      const job = await cron.getJob("onetime-test");
+      const job = await cron.getJob("onetime-test", TEST_USER_ID);
       expect(job).toBeUndefined();
     });
   });
@@ -138,14 +155,14 @@ describe("CronSingleton", () => {
   describe("unschedule", () => {
     test("removes job and returns it", async () => {
       const cron = CronSingleton.instance;
-      await cron.schedule({ name: "to-remove", pattern: "* * * * *" });
+      await cron.schedule({ name: "to-remove", userId: TEST_USER_ID, pattern: "* * * * *" });
 
-      const result = await cron.unschedule("to-remove");
+      const result = await cron.unschedule("to-remove", TEST_USER_ID);
       expect("error" in result).toBe(false);
       if ("error" in result) return;
       expect(result.name).toBe("to-remove");
 
-      const job = await cron.getJob("to-remove");
+      const job = await cron.getJob("to-remove", TEST_USER_ID);
       expect(job).toBeUndefined();
     });
   });
@@ -154,27 +171,40 @@ describe("CronSingleton", () => {
     test("schedule rejects when a one-time job with the same name exists", async () => {
       const cron = CronSingleton.instance;
       const futureDate = new Date(Date.now() + 60_000);
-      await cron.scheduleOnce({ name: "conflict-job", fireAt: futureDate });
+      await cron.scheduleOnce({ name: "conflict-job", userId: TEST_USER_ID, fireAt: futureDate });
 
-      const result = await cron.schedule({ name: "conflict-job", pattern: "*/5 * * * *" });
+      const result = await cron.schedule({
+        name: "conflict-job",
+        userId: TEST_USER_ID,
+        pattern: "*/5 * * * *",
+      });
       expect("error" in result).toBe(true);
     });
 
     test("scheduleOnce rejects when a recurring job with the same name exists", async () => {
       const cron = CronSingleton.instance;
-      await cron.schedule({ name: "conflict-job-2", pattern: "*/5 * * * *" });
+      await cron.schedule({ name: "conflict-job-2", userId: TEST_USER_ID, pattern: "*/5 * * * *" });
 
       const futureDate = new Date(Date.now() + 60_000);
-      const result = await cron.scheduleOnce({ name: "conflict-job-2", fireAt: futureDate });
+      const result = await cron.scheduleOnce({
+        name: "conflict-job-2",
+        userId: TEST_USER_ID,
+        fireAt: futureDate,
+      });
       expect("error" in result).toBe(true);
     });
 
     test("same-type overwrite with overwrite: true succeeds", async () => {
       const cron = CronSingleton.instance;
-      await cron.schedule({ name: "same-type", pattern: "0 0 * * *" });
-      await cron.schedule({ name: "same-type", pattern: "*/5 * * * *", overwrite: true });
+      await cron.schedule({ name: "same-type", userId: TEST_USER_ID, pattern: "0 0 * * *" });
+      await cron.schedule({
+        name: "same-type",
+        userId: TEST_USER_ID,
+        pattern: "*/5 * * * *",
+        overwrite: true,
+      });
 
-      const job = await cron.getJob("same-type");
+      const job = await cron.getJob("same-type", TEST_USER_ID);
       expect(job).toBeDefined();
       if (!job) return;
       expect(job.pattern).toBe("*/5 * * * *");
@@ -182,9 +212,13 @@ describe("CronSingleton", () => {
 
     test("same-type schedule rejects without overwrite flag", async () => {
       const cron = CronSingleton.instance;
-      await cron.schedule({ name: "dup-recurring", pattern: "0 0 * * *" });
+      await cron.schedule({ name: "dup-recurring", userId: TEST_USER_ID, pattern: "0 0 * * *" });
 
-      const result = await cron.schedule({ name: "dup-recurring", pattern: "*/5 * * * *" });
+      const result = await cron.schedule({
+        name: "dup-recurring",
+        userId: TEST_USER_ID,
+        pattern: "*/5 * * * *",
+      });
       expect("error" in result).toBe(true);
     });
   });
@@ -192,7 +226,12 @@ describe("CronSingleton", () => {
   describe("tick emits group in TJobContext", () => {
     test("group is included in emitted event", async () => {
       const cron = CronSingleton.instance;
-      await cron.schedule({ name: "grouped-tick", pattern: "*/5 * * * *", group: "alerts" });
+      await cron.schedule({
+        name: "grouped-tick",
+        userId: TEST_USER_ID,
+        pattern: "*/5 * * * *",
+        group: "alerts",
+      });
 
       const db = (cron as unknown as { db: import("bun:sqlite").Database }).db;
       db.query("UPDATE cron_jobs SET nextRunAt = $ts WHERE name = $name").run({
@@ -228,6 +267,70 @@ describe("CronSingleton", () => {
       expect(next.getDay()).toBeLessThanOrEqual(5);
       expect(next.getHours()).toBe(9);
       expect(next.getMinutes()).toBe(0);
+    });
+  });
+
+  describe("getAllJobs", () => {
+    test("returns only jobs for the given userId", async () => {
+      const cron = CronSingleton.instance;
+      await cron.schedule({ name: "user1-job", userId: "user-1", pattern: "*/5 * * * *" });
+      await cron.schedule({ name: "user1-job2", userId: "user-1", pattern: "0 9 * * *" });
+      await cron.schedule({ name: "user2-job", userId: "user-2", pattern: "0 12 * * *" });
+
+      const user1Jobs = await cron.getAllJobs("user-1");
+      const user2Jobs = await cron.getAllJobs("user-2");
+
+      expect(user1Jobs.length).toBe(2);
+      expect(user2Jobs.length).toBe(1);
+      expect(user1Jobs.every((j) => j.userId === "user-1")).toBe(true);
+      expect(user2Jobs[0]?.name).toBe("user2-job");
+    });
+
+    test("returns empty array for userId with no jobs", async () => {
+      const cron = CronSingleton.instance;
+      const jobs = await cron.getAllJobs("nonexistent-user");
+      expect(jobs.length).toBe(0);
+    });
+  });
+
+  describe("user isolation", () => {
+    test("different users can have jobs with the same name", async () => {
+      const cron = CronSingleton.instance;
+      const result1 = await cron.schedule({
+        name: "daily-reminder",
+        userId: "user-a",
+        pattern: "0 9 * * *",
+      });
+      const result2 = await cron.schedule({
+        name: "daily-reminder",
+        userId: "user-b",
+        pattern: "0 10 * * *",
+      });
+
+      expect("error" in result1).toBe(false);
+      expect("error" in result2).toBe(false);
+
+      const jobA = await cron.getJob("daily-reminder", "user-a");
+      const jobB = await cron.getJob("daily-reminder", "user-b");
+
+      expect(jobA).toBeDefined();
+      expect(jobB).toBeDefined();
+      expect(jobA?.pattern).toBe("0 9 * * *");
+      expect(jobB?.pattern).toBe("0 10 * * *");
+    });
+
+    test("unschedule only removes the job for the given userId", async () => {
+      const cron = CronSingleton.instance;
+      await cron.schedule({ name: "shared-name", userId: "user-x", pattern: "*/5 * * * *" });
+      await cron.schedule({ name: "shared-name", userId: "user-y", pattern: "0 0 * * *" });
+
+      await cron.unschedule("shared-name", "user-x");
+
+      const jobX = await cron.getJob("shared-name", "user-x");
+      const jobY = await cron.getJob("shared-name", "user-y");
+
+      expect(jobX).toBeUndefined();
+      expect(jobY).toBeDefined();
     });
   });
 });

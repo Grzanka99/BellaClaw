@@ -18,13 +18,15 @@ import {
 const CREATE_CRON_JOBS_TABLE = `
   CREATE TABLE IF NOT EXISTS cron_jobs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    userId TEXT NOT NULL,
     "group" TEXT,
     type TEXT NOT NULL,
     pattern TEXT,
     nextRunAt INTEGER NOT NULL,
     lastRunAt INTEGER,
-    createdAt INTEGER NOT NULL
+    createdAt INTEGER NOT NULL,
+    UNIQUE(name, userId)
   )
 `;
 
@@ -97,6 +99,7 @@ export class CronSingleton extends EventEmitter {
 
         const ctx: TJobContext = {
           name: job.name,
+          userId: job.userId,
           group: job.group,
           type: job.type,
           pattern: job.pattern ?? undefined,
@@ -115,7 +118,7 @@ export class CronSingleton extends EventEmitter {
       return { operation: "schedule", error: `Invalid cron pattern: ${args.pattern}` };
     }
 
-    const existing = await this.getJob(args.name);
+    const existing = await this.getJob(args.name, args.userId);
     if (existing && existing.type === ECronJobType.OneTime) {
       return {
         operation: "schedule",
@@ -137,13 +140,14 @@ export class CronSingleton extends EventEmitter {
       await this.queue.enqueue(async () => {
         this.db
           .query(
-            `INSERT INTO cron_jobs (name, "group", type, pattern, nextRunAt, lastRunAt, createdAt)
-             VALUES ($name, $group, $type, $pattern, $nextRunAt, $lastRunAt, $createdAt)
-             ON CONFLICT(name) DO UPDATE SET
+            `INSERT INTO cron_jobs (name, userId, "group", type, pattern, nextRunAt, lastRunAt, createdAt)
+             VALUES ($name, $userId, $group, $type, $pattern, $nextRunAt, $lastRunAt, $createdAt)
+             ON CONFLICT(name, userId) DO UPDATE SET
                "group" = $group, type = $type, pattern = $pattern, nextRunAt = $nextRunAt, lastRunAt = $lastRunAt, createdAt = $createdAt`,
           )
           .run({
             $name: args.name,
+            $userId: args.userId,
             $group: args.group ?? null,
             $type: ECronJobType.Recurring,
             $pattern: args.pattern,
@@ -153,7 +157,7 @@ export class CronSingleton extends EventEmitter {
           });
       });
 
-      const job = await this.getJob(args.name);
+      const job = await this.getJob(args.name, args.userId);
       if (!job) {
         return { operation: "schedule", error: "Failed to read back scheduled job" };
       }
@@ -170,7 +174,7 @@ export class CronSingleton extends EventEmitter {
       return { operation: "schedule", error: "fireAt must be in the future" };
     }
 
-    const existing = await this.getJob(args.name);
+    const existing = await this.getJob(args.name, args.userId);
     if (existing && existing.type === ECronJobType.Recurring) {
       return {
         operation: "schedule",
@@ -189,13 +193,14 @@ export class CronSingleton extends EventEmitter {
       await this.queue.enqueue(async () => {
         this.db
           .query(
-            `INSERT INTO cron_jobs (name, "group", type, pattern, nextRunAt, lastRunAt, createdAt)
-             VALUES ($name, $group, $type, $pattern, $nextRunAt, $lastRunAt, $createdAt)
-             ON CONFLICT(name) DO UPDATE SET
+            `INSERT INTO cron_jobs (name, userId, "group", type, pattern, nextRunAt, lastRunAt, createdAt)
+             VALUES ($name, $userId, $group, $type, $pattern, $nextRunAt, $lastRunAt, $createdAt)
+             ON CONFLICT(name, userId) DO UPDATE SET
                "group" = $group, type = $type, pattern = $pattern, nextRunAt = $nextRunAt, lastRunAt = $lastRunAt, createdAt = $createdAt`,
           )
           .run({
             $name: args.name,
+            $userId: args.userId,
             $group: args.group ?? null,
             $type: ECronJobType.OneTime,
             $pattern: null,
@@ -205,7 +210,7 @@ export class CronSingleton extends EventEmitter {
           });
       });
 
-      const job = await this.getJob(args.name);
+      const job = await this.getJob(args.name, args.userId);
       if (!job) {
         return { operation: "schedule", error: "Failed to read back scheduled job" };
       }
@@ -216,12 +221,12 @@ export class CronSingleton extends EventEmitter {
     }
   }
 
-  public async unschedule(name: string): Promise<TCronJob | TCronError> {
+  public async unschedule(name: string, userId: string): Promise<TCronJob | TCronError> {
     try {
       const res = await this.queue.enqueue(async () => {
         const row = this.db
-          .query("DELETE FROM cron_jobs WHERE name = $name RETURNING *")
-          .get({ $name: name });
+          .query("DELETE FROM cron_jobs WHERE name = $name AND userId = $userId RETURNING *")
+          .get({ $name: name, $userId: userId });
 
         const parsed = SCronJob.safeParse(row);
         if (!parsed.success) {
@@ -237,6 +242,7 @@ export class CronSingleton extends EventEmitter {
       return {
         id: res.id,
         name: res.name,
+        userId: res.userId,
         group: res.group,
         type: res.type,
         pattern: res.pattern,
@@ -250,9 +256,26 @@ export class CronSingleton extends EventEmitter {
     }
   }
 
-  public async getJob(name: string): Promise<TOption<TCronJob>> {
+  public async getAllJobs(userId: string): Promise<TCronJob[]> {
+    const results = await this.queue.enqueue(async () => {
+      const rows = this.db
+        .query("SELECT * FROM cron_jobs WHERE userId = $userId ORDER BY nextRunAt ASC")
+        .all({ $userId: userId });
+      const parsed = z.array(SCronJob).safeParse(rows);
+      if (!parsed.success) {
+        this.logger.error("Failed to parse jobs from DB in getAllJobs");
+        return [];
+      }
+      return parsed.data;
+    });
+    return results;
+  }
+
+  public async getJob(name: string, userId: string): Promise<TOption<TCronJob>> {
     const res = await this.queue.enqueue(async () => {
-      const row = this.db.query("SELECT * FROM cron_jobs WHERE name = $name").get({ $name: name });
+      const row = this.db
+        .query("SELECT * FROM cron_jobs WHERE name = $name AND userId = $userId")
+        .get({ $name: name, $userId: userId });
 
       const parsed = SCronJob.safeParse(row);
       if (!parsed.success) {
@@ -268,6 +291,7 @@ export class CronSingleton extends EventEmitter {
     return {
       id: res.id,
       name: res.name,
+      userId: res.userId,
       group: res.group,
       type: res.type,
       pattern: res.pattern,

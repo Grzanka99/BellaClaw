@@ -9,6 +9,7 @@ export enum ECronJobType {
 export const SCronJob = z.object({
   id: z.number(),
   name: z.string(),
+  userId: z.string(),
   group: z
     .string()
     .nullable()
@@ -25,6 +26,7 @@ export const SCronJob = z.object({
 
 export const SScheduleArgs = z.object({
   name: z.string(),
+  userId: z.string(),
   pattern: z.string(),
   group: z.string().optional(),
   overwrite: z.boolean().optional(),
@@ -32,6 +34,7 @@ export const SScheduleArgs = z.object({
 
 export const SScheduleOnceArgs = z.object({
   name: z.string(),
+  userId: z.string(),
   fireAt: z.coerce.date(),
   group: z.string().optional(),
   overwrite: z.boolean().optional(),
@@ -39,6 +42,7 @@ export const SScheduleOnceArgs = z.object({
 
 export type TJobContext = {
   name: string;
+  userId: string;
   group: TOption<string>;
   type: ECronJobType;
   pattern: TOption<string>;

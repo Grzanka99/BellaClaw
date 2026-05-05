@@ -5,8 +5,14 @@ import { createLogger } from "../../../utils/logger";
 import type { TTools } from "../tools";
 import { DEFINE_MESSAGE_IMPORTANCE_TOOL } from "../tools/define-message-importance/definition";
 import { handleDefineMessageImportance } from "../tools/define-message-importance/handler";
+import { LIST_CRON_JOBS_TOOL } from "../tools/list-cron-jobs/definition";
+import { handleListCronJobs } from "../tools/list-cron-jobs/handler";
+import { SCHEDULE_RECURRING_TOOL } from "../tools/schedule-recurring/definition";
+import { handleScheduleRecurring } from "../tools/schedule-recurring/handler";
 import { SEARCH_MEMORY_TOOL } from "../tools/search-memory/definition";
 import { handleSearchMemory } from "../tools/search-memory/handler";
+import { UNSCHEDULE_RECURRING_TOOL } from "../tools/unschedule-recurring/definition";
+import { handleUnscheduleRecurring } from "../tools/unschedule-recurring/handler";
 import {
   EModelPurpose,
   type TChatWithTools,
@@ -199,6 +205,40 @@ export class OllamaAiProvider {
           });
           break;
         }
+        case LIST_CRON_JOBS_TOOL: {
+          if (!args.chatId) {
+            this.logger.error(`chatId is required for tool: ${LIST_CRON_JOBS_TOOL}`);
+            continue;
+          }
+          const toolRes = await handleListCronJobs(handlerArgs, args.chatId);
+          if (!toolRes) {
+            this.logger.error(`Invalid arguments for tool: ${LIST_CRON_JOBS_TOOL}`);
+            continue;
+          }
+          toolCallsResults.push({
+            tool: LIST_CRON_JOBS_TOOL,
+            // NOTE: Thats the acceptable exception for type cast!
+            data: toolRes as T,
+          });
+          break;
+        }
+        case SCHEDULE_RECURRING_TOOL: {
+          if (!args.chatId) {
+            this.logger.error(`chatId is required for tool: ${SCHEDULE_RECURRING_TOOL}`);
+            continue;
+          }
+          const toolRes = await handleScheduleRecurring(handlerArgs, args.chatId);
+          if (!toolRes) {
+            this.logger.error(`Invalid arguments for tool: ${SCHEDULE_RECURRING_TOOL}`);
+            continue;
+          }
+          toolCallsResults.push({
+            tool: SCHEDULE_RECURRING_TOOL,
+            // NOTE: Thats the acceptable exception for type cast!
+            data: toolRes as T,
+          });
+          break;
+        }
         case SEARCH_MEMORY_TOOL: {
           if (!args.chatId) {
             this.logger.error(`chatId is required for tool: ${SEARCH_MEMORY_TOOL}`);
@@ -211,6 +251,23 @@ export class OllamaAiProvider {
           }
           toolCallsResults.push({
             tool: SEARCH_MEMORY_TOOL,
+            // NOTE: Thats the acceptable exception for type cast!
+            data: toolRes as T,
+          });
+          break;
+        }
+        case UNSCHEDULE_RECURRING_TOOL: {
+          if (!args.chatId) {
+            this.logger.error(`chatId is required for tool: ${UNSCHEDULE_RECURRING_TOOL}`);
+            continue;
+          }
+          const toolRes = await handleUnscheduleRecurring(handlerArgs, args.chatId);
+          if (!toolRes) {
+            this.logger.error(`Invalid arguments for tool: ${UNSCHEDULE_RECURRING_TOOL}`);
+            continue;
+          }
+          toolCallsResults.push({
+            tool: UNSCHEDULE_RECURRING_TOOL,
             // NOTE: Thats the acceptable exception for type cast!
             data: toolRes as T,
           });

@@ -1,0 +1,68 @@
+<instructions>
+
+  <purpose>
+    Schedule recurring events that fire automatically at defined intervals using cron patterns.
+    Use this tool when the user wants to set up a reminder, periodic notification, or any task
+    that should repeat on a regular schedule.
+  </purpose>
+
+  <tool>
+    <name>schedule-recurring</name>
+    <description>
+      Creates a recurring cron job identified by a unique name that fires at intervals
+      defined by a 5-field cron expression. Returns the scheduled job details including
+      the next fire time.
+    </description>
+  </tool>
+
+  <cron_patterns>
+    Use standard 5-field cron expressions: minute hour day-of-month month day-of-week
+
+    Common examples:
+    - "0 9 * * *"       — every day at 9:00
+    - "*/30 * * * *"    — every 30 minutes
+    - "0 8 * * 1"      — every Monday at 8:00
+    - "0 0 1 * *"      — first of every month at midnight
+    - "0 9 * * 1-5"    — weekdays at 9:00
+  </cron_patterns>
+
+  <usage_rules>
+    <rule>Always confirm the schedule with the user before calling this tool</rule>
+    <rule>Choose clear, descriptive names for jobs so they can be easily referenced later</rule>
+    <rule>If a job with the same name already exists, set overwrite to true only if the user explicitly agrees to replace it</rule>
+    <rule>Validate that the cron pattern matches the user's intended schedule before calling</rule>
+    <rule>Inform the user of the next fire time after successfully scheduling</rule>
+  </usage_rules>
+
+  <examples>
+    <example>
+      <context>User says: "Przypominaj mi o paddu co poniedziałek o 9 rano"</context>
+      <toolCall>
+        <name>paddu-reminder</name>
+        <pattern>0 9 * * 1</pattern>
+      </toolCall>
+      <reasoning>Weekly reminder every Monday at 9:00 for paddu.</reasoning>
+    </example>
+
+    <example>
+      <context>User says: "Check on me every 30 minutes while I'm studying"</context>
+      <toolCall>
+        <name>study-checkin</name>
+        <pattern>*/30 * * * *</pattern>
+        <group>study</group>
+      </toolCall>
+      <reasoning>Periodic check-in every 30 minutes, grouped under "study".</reasoning>
+    </example>
+
+    <example>
+      <context>User says: "Actually, change my paddu reminder to 10 instead of 9"</context>
+      <toolCall>
+        <name>paddu-reminder</name>
+        <pattern>0 10 * * 1</pattern>
+        <overwrite>true</overwrite>
+      </toolCall>
+      <reasoning>User wants to update an existing job, so overwrite must be true.</reasoning>
+    </example>
+  </examples>
+
+</instructions>
