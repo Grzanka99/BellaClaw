@@ -1,13 +1,15 @@
-import { Database } from "bun:sqlite";
 import { EventEmitter } from "node:events";
 import { z } from "zod";
+import {
+  CronEngine,
+  ECronEngineJobType,
+  type TCronEngineJob,
+  type TCronEngineJobContext,
+} from "../../lib/cron-engine";
 import type { TOption } from "../../types";
-import { AsyncQueue } from "../../utils/async-queue";
 import { createLogger, type TLogger } from "../../utils/logger";
-import { getNextFireTime, isValidCron } from "./parser";
 import {
   ECronJobType,
-  SCronJob,
   type TCronError,
   type TCronJob,
   type TJobContext,
@@ -15,36 +17,29 @@ import {
   type TScheduleOnceArgs,
 } from "./types";
 
-const CREATE_CRON_JOBS_TABLE = `
-  CREATE TABLE IF NOT EXISTS cron_jobs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    userId TEXT NOT NULL,
-    "group" TEXT,
-    type TEXT NOT NULL,
-    pattern TEXT,
-    nextRunAt INTEGER NOT NULL,
-    lastRunAt INTEGER,
-    createdAt INTEGER NOT NULL,
-    UNIQUE(name, userId)
-  )
-`;
+const SCronServiceData = z.object({
+  group: z.string().optional(),
+});
+
+type TCronServiceData = z.infer<typeof SCronServiceData>;
 
 export class CronSingleton extends EventEmitter {
   private static _instance: TOption<CronSingleton>;
-  private static DB_FILE = "cron.db";
-  private db: Database;
-  private queue: AsyncQueue;
+  private static DEFAULT_DB_FILE = "cron-engine.db";
+  private static dbFile = CronSingleton.DEFAULT_DB_FILE;
+  private engine: CronEngine;
   private logger: TLogger = createLogger("CRON");
-  private tickInterval: TOption<Timer>;
 
   private constructor() {
     super();
-    this.queue = new AsyncQueue();
-    this.db = new Database(CronSingleton.DB_FILE);
 
-    this.queue.enqueue(async () => {
-      this.db.run(CREATE_CRON_JOBS_TABLE);
+    this.engine = new CronEngine({
+      dbFile: CronSingleton.dbFile,
+      logger: this.logger,
+    });
+
+    this.engine.on("fire", (ctx: TCronEngineJobContext) => {
+      this.emit(ctx.name, this.toJobContext(ctx));
     });
   }
 
@@ -52,261 +47,165 @@ export class CronSingleton extends EventEmitter {
     if (!CronSingleton._instance) {
       CronSingleton._instance = new CronSingleton();
     }
+
     return CronSingleton._instance;
   }
 
-  public setup(pollIntervalMs = 10_000) {
-    if (this.tickInterval) {
-      return;
+  public static setDbFile(dbFile: string) {
+    if (CronSingleton._instance) {
+      throw new Error("Cannot change cron DB file while CronSingleton instance is active");
     }
 
-    this.tickInterval = setInterval(() => this.tick(), pollIntervalMs);
-    this.tick();
+    CronSingleton.dbFile = dbFile;
   }
 
-  private async tick() {
-    const now = Date.now();
-
-    const jobs = await this.queue.enqueue(async () => {
-      const results = this.db
-        .query("SELECT * FROM cron_jobs WHERE nextRunAt <= $now")
-        .all({ $now: now });
-
-      const parsed = z.array(SCronJob).safeParse(results);
-      if (!parsed.success) {
-        this.logger.error("Failed to parse jobs from DB during tick");
-        return [];
-      }
-      return parsed.data;
-    });
-
-    for (const job of jobs) {
-      try {
-        if (job.type === ECronJobType.Recurring && job.pattern) {
-          const nextRun = getNextFireTime(job.pattern, new Date(now));
-          await this.queue.enqueue(async () => {
-            this.db
-              .query(
-                "UPDATE cron_jobs SET nextRunAt = $nextRunAt, lastRunAt = $lastRunAt WHERE name = $name",
-              )
-              .run({ $nextRunAt: nextRun.getTime(), $lastRunAt: now, $name: job.name });
-          });
-        } else if (job.type === ECronJobType.OneTime) {
-          await this.queue.enqueue(async () => {
-            this.db.query("DELETE FROM cron_jobs WHERE name = $name").run({ $name: job.name });
-          });
-        }
-
-        const ctx: TJobContext = {
-          name: job.name,
-          userId: job.userId,
-          group: job.group,
-          type: job.type,
-          pattern: job.pattern ?? undefined,
-          lastRunAt: job.lastRunAt ?? undefined,
-          nextRunAt: job.nextRunAt,
-        };
-        this.emit(job.name, ctx);
-      } catch (error) {
-        this.logger.error(`Failed to process job '${job.name}' during tick: ${String(error)}`);
-      }
+  public static resetDbFile() {
+    if (CronSingleton._instance) {
+      throw new Error("Cannot reset cron DB file while CronSingleton instance is active");
     }
+
+    CronSingleton.dbFile = CronSingleton.DEFAULT_DB_FILE;
+  }
+
+  public setup(pollIntervalMs = 10_000) {
+    this.engine.setup(pollIntervalMs);
   }
 
   public async schedule(args: TScheduleArgs): Promise<TCronJob | TCronError> {
-    if (!isValidCron(args.pattern)) {
-      return { operation: "schedule", error: `Invalid cron pattern: ${args.pattern}` };
+    const result = await this.engine.schedule({
+      name: args.name,
+      scope: args.userId,
+      data: this.serializeData(args.group),
+      pattern: args.pattern,
+      overwrite: args.overwrite,
+    });
+
+    if ("error" in result) {
+      return result;
     }
 
-    const existing = await this.getJob(args.name, args.userId);
-    if (existing && existing.type === ECronJobType.OneTime) {
-      return {
-        operation: "schedule",
-        error: `A one-time job named '${args.name}' already exists. Unscheduled it first.`,
-      };
-    }
-
-    if (existing && args.overwrite !== true) {
-      return {
-        operation: "schedule",
-        error: `Job '${args.name}' already exists. Set overwrite: true to replace.`,
-      };
-    }
-
-    const nextRunAt = getNextFireTime(args.pattern, new Date());
-    const now = Date.now();
-
-    try {
-      await this.queue.enqueue(async () => {
-        this.db
-          .query(
-            `INSERT INTO cron_jobs (name, userId, "group", type, pattern, nextRunAt, lastRunAt, createdAt)
-             VALUES ($name, $userId, $group, $type, $pattern, $nextRunAt, $lastRunAt, $createdAt)
-             ON CONFLICT(name, userId) DO UPDATE SET
-               "group" = $group, type = $type, pattern = $pattern, nextRunAt = $nextRunAt, lastRunAt = $lastRunAt, createdAt = $createdAt`,
-          )
-          .run({
-            $name: args.name,
-            $userId: args.userId,
-            $group: args.group ?? null,
-            $type: ECronJobType.Recurring,
-            $pattern: args.pattern,
-            $nextRunAt: nextRunAt.getTime(),
-            $lastRunAt: null,
-            $createdAt: now,
-          });
-      });
-
-      const job = await this.getJob(args.name, args.userId);
-      if (!job) {
-        return { operation: "schedule", error: "Failed to read back scheduled job" };
-      }
-      return job;
-    } catch (error) {
-      this.logger.error(`Failed to schedule job: ${String(error)}`);
-      return { operation: "schedule", error };
-    }
+    return this.toCronJob(result);
   }
 
   public async scheduleOnce(args: TScheduleOnceArgs): Promise<TCronJob | TCronError> {
-    const now = new Date();
-    if (args.fireAt <= now) {
-      return { operation: "schedule", error: "fireAt must be in the future" };
+    const result = await this.engine.scheduleOnce({
+      name: args.name,
+      scope: args.userId,
+      data: this.serializeData(args.group),
+      fireAt: args.fireAt,
+      overwrite: args.overwrite,
+    });
+
+    if ("error" in result) {
+      return result;
     }
 
-    const existing = await this.getJob(args.name, args.userId);
-    if (existing && existing.type === ECronJobType.Recurring) {
-      return {
-        operation: "schedule",
-        error: `A recurring job named '${args.name}' already exists. Unscheduled it first.`,
-      };
-    }
-
-    if (existing && args.overwrite !== true) {
-      return {
-        operation: "schedule",
-        error: `Job '${args.name}' already exists. Set overwrite: true to replace.`,
-      };
-    }
-
-    try {
-      await this.queue.enqueue(async () => {
-        this.db
-          .query(
-            `INSERT INTO cron_jobs (name, userId, "group", type, pattern, nextRunAt, lastRunAt, createdAt)
-             VALUES ($name, $userId, $group, $type, $pattern, $nextRunAt, $lastRunAt, $createdAt)
-             ON CONFLICT(name, userId) DO UPDATE SET
-               "group" = $group, type = $type, pattern = $pattern, nextRunAt = $nextRunAt, lastRunAt = $lastRunAt, createdAt = $createdAt`,
-          )
-          .run({
-            $name: args.name,
-            $userId: args.userId,
-            $group: args.group ?? null,
-            $type: ECronJobType.OneTime,
-            $pattern: null,
-            $nextRunAt: args.fireAt.getTime(),
-            $lastRunAt: null,
-            $createdAt: Date.now(),
-          });
-      });
-
-      const job = await this.getJob(args.name, args.userId);
-      if (!job) {
-        return { operation: "schedule", error: "Failed to read back scheduled job" };
-      }
-      return job;
-    } catch (error) {
-      this.logger.error(`Failed to schedule one-time job: ${String(error)}`);
-      return { operation: "schedule", error };
-    }
+    return this.toCronJob(result);
   }
 
   public async unschedule(name: string, userId: string): Promise<TCronJob | TCronError> {
-    try {
-      const res = await this.queue.enqueue(async () => {
-        const row = this.db
-          .query("DELETE FROM cron_jobs WHERE name = $name AND userId = $userId RETURNING *")
-          .get({ $name: name, $userId: userId });
-
-        const parsed = SCronJob.safeParse(row);
-        if (!parsed.success) {
-          return undefined;
-        }
-        return parsed.data;
-      });
-
-      if (!res) {
-        return { operation: "unschedule", error: `No job found with name: ${name}` };
-      }
-
-      return {
-        id: res.id,
-        name: res.name,
-        userId: res.userId,
-        group: res.group,
-        type: res.type,
-        pattern: res.pattern,
-        nextRunAt: res.nextRunAt,
-        lastRunAt: res.lastRunAt,
-        createdAt: res.createdAt,
-      };
-    } catch (error) {
-      this.logger.error(`Failed to unschedule job: ${String(error)}`);
-      return { operation: "unschedule", error };
+    const result = await this.engine.unschedule(name, userId);
+    if ("error" in result) {
+      return result;
     }
+
+    return this.toCronJob(result);
   }
 
   public async getAllJobs(userId: string): Promise<TCronJob[]> {
-    const results = await this.queue.enqueue(async () => {
-      const rows = this.db
-        .query("SELECT * FROM cron_jobs WHERE userId = $userId ORDER BY nextRunAt ASC")
-        .all({ $userId: userId });
-      const parsed = z.array(SCronJob).safeParse(rows);
-      if (!parsed.success) {
-        this.logger.error("Failed to parse jobs from DB in getAllJobs");
-        return [];
-      }
-      return parsed.data;
-    });
-    return results;
+    const jobs = await this.engine.getAllJobs(userId);
+    return jobs.map((job) => this.toCronJob(job));
   }
 
   public async getJob(name: string, userId: string): Promise<TOption<TCronJob>> {
-    const res = await this.queue.enqueue(async () => {
-      const row = this.db
-        .query("SELECT * FROM cron_jobs WHERE name = $name AND userId = $userId")
-        .get({ $name: name, $userId: userId });
-
-      const parsed = SCronJob.safeParse(row);
-      if (!parsed.success) {
-        return undefined;
-      }
-      return parsed.data;
-    });
-
-    if (!res) {
+    const job = await this.engine.getJob(name, userId);
+    if (!job) {
       return undefined;
     }
 
-    return {
-      id: res.id,
-      name: res.name,
-      userId: res.userId,
-      group: res.group,
-      type: res.type,
-      pattern: res.pattern,
-      nextRunAt: res.nextRunAt,
-      lastRunAt: res.lastRunAt,
-      createdAt: res.createdAt,
-    };
+    return this.toCronJob(job);
   }
 
   public destroy() {
-    if (this.tickInterval) {
-      clearInterval(this.tickInterval);
-      this.tickInterval = undefined;
-    }
-    this.db.close();
+    this.engine.destroy();
     CronSingleton._instance = undefined;
+  }
+
+  private toCronJob(job: TCronEngineJob): TCronJob {
+    const data = this.deserializeData(job.data);
+
+    return {
+      id: job.id,
+      name: job.name,
+      userId: this.toUserId(job.scope, job.name),
+      group: data.group,
+      type: this.toCronJobType(job.type),
+      pattern: job.pattern ?? null,
+      nextRunAt: job.nextRunAt,
+      lastRunAt: job.lastRunAt ?? null,
+      createdAt: job.createdAt,
+    };
+  }
+
+  private toJobContext(ctx: TCronEngineJobContext): TJobContext {
+    const data = this.deserializeData(ctx.data);
+
+    return {
+      name: ctx.name,
+      userId: this.toUserId(ctx.scope, ctx.name),
+      group: data.group,
+      type: this.toCronJobType(ctx.type),
+      pattern: ctx.pattern,
+      lastRunAt: ctx.lastRunAt,
+      nextRunAt: ctx.nextRunAt,
+    };
+  }
+
+  private toCronJobType(type: ECronEngineJobType): ECronJobType {
+    if (type === ECronEngineJobType.Recurring) {
+      return ECronJobType.Recurring;
+    }
+
+    return ECronJobType.OneTime;
+  }
+
+  private toUserId(scope: TOption<string>, jobName: string): string {
+    if (scope === undefined) {
+      this.logger.warning(`Cron job '${jobName}' is missing scope; falling back to empty userId`);
+      return "";
+    }
+
+    return scope;
+  }
+
+  private serializeData(group: TOption<string>): TOption<string> {
+    if (group === undefined) {
+      return undefined;
+    }
+
+    return JSON.stringify({ group });
+  }
+
+  private deserializeData(data: TOption<string>): TCronServiceData {
+    if (data === undefined) {
+      return { group: undefined };
+    }
+
+    let parsedJson: unknown;
+
+    try {
+      parsedJson = JSON.parse(data);
+    } catch {
+      this.logger.warning(`Failed to parse cron job data: ${data}`);
+      return { group: undefined };
+    }
+
+    const parsed = SCronServiceData.safeParse(parsedJson);
+    if (!parsed.success) {
+      this.logger.warning(`Failed to validate cron job data: ${data}`);
+      return { group: undefined };
+    }
+
+    return parsed.data;
   }
 }
