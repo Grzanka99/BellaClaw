@@ -39,7 +39,7 @@ type TConfig = z.infer<typeof SConfig>;
 
 export const Config: TConfig = {
   ai: {
-    provider: EAiProvider.Ollama,
+    provider: EAiProvider.Openrouter,
     providers: {
       ollama: {
         models: {
