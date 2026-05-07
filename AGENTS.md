@@ -16,6 +16,7 @@ Small Bun + TypeScript Discord assistant. Prefer small, targeted changes that pr
 - Typecheck: `bunx tsc --noEmit`
 - Biome check: `bunx @biomejs/biome check .`
 - Biome auto-fix: `bunx @biomejs/biome check . --write`
+- After edits, run Biome auto-fix and Biome check on changed files when possible, instead of whole repo.
 
 ## Naming Conventions
 

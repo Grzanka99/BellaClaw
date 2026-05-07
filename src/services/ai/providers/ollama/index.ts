@@ -1,5 +1,6 @@
 import type { ToolDefinitionJson } from "@openrouter/sdk/models";
 import type { User } from "discord.js";
+import { Config } from "../../../../config";
 import type { TOption } from "../../../../types";
 import { createLogger } from "../../../../utils/logger";
 import type { TTools } from "../../tools";
@@ -29,16 +30,9 @@ import {
   flattenMessages,
   type TOllamaMessage,
 } from "./converters";
-import {
-  MODEL_OLLAMA_GLM_5,
-  MODEL_OLLAMA_MINIMAX_M2_7,
-  MODEL_OLLAMA_NEMOTRON_3_SUPER,
-} from "./models";
 
 export type TOllamaModel =
-  | typeof MODEL_OLLAMA_MINIMAX_M2_7
-  | typeof MODEL_OLLAMA_GLM_5
-  | typeof MODEL_OLLAMA_NEMOTRON_3_SUPER;
+  (typeof Config.ai.providers.ollama.models)[keyof typeof Config.ai.providers.ollama.models];
 
 const OLLAMA_BASE_URL = (Bun.env.OLLAMA_BASE_URL as string) ?? "http://localhost:11434";
 
@@ -51,14 +45,14 @@ type TChatWithToolsArgs = {
   history: THistoryItem[];
   user: TUserData;
   tools: TToolEntry[];
-  model: TOllamaModel;
+  purpose: EModelPurpose;
 };
 
 type TToolCallArgs = {
   prompt: TPrompt;
   instructions: THistoryItem[];
   tools: ToolDefinitionJson[];
-  model: TOllamaModel;
+  purpose: EModelPurpose;
   chatId?: string;
 };
 
@@ -99,21 +93,26 @@ export class OllamaAiProvider {
   }
 
   public getModel(purpose: EModelPurpose): TOllamaModel {
+    const { models } = Config.ai.providers.ollama;
+
     switch (purpose) {
       case EModelPurpose.ToolCheap:
-        return MODEL_OLLAMA_NEMOTRON_3_SUPER;
+        return models.toolCheap;
       case EModelPurpose.General:
-        return MODEL_OLLAMA_GLM_5;
+        return models.general;
       case EModelPurpose.Chat:
+        return models.chat;
       case EModelPurpose.ChatAccurate:
-        return MODEL_OLLAMA_MINIMAX_M2_7;
+        return models.chatAccurate;
       case EModelPurpose.ToolAccurate:
-        return MODEL_OLLAMA_MINIMAX_M2_7;
+        return models.toolAccurate;
     }
   }
 
   public async chatWithTools(args: TChatWithToolsArgs): Promise<TOption<TChatWithTools>> {
-    this.logger.info(`chatWithTools: start, model=${args.model}`);
+    const model = this.getModel(args.purpose);
+
+    this.logger.info(`chatWithTools: start, model=${model}`);
     const baseSystemText = await Bun.file(BASE_SYSTEM_INSTRUCTIONS_PATH).text();
     const toolInstructions = args.tools
       .filter((t) => t.instructions)
@@ -129,7 +128,7 @@ export class OllamaAiProvider {
     const ollamaTools = convertToolsForOllama(args.tools.map((t) => t.definition));
 
     const res = await ollamaChat({
-      model: args.model,
+      model,
       system: systemContent,
       messages,
       tools: ollamaTools,
@@ -156,13 +155,15 @@ export class OllamaAiProvider {
   }
 
   public async toolCall<T = unknown>(args: TToolCallArgs): Promise<TOption<TToolCallResponse<T>>> {
-    this.logger.info(`toolCall: start, model=${args.model}`);
+    const model = this.getModel(args.purpose);
+
+    this.logger.info(`toolCall: start, model=${model}`);
     const messages = buildMessages(args.instructions, args.prompt);
 
     const ollamaTools = convertToolsForOllama(args.tools);
 
     const res = await ollamaChat({
-      model: args.model,
+      model,
       messages,
       tools: ollamaTools,
       stream: false,

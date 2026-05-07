@@ -1,6 +1,7 @@
 import { OpenRouter } from "@openrouter/sdk";
 import type { AssistantMessage, Message, ToolDefinitionJson } from "@openrouter/sdk/models";
 import type { User } from "discord.js";
+import { Config } from "../../../../config";
 import type { TOption } from "../../../../types";
 import { createLogger } from "../../../../utils/logger";
 import type { TTools } from "../../tools";
@@ -24,20 +25,9 @@ import {
   type TToolCallResult,
   type TToolEntry,
 } from "../../types";
-import {
-  MODEL_OPENROUTER_FREE,
-  MODEL_OPENROUTER_GEMINI_3_1_PRO_PREVIEW,
-  MODEL_OPENROUTER_GEMINI_3_FLASH_PREVIEW,
-  MODEL_OPENROUTER_GPT_5_4_MINI,
-  MODEL_OPENROUTER_GPT_5_4_NANO,
-} from "./models";
 
 export type TOpenrouterModel =
-  | typeof MODEL_OPENROUTER_FREE
-  | typeof MODEL_OPENROUTER_GEMINI_3_FLASH_PREVIEW
-  | typeof MODEL_OPENROUTER_GPT_5_4_MINI
-  | typeof MODEL_OPENROUTER_GPT_5_4_NANO
-  | typeof MODEL_OPENROUTER_GEMINI_3_1_PRO_PREVIEW;
+  (typeof Config.ai.providers.openrouter.models)[keyof typeof Config.ai.providers.openrouter.models];
 
 const OPENROUTER_API_KEY = Bun.env.OPENROUTER_API_KEY as string;
 
@@ -62,14 +52,14 @@ type TChatWithToolsArgs = {
   history: THistoryItem[];
   user: TUserData;
   tools: TToolEntry[];
-  model: TOpenrouterModel;
+  purpose: EModelPurpose;
 };
 
 type TToolCallArgs = {
   prompt: TPrompt;
   instructions: THistoryItem[];
   tools: ToolDefinitionJson[];
-  model: TOpenrouterModel;
+  purpose: EModelPurpose;
   chatId?: string;
 };
 
@@ -91,22 +81,26 @@ export class OpenrouterAiProvider {
   }
 
   public getModel(purpose: EModelPurpose): TOpenrouterModel {
+    const { models } = Config.ai.providers.openrouter;
+
     switch (purpose) {
       case EModelPurpose.ToolCheap:
-        return MODEL_OPENROUTER_GPT_5_4_NANO;
+        return models.toolCheap;
       case EModelPurpose.General:
-        return MODEL_OPENROUTER_FREE;
+        return models.general;
       case EModelPurpose.ToolAccurate:
-        return MODEL_OPENROUTER_GEMINI_3_FLASH_PREVIEW;
+        return models.toolAccurate;
       case EModelPurpose.Chat:
-        return MODEL_OPENROUTER_GPT_5_4_MINI;
+        return models.chat;
       case EModelPurpose.ChatAccurate:
-        return MODEL_OPENROUTER_GEMINI_3_1_PRO_PREVIEW;
+        return models.chatAccurate;
     }
   }
 
   public async chatWithTools(args: TChatWithToolsArgs): Promise<TOption<TChatWithTools>> {
-    this.logger.info(`Calling ${args.model}`);
+    const model = this.getModel(args.purpose);
+
+    this.logger.info(`Calling ${model}`);
     const baseSystemText = await Bun.file(BASE_SYSTEM_INSTRUCTIONS_PATH).text();
     const baseSystemMessage: THistoryItem = { role: ERole.System, content: baseSystemText };
     const messages: Message[] = [
@@ -127,7 +121,7 @@ export class OpenrouterAiProvider {
 
     const res = await this.openrouter.chat.send({
       stream: false,
-      model: args.model,
+      model,
       messages,
       tools: definitions,
     });
@@ -148,13 +142,15 @@ export class OpenrouterAiProvider {
   }
 
   public async toolCall<T = unknown>(args: TToolCallArgs): Promise<TOption<TToolCallResponse<T>>> {
-    this.logger.info(`Calling ${args.model}`);
+    const model = this.getModel(args.purpose);
+
+    this.logger.info(`Calling ${model}`);
     const messages: Message[] = [...args.instructions];
     messages.push(args.prompt);
 
     const res = await this.openrouter.chat.send({
       stream: false,
-      model: args.model,
+      model,
       messages,
       tools: args.tools,
     });
