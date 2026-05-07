@@ -7,7 +7,7 @@ import { ECronJobType, type TJobContext } from "./types";
 const tempDir = Bun.env.TMPDIR ?? "/var/folders/q5/24yvwq2937j076ff04yjn_dc0000gn/T/opencode";
 const TEST_DB = join(tempDir, "test-cron-service.db");
 
-type TCronSingletonWithInternals = CronSingleton & {
+type TCronSingletonInternals = {
   engine: {
     db: import("bun:sqlite").Database;
     tick: () => Promise<void>;
@@ -25,7 +25,7 @@ function cleanupCronSingleton() {
 }
 
 function forceJobDue(cron: CronSingleton, name: string, userId: string) {
-  const internals = cron as unknown as TCronSingletonWithInternals;
+  const internals = cron as unknown as TCronSingletonInternals;
 
   internals.engine.db
     .query("UPDATE cron_engine_jobs SET nextRunAt = $ts WHERE name = $name AND scope = $scope")
@@ -149,7 +149,7 @@ describe("CronSingleton", () => {
 
   test("fires one-time jobs with mapped context and removes them", async () => {
     const cron = CronSingleton.instance;
-    const internals = cron as unknown as TCronSingletonWithInternals;
+    const internals = cron as unknown as TCronSingletonInternals;
 
     const scheduled = await cron.scheduleOnce({
       name: "one-time-job",
@@ -187,7 +187,7 @@ describe("CronSingleton", () => {
 
   test("fires recurring jobs with mapped context and keeps them scheduled", async () => {
     const cron = CronSingleton.instance;
-    const internals = cron as unknown as TCronSingletonWithInternals;
+    const internals = cron as unknown as TCronSingletonInternals;
 
     const scheduled = await cron.schedule({
       name: "recurring-job",

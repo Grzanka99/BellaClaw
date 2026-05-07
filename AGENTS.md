@@ -44,10 +44,10 @@ Use `Bun.env.*` — never `process.env`.
 
 ## Tool Definitions Pattern
 
-Each tool lives in its own directory under `src/services/ai-providers/tools/`:
+Each tool lives in its own directory under `src/services/ai/tools/`:
 
 ```
-src/services/ai-providers/tools/<tool-name>/
+src/services/ai/tools/<tool-name>/
   definition.ts    — exports a ToolDefinitionJson (name, description, parameters)
   handler.ts       — parses arguments with Zod, returns parsed data
   instructions.xml — detailed instructions for the AI on when/how to use the tool
@@ -69,7 +69,7 @@ src/services/ai-providers/tools/<tool-name>/
 - Instead of `some-type | undefined` use `TOption<some-type>`
 - Prefer braces even if statement has one line
     ```
-    return {
-        undefined
+    if (true) {
+        return undefined
     }
     ```

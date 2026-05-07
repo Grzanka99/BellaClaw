@@ -1,5 +1,5 @@
 import type { ToolDefinitionJson } from "@openrouter/sdk/models";
-import type { THistoryItem, TPrompt } from "../types";
+import type { THistoryItem, TPrompt } from "../../types";
 import type { TUserData } from "./index";
 
 export type TOllamaMessage = {

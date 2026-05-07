@@ -1,7 +1,7 @@
 import { Client, Events, GatewayIntentBits, type Message, Partials } from "discord.js";
 import { createLogger, type TLogger } from "../../utils/logger";
-import { OpenrouterAiProvider } from "../ai-providers/openrouter";
-import { ERole } from "../ai-providers/types";
+import { OpenrouterAiProvider } from "../ai/providers/openrouter";
+import { ERole } from "../ai/types";
 import { Memory } from "../memory";
 import { MessageHandler } from "../message-handler";
 

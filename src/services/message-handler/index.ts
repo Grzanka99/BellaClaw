@@ -1,20 +1,20 @@
 import type { TOption } from "../../types";
 import { AsyncQueue } from "../../utils/async-queue";
 import { createLogger, type TLogger } from "../../utils/logger";
-import { OllamaAiProvider } from "../ai-providers/ollama";
-import { OpenrouterAiProvider } from "../ai-providers/openrouter";
+import { OllamaAiProvider } from "../ai/providers/ollama";
+import { OpenrouterAiProvider } from "../ai/providers/openrouter";
 import {
   DEFINE_MESSAGE_IMPORTANCE_TOOL,
   defineMessageImportanceTool,
-} from "../ai-providers/tools/define-message-importance/definition";
-import type { TDefineMessageImportance } from "../ai-providers/tools/define-message-importance/handler";
+} from "../ai/tools/define-message-importance/definition";
+import type { TDefineMessageImportance } from "../ai/tools/define-message-importance/handler";
 import {
   SEARCH_MEMORY_TOOL,
   searchMemoryTool,
-} from "../ai-providers/tools/search-memory/definition";
-import type { TSearchMemory } from "../ai-providers/tools/search-memory/handler";
-import type { THistoryItem, TPrompt } from "../ai-providers/types";
-import { EModelPurpose, ERole } from "../ai-providers/types";
+} from "../ai/tools/search-memory/definition";
+import type { TSearchMemory } from "../ai/tools/search-memory/handler";
+import type { THistoryItem, TPrompt } from "../ai/types";
+import { EModelPurpose, ERole } from "../ai/types";
 import { Memory } from "../memory";
 import { EMemoryImportance, type TMemory } from "../memory/types";
 import type { TIncommingMessage, TOutgoingMessage } from "./types";
@@ -142,7 +142,7 @@ export class MessageHandler {
     const start = performance.now();
 
     const INSTRUCTIONS = await Bun.file(
-      "./src/services/ai-providers/tools/define-message-importance/instructions.xml",
+      "./src/services/ai/tools/define-message-importance/instructions.xml",
     ).text();
 
     const system: THistoryItem = {
@@ -221,7 +221,7 @@ export class MessageHandler {
     }
 
     const INSTRUCTIONS = await Bun.file(
-      "./src/services/ai-providers/tools/search-memory/instructions.xml",
+      "./src/services/ai/tools/search-memory/instructions.xml",
     ).text();
 
     const system: THistoryItem = {

@@ -1,18 +1,18 @@
 import type { ToolDefinitionJson } from "@openrouter/sdk/models";
 import type { User } from "discord.js";
-import type { TOption } from "../../../types";
-import { createLogger } from "../../../utils/logger";
-import type { TTools } from "../tools";
-import { DEFINE_MESSAGE_IMPORTANCE_TOOL } from "../tools/define-message-importance/definition";
-import { handleDefineMessageImportance } from "../tools/define-message-importance/handler";
-import { LIST_CRON_JOBS_TOOL } from "../tools/list-cron-jobs/definition";
-import { handleListCronJobs } from "../tools/list-cron-jobs/handler";
-import { SCHEDULE_RECURRING_TOOL } from "../tools/schedule-recurring/definition";
-import { handleScheduleRecurring } from "../tools/schedule-recurring/handler";
-import { SEARCH_MEMORY_TOOL } from "../tools/search-memory/definition";
-import { handleSearchMemory } from "../tools/search-memory/handler";
-import { UNSCHEDULE_RECURRING_TOOL } from "../tools/unschedule-recurring/definition";
-import { handleUnscheduleRecurring } from "../tools/unschedule-recurring/handler";
+import type { TOption } from "../../../../types";
+import { createLogger } from "../../../../utils/logger";
+import type { TTools } from "../../tools";
+import { DEFINE_MESSAGE_IMPORTANCE_TOOL } from "../../tools/define-message-importance/definition";
+import { handleDefineMessageImportance } from "../../tools/define-message-importance/handler";
+import { LIST_CRON_JOBS_TOOL } from "../../tools/list-cron-jobs/definition";
+import { handleListCronJobs } from "../../tools/list-cron-jobs/handler";
+import { SCHEDULE_RECURRING_TOOL } from "../../tools/schedule-recurring/definition";
+import { handleScheduleRecurring } from "../../tools/schedule-recurring/handler";
+import { SEARCH_MEMORY_TOOL } from "../../tools/search-memory/definition";
+import { handleSearchMemory } from "../../tools/search-memory/handler";
+import { UNSCHEDULE_RECURRING_TOOL } from "../../tools/unschedule-recurring/definition";
+import { handleUnscheduleRecurring } from "../../tools/unschedule-recurring/handler";
 import {
   EModelPurpose,
   type TChatWithTools,
@@ -21,7 +21,7 @@ import {
   type TToolCallResponse,
   type TToolCallResult,
   type TToolEntry,
-} from "../types";
+} from "../../types";
 import {
   buildMessages,
   convertOllamaToolCalls,
@@ -42,7 +42,7 @@ export type TOllamaModel =
 
 const OLLAMA_BASE_URL = (Bun.env.OLLAMA_BASE_URL as string) ?? "http://localhost:11434";
 
-const BASE_SYSTEM_INSTRUCTIONS_PATH = "./src/services/ai-providers/instructions/base-system.xml";
+const BASE_SYSTEM_INSTRUCTIONS_PATH = "./src/services/ai/instructions/base-system.xml";
 
 export type TUserData = Pick<User, "username" | "id" | "displayName">;
 
