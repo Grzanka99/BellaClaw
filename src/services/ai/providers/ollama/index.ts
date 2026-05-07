@@ -1,12 +1,19 @@
 import type { ToolDefinitionJson } from "@openrouter/sdk/models";
 import type { User } from "discord.js";
-import type { TOption } from "../../../types";
-import { createLogger } from "../../../utils/logger";
-import type { TTools } from "../tools";
-import { DEFINE_MESSAGE_IMPORTANCE_TOOL } from "../tools/define-message-importance/definition";
-import { handleDefineMessageImportance } from "../tools/define-message-importance/handler";
-import { SEARCH_MEMORY_TOOL } from "../tools/search-memory/definition";
-import { handleSearchMemory } from "../tools/search-memory/handler";
+import { Config } from "../../../../config";
+import type { TOption } from "../../../../types";
+import { createLogger } from "../../../../utils/logger";
+import type { TTools } from "../../tools";
+import { DEFINE_MESSAGE_IMPORTANCE_TOOL } from "../../tools/define-message-importance/definition";
+import { handleDefineMessageImportance } from "../../tools/define-message-importance/handler";
+import { LIST_CRON_JOBS_TOOL } from "../../tools/list-cron-jobs/definition";
+import { handleListCronJobs } from "../../tools/list-cron-jobs/handler";
+import { SCHEDULE_RECURRING_TOOL } from "../../tools/schedule-recurring/definition";
+import { handleScheduleRecurring } from "../../tools/schedule-recurring/handler";
+import { SEARCH_MEMORY_TOOL } from "../../tools/search-memory/definition";
+import { handleSearchMemory } from "../../tools/search-memory/handler";
+import { UNSCHEDULE_RECURRING_TOOL } from "../../tools/unschedule-recurring/definition";
+import { handleUnscheduleRecurring } from "../../tools/unschedule-recurring/handler";
 import {
   EModelPurpose,
   type TChatWithTools,
@@ -15,7 +22,7 @@ import {
   type TToolCallResponse,
   type TToolCallResult,
   type TToolEntry,
-} from "../types";
+} from "../../types";
 import {
   buildMessages,
   convertOllamaToolCalls,
@@ -23,20 +30,13 @@ import {
   flattenMessages,
   type TOllamaMessage,
 } from "./converters";
-import {
-  MODEL_OLLAMA_GLM_5,
-  MODEL_OLLAMA_MINIMAX_M2_7,
-  MODEL_OLLAMA_NEMOTRON_3_SUPER,
-} from "./models";
 
 export type TOllamaModel =
-  | typeof MODEL_OLLAMA_MINIMAX_M2_7
-  | typeof MODEL_OLLAMA_GLM_5
-  | typeof MODEL_OLLAMA_NEMOTRON_3_SUPER;
+  (typeof Config.ai.providers.ollama.models)[keyof typeof Config.ai.providers.ollama.models];
 
 const OLLAMA_BASE_URL = (Bun.env.OLLAMA_BASE_URL as string) ?? "http://localhost:11434";
 
-const BASE_SYSTEM_INSTRUCTIONS_PATH = "./src/services/ai-providers/instructions/base-system.xml";
+const BASE_SYSTEM_INSTRUCTIONS_PATH = "./src/services/ai/instructions/base-system.xml";
 
 export type TUserData = Pick<User, "username" | "id" | "displayName">;
 
@@ -45,14 +45,14 @@ type TChatWithToolsArgs = {
   history: THistoryItem[];
   user: TUserData;
   tools: TToolEntry[];
-  model: TOllamaModel;
+  purpose: EModelPurpose;
 };
 
 type TToolCallArgs = {
   prompt: TPrompt;
   instructions: THistoryItem[];
   tools: ToolDefinitionJson[];
-  model: TOllamaModel;
+  purpose: EModelPurpose;
   chatId?: string;
 };
 
@@ -93,21 +93,26 @@ export class OllamaAiProvider {
   }
 
   public getModel(purpose: EModelPurpose): TOllamaModel {
+    const { models } = Config.ai.providers.ollama;
+
     switch (purpose) {
       case EModelPurpose.ToolCheap:
-        return MODEL_OLLAMA_NEMOTRON_3_SUPER;
+        return models.toolCheap;
       case EModelPurpose.General:
-        return MODEL_OLLAMA_GLM_5;
+        return models.general;
       case EModelPurpose.Chat:
+        return models.chat;
       case EModelPurpose.ChatAccurate:
-        return MODEL_OLLAMA_MINIMAX_M2_7;
+        return models.chatAccurate;
       case EModelPurpose.ToolAccurate:
-        return MODEL_OLLAMA_MINIMAX_M2_7;
+        return models.toolAccurate;
     }
   }
 
   public async chatWithTools(args: TChatWithToolsArgs): Promise<TOption<TChatWithTools>> {
-    this.logger.info(`chatWithTools: start, model=${args.model}`);
+    const model = this.getModel(args.purpose);
+
+    this.logger.info(`chatWithTools: start, model=${model}`);
     const baseSystemText = await Bun.file(BASE_SYSTEM_INSTRUCTIONS_PATH).text();
     const toolInstructions = args.tools
       .filter((t) => t.instructions)
@@ -123,7 +128,7 @@ export class OllamaAiProvider {
     const ollamaTools = convertToolsForOllama(args.tools.map((t) => t.definition));
 
     const res = await ollamaChat({
-      model: args.model,
+      model,
       system: systemContent,
       messages,
       tools: ollamaTools,
@@ -150,13 +155,15 @@ export class OllamaAiProvider {
   }
 
   public async toolCall<T = unknown>(args: TToolCallArgs): Promise<TOption<TToolCallResponse<T>>> {
-    this.logger.info(`toolCall: start, model=${args.model}`);
+    const model = this.getModel(args.purpose);
+
+    this.logger.info(`toolCall: start, model=${model}`);
     const messages = buildMessages(args.instructions, args.prompt);
 
     const ollamaTools = convertToolsForOllama(args.tools);
 
     const res = await ollamaChat({
-      model: args.model,
+      model,
       messages,
       tools: ollamaTools,
       stream: false,
@@ -199,6 +206,40 @@ export class OllamaAiProvider {
           });
           break;
         }
+        case LIST_CRON_JOBS_TOOL: {
+          if (!args.chatId) {
+            this.logger.error(`chatId is required for tool: ${LIST_CRON_JOBS_TOOL}`);
+            continue;
+          }
+          const toolRes = await handleListCronJobs(handlerArgs, args.chatId);
+          if (!toolRes) {
+            this.logger.error(`Invalid arguments for tool: ${LIST_CRON_JOBS_TOOL}`);
+            continue;
+          }
+          toolCallsResults.push({
+            tool: LIST_CRON_JOBS_TOOL,
+            // NOTE: Thats the acceptable exception for type cast!
+            data: toolRes as T,
+          });
+          break;
+        }
+        case SCHEDULE_RECURRING_TOOL: {
+          if (!args.chatId) {
+            this.logger.error(`chatId is required for tool: ${SCHEDULE_RECURRING_TOOL}`);
+            continue;
+          }
+          const toolRes = await handleScheduleRecurring(handlerArgs, args.chatId);
+          if (!toolRes) {
+            this.logger.error(`Invalid arguments for tool: ${SCHEDULE_RECURRING_TOOL}`);
+            continue;
+          }
+          toolCallsResults.push({
+            tool: SCHEDULE_RECURRING_TOOL,
+            // NOTE: Thats the acceptable exception for type cast!
+            data: toolRes as T,
+          });
+          break;
+        }
         case SEARCH_MEMORY_TOOL: {
           if (!args.chatId) {
             this.logger.error(`chatId is required for tool: ${SEARCH_MEMORY_TOOL}`);
@@ -211,6 +252,23 @@ export class OllamaAiProvider {
           }
           toolCallsResults.push({
             tool: SEARCH_MEMORY_TOOL,
+            // NOTE: Thats the acceptable exception for type cast!
+            data: toolRes as T,
+          });
+          break;
+        }
+        case UNSCHEDULE_RECURRING_TOOL: {
+          if (!args.chatId) {
+            this.logger.error(`chatId is required for tool: ${UNSCHEDULE_RECURRING_TOOL}`);
+            continue;
+          }
+          const toolRes = await handleUnscheduleRecurring(handlerArgs, args.chatId);
+          if (!toolRes) {
+            this.logger.error(`Invalid arguments for tool: ${UNSCHEDULE_RECURRING_TOOL}`);
+            continue;
+          }
+          toolCallsResults.push({
+            tool: UNSCHEDULE_RECURRING_TOOL,
             // NOTE: Thats the acceptable exception for type cast!
             data: toolRes as T,
           });

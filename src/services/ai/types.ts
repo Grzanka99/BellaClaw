@@ -1,5 +1,10 @@
 import type { ChatMessageToolCall, ToolDefinitionJson } from "@openrouter/sdk/models";
 
+export enum EAiProvider {
+  Openrouter = "openrouter",
+  Ollama = "ollama",
+}
+
 export enum ERole {
   System = "system",
   User = "user",

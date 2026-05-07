@@ -1,20 +1,19 @@
 import type { TOption } from "../../types";
 import { AsyncQueue } from "../../utils/async-queue";
 import { createLogger, type TLogger } from "../../utils/logger";
-import { OllamaAiProvider } from "../ai-providers/ollama";
-import { OpenrouterAiProvider } from "../ai-providers/openrouter";
 import {
+  AiConnector,
   DEFINE_MESSAGE_IMPORTANCE_TOOL,
   defineMessageImportanceTool,
-} from "../ai-providers/tools/define-message-importance/definition";
-import type { TDefineMessageImportance } from "../ai-providers/tools/define-message-importance/handler";
-import {
+  EModelPurpose,
+  ERole,
   SEARCH_MEMORY_TOOL,
   searchMemoryTool,
-} from "../ai-providers/tools/search-memory/definition";
-import type { TSearchMemory } from "../ai-providers/tools/search-memory/handler";
-import type { THistoryItem, TPrompt } from "../ai-providers/types";
-import { EModelPurpose, ERole } from "../ai-providers/types";
+  type TDefineMessageImportance,
+  type THistoryItem,
+  type TPrompt,
+  type TSearchMemory,
+} from "../ai/api";
 import { Memory } from "../memory";
 import { EMemoryImportance, type TMemory } from "../memory/types";
 import type { TIncommingMessage, TOutgoingMessage } from "./types";
@@ -22,7 +21,7 @@ import type { TIncommingMessage, TOutgoingMessage } from "./types";
 export class MessageHandler {
   private static _instances = new Map<string, MessageHandler>();
   private logger: TLogger;
-  private ai = OpenrouterAiProvider.instance;
+  private ai = AiConnector.instance;
   private queue = new AsyncQueue();
   private memory = Memory.instance;
 
@@ -93,13 +92,13 @@ export class MessageHandler {
         content: [{ type: "text", text: message.message.content }],
       },
       history,
+      purpose: EModelPurpose.ChatAccurate,
       user: {
         username: message.author.username,
         id: message.author.id,
         displayName: message.author.username,
       },
       tools: [],
-      model: this.ai.getModel(EModelPurpose.ChatAccurate),
     });
     this.logger.info(
       `handleMessage: AI chat completed (${(performance.now() - chatStart).toFixed(0)}ms)`,
@@ -142,7 +141,7 @@ export class MessageHandler {
     const start = performance.now();
 
     const INSTRUCTIONS = await Bun.file(
-      "./src/services/ai-providers/tools/define-message-importance/instructions.xml",
+      "./src/services/ai/tools/define-message-importance/instructions.xml",
     ).text();
 
     const system: THistoryItem = {
@@ -159,7 +158,7 @@ export class MessageHandler {
       prompt: uMessage,
       instructions: [system],
       tools: [defineMessageImportanceTool],
-      model: this.ai.getModel(EModelPurpose.ToolCheap),
+      purpose: EModelPurpose.ToolCheap,
     });
 
     if (!res) {
@@ -221,7 +220,7 @@ export class MessageHandler {
     }
 
     const INSTRUCTIONS = await Bun.file(
-      "./src/services/ai-providers/tools/search-memory/instructions.xml",
+      "./src/services/ai/tools/search-memory/instructions.xml",
     ).text();
 
     const system: THistoryItem = {
@@ -238,7 +237,7 @@ export class MessageHandler {
       prompt: uMessage,
       instructions: [system],
       tools: [searchMemoryTool],
-      model: this.ai.getModel(EModelPurpose.ToolCheap),
+      purpose: EModelPurpose.ToolCheap,
       chatId: message.chatId,
     });
 

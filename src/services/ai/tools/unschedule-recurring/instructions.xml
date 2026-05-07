@@ -1,0 +1,42 @@
+<instructions>
+
+  <purpose>
+    Remove a previously scheduled recurring cron job so it no longer fires.
+    Use this tool when the user explicitly asks to cancel or stop a scheduled reminder
+    or periodic task.
+  </purpose>
+
+  <tool>
+    <name>unschedule-recurring</name>
+    <description>
+      Deletes a recurring cron job by its unique name. The job will no longer fire
+      after being unscheduled. Returns the removed job details.
+    </description>
+  </tool>
+
+  <usage_rules>
+    <rule>Always confirm with the user which job they want to remove before calling this tool</rule>
+    <rule>Use the exact job name that was provided when the job was originally scheduled</rule>
+    <rule>Inform the user once the job has been successfully removed</rule>
+    <rule>If the job name does not exist, inform the user that no matching job was found</rule>
+  </usage_rules>
+
+  <examples>
+    <example>
+      <context>User says: "Już nie potrzebuję przypomnienia o paddu"</context>
+      <toolCall>
+        <name>paddu-reminder</name>
+      </toolCall>
+      <reasoning>User wants to cancel their paddu reminder by name.</reasoning>
+    </example>
+
+    <example>
+      <context>User says: "Stop the study check-ins"</context>
+      <toolCall>
+        <name>study-checkin</name>
+      </toolCall>
+      <reasoning>User wants to cancel the study check-in job.</reasoning>
+    </example>
+  </examples>
+
+</instructions>

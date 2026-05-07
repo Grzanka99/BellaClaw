@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { ERole } from "../ai-providers/types";
+import { ERole } from "../ai/types";
 import { sortByImportanceAndDates } from "./sort";
 import type { TMemory } from "./types";
 import { EMemoryImportance } from "./types";

@@ -1,13 +1,20 @@
 import { OpenRouter } from "@openrouter/sdk";
 import type { AssistantMessage, Message, ToolDefinitionJson } from "@openrouter/sdk/models";
 import type { User } from "discord.js";
-import type { TOption } from "../../../types";
-import { createLogger } from "../../../utils/logger";
-import type { TTools } from "../tools";
-import { DEFINE_MESSAGE_IMPORTANCE_TOOL } from "../tools/define-message-importance/definition";
-import { handleDefineMessageImportance } from "../tools/define-message-importance/handler";
-import { SEARCH_MEMORY_TOOL } from "../tools/search-memory/definition";
-import { handleSearchMemory } from "../tools/search-memory/handler";
+import { Config } from "../../../../config";
+import type { TOption } from "../../../../types";
+import { createLogger } from "../../../../utils/logger";
+import type { TTools } from "../../tools";
+import { DEFINE_MESSAGE_IMPORTANCE_TOOL } from "../../tools/define-message-importance/definition";
+import { handleDefineMessageImportance } from "../../tools/define-message-importance/handler";
+import { LIST_CRON_JOBS_TOOL } from "../../tools/list-cron-jobs/definition";
+import { handleListCronJobs } from "../../tools/list-cron-jobs/handler";
+import { SCHEDULE_RECURRING_TOOL } from "../../tools/schedule-recurring/definition";
+import { handleScheduleRecurring } from "../../tools/schedule-recurring/handler";
+import { SEARCH_MEMORY_TOOL } from "../../tools/search-memory/definition";
+import { handleSearchMemory } from "../../tools/search-memory/handler";
+import { UNSCHEDULE_RECURRING_TOOL } from "../../tools/unschedule-recurring/definition";
+import { handleUnscheduleRecurring } from "../../tools/unschedule-recurring/handler";
 import {
   EModelPurpose,
   ERole,
@@ -17,25 +24,14 @@ import {
   type TToolCallResponse,
   type TToolCallResult,
   type TToolEntry,
-} from "../types";
-import {
-  MODEL_OPENROUTER_FREE,
-  MODEL_OPENROUTER_GEMINI_3_1_PRO_PREVIEW,
-  MODEL_OPENROUTER_GEMINI_3_FLASH_PREVIEW,
-  MODEL_OPENROUTER_GPT_5_4_MINI,
-  MODEL_OPENROUTER_GPT_5_4_NANO,
-} from "./models";
+} from "../../types";
 
 export type TOpenrouterModel =
-  | typeof MODEL_OPENROUTER_FREE
-  | typeof MODEL_OPENROUTER_GEMINI_3_FLASH_PREVIEW
-  | typeof MODEL_OPENROUTER_GPT_5_4_MINI
-  | typeof MODEL_OPENROUTER_GPT_5_4_NANO
-  | typeof MODEL_OPENROUTER_GEMINI_3_1_PRO_PREVIEW;
+  (typeof Config.ai.providers.openrouter.models)[keyof typeof Config.ai.providers.openrouter.models];
 
 const OPENROUTER_API_KEY = Bun.env.OPENROUTER_API_KEY as string;
 
-const BASE_SYSTEM_INSTRUCTIONS_PATH = "./src/services/ai-providers/instructions/base-system.xml";
+const BASE_SYSTEM_INSTRUCTIONS_PATH = "./src/services/ai/instructions/base-system.xml";
 
 function buildUserContextMessage(user: TUserData): TPrompt {
   return {
@@ -56,14 +52,14 @@ type TChatWithToolsArgs = {
   history: THistoryItem[];
   user: TUserData;
   tools: TToolEntry[];
-  model: TOpenrouterModel;
+  purpose: EModelPurpose;
 };
 
 type TToolCallArgs = {
   prompt: TPrompt;
   instructions: THistoryItem[];
   tools: ToolDefinitionJson[];
-  model: TOpenrouterModel;
+  purpose: EModelPurpose;
   chatId?: string;
 };
 
@@ -85,22 +81,26 @@ export class OpenrouterAiProvider {
   }
 
   public getModel(purpose: EModelPurpose): TOpenrouterModel {
+    const { models } = Config.ai.providers.openrouter;
+
     switch (purpose) {
       case EModelPurpose.ToolCheap:
-        return MODEL_OPENROUTER_GPT_5_4_NANO;
+        return models.toolCheap;
       case EModelPurpose.General:
-        return MODEL_OPENROUTER_FREE;
+        return models.general;
       case EModelPurpose.ToolAccurate:
-        return MODEL_OPENROUTER_GEMINI_3_FLASH_PREVIEW;
+        return models.toolAccurate;
       case EModelPurpose.Chat:
-        return MODEL_OPENROUTER_GPT_5_4_MINI;
+        return models.chat;
       case EModelPurpose.ChatAccurate:
-        return MODEL_OPENROUTER_GEMINI_3_1_PRO_PREVIEW;
+        return models.chatAccurate;
     }
   }
 
   public async chatWithTools(args: TChatWithToolsArgs): Promise<TOption<TChatWithTools>> {
-    this.logger.info(`Calling ${args.model}`);
+    const model = this.getModel(args.purpose);
+
+    this.logger.info(`Calling ${model}`);
     const baseSystemText = await Bun.file(BASE_SYSTEM_INSTRUCTIONS_PATH).text();
     const baseSystemMessage: THistoryItem = { role: ERole.System, content: baseSystemText };
     const messages: Message[] = [
@@ -121,7 +121,7 @@ export class OpenrouterAiProvider {
 
     const res = await this.openrouter.chat.send({
       stream: false,
-      model: args.model,
+      model,
       messages,
       tools: definitions,
     });
@@ -142,13 +142,15 @@ export class OpenrouterAiProvider {
   }
 
   public async toolCall<T = unknown>(args: TToolCallArgs): Promise<TOption<TToolCallResponse<T>>> {
-    this.logger.info(`Calling ${args.model}`);
+    const model = this.getModel(args.purpose);
+
+    this.logger.info(`Calling ${model}`);
     const messages: Message[] = [...args.instructions];
     messages.push(args.prompt);
 
     const res = await this.openrouter.chat.send({
       stream: false,
-      model: args.model,
+      model,
       messages,
       tools: args.tools,
     });
@@ -178,6 +180,40 @@ export class OpenrouterAiProvider {
           });
           break;
         }
+        case LIST_CRON_JOBS_TOOL: {
+          if (!args.chatId) {
+            this.logger.error(`chatId is required for tool: ${LIST_CRON_JOBS_TOOL}`);
+            continue;
+          }
+          const toolRes = await handleListCronJobs(toolCall, args.chatId);
+          if (!toolRes) {
+            this.logger.error(`Invalid arguments for tool: ${LIST_CRON_JOBS_TOOL}`);
+            continue;
+          }
+          toolCallsResults.push({
+            tool: LIST_CRON_JOBS_TOOL,
+            // NOTE: Thats the acceptable exception for type cast!
+            data: toolRes as T,
+          });
+          break;
+        }
+        case SCHEDULE_RECURRING_TOOL: {
+          if (!args.chatId) {
+            this.logger.error(`chatId is required for tool: ${SCHEDULE_RECURRING_TOOL}`);
+            continue;
+          }
+          const toolRes = await handleScheduleRecurring(toolCall, args.chatId);
+          if (!toolRes) {
+            this.logger.error(`Invalid arguments for tool: ${SCHEDULE_RECURRING_TOOL}`);
+            continue;
+          }
+          toolCallsResults.push({
+            tool: SCHEDULE_RECURRING_TOOL,
+            // NOTE: Thats the acceptable exception for type cast!
+            data: toolRes as T,
+          });
+          break;
+        }
         case SEARCH_MEMORY_TOOL: {
           if (!args.chatId) {
             this.logger.error(`chatId is required for tool: ${SEARCH_MEMORY_TOOL}`);
@@ -190,6 +226,23 @@ export class OpenrouterAiProvider {
           }
           toolCallsResults.push({
             tool: SEARCH_MEMORY_TOOL,
+            // NOTE: Thats the acceptable exception for type cast!
+            data: toolRes as T,
+          });
+          break;
+        }
+        case UNSCHEDULE_RECURRING_TOOL: {
+          if (!args.chatId) {
+            this.logger.error(`chatId is required for tool: ${UNSCHEDULE_RECURRING_TOOL}`);
+            continue;
+          }
+          const toolRes = await handleUnscheduleRecurring(toolCall, args.chatId);
+          if (!toolRes) {
+            this.logger.error(`Invalid arguments for tool: ${UNSCHEDULE_RECURRING_TOOL}`);
+            continue;
+          }
+          toolCallsResults.push({
+            tool: UNSCHEDULE_RECURRING_TOOL,
             // NOTE: Thats the acceptable exception for type cast!
             data: toolRes as T,
           });

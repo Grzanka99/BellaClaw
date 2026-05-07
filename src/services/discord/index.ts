@@ -1,7 +1,6 @@
 import { Client, Events, GatewayIntentBits, type Message, Partials } from "discord.js";
 import { createLogger, type TLogger } from "../../utils/logger";
-import { OpenrouterAiProvider } from "../ai-providers/openrouter";
-import { ERole } from "../ai-providers/types";
+import { ERole } from "../ai/types";
 import { Memory } from "../memory";
 import { MessageHandler } from "../message-handler";
 
@@ -10,7 +9,6 @@ export class DiscordSingleton {
   private logger: TLogger = createLogger("DISCORD");
   private client: Client;
   private memory: Memory;
-  private openrouter: OpenrouterAiProvider;
 
   private constructor() {
     this.client = new Client({
@@ -24,7 +22,6 @@ export class DiscordSingleton {
     });
 
     this.memory = Memory.instance;
-    this.openrouter = OpenrouterAiProvider.instance;
   }
 
   public static get instance() {

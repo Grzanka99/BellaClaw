@@ -16,6 +16,7 @@ Small Bun + TypeScript Discord assistant. Prefer small, targeted changes that pr
 - Typecheck: `bunx tsc --noEmit`
 - Biome check: `bunx @biomejs/biome check .`
 - Biome auto-fix: `bunx @biomejs/biome check . --write`
+- After edits, run Biome auto-fix and Biome check on changed files when possible, instead of whole repo.
 
 ## Naming Conventions
 
@@ -44,10 +45,10 @@ Use `Bun.env.*` — never `process.env`.
 
 ## Tool Definitions Pattern
 
-Each tool lives in its own directory under `src/services/ai-providers/tools/`:
+Each tool lives in its own directory under `src/services/ai/tools/`:
 
 ```
-src/services/ai-providers/tools/<tool-name>/
+src/services/ai/tools/<tool-name>/
   definition.ts    — exports a ToolDefinitionJson (name, description, parameters)
   handler.ts       — parses arguments with Zod, returns parsed data
   instructions.xml — detailed instructions for the AI on when/how to use the tool
@@ -67,3 +68,9 @@ src/services/ai-providers/tools/<tool-name>/
 - Do not modify existing test files unless given direct permission
 - NEVER use types cast - 'as Type' - outside of tests
 - Instead of `some-type | undefined` use `TOption<some-type>`
+- Prefer braces even if statement has one line
+    ```
+    if (true) {
+        return undefined
+    }
+    ```
