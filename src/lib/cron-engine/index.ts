@@ -62,51 +62,91 @@ export class CronEngine extends EventEmitter {
       return { operation: "schedule", error: `Invalid cron pattern: ${args.pattern}` };
     }
 
-    const existing = await this.getJob(args.name, args.scope);
-    if (existing && existing.type === ECronEngineJobType.OneTime) {
-      return {
-        operation: "schedule",
-        error: `A one-time job named '${args.name}' already exists. Unschedule it first.`,
-      };
+    const normalizedScope = this.normalizeScope(args.scope);
+    const scheduledAt = new Date();
+    let nextRunAt: Date;
+    try {
+      nextRunAt = getNextFireTime(args.pattern, scheduledAt);
+    } catch (error) {
+      return this.createUnschedulablePatternError(args.pattern, error);
     }
-
-    if (existing && args.overwrite !== true) {
-      return {
-        operation: "schedule",
-        error: `Job '${args.name}' already exists. Set overwrite: true to replace.`,
-      };
-    }
-
-    const nextRunAt = getNextFireTime(args.pattern, new Date());
-    const now = Date.now();
 
     try {
-      await this.queue.enqueue(async () => {
-        this.db
-          .query(
-            `INSERT INTO ${this.tableName} (name, scope, data, type, pattern, nextRunAt, lastRunAt, createdAt)
-             VALUES ($name, $scope, $data, $type, $pattern, $nextRunAt, $lastRunAt, $createdAt)
-             ON CONFLICT(name, scope) DO UPDATE SET
-               data = $data, type = $type, pattern = $pattern, nextRunAt = $nextRunAt, lastRunAt = $lastRunAt, createdAt = $createdAt`,
-          )
-          .run({
-            $name: args.name,
-            $scope: this.normalizeScope(args.scope),
-            $data: args.data ?? null,
-            $type: ECronEngineJobType.Recurring,
-            $pattern: args.pattern,
-            $nextRunAt: nextRunAt.getTime(),
-            $lastRunAt: null,
-            $createdAt: now,
-          });
+      return await this.queue.enqueue(async () => {
+        const existing = this.getJobByNormalizedScope(args.name, normalizedScope);
+
+        if (existing && existing.type !== ECronEngineJobType.Recurring) {
+          return this.createCrossTypeScheduleError(args.name, existing.type);
+        }
+
+        if (existing && args.overwrite !== true) {
+          return this.createDuplicateJobError(args.name);
+        }
+
+        const rowParams = {
+          $name: args.name,
+          $scope: normalizedScope,
+          $data: args.data ?? null,
+          $type: ECronEngineJobType.Recurring,
+          $pattern: args.pattern,
+          $nextRunAt: nextRunAt.getTime(),
+          $lastRunAt: null,
+          $createdAt: scheduledAt.getTime(),
+        };
+
+        if (args.overwrite === true) {
+          const row = this.db
+            .query(
+              `INSERT INTO ${this.tableName} (name, scope, data, type, pattern, nextRunAt, lastRunAt, createdAt)
+               VALUES ($name, $scope, $data, $type, $pattern, $nextRunAt, $lastRunAt, $createdAt)
+               ON CONFLICT(name, scope) DO UPDATE SET
+                 data = $data, type = $type, pattern = $pattern, nextRunAt = $nextRunAt, lastRunAt = $lastRunAt, createdAt = $createdAt
+               WHERE type = $type
+               RETURNING *`,
+            )
+            .get(rowParams);
+
+          const job = this.parseJobRow(row);
+          if (job) {
+            return job;
+          }
+
+          const currentJob = this.getJobByNormalizedScope(args.name, normalizedScope);
+          if (currentJob) {
+            return this.createCrossTypeScheduleError(args.name, currentJob.type);
+          }
+
+          return this.createScheduledJobReadbackError();
+        }
+
+        try {
+          const row = this.db
+            .query(
+              `INSERT INTO ${this.tableName} (name, scope, data, type, pattern, nextRunAt, lastRunAt, createdAt)
+               VALUES ($name, $scope, $data, $type, $pattern, $nextRunAt, $lastRunAt, $createdAt)
+               RETURNING *`,
+            )
+            .get(rowParams);
+
+          const job = this.parseJobRow(row);
+          if (job) {
+            return job;
+          }
+
+          return this.createScheduledJobReadbackError();
+        } catch (error) {
+          const currentJob = this.getJobByNormalizedScope(args.name, normalizedScope);
+          if (currentJob) {
+            if (currentJob.type !== ECronEngineJobType.Recurring) {
+              return this.createCrossTypeScheduleError(args.name, currentJob.type);
+            }
+
+            return this.createDuplicateJobError(args.name);
+          }
+
+          throw error;
+        }
       });
-
-      const job = await this.getJob(args.name, args.scope);
-      if (!job) {
-        return { operation: "schedule", error: "Failed to read back scheduled job" };
-      }
-
-      return job;
     } catch (error) {
       this.logger.error(`Failed to schedule job: ${String(error)}`);
       return { operation: "schedule", error };
@@ -119,48 +159,84 @@ export class CronEngine extends EventEmitter {
       return { operation: "schedule", error: "fireAt must be in the future" };
     }
 
-    const existing = await this.getJob(args.name, args.scope);
-    if (existing && existing.type === ECronEngineJobType.Recurring) {
-      return {
-        operation: "schedule",
-        error: `A recurring job named '${args.name}' already exists. Unschedule it first.`,
-      };
-    }
-
-    if (existing && args.overwrite !== true) {
-      return {
-        operation: "schedule",
-        error: `Job '${args.name}' already exists. Set overwrite: true to replace.`,
-      };
-    }
+    const normalizedScope = this.normalizeScope(args.scope);
 
     try {
-      await this.queue.enqueue(async () => {
-        this.db
-          .query(
-            `INSERT INTO ${this.tableName} (name, scope, data, type, pattern, nextRunAt, lastRunAt, createdAt)
-             VALUES ($name, $scope, $data, $type, $pattern, $nextRunAt, $lastRunAt, $createdAt)
-             ON CONFLICT(name, scope) DO UPDATE SET
-               data = $data, type = $type, pattern = $pattern, nextRunAt = $nextRunAt, lastRunAt = $lastRunAt, createdAt = $createdAt`,
-          )
-          .run({
-            $name: args.name,
-            $scope: this.normalizeScope(args.scope),
-            $data: args.data ?? null,
-            $type: ECronEngineJobType.OneTime,
-            $pattern: null,
-            $nextRunAt: args.fireAt.getTime(),
-            $lastRunAt: null,
-            $createdAt: Date.now(),
-          });
+      return await this.queue.enqueue(async () => {
+        const existing = this.getJobByNormalizedScope(args.name, normalizedScope);
+
+        if (existing && existing.type !== ECronEngineJobType.OneTime) {
+          return this.createCrossTypeScheduleError(args.name, existing.type);
+        }
+
+        if (existing && args.overwrite !== true) {
+          return this.createDuplicateJobError(args.name);
+        }
+
+        const rowParams = {
+          $name: args.name,
+          $scope: normalizedScope,
+          $data: args.data ?? null,
+          $type: ECronEngineJobType.OneTime,
+          $pattern: null,
+          $nextRunAt: args.fireAt.getTime(),
+          $lastRunAt: null,
+          $createdAt: Date.now(),
+        };
+
+        if (args.overwrite === true) {
+          const row = this.db
+            .query(
+              `INSERT INTO ${this.tableName} (name, scope, data, type, pattern, nextRunAt, lastRunAt, createdAt)
+               VALUES ($name, $scope, $data, $type, $pattern, $nextRunAt, $lastRunAt, $createdAt)
+               ON CONFLICT(name, scope) DO UPDATE SET
+                 data = $data, type = $type, pattern = $pattern, nextRunAt = $nextRunAt, lastRunAt = $lastRunAt, createdAt = $createdAt
+               WHERE type = $type
+               RETURNING *`,
+            )
+            .get(rowParams);
+
+          const job = this.parseJobRow(row);
+          if (job) {
+            return job;
+          }
+
+          const currentJob = this.getJobByNormalizedScope(args.name, normalizedScope);
+          if (currentJob) {
+            return this.createCrossTypeScheduleError(args.name, currentJob.type);
+          }
+
+          return this.createScheduledJobReadbackError();
+        }
+
+        try {
+          const row = this.db
+            .query(
+              `INSERT INTO ${this.tableName} (name, scope, data, type, pattern, nextRunAt, lastRunAt, createdAt)
+               VALUES ($name, $scope, $data, $type, $pattern, $nextRunAt, $lastRunAt, $createdAt)
+               RETURNING *`,
+            )
+            .get(rowParams);
+
+          const job = this.parseJobRow(row);
+          if (job) {
+            return job;
+          }
+
+          return this.createScheduledJobReadbackError();
+        } catch (error) {
+          const currentJob = this.getJobByNormalizedScope(args.name, normalizedScope);
+          if (currentJob) {
+            if (currentJob.type !== ECronEngineJobType.OneTime) {
+              return this.createCrossTypeScheduleError(args.name, currentJob.type);
+            }
+
+            return this.createDuplicateJobError(args.name);
+          }
+
+          throw error;
+        }
       });
-
-      const job = await this.getJob(args.name, args.scope);
-      if (!job) {
-        return { operation: "schedule", error: "Failed to read back scheduled job" };
-      }
-
-      return job;
     } catch (error) {
       this.logger.error(`Failed to schedule one-time job: ${String(error)}`);
       return { operation: "schedule", error };
@@ -177,12 +253,12 @@ export class CronEngine extends EventEmitter {
           .query(`DELETE FROM ${this.tableName} WHERE name = $name AND scope = $scope RETURNING *`)
           .get({ $name: name, $scope: this.normalizeScope(scope) });
 
-        const parsed = SCronEngineJob.safeParse(row);
-        if (!parsed.success) {
+        const job = this.parseJobRow(row);
+        if (!job) {
           return undefined;
         }
 
-        return parsed.data;
+        return job;
       });
 
       if (!res) {
@@ -219,16 +295,7 @@ export class CronEngine extends EventEmitter {
 
   public async getJob(name: string, scope?: string): Promise<TOption<TCronEngineJob>> {
     const res = await this.queue.enqueue(async () => {
-      const row = this.db
-        .query(`SELECT * FROM ${this.tableName} WHERE name = $name AND scope = $scope`)
-        .get({ $name: name, $scope: this.normalizeScope(scope) });
-
-      const parsed = SCronEngineJob.safeParse(row);
-      if (!parsed.success) {
-        return undefined;
-      }
-
-      return parsed.data;
+      return this.getJobByNormalizedScope(name, this.normalizeScope(scope));
     });
 
     if (!res) {
@@ -329,6 +396,58 @@ export class CronEngine extends EventEmitter {
 
   private normalizeScope(scope: TOption<string>) {
     return scope ?? "";
+  }
+
+  private createDuplicateJobError(name: string): TCronEngineError {
+    return {
+      operation: "schedule",
+      error: `Job '${name}' already exists. Set overwrite: true to replace.`,
+    };
+  }
+
+  private createCrossTypeScheduleError(
+    name: string,
+    existingType: ECronEngineJobType,
+  ): TCronEngineError {
+    if (existingType === ECronEngineJobType.OneTime) {
+      return {
+        operation: "schedule",
+        error: `A one-time job named '${name}' already exists. Unschedule it first.`,
+      };
+    }
+
+    return {
+      operation: "schedule",
+      error: `A recurring job named '${name}' already exists. Unschedule it first.`,
+    };
+  }
+
+  private createUnschedulablePatternError(pattern: string, error: unknown): TCronEngineError {
+    return {
+      operation: "schedule",
+      error: `Cron pattern '${pattern}' is valid but cannot be scheduled: ${String(error)}`,
+    };
+  }
+
+  private createScheduledJobReadbackError(): TCronEngineError {
+    return { operation: "schedule", error: "Failed to read back scheduled job" };
+  }
+
+  private parseJobRow(row: unknown): TOption<TCronEngineJob> {
+    const parsed = SCronEngineJob.safeParse(row);
+    if (!parsed.success) {
+      return undefined;
+    }
+
+    return parsed.data;
+  }
+
+  private getJobByNormalizedScope(name: string, normalizedScope: string): TOption<TCronEngineJob> {
+    const row = this.db
+      .query(`SELECT * FROM ${this.tableName} WHERE name = $name AND scope = $scope`)
+      .get({ $name: name, $scope: normalizedScope });
+
+    return this.parseJobRow(row);
   }
 
   private static validateTableName(tableName: string) {
