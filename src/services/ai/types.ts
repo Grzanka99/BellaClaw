@@ -1,4 +1,4 @@
-import type { ChatMessageToolCall, ToolDefinitionJson } from "@openrouter/sdk/models";
+import type { ToolDefinitionJson } from "@openrouter/sdk/models";
 
 export enum EAiProvider {
   Openrouter = "openrouter",
@@ -22,26 +22,6 @@ export type TPrompt = {
     type: "text";
     text: string;
   }>;
-};
-
-export type TToolCallResult<T = unknown> = {
-  tool: string;
-  data: T;
-};
-
-export type TToolCallResponse<T = unknown> = {
-  response: string;
-  toolCalls: Array<{
-    id: string;
-    type: "function";
-    function: unknown;
-  }>;
-  toolCallsResults: TToolCallResult<T>[];
-};
-
-export type TChatWithTools = {
-  response: string;
-  toolCalls: ChatMessageToolCall[];
 };
 
 export type TToolEntry = {

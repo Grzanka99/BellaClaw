@@ -1,19 +1,28 @@
-import type { ToolDefinitionJson } from "@openrouter/sdk/models";
 import { Config } from "../../../config";
-import type { TOption } from "../../../types";
 import { createLogger } from "../../../utils/logger";
 import { OllamaAiProvider } from "../providers/ollama";
 import { OpenrouterAiProvider } from "../providers/openrouter";
-import type {
-  EModelPurpose,
-  TChatWithTools,
-  THistoryItem,
-  TPrompt,
-  TToolCallResponse,
-  TToolEntry,
-} from "../types";
+import {
+  runAssistantToolLoop,
+  runToolTask,
+  type TAssistantToolLoopArgs,
+  type TAssistantToolLoopResult,
+  type TRuntimeUser,
+  type TToolTaskArgs,
+  type TToolTaskResult,
+} from "../runtime";
 import { EAiProvider } from "../types";
 
+export type {
+  TAssistantToolActivity,
+  TAssistantToolLoopArgs,
+  TAssistantToolLoopResult,
+  TNormalizedToolResult,
+  TRuntimeUser,
+  TToolTaskArgs,
+  TToolTaskResult,
+} from "../runtime";
+export { EAssistantLoopStopReason } from "../runtime";
 export {
   DEFINE_MESSAGE_IMPORTANCE_TOOL,
   defineMessageImportanceTool,
@@ -23,28 +32,7 @@ export { SEARCH_MEMORY_TOOL, searchMemoryTool } from "../tools/search-memory/def
 export type { TSearchMemory } from "../tools/search-memory/handler";
 export type { THistoryItem, TPrompt } from "../types";
 export { EAiProvider, EModelPurpose, ERole } from "../types";
-
-export type TAiUser = {
-  username: string;
-  id: string;
-  displayName: string;
-};
-
-export type TChatWithToolsArgs = {
-  prompt: TPrompt;
-  history: THistoryItem[];
-  user: TAiUser;
-  tools: TToolEntry[];
-  purpose: EModelPurpose;
-};
-
-export type TToolCallArgs = {
-  prompt: TPrompt;
-  instructions: THistoryItem[];
-  tools: ToolDefinitionJson[];
-  purpose: EModelPurpose;
-  chatId?: string;
-};
+export type TAiUser = TRuntimeUser;
 
 export class AiConnector {
   private static _instance: AiConnector;
@@ -77,11 +65,20 @@ export class AiConnector {
     }
   }
 
-  public async chatWithTools(args: TChatWithToolsArgs): Promise<TOption<TChatWithTools>> {
-    return this.provider.chatWithTools(args);
+  public async runAssistantToolLoop(
+    args: TAssistantToolLoopArgs,
+  ): Promise<TAssistantToolLoopResult> {
+    return runAssistantToolLoop({
+      ...args,
+      requestAssistantTurn:
+        args.requestAssistantTurn ?? this.provider.requestAssistantTurn.bind(this.provider),
+    });
   }
 
-  public async toolCall<T = unknown>(args: TToolCallArgs): Promise<TOption<TToolCallResponse<T>>> {
-    return this.provider.toolCall<T>(args);
+  public async runToolTask(args: TToolTaskArgs): Promise<TToolTaskResult> {
+    return runToolTask({
+      ...args,
+      requestAssistantTurn: this.provider.requestAssistantTurn.bind(this.provider),
+    });
   }
 }

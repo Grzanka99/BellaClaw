@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type { TOption } from "../../types";
 import { AsyncQueue } from "../../utils/async-queue";
 import { createLogger, type TLogger } from "../../utils/logger";
@@ -9,14 +10,17 @@ import {
   ERole,
   SEARCH_MEMORY_TOOL,
   searchMemoryTool,
-  type TDefineMessageImportance,
   type THistoryItem,
   type TPrompt,
-  type TSearchMemory,
 } from "../ai/api";
+import { SDefineMessageImportance } from "../ai/tools/define-message-importance/handler";
 import { Memory } from "../memory";
-import { EMemoryImportance, type TMemory } from "../memory/types";
+import { EMemoryImportance, SMemory, type TMemory } from "../memory/types";
 import type { TIncommingMessage, TOutgoingMessage } from "./types";
+
+const SSearchMemoryToolResult = z.object({
+  memories: z.array(SMemory),
+});
 
 export class MessageHandler {
   private static _instances = new Map<string, MessageHandler>();
@@ -86,7 +90,7 @@ export class MessageHandler {
     }
 
     const chatStart = performance.now();
-    const aiRes = await this.ai.chatWithTools({
+    const aiRes = await this.ai.runAssistantToolLoop({
       prompt: {
         role: ERole.User,
         content: [{ type: "text", text: message.message.content }],
@@ -99,19 +103,22 @@ export class MessageHandler {
         displayName: message.author.username,
       },
       tools: [],
+      chatId: message.chatId,
     });
     this.logger.info(
       `handleMessage: AI chat completed (${(performance.now() - chatStart).toFixed(0)}ms)`,
     );
 
-    if (!aiRes) {
-      this.logger.warning("handleMessage: AI returned undefined, aborting");
+    if (aiRes.finalResponse === undefined) {
+      this.logger.warning("handleMessage: AI returned no final response, aborting");
       return undefined;
     }
 
+    const finalResponse = aiRes.finalResponse;
+
     this.queue.enqueue(async () => {
       const respImpStart = performance.now();
-      const responseImportance = await this.defineMessageImportance(aiRes.response);
+      const responseImportance = await this.defineMessageImportance(finalResponse);
       this.logger.info(
         `handleMessage: response importance: ${responseImportance} (${(performance.now() - respImpStart).toFixed(0)}ms)`,
       );
@@ -121,7 +128,7 @@ export class MessageHandler {
           chatId: message.chatId,
           message: {
             type: "text",
-            content: aiRes.response,
+            content: finalResponse,
           },
           author: {
             type: ERole.Assistant,
@@ -134,7 +141,7 @@ export class MessageHandler {
     this.logger.info(
       `handleMessage: done (${(performance.now() - handleMessageStart).toFixed(0)}ms)`,
     );
-    return aiRes.response;
+    return finalResponse;
   }
 
   private async defineMessageImportance(message: string): Promise<EMemoryImportance> {
@@ -154,31 +161,37 @@ export class MessageHandler {
       content: [{ type: "text", text: message }],
     };
 
-    const res = await this.ai.toolCall<TDefineMessageImportance>({
+    const res = await this.ai.runToolTask({
       prompt: uMessage,
-      instructions: [system],
-      tools: [defineMessageImportanceTool],
+      history: [system],
+      tools: [{ definition: defineMessageImportanceTool }],
       purpose: EModelPurpose.ToolCheap,
+      chatId: undefined,
+      user: undefined,
     });
 
-    if (!res) {
+    const realRes = res.toolResults.find(
+      (toolResult) => toolResult.toolName === DEFINE_MESSAGE_IMPORTANCE_TOOL && toolResult.success,
+    );
+
+    if (realRes === undefined) {
       this.logger.error(
         `defineMessageImportance: failed, defaulting to low (${(performance.now() - start).toFixed(0)}ms)`,
       );
       return EMemoryImportance.Low;
     }
 
-    const realRes = res.toolCallsResults.find((el) => el.tool === DEFINE_MESSAGE_IMPORTANCE_TOOL);
+    const parsed = SDefineMessageImportance.safeParse(realRes.data);
 
-    if (!realRes) {
+    if (!parsed.success) {
       this.logger.error(
-        `defineMessageImportance: no tool call result found, defaulting to low (${(performance.now() - start).toFixed(0)}ms)`,
+        `defineMessageImportance: invalid tool result, defaulting to low (${(performance.now() - start).toFixed(0)}ms)`,
       );
       return EMemoryImportance.Low;
     }
 
     this.logger.info(`defineMessageImportance: done (${(performance.now() - start).toFixed(0)}ms)`);
-    return realRes.data.importance;
+    return parsed.data.importance;
   }
 
   private async saveMessageToDatabase(
@@ -233,27 +246,30 @@ export class MessageHandler {
       content: [{ type: "text", text: message.message.content }],
     };
 
-    const res = await this.ai.toolCall<TSearchMemory>({
+    const res = await this.ai.runToolTask({
       prompt: uMessage,
-      instructions: [system],
-      tools: [searchMemoryTool],
+      history: [system],
+      tools: [{ definition: searchMemoryTool }],
       purpose: EModelPurpose.ToolCheap,
       chatId: message.chatId,
+      user: undefined,
     });
 
-    if (!res) {
-      this.logger.error(
-        `searchMemories: failed to determine if memory should be searched (${(performance.now() - start).toFixed(0)}ms)`,
-      );
-      return [];
-    }
-
-    const filtered = res.toolCallsResults.filter((el) => el.tool === SEARCH_MEMORY_TOOL);
     const allFound: TMemory[] = [];
-
     const seen = new Set<number>();
-    for (const f of filtered) {
-      for (const m of f.data.memories) {
+
+    for (const toolResult of res.toolResults) {
+      if (toolResult.toolName !== SEARCH_MEMORY_TOOL || !toolResult.success) {
+        continue;
+      }
+
+      const parsed = SSearchMemoryToolResult.safeParse(toolResult.data);
+
+      if (!parsed.success) {
+        continue;
+      }
+
+      for (const m of parsed.data.memories) {
         if (!seen.has(m.id)) {
           seen.add(m.id);
           allFound.push(m);
