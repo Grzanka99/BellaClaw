@@ -10,7 +10,7 @@ export const SCronEngineJob = z.object({
   id: z.number(),
   name: z.string(),
   scope: z.string().transform((value) => (value.length > 0 ? value : undefined)),
-  data: z
+  group: z
     .string()
     .nullable()
     .transform((value) => value ?? undefined),
@@ -30,7 +30,7 @@ export const SCronEngineJob = z.object({
 export const SScheduleRecurringArgs = z.object({
   name: z.string(),
   scope: z.string().optional(),
-  data: z.string().optional(),
+  group: z.string().optional(),
   pattern: z.string(),
   overwrite: z.boolean().optional(),
 });
@@ -38,7 +38,7 @@ export const SScheduleRecurringArgs = z.object({
 export const SScheduleOnceArgs = z.object({
   name: z.string(),
   scope: z.string().optional(),
-  data: z.string().optional(),
+  group: z.string().optional(),
   fireAt: z.coerce.date(),
   overwrite: z.boolean().optional(),
 });
@@ -46,7 +46,7 @@ export const SScheduleOnceArgs = z.object({
 export type TCronEngineJobContext = {
   name: string;
   scope: TOption<string>;
-  data: TOption<string>;
+  group: TOption<string>;
   type: ECronEngineJobType;
   pattern: TOption<string>;
   lastRunAt: TOption<Date>;

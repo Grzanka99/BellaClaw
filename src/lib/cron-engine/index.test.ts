@@ -106,28 +106,32 @@ describe("CronEngine", () => {
       name: "recurring-job",
       scope: "scope-a",
       pattern: "*/5 * * * *",
-      data: '{"kind":"recurring"}',
+      group: '{"kind":"recurring"}',
     });
 
     const internals = engine as unknown as TEngineWithInternals;
-    internals.db.query("UPDATE cron_engine_test_jobs SET nextRunAt = $ts WHERE name = $name AND scope = $scope").run({
-      $ts: Date.now() - 1_000,
-      $name: "recurring-job",
-      $scope: "scope-a",
-    });
+    internals.db
+      .query(
+        "UPDATE cron_engine_test_jobs SET nextRunAt = $ts WHERE name = $name AND scope = $scope",
+      )
+      .run({
+        $ts: Date.now() - 1_000,
+        $name: "recurring-job",
+        $scope: "scope-a",
+      });
 
     const namedEvent = new Promise<{
       name: string;
       scope: string | undefined;
       type: ECronEngineJobType;
-      data: string | undefined;
+      group: string | undefined;
     }>((resolve) => {
       engine.on("recurring-job", (ctx) => {
         resolve({
           name: ctx.name,
           scope: ctx.scope,
           type: ctx.type,
-          data: ctx.data,
+          group: ctx.group,
         });
       });
     });
@@ -149,7 +153,7 @@ describe("CronEngine", () => {
     expect(emitted.name).toBe("recurring-job");
     expect(emitted.scope).toBe("scope-a");
     expect(emitted.type).toBe(ECronEngineJobType.Recurring);
-    expect(emitted.data).toBe('{"kind":"recurring"}');
+    expect(emitted.group).toBe('{"kind":"recurring"}');
     expect(firedName).toBe("recurring-job");
     expect(updatedJob?.lastRunAt).toBeInstanceOf(Date);
     expect(updatedJob?.nextRunAt).toBeInstanceOf(Date);
@@ -160,13 +164,13 @@ describe("CronEngine", () => {
     const internals = engine as unknown as TEngineWithInternals;
     internals.db
       .query(
-        `INSERT INTO cron_engine_test_jobs (name, scope, data, type, pattern, nextRunAt, lastRunAt, createdAt)
-         VALUES ($name, $scope, $data, $type, $pattern, $nextRunAt, $lastRunAt, $createdAt)`,
+        `INSERT INTO cron_engine_test_jobs (name, scope, "group", type, pattern, nextRunAt, lastRunAt, createdAt)
+         VALUES ($name, $scope, $group, $type, $pattern, $nextRunAt, $lastRunAt, $createdAt)`,
       )
       .run({
         $name: "one-time-job",
         $scope: "scope-a",
-        $data: '{"kind":"one-time"}',
+        $group: '{"kind":"one-time"}',
         $type: "onetime",
         $pattern: null,
         $nextRunAt: Date.now() - 1_000,

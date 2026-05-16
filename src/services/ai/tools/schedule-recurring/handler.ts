@@ -4,7 +4,7 @@ import type { TCronEngineJob } from "../../../../lib/cron-engine";
 export const SScheduleRecurringArgs = z.object({
   name: z.string(),
   pattern: z.string(),
-  data: z.string().optional(),
+  group: z.string().optional(),
   overwrite: z.boolean().optional(),
 });
 

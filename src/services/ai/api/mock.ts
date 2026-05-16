@@ -143,7 +143,7 @@ function createSingleToolRequester(reminderName: string): TRequestAssistantTurn 
             JSON.stringify({
               name: reminderName,
               pattern: "*/30 * * * *",
-              data: "mock-single",
+              group: "mock-single",
             }),
           ),
         ],
@@ -182,7 +182,7 @@ function createMultipleToolRequester(reminderName: string): TRequestAssistantTur
             JSON.stringify({
               name: reminderName,
               pattern: "0 9 * * 1",
-              data: "mock-batch",
+              group: "mock-batch",
             }),
           ),
           createToolCall("multi-list", LIST_CRON_JOBS_TOOL, "{}"),

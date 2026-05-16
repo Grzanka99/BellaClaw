@@ -8,22 +8,17 @@ import {
   type TScheduleRecurringArgs,
 } from "../../lib/cron-engine";
 import type { TOption } from "../../types";
-import { createLogger, type TLogger } from "../../utils/logger";
 
 export class CronSingleton extends EventEmitter {
   private static _instance: TOption<CronSingleton>;
   private static DEFAULT_DB_FILE = "cron-engine.db";
   private static dbFile = CronSingleton.DEFAULT_DB_FILE;
   private engine: CronEngine;
-  private logger: TLogger = createLogger("CRON");
 
   private constructor() {
     super();
 
-    this.engine = new CronEngine({
-      dbFile: CronSingleton.dbFile,
-      logger: this.logger,
-    });
+    this.engine = new CronEngine({ dbFile: CronSingleton.dbFile });
 
     this.engine.on("fire", (ctx: TCronEngineJobContext) => {
       this.emit(ctx.name, ctx);

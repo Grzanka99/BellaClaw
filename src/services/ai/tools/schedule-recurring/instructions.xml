@@ -49,9 +49,9 @@
       <toolCall>
         <name>study-checkin</name>
         <pattern>*/30 * * * *</pattern>
-        <data>study</data>
+        <group>study</group>
       </toolCall>
-      <reasoning>Periodic check-in every 30 minutes with "study" stored as job data.</reasoning>
+      <reasoning>Periodic check-in every 30 minutes with "study" stored as job group.</reasoning>
     </example>
 
     <example>

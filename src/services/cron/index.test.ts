@@ -62,7 +62,7 @@ describe("CronSingleton", () => {
       name: "shared-name",
       scope: "user-a",
       pattern: "0 9 * * *",
-      data: "alerts",
+      group: "alerts",
     });
     const second = await cron.schedule({
       name: "shared-name",
@@ -80,14 +80,14 @@ describe("CronSingleton", () => {
     expect(userAJob).toMatchObject({
       name: "shared-name",
       scope: "user-a",
-      data: "alerts",
+      group: "alerts",
       type: ECronEngineJobType.Recurring,
       pattern: "0 9 * * *",
     });
     expect(userBJob).toMatchObject({
       name: "shared-name",
       scope: "user-b",
-      data: undefined,
+      group: undefined,
       type: ECronEngineJobType.Recurring,
       pattern: "0 10 * * *",
     });
@@ -123,13 +123,13 @@ describe("CronSingleton", () => {
       name: "overwrite-job",
       scope: "user-a",
       pattern: "0 9 * * *",
-      data: "alerts",
+      group: "alerts",
     });
     const overwritten = await cron.schedule({
       name: "overwrite-job",
       scope: "user-a",
       pattern: "0 10 * * *",
-      data: "reminders",
+      group: "reminders",
       overwrite: true,
     });
 
@@ -142,7 +142,7 @@ describe("CronSingleton", () => {
       name: "overwrite-job",
       scope: "user-a",
       pattern: "0 10 * * *",
-      data: "reminders",
+      group: "reminders",
       type: ECronEngineJobType.Recurring,
     });
   });
@@ -155,7 +155,7 @@ describe("CronSingleton", () => {
       name: "one-time-job",
       scope: "user-a",
       fireAt: new Date(Date.now() + 60_000),
-      data: "timers",
+      group: "timers",
     });
 
     expect("error" in scheduled).toBe(false);
@@ -176,7 +176,7 @@ describe("CronSingleton", () => {
     expect(ctx).toMatchObject({
       name: "one-time-job",
       scope: "user-a",
-      data: "timers",
+      group: "timers",
       type: ECronEngineJobType.OneTime,
       pattern: undefined,
       lastRunAt: undefined,
@@ -193,7 +193,7 @@ describe("CronSingleton", () => {
       name: "recurring-job",
       scope: "user-a",
       pattern: "*/5 * * * *",
-      data: "alerts",
+      group: "alerts",
     });
 
     expect("error" in scheduled).toBe(false);
@@ -214,7 +214,7 @@ describe("CronSingleton", () => {
     expect(ctx).toMatchObject({
       name: "recurring-job",
       scope: "user-a",
-      data: "alerts",
+      group: "alerts",
       type: ECronEngineJobType.Recurring,
       pattern: "*/5 * * * *",
       lastRunAt: undefined,
@@ -222,7 +222,7 @@ describe("CronSingleton", () => {
     expect(job).toMatchObject({
       name: "recurring-job",
       scope: "user-a",
-      data: "alerts",
+      group: "alerts",
       type: ECronEngineJobType.Recurring,
       pattern: "*/5 * * * *",
       lastRunAt: expect.any(Date),

@@ -60,6 +60,7 @@ src/services/ai/tools/<tool-name>/
 
 ## Scope Rules
 
+- Do not introduce any shims or compatibility layers. It is work in progress app
 - Do not change anything not directly asked.
 - Do not fix type errors in files outside the current task's scope, even if you notice them.
 - If you find errors that are caused by current task changes, ask for permission to fix them

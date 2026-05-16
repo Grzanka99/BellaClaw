@@ -196,7 +196,7 @@ export async function executeToolCall(args: {
         name: parsed.data.name,
         scope: resolvedChatId,
         pattern: parsed.data.pattern,
-        data: parsed.data.data,
+        group: parsed.data.group,
         overwrite: parsed.data.overwrite,
       });
 

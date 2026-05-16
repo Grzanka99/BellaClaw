@@ -78,7 +78,7 @@ export class CronEngine extends EventEmitter {
         const rowParams = {
           $name: args.name,
           $scope: normalizedScope,
-          $data: args.data ?? null,
+          $group: args.group ?? null,
           $type: ECronEngineJobType.Recurring,
           $pattern: args.pattern,
           $nextRunAt: nextRunAt.getTime(),
@@ -89,10 +89,10 @@ export class CronEngine extends EventEmitter {
         if (args.overwrite === true) {
           const row = this.db
             .query(
-              `INSERT INTO ${this.tableName} (name, scope, data, type, pattern, nextRunAt, lastRunAt, createdAt)
-               VALUES ($name, $scope, $data, $type, $pattern, $nextRunAt, $lastRunAt, $createdAt)
+              `INSERT INTO ${this.tableName} (name, scope, "group", type, pattern, nextRunAt, lastRunAt, createdAt)
+               VALUES ($name, $scope, $group, $type, $pattern, $nextRunAt, $lastRunAt, $createdAt)
                ON CONFLICT(name, scope) DO UPDATE SET
-                 data = $data, type = $type, pattern = $pattern, nextRunAt = $nextRunAt, lastRunAt = $lastRunAt, createdAt = $createdAt
+                 "group" = $group, type = $type, pattern = $pattern, nextRunAt = $nextRunAt, lastRunAt = $lastRunAt, createdAt = $createdAt
                WHERE type = $type
                RETURNING *`,
             )
@@ -114,8 +114,8 @@ export class CronEngine extends EventEmitter {
         try {
           const row = this.db
             .query(
-              `INSERT INTO ${this.tableName} (name, scope, data, type, pattern, nextRunAt, lastRunAt, createdAt)
-               VALUES ($name, $scope, $data, $type, $pattern, $nextRunAt, $lastRunAt, $createdAt)
+              `INSERT INTO ${this.tableName} (name, scope, "group", type, pattern, nextRunAt, lastRunAt, createdAt)
+               VALUES ($name, $scope, $group, $type, $pattern, $nextRunAt, $lastRunAt, $createdAt)
                RETURNING *`,
             )
             .get(rowParams);
@@ -168,7 +168,7 @@ export class CronEngine extends EventEmitter {
         const rowParams = {
           $name: args.name,
           $scope: normalizedScope,
-          $data: args.data ?? null,
+          $group: args.group ?? null,
           $type: ECronEngineJobType.OneTime,
           $pattern: null,
           $nextRunAt: args.fireAt.getTime(),
@@ -179,10 +179,10 @@ export class CronEngine extends EventEmitter {
         if (args.overwrite === true) {
           const row = this.db
             .query(
-              `INSERT INTO ${this.tableName} (name, scope, data, type, pattern, nextRunAt, lastRunAt, createdAt)
-               VALUES ($name, $scope, $data, $type, $pattern, $nextRunAt, $lastRunAt, $createdAt)
+              `INSERT INTO ${this.tableName} (name, scope, "group", type, pattern, nextRunAt, lastRunAt, createdAt)
+               VALUES ($name, $scope, $group, $type, $pattern, $nextRunAt, $lastRunAt, $createdAt)
                ON CONFLICT(name, scope) DO UPDATE SET
-                 data = $data, type = $type, pattern = $pattern, nextRunAt = $nextRunAt, lastRunAt = $lastRunAt, createdAt = $createdAt
+                 "group" = $group, type = $type, pattern = $pattern, nextRunAt = $nextRunAt, lastRunAt = $lastRunAt, createdAt = $createdAt
                WHERE type = $type
                RETURNING *`,
             )
@@ -204,8 +204,8 @@ export class CronEngine extends EventEmitter {
         try {
           const row = this.db
             .query(
-              `INSERT INTO ${this.tableName} (name, scope, data, type, pattern, nextRunAt, lastRunAt, createdAt)
-               VALUES ($name, $scope, $data, $type, $pattern, $nextRunAt, $lastRunAt, $createdAt)
+              `INSERT INTO ${this.tableName} (name, scope, "group", type, pattern, nextRunAt, lastRunAt, createdAt)
+               VALUES ($name, $scope, $group, $type, $pattern, $nextRunAt, $lastRunAt, $createdAt)
                RETURNING *`,
             )
             .get(rowParams);
@@ -353,7 +353,7 @@ export class CronEngine extends EventEmitter {
         const ctx: TCronEngineJobContext = {
           name: job.name,
           scope: job.scope,
-          data: job.data,
+          group: job.group,
           type: job.type,
           pattern: job.pattern,
           lastRunAt: job.lastRunAt,
@@ -375,7 +375,7 @@ export class CronEngine extends EventEmitter {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
         scope TEXT NOT NULL,
-        data TEXT,
+        "group" TEXT,
         type TEXT NOT NULL,
         pattern TEXT,
         nextRunAt INTEGER NOT NULL,
