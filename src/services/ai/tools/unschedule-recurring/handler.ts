@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { TCronJob } from "../../../cron/types";
+import type { TCronEngineJob } from "../../../../lib/cron-engine";
 
 export const SUnscheduleRecurringArgs = z.object({
   name: z.string(),
@@ -7,4 +7,4 @@ export const SUnscheduleRecurringArgs = z.object({
 
 export type TUnscheduleRecurringArgs = z.infer<typeof SUnscheduleRecurringArgs>;
 
-export type TUnscheduleRecurringResult = TCronJob;
+export type TUnscheduleRecurringResult = TCronEngineJob;

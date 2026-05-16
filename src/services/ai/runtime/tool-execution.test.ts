@@ -122,7 +122,7 @@ describe("executeToolCall", () => {
       toolCall: createToolCall(
         "schedule-cron",
         SCHEDULE_RECURRING_TOOL,
-        JSON.stringify({ name: "drink-water", pattern: "0 9 * * *", group: "health" }),
+        JSON.stringify({ name: "drink-water", pattern: "0 9 * * *", data: "health" }),
       ),
       chatId,
       allowedToolNames: new Set([SCHEDULE_RECURRING_TOOL, LIST_CRON_JOBS_TOOL]),
@@ -136,17 +136,17 @@ describe("executeToolCall", () => {
     expect(scheduleResult.success).toBe(true);
     expect(scheduleResult.data).toMatchObject({
       name: "drink-water",
-      userId: chatId,
+      scope: chatId,
       pattern: "0 9 * * *",
-      group: "health",
+      data: "health",
     });
     expect(listResult.success).toBe(true);
     expect(listResult.data).toMatchObject([
       {
         name: "drink-water",
-        userId: chatId,
+        scope: chatId,
         pattern: "0 9 * * *",
-        group: "health",
+        data: "health",
       },
     ]);
   });

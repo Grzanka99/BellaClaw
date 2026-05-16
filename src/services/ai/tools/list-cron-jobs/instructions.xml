@@ -9,7 +9,7 @@
   <tool>
     <name>list-cron-jobs</name>
     <description>
-      Returns all scheduled cron jobs with their name, group, type, pattern, next fire time,
+      Returns all scheduled cron jobs with their name, scope, data, type, pattern, next fire time,
       last run time, and creation time. Takes no parameters.
     </description>
   </tool>

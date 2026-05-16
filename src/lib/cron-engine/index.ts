@@ -3,6 +3,7 @@ import { EventEmitter } from "node:events";
 import { z } from "zod";
 import type { TOption } from "../../types";
 import { AsyncQueue } from "../../utils/async-queue";
+import { createLogger } from "../../utils/logger";
 import { getNextFireTime, isValidCron } from "./parser";
 import {
   ECronEngineJobType,
@@ -10,7 +11,6 @@ import {
   type TCronEngineError,
   type TCronEngineJob,
   type TCronEngineJobContext,
-  type TCronEngineLogger,
   type TCronEngineOptions,
   type TScheduleOnceArgs,
   type TScheduleRecurringArgs,
@@ -18,20 +18,13 @@ import {
 
 const DEFAULT_TABLE_NAME = "cron_engine_jobs";
 
-const NOOP_LOGGER: TCronEngineLogger = {
-  info: () => {},
-  warning: () => {},
-  error: () => {},
-  message: () => {},
-};
-
 export * from "./parser";
 export * from "./types";
 
 export class CronEngine extends EventEmitter {
   private db: Database;
   private queue: AsyncQueue;
-  private logger: TCronEngineLogger;
+  private logger = createLogger("CRON ENGINE");
   private tableName: string;
   private tickInterval: TOption<ReturnType<typeof setInterval>>;
 
@@ -41,7 +34,6 @@ export class CronEngine extends EventEmitter {
     this.tableName = CronEngine.validateTableName(options.tableName ?? DEFAULT_TABLE_NAME);
     this.queue = new AsyncQueue();
     this.db = new Database(options.dbFile);
-    this.logger = options.logger ?? NOOP_LOGGER;
 
     this.queue.enqueue(async () => {
       this.db.run(this.createTableQuery());

@@ -194,9 +194,9 @@ export async function executeToolCall(args: {
 
       const result = await CronSingleton.instance.schedule({
         name: parsed.data.name,
-        userId: resolvedChatId,
+        scope: resolvedChatId,
         pattern: parsed.data.pattern,
-        group: parsed.data.group,
+        data: parsed.data.data,
         overwrite: parsed.data.overwrite,
       });
 

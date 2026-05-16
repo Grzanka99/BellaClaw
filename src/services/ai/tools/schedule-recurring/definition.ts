@@ -21,9 +21,9 @@ export const scheduleRecurringTool: ToolDefinitionJson = {
           description:
             "A standard 5-field cron expression: minute hour day-of-month month day-of-week (e.g. '0 9 * * *' for every day at 9:00, '*/30 * * * *' for every 30 minutes).",
         },
-        group: {
+        data: {
           type: "string",
-          description: "Optional group name for organizing related cron jobs.",
+          description: "Optional opaque data stored with the cron job.",
         },
         overwrite: {
           type: "boolean",

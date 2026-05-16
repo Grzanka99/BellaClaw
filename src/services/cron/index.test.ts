@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
+import { ECronEngineJobType, type TCronEngineJobContext } from "../../lib/cron-engine";
 import { CronSingleton } from "./index";
-import { ECronJobType, type TJobContext } from "./types";
 
 const tempDir = Bun.env.TMPDIR ?? "/var/folders/q5/24yvwq2937j076ff04yjn_dc0000gn/T/opencode";
 const TEST_DB = join(tempDir, "test-cron-service.db");
@@ -24,7 +24,7 @@ function cleanupCronSingleton() {
   CronSingleton.resetDbFile();
 }
 
-function forceJobDue(cron: CronSingleton, name: string, userId: string) {
+function forceJobDue(cron: CronSingleton, name: string, scope: string) {
   const internals = cron as unknown as TCronSingletonInternals;
 
   internals.engine.db
@@ -32,7 +32,7 @@ function forceJobDue(cron: CronSingleton, name: string, userId: string) {
     .run({
       $ts: Date.now() - 1_000,
       $name: name,
-      $scope: userId,
+      $scope: scope,
     });
 }
 
@@ -60,13 +60,13 @@ describe("CronSingleton", () => {
 
     const first = await cron.schedule({
       name: "shared-name",
-      userId: "user-a",
+      scope: "user-a",
       pattern: "0 9 * * *",
-      group: "alerts",
+      data: "alerts",
     });
     const second = await cron.schedule({
       name: "shared-name",
-      userId: "user-b",
+      scope: "user-b",
       pattern: "0 10 * * *",
     });
 
@@ -79,16 +79,16 @@ describe("CronSingleton", () => {
 
     expect(userAJob).toMatchObject({
       name: "shared-name",
-      userId: "user-a",
-      group: "alerts",
-      type: ECronJobType.Recurring,
+      scope: "user-a",
+      data: "alerts",
+      type: ECronEngineJobType.Recurring,
       pattern: "0 9 * * *",
     });
     expect(userBJob).toMatchObject({
       name: "shared-name",
-      userId: "user-b",
-      group: undefined,
-      type: ECronJobType.Recurring,
+      scope: "user-b",
+      data: undefined,
+      type: ECronEngineJobType.Recurring,
       pattern: "0 10 * * *",
     });
     expect(userAJobs).toHaveLength(1);
@@ -99,12 +99,12 @@ describe("CronSingleton", () => {
 
     const first = await cron.schedule({
       name: "duplicate-job",
-      userId: "user-a",
+      scope: "user-a",
       pattern: "0 9 * * *",
     });
     const duplicate = await cron.schedule({
       name: "duplicate-job",
-      userId: "user-a",
+      scope: "user-a",
       pattern: "0 10 * * *",
     });
 
@@ -121,15 +121,15 @@ describe("CronSingleton", () => {
 
     const first = await cron.schedule({
       name: "overwrite-job",
-      userId: "user-a",
+      scope: "user-a",
       pattern: "0 9 * * *",
-      group: "alerts",
+      data: "alerts",
     });
     const overwritten = await cron.schedule({
       name: "overwrite-job",
-      userId: "user-a",
+      scope: "user-a",
       pattern: "0 10 * * *",
-      group: "reminders",
+      data: "reminders",
       overwrite: true,
     });
 
@@ -140,10 +140,10 @@ describe("CronSingleton", () => {
 
     expect(job).toMatchObject({
       name: "overwrite-job",
-      userId: "user-a",
+      scope: "user-a",
       pattern: "0 10 * * *",
-      group: "reminders",
-      type: ECronJobType.Recurring,
+      data: "reminders",
+      type: ECronEngineJobType.Recurring,
     });
   });
 
@@ -153,16 +153,16 @@ describe("CronSingleton", () => {
 
     const scheduled = await cron.scheduleOnce({
       name: "one-time-job",
-      userId: "user-a",
+      scope: "user-a",
       fireAt: new Date(Date.now() + 60_000),
-      group: "timers",
+      data: "timers",
     });
 
     expect("error" in scheduled).toBe(false);
 
     forceJobDue(cron, "one-time-job", "user-a");
 
-    const fired = new Promise<TJobContext>((resolve) => {
+    const fired = new Promise<TCronEngineJobContext>((resolve) => {
       cron.on("one-time-job", (ctx) => {
         resolve(ctx);
       });
@@ -175,9 +175,9 @@ describe("CronSingleton", () => {
 
     expect(ctx).toMatchObject({
       name: "one-time-job",
-      userId: "user-a",
-      group: "timers",
-      type: ECronJobType.OneTime,
+      scope: "user-a",
+      data: "timers",
+      type: ECronEngineJobType.OneTime,
       pattern: undefined,
       lastRunAt: undefined,
     });
@@ -191,16 +191,16 @@ describe("CronSingleton", () => {
 
     const scheduled = await cron.schedule({
       name: "recurring-job",
-      userId: "user-a",
+      scope: "user-a",
       pattern: "*/5 * * * *",
-      group: "alerts",
+      data: "alerts",
     });
 
     expect("error" in scheduled).toBe(false);
 
     forceJobDue(cron, "recurring-job", "user-a");
 
-    const fired = new Promise<TJobContext>((resolve) => {
+    const fired = new Promise<TCronEngineJobContext>((resolve) => {
       cron.on("recurring-job", (ctx) => {
         resolve(ctx);
       });
@@ -213,17 +213,17 @@ describe("CronSingleton", () => {
 
     expect(ctx).toMatchObject({
       name: "recurring-job",
-      userId: "user-a",
-      group: "alerts",
-      type: ECronJobType.Recurring,
+      scope: "user-a",
+      data: "alerts",
+      type: ECronEngineJobType.Recurring,
       pattern: "*/5 * * * *",
       lastRunAt: undefined,
     });
     expect(job).toMatchObject({
       name: "recurring-job",
-      userId: "user-a",
-      group: "alerts",
-      type: ECronJobType.Recurring,
+      scope: "user-a",
+      data: "alerts",
+      type: ECronEngineJobType.Recurring,
       pattern: "*/5 * * * *",
       lastRunAt: expect.any(Date),
     });

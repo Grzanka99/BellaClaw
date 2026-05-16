@@ -63,15 +63,7 @@ export type TCronEngineError = {
   error: unknown;
 };
 
-export type TCronEngineLogger = {
-  info: (msg: string) => void;
-  warning: (msg: string) => void;
-  error: (msg: string) => void;
-  message: (msg: string) => void;
-};
-
 export type TCronEngineOptions = {
   dbFile: string;
   tableName?: string;
-  logger?: TCronEngineLogger;
 };

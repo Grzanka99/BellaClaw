@@ -1,8 +1,8 @@
 import { z } from "zod";
-import type { TCronJob } from "../../../cron/types";
+import type { TCronEngineJob } from "../../../../lib/cron-engine";
 
 export const SListCronJobsArgs = z.object({});
 
 export type TListCronJobsArgs = z.infer<typeof SListCronJobsArgs>;
 
-export type TListCronJobsResult = TCronJob[];
+export type TListCronJobsResult = TCronEngineJob[];
