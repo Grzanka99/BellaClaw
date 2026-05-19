@@ -81,6 +81,9 @@ export class CronEngine extends EventEmitter {
           $group: args.group ?? null,
           $type: ECronEngineJobType.Recurring,
           $pattern: args.pattern,
+          $reminderText: args.reminderText ?? null,
+          $reminderPromptData: args.reminderPromptData ?? null,
+          $reminderFallbackText: args.reminderFallbackText ?? args.reminderText ?? null,
           $nextRunAt: nextRunAt.getTime(),
           $lastRunAt: null,
           $createdAt: scheduledAt.getTime(),
@@ -89,12 +92,13 @@ export class CronEngine extends EventEmitter {
         if (args.overwrite === true) {
           const row = this.db
             .query(
-              `INSERT INTO ${this.tableName} (name, scope, "group", type, pattern, nextRunAt, lastRunAt, createdAt)
-               VALUES ($name, $scope, $group, $type, $pattern, $nextRunAt, $lastRunAt, $createdAt)
-               ON CONFLICT(name, scope) DO UPDATE SET
-                 "group" = $group, type = $type, pattern = $pattern, nextRunAt = $nextRunAt, lastRunAt = $lastRunAt, createdAt = $createdAt
-               WHERE type = $type
-               RETURNING *`,
+              `INSERT INTO ${this.tableName} (name, scope, "group", type, pattern, nextRunAt, lastRunAt, createdAt, reminderText, reminderPromptData, reminderFallbackText)
+               VALUES ($name, $scope, $group, $type, $pattern, $nextRunAt, $lastRunAt, $createdAt, $reminderText, $reminderPromptData, $reminderFallbackText)
+                ON CONFLICT(name, scope) DO UPDATE SET
+                 "group" = $group, type = $type, pattern = $pattern, nextRunAt = $nextRunAt, lastRunAt = $lastRunAt, createdAt = $createdAt,
+                 reminderText = $reminderText, reminderPromptData = $reminderPromptData, reminderFallbackText = $reminderFallbackText
+                WHERE type = $type
+                RETURNING *`,
             )
             .get(rowParams);
 
@@ -114,9 +118,9 @@ export class CronEngine extends EventEmitter {
         try {
           const row = this.db
             .query(
-              `INSERT INTO ${this.tableName} (name, scope, "group", type, pattern, nextRunAt, lastRunAt, createdAt)
-               VALUES ($name, $scope, $group, $type, $pattern, $nextRunAt, $lastRunAt, $createdAt)
-               RETURNING *`,
+              `INSERT INTO ${this.tableName} (name, scope, "group", type, pattern, nextRunAt, lastRunAt, createdAt, reminderText, reminderPromptData, reminderFallbackText)
+               VALUES ($name, $scope, $group, $type, $pattern, $nextRunAt, $lastRunAt, $createdAt, $reminderText, $reminderPromptData, $reminderFallbackText)
+                RETURNING *`,
             )
             .get(rowParams);
 
@@ -171,6 +175,9 @@ export class CronEngine extends EventEmitter {
           $group: args.group ?? null,
           $type: ECronEngineJobType.OneTime,
           $pattern: null,
+          $reminderText: args.reminderText ?? null,
+          $reminderPromptData: args.reminderPromptData ?? null,
+          $reminderFallbackText: args.reminderFallbackText ?? args.reminderText ?? null,
           $nextRunAt: args.fireAt.getTime(),
           $lastRunAt: null,
           $createdAt: Date.now(),
@@ -179,12 +186,13 @@ export class CronEngine extends EventEmitter {
         if (args.overwrite === true) {
           const row = this.db
             .query(
-              `INSERT INTO ${this.tableName} (name, scope, "group", type, pattern, nextRunAt, lastRunAt, createdAt)
-               VALUES ($name, $scope, $group, $type, $pattern, $nextRunAt, $lastRunAt, $createdAt)
-               ON CONFLICT(name, scope) DO UPDATE SET
-                 "group" = $group, type = $type, pattern = $pattern, nextRunAt = $nextRunAt, lastRunAt = $lastRunAt, createdAt = $createdAt
-               WHERE type = $type
-               RETURNING *`,
+              `INSERT INTO ${this.tableName} (name, scope, "group", type, pattern, nextRunAt, lastRunAt, createdAt, reminderText, reminderPromptData, reminderFallbackText)
+               VALUES ($name, $scope, $group, $type, $pattern, $nextRunAt, $lastRunAt, $createdAt, $reminderText, $reminderPromptData, $reminderFallbackText)
+                ON CONFLICT(name, scope) DO UPDATE SET
+                 "group" = $group, type = $type, pattern = $pattern, nextRunAt = $nextRunAt, lastRunAt = $lastRunAt, createdAt = $createdAt,
+                 reminderText = $reminderText, reminderPromptData = $reminderPromptData, reminderFallbackText = $reminderFallbackText
+                WHERE type = $type
+                RETURNING *`,
             )
             .get(rowParams);
 
@@ -204,9 +212,9 @@ export class CronEngine extends EventEmitter {
         try {
           const row = this.db
             .query(
-              `INSERT INTO ${this.tableName} (name, scope, "group", type, pattern, nextRunAt, lastRunAt, createdAt)
-               VALUES ($name, $scope, $group, $type, $pattern, $nextRunAt, $lastRunAt, $createdAt)
-               RETURNING *`,
+              `INSERT INTO ${this.tableName} (name, scope, "group", type, pattern, nextRunAt, lastRunAt, createdAt, reminderText, reminderPromptData, reminderFallbackText)
+               VALUES ($name, $scope, $group, $type, $pattern, $nextRunAt, $lastRunAt, $createdAt, $reminderText, $reminderPromptData, $reminderFallbackText)
+                RETURNING *`,
             )
             .get(rowParams);
 
@@ -356,6 +364,9 @@ export class CronEngine extends EventEmitter {
           group: job.group,
           type: job.type,
           pattern: job.pattern,
+          reminderText: job.reminderText,
+          reminderPromptData: job.reminderPromptData,
+          reminderFallbackText: job.reminderFallbackText,
           lastRunAt: job.lastRunAt,
           nextRunAt: job.nextRunAt,
           createdAt: job.createdAt,
@@ -378,6 +389,9 @@ export class CronEngine extends EventEmitter {
         "group" TEXT,
         type TEXT NOT NULL,
         pattern TEXT,
+        reminderText TEXT,
+        reminderPromptData TEXT,
+        reminderFallbackText TEXT,
         nextRunAt INTEGER NOT NULL,
         lastRunAt INTEGER,
         createdAt INTEGER NOT NULL,

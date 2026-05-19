@@ -122,7 +122,13 @@ describe("executeToolCall", () => {
       toolCall: createToolCall(
         "schedule-cron",
         SCHEDULE_RECURRING_TOOL,
-        JSON.stringify({ name: "drink-water", pattern: "0 9 * * *", group: "health" }),
+        JSON.stringify({
+          name: "drink-water",
+          pattern: "0 9 * * *",
+          group: "health",
+          reminderPromptData: '{"topic":"hydration"}',
+          reminderFallbackText: "Drink water.",
+        }),
       ),
       chatId,
       allowedToolNames: new Set([SCHEDULE_RECURRING_TOOL, LIST_CRON_JOBS_TOOL]),
@@ -139,6 +145,9 @@ describe("executeToolCall", () => {
       scope: chatId,
       pattern: "0 9 * * *",
       group: "health",
+      reminderText: undefined,
+      reminderPromptData: '{"topic":"hydration"}',
+      reminderFallbackText: "Drink water.",
     });
     expect(listResult.success).toBe(true);
     expect(listResult.data).toMatchObject([
@@ -147,7 +156,29 @@ describe("executeToolCall", () => {
         scope: chatId,
         pattern: "0 9 * * *",
         group: "health",
+        reminderText: undefined,
+        reminderPromptData: '{"topic":"hydration"}',
+        reminderFallbackText: "Drink water.",
       },
     ]);
+  });
+
+  test("rejects generated reminder args without fallback text", async () => {
+    const result = await executeToolCall({
+      toolCall: createToolCall(
+        "schedule-cron-invalid",
+        SCHEDULE_RECURRING_TOOL,
+        JSON.stringify({
+          name: "drink-water",
+          pattern: "0 9 * * *",
+          reminderPromptData: '{"topic":"hydration"}',
+        }),
+      ),
+      chatId: "runtime-cron-user",
+      allowedToolNames: new Set([SCHEDULE_RECURRING_TOOL]),
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("reminderFallbackText is required");
   });
 });

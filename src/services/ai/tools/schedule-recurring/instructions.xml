@@ -10,8 +10,9 @@
     <name>schedule-recurring</name>
     <description>
       Creates a recurring cron job identified by a unique name that fires at intervals
-      defined by a 5-field cron expression. Returns the scheduled job details including
-      the next fire time.
+      defined by a 5-field cron expression. Also stores either direct reminder text or
+      LLM regeneration data with a fallback message. Returns the scheduled job details
+      including the next fire time.
     </description>
   </tool>
 
@@ -33,6 +34,8 @@
     <rule>Choose clear, descriptive names for jobs so they can be easily referenced later</rule>
     <rule>If a job with the same name already exists, set overwrite to true only if the user explicitly agrees to replace it</rule>
     <rule>Validate that the cron pattern matches the user's intended schedule before calling</rule>
+    <rule>Always provide reminderText for direct reminders, or reminderPromptData plus reminderFallbackText for generated reminders</rule>
+    <rule>Pass reminderPromptData as a serialized JSON string, not as a nested object</rule>
     <rule>Inform the user of the next fire time after successfully scheduling</rule>
   </usage_rules>
 
@@ -42,6 +45,7 @@
       <toolCall>
         <name>paddu-reminder</name>
         <pattern>0 9 * * 1</pattern>
+        <reminderText>Reminder to work on paddu.</reminderText>
       </toolCall>
       <reasoning>Weekly reminder every Monday at 9:00 for paddu.</reasoning>
     </example>
@@ -52,8 +56,10 @@
         <name>study-checkin</name>
         <pattern>*/30 * * * *</pattern>
         <group>study</group>
+        <reminderPromptData>{\"topic\":\"study\",\"tone\":\"encouraging\"}</reminderPromptData>
+        <reminderFallbackText>Quick study check-in: stay focused and keep going.</reminderFallbackText>
       </toolCall>
-      <reasoning>Periodic check-in every 30 minutes with "study" stored as job group.</reasoning>
+      <reasoning>Periodic check-in every 30 minutes with LLM regeneration data plus a fallback message.</reasoning>
     </example>
 
     <example>
@@ -61,6 +67,7 @@
       <toolCall>
         <name>paddu-reminder</name>
         <pattern>0 10 * * 1</pattern>
+        <reminderText>Reminder to work on paddu.</reminderText>
         <overwrite>true</overwrite>
       </toolCall>
       <reasoning>User wants to update an existing job, so overwrite must be true.</reasoning>

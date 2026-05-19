@@ -107,6 +107,8 @@ describe("CronEngine", () => {
       scope: "scope-a",
       pattern: "*/5 * * * *",
       group: '{"kind":"recurring"}',
+      reminderPromptData: '{"topic":"water"}',
+      reminderFallbackText: "Drink water.",
     });
 
     const internals = engine as unknown as TEngineWithInternals;
@@ -125,6 +127,8 @@ describe("CronEngine", () => {
       scope: string | undefined;
       type: ECronEngineJobType;
       group: string | undefined;
+      reminderPromptData: string | undefined;
+      reminderFallbackText: string | undefined;
     }>((resolve) => {
       engine.on("recurring-job", (ctx) => {
         resolve({
@@ -132,6 +136,8 @@ describe("CronEngine", () => {
           scope: ctx.scope,
           type: ctx.type,
           group: ctx.group,
+          reminderPromptData: ctx.reminderPromptData,
+          reminderFallbackText: ctx.reminderFallbackText,
         });
       });
     });
@@ -154,9 +160,13 @@ describe("CronEngine", () => {
     expect(emitted.scope).toBe("scope-a");
     expect(emitted.type).toBe(ECronEngineJobType.Recurring);
     expect(emitted.group).toBe('{"kind":"recurring"}');
+    expect(emitted.reminderPromptData).toBe('{"topic":"water"}');
+    expect(emitted.reminderFallbackText).toBe("Drink water.");
     expect(firedName).toBe("recurring-job");
     expect(updatedJob?.lastRunAt).toBeInstanceOf(Date);
     expect(updatedJob?.nextRunAt).toBeInstanceOf(Date);
+    expect(updatedJob?.reminderPromptData).toBe('{"topic":"water"}');
+    expect(updatedJob?.reminderFallbackText).toBe("Drink water.");
     expect((updatedJob?.nextRunAt.getTime() ?? 0) > Date.now()).toBe(true);
   });
 
@@ -164,8 +174,8 @@ describe("CronEngine", () => {
     const internals = engine as unknown as TEngineWithInternals;
     internals.db
       .query(
-        `INSERT INTO cron_engine_test_jobs (name, scope, "group", type, pattern, nextRunAt, lastRunAt, createdAt)
-         VALUES ($name, $scope, $group, $type, $pattern, $nextRunAt, $lastRunAt, $createdAt)`,
+        `INSERT INTO cron_engine_test_jobs (name, scope, "group", type, pattern, reminderText, reminderPromptData, reminderFallbackText, nextRunAt, lastRunAt, createdAt)
+         VALUES ($name, $scope, $group, $type, $pattern, $reminderText, $reminderPromptData, $reminderFallbackText, $nextRunAt, $lastRunAt, $createdAt)`,
       )
       .run({
         $name: "one-time-job",
@@ -173,23 +183,36 @@ describe("CronEngine", () => {
         $group: '{"kind":"one-time"}',
         $type: "onetime",
         $pattern: null,
+        $reminderText: "One-time reminder.",
+        $reminderPromptData: null,
+        $reminderFallbackText: "One-time reminder.",
         $nextRunAt: Date.now() - 1_000,
         $lastRunAt: null,
         $createdAt: Date.now(),
       });
 
-    const namedEvent = new Promise<ECronEngineJobType>((resolve) => {
+    const namedEvent = new Promise<{
+      type: ECronEngineJobType;
+      reminderText: string | undefined;
+      reminderFallbackText: string | undefined;
+    }>((resolve) => {
       engine.on("one-time-job", (ctx) => {
-        resolve(ctx.type);
+        resolve({
+          type: ctx.type,
+          reminderText: ctx.reminderText,
+          reminderFallbackText: ctx.reminderFallbackText,
+        });
       });
     });
 
     await internals.tick();
 
-    const emittedType = await namedEvent;
+    const emitted = await namedEvent;
     const remainingJob = await engine.getJob("one-time-job", "scope-a");
 
-    expect(emittedType).toBe(ECronEngineJobType.OneTime);
+    expect(emitted.type).toBe(ECronEngineJobType.OneTime);
+    expect(emitted.reminderText).toBe("One-time reminder.");
+    expect(emitted.reminderFallbackText).toBe("One-time reminder.");
     expect(remainingJob).toBeUndefined();
   });
 });

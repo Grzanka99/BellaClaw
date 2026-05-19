@@ -6,42 +6,104 @@ export enum ECronEngineJobType {
   OneTime = "onetime",
 }
 
-export const SCronEngineJob = z.object({
-  id: z.number(),
-  name: z.string(),
-  scope: z.string().transform((value) => (value.length > 0 ? value : undefined)),
-  group: z
+const SReminderContentJobFields = z.object({
+  reminderText: z
     .string()
     .nullable()
     .transform((value) => value ?? undefined),
-  type: z.enum(ECronEngineJobType),
-  pattern: z
+  reminderPromptData: z
     .string()
     .nullable()
     .transform((value) => value ?? undefined),
-  nextRunAt: z.number().transform((value) => new Date(value)),
-  lastRunAt: z
-    .number()
+  reminderFallbackText: z
+    .string()
     .nullable()
-    .transform((value) => (value !== null ? new Date(value) : undefined)),
-  createdAt: z.number().transform((value) => new Date(value)),
+    .transform((value) => value ?? undefined),
 });
 
-export const SScheduleRecurringArgs = z.object({
-  name: z.string(),
-  scope: z.string().optional(),
-  group: z.string().optional(),
-  pattern: z.string(),
-  overwrite: z.boolean().optional(),
+const SReminderContentArgsBase = z.object({
+  reminderText: z.string().optional(),
+  reminderPromptData: z.string().optional(),
+  reminderFallbackText: z.string().optional(),
 });
 
-export const SScheduleOnceArgs = z.object({
-  name: z.string(),
-  scope: z.string().optional(),
-  group: z.string().optional(),
-  fireAt: z.coerce.date(),
-  overwrite: z.boolean().optional(),
-});
+function validateReminderContentArgs(
+  value: z.infer<typeof SReminderContentArgsBase>,
+  ctx: z.RefinementCtx,
+) {
+  if (value.reminderText !== undefined && value.reminderPromptData !== undefined) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Provide either reminderText or reminderPromptData, not both",
+      path: ["reminderText"],
+    });
+  }
+
+  if (value.reminderPromptData !== undefined && value.reminderFallbackText === undefined) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "reminderFallbackText is required when reminderPromptData is set",
+      path: ["reminderFallbackText"],
+    });
+  }
+
+  if (
+    value.reminderFallbackText !== undefined &&
+    value.reminderText === undefined &&
+    value.reminderPromptData === undefined
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "reminderFallbackText requires reminderText or reminderPromptData",
+      path: ["reminderFallbackText"],
+    });
+  }
+}
+
+export const SCronEngineJob = z
+  .object({
+    id: z.number(),
+    name: z.string(),
+    scope: z.string().transform((value) => (value.length > 0 ? value : undefined)),
+    group: z
+      .string()
+      .nullable()
+      .transform((value) => value ?? undefined),
+    type: z.enum(ECronEngineJobType),
+    pattern: z
+      .string()
+      .nullable()
+      .transform((value) => value ?? undefined),
+    nextRunAt: z.number().transform((value) => new Date(value)),
+    lastRunAt: z
+      .number()
+      .nullable()
+      .transform((value) => (value !== null ? new Date(value) : undefined)),
+    createdAt: z.number().transform((value) => new Date(value)),
+  })
+  .extend(SReminderContentJobFields.shape);
+
+export const SScheduleRecurringArgs = z
+  .object({
+    name: z.string(),
+    scope: z.string().optional(),
+    group: z.string().optional(),
+    pattern: z.string(),
+    overwrite: z.boolean().optional(),
+  })
+  .extend(SReminderContentArgsBase.shape)
+  .superRefine(validateReminderContentArgs);
+
+export const SScheduleOnceArgs = z
+  .object({
+    name: z.string(),
+    scope: z.string().optional(),
+    group: z.string().optional(),
+    fireAt: z.coerce.date(),
+    overwrite: z.boolean().optional(),
+  })
+  .extend(SReminderContentArgsBase.shape)
+  .superRefine(validateReminderContentArgs);
 
 export type TCronEngineJobContext = {
   name: string;
@@ -49,6 +111,9 @@ export type TCronEngineJobContext = {
   group: TOption<string>;
   type: ECronEngineJobType;
   pattern: TOption<string>;
+  reminderText: TOption<string>;
+  reminderPromptData: TOption<string>;
+  reminderFallbackText: TOption<string>;
   lastRunAt: TOption<Date>;
   nextRunAt: Date;
   createdAt: Date;

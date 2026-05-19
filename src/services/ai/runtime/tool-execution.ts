@@ -197,6 +197,9 @@ export async function executeToolCall(args: {
         scope: resolvedChatId,
         pattern: parsed.data.pattern,
         group: parsed.data.group,
+        reminderText: parsed.data.reminderText,
+        reminderPromptData: parsed.data.reminderPromptData,
+        reminderFallbackText: parsed.data.reminderFallbackText,
         overwrite: parsed.data.overwrite,
       });
 

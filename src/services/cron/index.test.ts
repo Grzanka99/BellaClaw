@@ -63,6 +63,7 @@ describe("CronSingleton", () => {
       scope: "user-a",
       pattern: "0 9 * * *",
       group: "alerts",
+      reminderText: "Take medicine.",
     });
     const second = await cron.schedule({
       name: "shared-name",
@@ -83,6 +84,8 @@ describe("CronSingleton", () => {
       group: "alerts",
       type: ECronEngineJobType.Recurring,
       pattern: "0 9 * * *",
+      reminderText: "Take medicine.",
+      reminderFallbackText: "Take medicine.",
     });
     expect(userBJob).toMatchObject({
       name: "shared-name",
@@ -90,6 +93,9 @@ describe("CronSingleton", () => {
       group: undefined,
       type: ECronEngineJobType.Recurring,
       pattern: "0 10 * * *",
+      reminderText: undefined,
+      reminderPromptData: undefined,
+      reminderFallbackText: undefined,
     });
     expect(userAJobs).toHaveLength(1);
   });
@@ -124,12 +130,15 @@ describe("CronSingleton", () => {
       scope: "user-a",
       pattern: "0 9 * * *",
       group: "alerts",
+      reminderText: "First reminder.",
     });
     const overwritten = await cron.schedule({
       name: "overwrite-job",
       scope: "user-a",
       pattern: "0 10 * * *",
       group: "reminders",
+      reminderPromptData: '{"topic":"hydration"}',
+      reminderFallbackText: "Drink water.",
       overwrite: true,
     });
 
@@ -144,6 +153,9 @@ describe("CronSingleton", () => {
       pattern: "0 10 * * *",
       group: "reminders",
       type: ECronEngineJobType.Recurring,
+      reminderText: undefined,
+      reminderPromptData: '{"topic":"hydration"}',
+      reminderFallbackText: "Drink water.",
     });
   });
 
@@ -156,6 +168,7 @@ describe("CronSingleton", () => {
       scope: "user-a",
       fireAt: new Date(Date.now() + 60_000),
       group: "timers",
+      reminderText: "Stretch now.",
     });
 
     expect("error" in scheduled).toBe(false);
@@ -179,6 +192,9 @@ describe("CronSingleton", () => {
       group: "timers",
       type: ECronEngineJobType.OneTime,
       pattern: undefined,
+      reminderText: "Stretch now.",
+      reminderPromptData: undefined,
+      reminderFallbackText: "Stretch now.",
       lastRunAt: undefined,
     });
     expect(ctx.nextRunAt).toBeInstanceOf(Date);
@@ -194,6 +210,8 @@ describe("CronSingleton", () => {
       scope: "user-a",
       pattern: "*/5 * * * *",
       group: "alerts",
+      reminderPromptData: '{"topic":"posture"}',
+      reminderFallbackText: "Posture check.",
     });
 
     expect("error" in scheduled).toBe(false);
@@ -217,6 +235,9 @@ describe("CronSingleton", () => {
       group: "alerts",
       type: ECronEngineJobType.Recurring,
       pattern: "*/5 * * * *",
+      reminderText: undefined,
+      reminderPromptData: '{"topic":"posture"}',
+      reminderFallbackText: "Posture check.",
       lastRunAt: undefined,
     });
     expect(job).toMatchObject({
@@ -225,6 +246,9 @@ describe("CronSingleton", () => {
       group: "alerts",
       type: ECronEngineJobType.Recurring,
       pattern: "*/5 * * * *",
+      reminderText: undefined,
+      reminderPromptData: '{"topic":"posture"}',
+      reminderFallbackText: "Posture check.",
       lastRunAt: expect.any(Date),
     });
     expect(job?.nextRunAt).toBeInstanceOf(Date);
