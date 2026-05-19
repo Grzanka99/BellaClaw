@@ -54,12 +54,12 @@
       <toolCall>
         <searchString>job</searchString>
         <timeRange>
-          <start>2025-01-20T00:00:00Z</start>
-          <end>2025-01-27T23:59:59Z</end>
+          <start>2025-01-20T00:00:00+01:00</start>
+          <end>2025-01-27T23:59:59+01:00</end>
         </timeRange>
         <importance>["medium", "high"]</importance>
       </toolCall>
-      <reasoning>User is asking about work-related information from last week. Search with text filter and time range.</reasoning>
+      <reasoning>User is asking about work-related information from last week. Search with text filter and time range. Date values are examples — always compute actual dates relative to the current time in the {{config.ai.instructions.timezone}} timezone.</reasoning>
     </example>
 
     <example>

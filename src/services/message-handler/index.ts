@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { Config } from "../../config";
 import type { TOption } from "../../types";
 import { AsyncQueue } from "../../utils/async-queue";
 import { createLogger, type TLogger } from "../../utils/logger";
@@ -13,6 +14,7 @@ import {
   type THistoryItem,
   type TPrompt,
 } from "../ai/api";
+import { readXmlAndInjectConfig } from "../ai/instructions/read-xml-and-inject-config";
 import { SDefineMessageImportance } from "../ai/tools/define-message-importance/handler";
 import { Memory } from "../memory";
 import { EMemoryImportance, SMemory, type TMemory } from "../memory/types";
@@ -147,9 +149,10 @@ export class MessageHandler {
   private async defineMessageImportance(message: string): Promise<EMemoryImportance> {
     const start = performance.now();
 
-    const INSTRUCTIONS = await Bun.file(
+    const INSTRUCTIONS = await readXmlAndInjectConfig(
       "./src/services/ai/tools/define-message-importance/instructions.xml",
-    ).text();
+      Config,
+    );
 
     const system: THistoryItem = {
       role: ERole.System,
@@ -232,9 +235,10 @@ export class MessageHandler {
       return [];
     }
 
-    const INSTRUCTIONS = await Bun.file(
+    const INSTRUCTIONS = await readXmlAndInjectConfig(
       "./src/services/ai/tools/search-memory/instructions.xml",
-    ).text();
+      Config,
+    );
 
     const system: THistoryItem = {
       role: ERole.System,

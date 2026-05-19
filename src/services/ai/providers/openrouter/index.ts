@@ -3,6 +3,7 @@ import type { Message } from "@openrouter/sdk/models";
 import { Config } from "../../../../config";
 import type { TOption } from "../../../../types";
 import { createLogger } from "../../../../utils/logger";
+import { readXmlAndInjectConfig } from "../../instructions/read-xml-and-inject-config";
 import {
   EAssistantLoopConversationItemKind,
   type TRequestAssistantTurnArgs,
@@ -27,7 +28,7 @@ function buildUserContextMessage(user: TRuntimeUser): Message {
 }
 
 export async function readBaseSystemText(): Promise<string> {
-  return Bun.file(BASE_SYSTEM_INSTRUCTIONS_PATH).text();
+  return readXmlAndInjectConfig(BASE_SYSTEM_INSTRUCTIONS_PATH, Config);
 }
 
 export function buildOpenrouterMessages(

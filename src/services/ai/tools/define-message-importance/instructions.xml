@@ -28,7 +28,7 @@
         - Repetitive confirmations or clarifications
         - Emotional reactions without context ("lol", "haha", "xd")
       </criteria>
-      <retention>Discard after short-term context window</retention>
+      <retention>{{config.ai.instructions.memoryRetention.low}}</retention>
     </level>
 
     <level name="medium">
@@ -39,7 +39,7 @@
         - Questions and answers about general knowledge
         - Casual mentions of activities or interests
       </criteria>
-      <retention>Keep for several weeks, review periodically</retention>
+      <retention>{{config.ai.instructions.memoryRetention.medium}}</retention>
     </level>
 
     <level name="high">
@@ -52,7 +52,7 @@
         - Emotional states that indicate important context
         - Instructions for how the assistant should behave or address the user
       </criteria>
-      <retention>Keep indefinitely, reference in future conversations</retention>
+      <retention>{{config.ai.instructions.memoryRetention.high}}</retention>
     </level>
   </importance_levels>
 

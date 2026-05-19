@@ -1,12 +1,15 @@
-import type { ChatMessageToolCall, ToolDefinitionJson } from "@openrouter/sdk/models";
+import type { ToolDefinitionJson } from "@openrouter/sdk/models";
+import { Config } from "../../../config";
 import { createLogger } from "../../../utils/logger";
 import { CronSingleton } from "../../cron";
+import { readXmlAndInjectConfig } from "../instructions/read-xml-and-inject-config";
+import { OpenrouterAiProvider } from "../providers/openrouter";
 import {
   EAssistantLoopConversationItemKind,
   EAssistantLoopStopReason,
+  runAssistantToolLoop,
   type TAssistantToolLoopResult,
   type TNormalizedToolResult,
-  type TRequestAssistantTurn,
   type TRuntimeConversationItem,
 } from "../runtime";
 import { LIST_CRON_JOBS_TOOL, listCronJobsTool } from "../tools/list-cron-jobs/definition";
@@ -14,9 +17,7 @@ import {
   SCHEDULE_RECURRING_TOOL,
   scheduleRecurringTool,
 } from "../tools/schedule-recurring/definition";
-import { unscheduleRecurringTool } from "../tools/unschedule-recurring/definition";
 import { EModelPurpose, ERole, type TPrompt, type TToolEntry } from "../types";
-import { AiConnector } from "./index";
 
 const logger = createLogger("AI MOCK");
 const runId = Date.now();
@@ -32,9 +33,17 @@ type TScenarioDefinition = {
   prompt: TPrompt;
   user: TMockUser;
   tools: TToolEntry[];
-  requestAssistantTurn: TRequestAssistantTurn;
+  expectedStopReason: EAssistantLoopStopReason;
+  expectedToolNames: string[];
   maxIterations?: number;
+  waitForFirstFire?: boolean;
 };
+
+const SCHEDULE_RECURRING_INSTRUCTIONS_PATH =
+  "./src/services/ai/tools/schedule-recurring/instructions.xml";
+const LIST_CRON_JOBS_INSTRUCTIONS_PATH = "./src/services/ai/tools/list-cron-jobs/instructions.xml";
+const FIRE_TEST_TIMEOUT_MS = 10 * 60 * 1000;
+const CRON_POLL_INTERVAL_MS = 1000;
 
 function createPrompt(text: string): TPrompt {
   return {
@@ -59,31 +68,12 @@ function serialize(value: unknown): string {
   return json ?? "undefined";
 }
 
-function toolEntry(definition: ToolDefinitionJson): TToolEntry {
-  return { definition };
-}
-
-function createToolCall(id: string, name: string, argumentsText: string): ChatMessageToolCall {
-  return {
-    id,
-    type: "function",
-    function: {
-      name,
-      arguments: argumentsText,
-    },
-  };
+function toolEntry(definition: ToolDefinitionJson, instructions: string): TToolEntry {
+  return { definition, instructions };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function isCronJobSummary(value: unknown): value is { name: string } {
-  return isRecord(value) && typeof value.name === "string";
-}
-
-function isCronJobSummaryArray(value: unknown): value is Array<{ name: string }> {
-  return Array.isArray(value) && value.every((item) => isCronJobSummary(item));
 }
 
 function getToolResults(conversation: TRuntimeConversationItem[]): TNormalizedToolResult[] {
@@ -100,23 +90,6 @@ function getToolResults(conversation: TRuntimeConversationItem[]): TNormalizedTo
   return results;
 }
 
-function getLatestToolResult(
-  conversation: TRuntimeConversationItem[],
-  toolName: string,
-): TNormalizedToolResult | undefined {
-  const results = getToolResults(conversation);
-
-  for (let index = results.length - 1; index >= 0; index--) {
-    const result = results[index];
-
-    if (result?.toolName === toolName) {
-      return result;
-    }
-  }
-
-  return undefined;
-}
-
 function createUser(name: string): TMockUser {
   const id = `mock-runtime-${runId}-${name}`;
 
@@ -127,183 +100,171 @@ function createUser(name: string): TMockUser {
   };
 }
 
-function createSingleToolRequester(reminderName: string): TRequestAssistantTurn {
-  let turn = 0;
+async function createScenarios(): Promise<TScenarioDefinition[]> {
+  const [scheduleRecurringInstructions, listCronJobsInstructions] = await Promise.all([
+    readXmlAndInjectConfig(SCHEDULE_RECURRING_INSTRUCTIONS_PATH, Config),
+    readXmlAndInjectConfig(LIST_CRON_JOBS_INSTRUCTIONS_PATH, Config),
+  ]);
 
-  return async ({ conversation }) => {
-    if (turn === 0) {
-      turn += 1;
-
-      return {
-        response: "",
-        toolCalls: [
-          createToolCall(
-            "single-schedule",
-            SCHEDULE_RECURRING_TOOL,
-            JSON.stringify({
-              name: reminderName,
-              pattern: "*/30 * * * *",
-              group: "mock-single",
-            }),
-          ),
-        ],
-      };
-    }
-
-    const scheduleResult = getLatestToolResult(conversation, SCHEDULE_RECURRING_TOOL);
-
-    if (scheduleResult?.success && isCronJobSummary(scheduleResult.data)) {
-      return {
-        response: `Scheduled reminder ${scheduleResult.data.name} every 30 minutes.`,
-        toolCalls: [],
-      };
-    }
-
-    return {
-      response: `I could not schedule reminder ${reminderName}.`,
-      toolCalls: [],
-    };
-  };
-}
-
-function createMultipleToolRequester(reminderName: string): TRequestAssistantTurn {
-  let turn = 0;
-
-  return async ({ conversation }) => {
-    if (turn === 0) {
-      turn += 1;
-
-      return {
-        response: "",
-        toolCalls: [
-          createToolCall(
-            "multi-schedule",
-            SCHEDULE_RECURRING_TOOL,
-            JSON.stringify({
-              name: reminderName,
-              pattern: "0 9 * * 1",
-              group: "mock-batch",
-            }),
-          ),
-          createToolCall("multi-list", LIST_CRON_JOBS_TOOL, "{}"),
-        ],
-      };
-    }
-
-    const scheduleResult = getLatestToolResult(conversation, SCHEDULE_RECURRING_TOOL);
-    const listResult = getLatestToolResult(conversation, LIST_CRON_JOBS_TOOL);
-
-    if (
-      scheduleResult?.success &&
-      isCronJobSummary(scheduleResult.data) &&
-      listResult?.success &&
-      isCronJobSummaryArray(listResult.data)
-    ) {
-      return {
-        response: `Scheduled ${scheduleResult.data.name}. You now have ${listResult.data.length} cron job(s).`,
-        toolCalls: [],
-      };
-    }
-
-    return {
-      response: `I could not complete the schedule-and-list flow for ${reminderName}.`,
-      toolCalls: [],
-    };
-  };
-}
-
-function createInvalidArgsRequester(): TRequestAssistantTurn {
-  let turn = 0;
-
-  return async ({ conversation }) => {
-    if (turn === 0) {
-      turn += 1;
-
-      return {
-        response: "",
-        toolCalls: [
-          createToolCall(
-            "bad-schedule",
-            SCHEDULE_RECURRING_TOOL,
-            '{"name":"broken-reminder","pattern":',
-          ),
-        ],
-      };
-    }
-
-    const scheduleResult = getLatestToolResult(conversation, SCHEDULE_RECURRING_TOOL);
-
-    return {
-      response: `Scheduling failed with: ${scheduleResult?.error ?? "unknown error"}`,
-      toolCalls: [],
-    };
-  };
-}
-
-function createMaxIterationRequester(): TRequestAssistantTurn {
-  return async () => {
-    return {
-      response: "",
-      toolCalls: [createToolCall("max-list", LIST_CRON_JOBS_TOOL, "{}")],
-    };
-  };
-}
-
-function createRepeatedToolRequester(): TRequestAssistantTurn {
-  return async () => {
-    return {
-      response: "",
-      toolCalls: [createToolCall("repeat-list", LIST_CRON_JOBS_TOOL, "{}")],
-    };
-  };
-}
-
-function createScenarios(): TScenarioDefinition[] {
+  const scheduleRecurringEntry = toolEntry(scheduleRecurringTool, scheduleRecurringInstructions);
+  const listCronJobsEntry = toolEntry(listCronJobsTool, listCronJobsInstructions);
+  const fireUser = createUser("fire-tool");
   const singleUser = createUser("single-tool");
   const multiUser = createUser("multi-tool");
-  const invalidArgsUser = createUser("invalid-args");
-  const maxIterationUser = createUser("max-iteration");
-  const repeatedUser = createUser("repeated-tool-call");
+  const listUser = createUser("list-tool");
+  const weekdayUser = createUser("weekday-tool");
+  const weekendUser = createUser("weekend-tool");
 
   return [
     {
-      name: "One tool call followed by final assistant reply",
-      prompt: createPrompt("Please schedule a recurring reminder every 30 minutes."),
+      name: "OpenRouter schedules and waits for an actual reminder fire",
+      prompt: createPrompt(
+        "I'm checking if reminders actually fire. Every minute, remind me to look for the reminder event.",
+      ),
+      user: fireUser,
+      tools: [scheduleRecurringEntry],
+      expectedStopReason: EAssistantLoopStopReason.FinalResponse,
+      expectedToolNames: [SCHEDULE_RECURRING_TOOL],
+      waitForFirstFire: true,
+    },
+    {
+      name: "OpenRouter schedules a casual recurring reminder",
+      prompt: createPrompt("Yo, remind me every 30 minutes to drink water while I'm working."),
       user: singleUser,
-      tools: [toolEntry(scheduleRecurringTool)],
-      requestAssistantTurn: createSingleToolRequester(`single-reminder-${runId}`),
+      tools: [scheduleRecurringEntry],
+      expectedStopReason: EAssistantLoopStopReason.FinalResponse,
+      expectedToolNames: [SCHEDULE_RECURRING_TOOL],
     },
     {
-      name: "Multiple tool calls in one request",
-      prompt: createPrompt("Schedule a Monday reminder and then show me my cron jobs."),
+      name: "OpenRouter schedules and lists cron jobs",
+      prompt: createPrompt(
+        "Every Monday at 9 in the morning remind me to review invoices. What reminders have I got now?",
+      ),
       user: multiUser,
-      tools: [toolEntry(scheduleRecurringTool), toolEntry(listCronJobsTool)],
-      requestAssistantTurn: createMultipleToolRequester(`multi-reminder-${runId}`),
+      tools: [scheduleRecurringEntry, listCronJobsEntry],
+      expectedStopReason: EAssistantLoopStopReason.FinalResponse,
+      expectedToolNames: [SCHEDULE_RECURRING_TOOL, LIST_CRON_JOBS_TOOL],
     },
     {
-      name: "Cron failure path with invalid tool arguments",
-      prompt: createPrompt("Schedule a reminder, but the model sends broken arguments."),
-      user: invalidArgsUser,
-      tools: [toolEntry(scheduleRecurringTool)],
-      requestAssistantTurn: createInvalidArgsRequester(),
+      name: "OpenRouter lists cron jobs",
+      prompt: createPrompt("What reminders do I even have set up right now?"),
+      user: listUser,
+      tools: [listCronJobsEntry],
+      expectedStopReason: EAssistantLoopStopReason.FinalResponse,
+      expectedToolNames: [LIST_CRON_JOBS_TOOL],
     },
     {
-      name: "Loop termination by max-iteration guard",
-      prompt: createPrompt("Keep asking for the cron list forever."),
-      user: maxIterationUser,
-      tools: [toolEntry(listCronJobsTool)],
-      requestAssistantTurn: createMaxIterationRequester(),
-      maxIterations: 1,
+      name: "OpenRouter schedules a weekday vitamins reminder",
+      prompt: createPrompt(
+        "I keep forgetting my vitamins. Every weekday at 7:30 in the morning remind me to take them.",
+      ),
+      user: weekdayUser,
+      tools: [scheduleRecurringEntry],
+      expectedStopReason: EAssistantLoopStopReason.FinalResponse,
+      expectedToolNames: [SCHEDULE_RECURRING_TOOL],
     },
     {
-      name: "Loop termination by repeated tool-call guard",
-      prompt: createPrompt("Repeat the same cron tool call without making progress."),
-      user: repeatedUser,
-      tools: [toolEntry(listCronJobsTool), toolEntry(unscheduleRecurringTool)],
-      requestAssistantTurn: createRepeatedToolRequester(),
-      maxIterations: 3,
+      name: "OpenRouter schedules a weekend medicine reminder",
+      prompt: createPrompt(
+        "Every Tuesday and Saturday at 8 in the morning remind me to take that nail medicine thing.",
+      ),
+      user: weekendUser,
+      tools: [scheduleRecurringEntry],
+      expectedStopReason: EAssistantLoopStopReason.FinalResponse,
+      expectedToolNames: [SCHEDULE_RECURRING_TOOL],
     },
   ];
+}
+
+function hasSuccessfulToolResult(toolResults: TNormalizedToolResult[], toolName: string): boolean {
+  return toolResults.some((result) => result.toolName === toolName && result.success);
+}
+
+function validateScenario(scenario: TScenarioDefinition, result: TAssistantToolLoopResult) {
+  if (result.stopReason !== scenario.expectedStopReason) {
+    logger.warning(
+      `Expected stop reason ${scenario.expectedStopReason} for ${scenario.name}, got ${result.stopReason}`,
+    );
+  }
+
+  const toolResults = getToolResults(result.conversation);
+
+  for (const toolName of scenario.expectedToolNames) {
+    if (!hasSuccessfulToolResult(toolResults, toolName)) {
+      logger.warning(`Expected successful ${toolName} tool call for ${scenario.name}`);
+    }
+  }
+}
+
+function getFirstScheduledJobName(result: TAssistantToolLoopResult): string | undefined {
+  const toolResults = getToolResults(result.conversation);
+
+  for (const toolResult of toolResults) {
+    if (toolResult.toolName !== SCHEDULE_RECURRING_TOOL || !toolResult.success) {
+      continue;
+    }
+
+    if (!isRecord(toolResult.data)) {
+      continue;
+    }
+
+    if (typeof toolResult.data.name === "string") {
+      return toolResult.data.name;
+    }
+  }
+
+  return undefined;
+}
+
+async function waitForCronFire(jobName: string): Promise<boolean> {
+  logger.message(`Waiting up to ${FIRE_TEST_TIMEOUT_MS / 1000}s for cron job to fire: ${jobName}`);
+
+  return new Promise((resolve) => {
+    let resolved = false;
+    let timer: ReturnType<typeof setTimeout>;
+
+    const finish = (success: boolean) => {
+      if (resolved) {
+        return;
+      }
+
+      resolved = true;
+      clearTimeout(timer);
+      CronSingleton.instance.off(jobName, onFire);
+      resolve(success);
+    };
+
+    const onFire = (ctx: unknown) => {
+      logger.message(["Cron reminder fired", "", serialize(ctx)].join("\n"));
+      finish(true);
+    };
+
+    CronSingleton.instance.on(jobName, onFire);
+    CronSingleton.instance.setup(CRON_POLL_INTERVAL_MS);
+    timer = setTimeout(() => finish(false), FIRE_TEST_TIMEOUT_MS);
+  });
+}
+
+async function waitForScenarioFire(
+  scenario: TScenarioDefinition,
+  result: TAssistantToolLoopResult,
+) {
+  if (scenario.waitForFirstFire !== true) {
+    return;
+  }
+
+  const jobName = getFirstScheduledJobName(result);
+
+  if (jobName === undefined) {
+    logger.warning(`Cannot wait for fire in ${scenario.name}: no scheduled job name found`);
+    return;
+  }
+
+  const fired = await waitForCronFire(jobName);
+
+  if (!fired) {
+    logger.warning(`Expected cron job ${jobName} to fire within ${FIRE_TEST_TIMEOUT_MS / 1000}s`);
+  }
 }
 
 function logScenario(name: string, result: TAssistantToolLoopResult) {
@@ -339,12 +300,23 @@ async function cleanupCron(chatIds: string[]) {
   CronSingleton.instance.destroy();
 }
 
+function assertOpenrouterConfigured() {
+  const apiKey = Bun.env.OPENROUTER_API_KEY ?? "";
+
+  if (apiKey.trim().length === 0) {
+    throw new Error("OPENROUTER_API_KEY is required to run src/services/ai/api/mock.ts");
+  }
+}
+
 async function main() {
-  const scenarios = createScenarios();
+  assertOpenrouterConfigured();
+
+  const scenarios = await createScenarios();
+  const openrouter = OpenrouterAiProvider.instance;
 
   try {
     for (const scenario of scenarios) {
-      const result = await AiConnector.instance.runAssistantToolLoop({
+      const result = await runAssistantToolLoop({
         prompt: scenario.prompt,
         history: [],
         user: scenario.user,
@@ -352,33 +324,12 @@ async function main() {
         purpose: EModelPurpose.Chat,
         chatId: scenario.user.id,
         maxIterations: scenario.maxIterations,
-        requestAssistantTurn: scenario.requestAssistantTurn,
+        requestAssistantTurn: openrouter.requestAssistantTurn.bind(openrouter),
       });
 
       logScenario(scenario.name, result);
-
-      const toolResults = getToolResults(result.conversation);
-
-      if (
-        scenario.name === "Loop termination by repeated tool-call guard" &&
-        result.stopReason !== EAssistantLoopStopReason.RepeatedToolCall
-      ) {
-        logger.warning(`Expected repeated tool-call guard, got ${result.stopReason}`);
-      }
-
-      if (
-        scenario.name === "Loop termination by max-iteration guard" &&
-        result.stopReason !== EAssistantLoopStopReason.MaxIterations
-      ) {
-        logger.warning(`Expected max-iterations guard, got ${result.stopReason}`);
-      }
-
-      if (
-        toolResults.length === 0 &&
-        result.stopReason === EAssistantLoopStopReason.FinalResponse
-      ) {
-        logger.warning("Scenario finished without any tool results");
-      }
+      validateScenario(scenario, result);
+      await waitForScenarioFire(scenario, result);
     }
   } finally {
     await cleanupCron(scenarios.map((scenario) => scenario.user.id));
