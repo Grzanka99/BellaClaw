@@ -1,14 +1,17 @@
 import { Client, Events, GatewayIntentBits, type Message, Partials } from "discord.js";
+import { generateReminderText } from "../../handlers/generate-reminder-text";
+import type { TCronEngineJobContext } from "../../lib/cron-engine";
 import { createLogger, type TLogger } from "../../utils/logger";
+import { AiConnector } from "../ai/api";
 import { ERole } from "../ai/types";
-import { Memory } from "../memory";
+import { CronSingleton } from "../cron";
 import { MessageHandler } from "../message-handler";
 
 export class DiscordSingleton {
   private static _instance: DiscordSingleton;
   private logger: TLogger = createLogger("DISCORD");
+  private ai = AiConnector.instance;
   private client: Client;
-  private memory: Memory;
 
   private constructor() {
     this.client = new Client({
@@ -20,8 +23,6 @@ export class DiscordSingleton {
       ],
       partials: [Partials.Channel],
     });
-
-    this.memory = Memory.instance;
   }
 
   public static get instance() {
@@ -61,11 +62,36 @@ export class DiscordSingleton {
 
   private async onReady(c: Client<true>) {
     this.logger.info(`Logged in as ${c.user.tag}!`);
+    CronSingleton.instance.setup();
+  }
+
+  private async handleCronFire(ctx: TCronEngineJobContext) {
+    const userId = ctx.scope;
+    if (userId === undefined) {
+      this.logger.warning(`handleCronFire: job "${ctx.name}" has no scope, skipping delivery`);
+      return;
+    }
+
+    const text = await generateReminderText(ctx, this.ai);
+    if (text === undefined) {
+      this.logger.info(`handleCronFire: job "${ctx.name}" has no reminder text, skipping delivery`);
+      return;
+    }
+
+    try {
+      const user = await this.client.users.fetch(userId);
+      await user.send(text);
+    } catch (error) {
+      this.logger.error(
+        `handleCronFire: failed to deliver reminder "${ctx.name}" to user ${userId}: ${String(error)}`,
+      );
+    }
   }
 
   public setup() {
     this.client.once(Events.ClientReady, this.onReady.bind(this));
     this.client.on(Events.MessageCreate, this.handleMessage.bind(this));
+    CronSingleton.instance.onCronEvent(this.handleCronFire.bind(this));
     this.client.login(Bun.env.DISCORD_TOKEN);
   }
 }

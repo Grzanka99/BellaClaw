@@ -254,4 +254,38 @@ describe("CronSingleton", () => {
     expect(job?.nextRunAt).toBeInstanceOf(Date);
     expect((job?.nextRunAt.getTime() ?? 0) > Date.now()).toBe(true);
   });
+
+  test("generic cron event does not collide with job named cron-event", async () => {
+    const cron = CronSingleton.instance;
+    const internals = cron as unknown as TCronSingletonInternals;
+
+    const scheduled = await cron.schedule({
+      name: "cron-event",
+      scope: "user-a",
+      pattern: "0 9 * * *",
+      reminderText: "Test.",
+    });
+
+    expect("error" in scheduled).toBe(false);
+
+    forceJobDue(cron, "cron-event", "user-a");
+
+    const namedEvents: TCronEngineJobContext[] = [];
+    const cronEvents: TCronEngineJobContext[] = [];
+
+    cron.on("cron-event", (ctx) => {
+      namedEvents.push(ctx);
+    });
+    cron.onCronEvent((ctx) => {
+      cronEvents.push(ctx);
+    });
+
+    await internals.engine.tick();
+
+    expect(namedEvents).toHaveLength(1);
+    expect(cronEvents).toHaveLength(1);
+    expect(namedEvents[0]?.name).toBe("cron-event");
+    expect(cronEvents[0]?.name).toBe("cron-event");
+    expect(cronEvents[0]?.scope).toBe("user-a");
+  });
 });

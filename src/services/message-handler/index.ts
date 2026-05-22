@@ -16,6 +16,9 @@ import {
 } from "../ai/api";
 import { readXmlAndInjectConfig } from "../ai/instructions/read-xml-and-inject-config";
 import { SDefineMessageImportance } from "../ai/tools/define-message-importance/handler";
+import { listCronJobsTool } from "../ai/tools/list-cron-jobs/definition";
+import { scheduleRecurringTool } from "../ai/tools/schedule-recurring/definition";
+import { unscheduleRecurringTool } from "../ai/tools/unschedule-recurring/definition";
 import { Memory } from "../memory";
 import { EMemoryImportance, SMemory, type TMemory } from "../memory/types";
 import type { TIncommingMessage, TOutgoingMessage } from "./types";
@@ -91,6 +94,25 @@ export class MessageHandler {
       });
     }
 
+    const [
+      listCronJobsInstructions,
+      scheduleRecurringInstructions,
+      unscheduleRecurringInstructions,
+    ] = await Promise.all([
+      readXmlAndInjectConfig("./src/services/ai/tools/list-cron-jobs/instructions.xml", Config),
+      readXmlAndInjectConfig("./src/services/ai/tools/schedule-recurring/instructions.xml", Config),
+      readXmlAndInjectConfig(
+        "./src/services/ai/tools/unschedule-recurring/instructions.xml",
+        Config,
+      ),
+    ]);
+
+    const tools = [
+      { definition: listCronJobsTool, instructions: listCronJobsInstructions },
+      { definition: scheduleRecurringTool, instructions: scheduleRecurringInstructions },
+      { definition: unscheduleRecurringTool, instructions: unscheduleRecurringInstructions },
+    ];
+
     const chatStart = performance.now();
     const aiRes = await this.ai.runAssistantToolLoop({
       prompt: {
@@ -104,7 +126,7 @@ export class MessageHandler {
         id: message.author.id,
         displayName: message.author.username,
       },
-      tools: [],
+      tools,
       chatId: message.chatId,
     });
     this.logger.info(

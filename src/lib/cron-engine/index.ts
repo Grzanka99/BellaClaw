@@ -17,21 +17,30 @@ import {
 } from "./types";
 
 const DEFAULT_TABLE_NAME = "cron_engine_jobs";
+const RESERVED_CRON_JOB_EVENT_NAMES = new Set(["error", "newListener", "removeListener"]);
 
 export * from "./parser";
 export * from "./types";
 
+export function isReservedCronJobEventName(name: string) {
+  return RESERVED_CRON_JOB_EVENT_NAMES.has(name);
+}
+
 export class CronEngine extends EventEmitter {
+  private static readonly FIRE_EVENT = Symbol("cron-engine-fire");
   private db: Database;
   private queue: AsyncQueue;
   private logger = createLogger("CRON ENGINE");
   private tableName: string;
+  private timezone: TOption<string>;
   private tickInterval: TOption<ReturnType<typeof setInterval>>;
+  private isTicking = false;
 
   public constructor(options: TCronEngineOptions) {
     super();
 
     this.tableName = CronEngine.validateTableName(options.tableName ?? DEFAULT_TABLE_NAME);
+    this.timezone = options.timezone;
     this.queue = new AsyncQueue();
     this.db = new Database(options.dbFile);
 
@@ -45,11 +54,21 @@ export class CronEngine extends EventEmitter {
       return;
     }
 
+    this.logger.info("started");
+
     this.tickInterval = setInterval(() => this.tick(), pollIntervalMs);
     this.tick();
   }
 
+  public onFire(listener: (ctx: TCronEngineJobContext) => void) {
+    return this.on(CronEngine.FIRE_EVENT, listener);
+  }
+
   public async schedule(args: TScheduleRecurringArgs): Promise<TCronEngineJob | TCronEngineError> {
+    if (isReservedCronJobEventName(args.name)) {
+      return this.createReservedJobNameError(args.name);
+    }
+
     if (!isValidCron(args.pattern)) {
       return { operation: "schedule", error: `Invalid cron pattern: ${args.pattern}` };
     }
@@ -58,7 +77,7 @@ export class CronEngine extends EventEmitter {
     const scheduledAt = new Date();
     let nextRunAt: Date;
     try {
-      nextRunAt = getNextFireTime(args.pattern, scheduledAt);
+      nextRunAt = getNextFireTime(args.pattern, scheduledAt, this.timezone);
     } catch (error) {
       return this.createUnschedulablePatternError(args.pattern, error);
     }
@@ -150,6 +169,10 @@ export class CronEngine extends EventEmitter {
   }
 
   public async scheduleOnce(args: TScheduleOnceArgs): Promise<TCronEngineJob | TCronEngineError> {
+    if (isReservedCronJobEventName(args.name)) {
+      return this.createReservedJobNameError(args.name);
+    }
+
     const now = new Date();
     if (args.fireAt <= now) {
       return { operation: "schedule", error: "fireAt must be in the future" };
@@ -315,68 +338,80 @@ export class CronEngine extends EventEmitter {
   }
 
   public async tick() {
-    const now = Date.now();
+    if (this.isTicking) {
+      return;
+    }
 
-    const jobs = await this.queue.enqueue(async () => {
-      const results = this.db
-        .query(`SELECT * FROM ${this.tableName} WHERE nextRunAt <= $now`)
-        .all({ $now: now });
+    this.isTicking = true;
 
-      const parsed = z.array(SCronEngineJob).safeParse(results);
-      if (!parsed.success) {
-        this.logger.error("Failed to parse jobs from DB during tick");
-        return [];
-      }
+    try {
+      const now = Date.now();
 
-      return parsed.data;
-    });
+      const jobs = await this.queue.enqueue(async () => {
+        const results = this.db
+          .query(`SELECT * FROM ${this.tableName} WHERE nextRunAt <= $now`)
+          .all({ $now: now });
 
-    for (const job of jobs) {
-      try {
-        if (job.type === ECronEngineJobType.Recurring && job.pattern) {
-          const nextRun = getNextFireTime(job.pattern, new Date(now));
-          await this.queue.enqueue(async () => {
-            this.db
-              .query(
-                `UPDATE ${this.tableName} SET nextRunAt = $nextRunAt, lastRunAt = $lastRunAt WHERE name = $name AND scope = $scope`,
-              )
-              .run({
-                $nextRunAt: nextRun.getTime(),
-                $lastRunAt: now,
-                $name: job.name,
-                $scope: this.normalizeScope(job.scope),
-              });
-          });
-        } else if (job.type === ECronEngineJobType.OneTime) {
-          await this.queue.enqueue(async () => {
-            this.db
-              .query(`DELETE FROM ${this.tableName} WHERE name = $name AND scope = $scope`)
-              .run({
-                $name: job.name,
-                $scope: this.normalizeScope(job.scope),
-              });
-          });
+        const parsed = z.array(SCronEngineJob).safeParse(results);
+        if (!parsed.success) {
+          this.logger.error("Failed to parse jobs from DB during tick");
+          return [];
         }
 
-        const ctx: TCronEngineJobContext = {
-          name: job.name,
-          scope: job.scope,
-          group: job.group,
-          type: job.type,
-          pattern: job.pattern,
-          reminderText: job.reminderText,
-          reminderPromptData: job.reminderPromptData,
-          reminderFallbackText: job.reminderFallbackText,
-          lastRunAt: job.lastRunAt,
-          nextRunAt: job.nextRunAt,
-          createdAt: job.createdAt,
-        };
+        return parsed.data;
+      });
 
-        this.emit(job.name, ctx);
-        this.emit("fire", ctx);
-      } catch (error) {
-        this.logger.error(`Failed to process job '${job.name}' during tick: ${String(error)}`);
+      for (const job of jobs) {
+        try {
+          if (job.type === ECronEngineJobType.Recurring && job.pattern) {
+            const nextRun = getNextFireTime(job.pattern, new Date(now), this.timezone);
+            await this.queue.enqueue(async () => {
+              this.db
+                .query(
+                  `UPDATE ${this.tableName} SET nextRunAt = $nextRunAt, lastRunAt = $lastRunAt WHERE name = $name AND scope = $scope`,
+                )
+                .run({
+                  $nextRunAt: nextRun.getTime(),
+                  $lastRunAt: now,
+                  $name: job.name,
+                  $scope: this.normalizeScope(job.scope),
+                });
+            });
+          } else if (job.type === ECronEngineJobType.OneTime) {
+            await this.queue.enqueue(async () => {
+              this.db
+                .query(`DELETE FROM ${this.tableName} WHERE name = $name AND scope = $scope`)
+                .run({
+                  $name: job.name,
+                  $scope: this.normalizeScope(job.scope),
+                });
+            });
+          }
+
+          const ctx: TCronEngineJobContext = {
+            name: job.name,
+            scope: job.scope,
+            group: job.group,
+            type: job.type,
+            pattern: job.pattern,
+            reminderText: job.reminderText,
+            reminderPromptData: job.reminderPromptData,
+            reminderFallbackText: job.reminderFallbackText,
+            lastRunAt: job.lastRunAt,
+            nextRunAt: job.nextRunAt,
+            createdAt: job.createdAt,
+          };
+
+          this.emit(CronEngine.FIRE_EVENT, ctx);
+          if (!isReservedCronJobEventName(job.name)) {
+            this.emit(job.name, ctx);
+          }
+        } catch (error) {
+          this.logger.error(`Failed to process job '${job.name}' during tick: ${String(error)}`);
+        }
       }
+    } finally {
+      this.isTicking = false;
     }
   }
 
@@ -437,6 +472,10 @@ export class CronEngine extends EventEmitter {
 
   private createScheduledJobReadbackError(): TCronEngineError {
     return { operation: "schedule", error: "Failed to read back scheduled job" };
+  }
+
+  private createReservedJobNameError(name: string): TCronEngineError {
+    return { operation: "schedule", error: `Job name '${name}' is reserved by EventEmitter` };
   }
 
   private parseJobRow(row: unknown): TOption<TCronEngineJob> {

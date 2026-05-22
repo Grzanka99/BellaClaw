@@ -19,8 +19,6 @@
   <cron_patterns>
     Use standard 5-field cron expressions: minute hour day-of-month month day-of-week
 
-    All times are interpreted in the {{config.ai.instructions.timezone}} timezone.
-
     Common examples:
     - "0 9 * * *"       — every day at 9:00
     - "*/30 * * * *"    — every 30 minutes

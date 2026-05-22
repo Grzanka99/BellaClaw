@@ -143,7 +143,7 @@ describe("CronEngine", () => {
     });
 
     const fireEvent = new Promise<string>((resolve) => {
-      engine.on("fire", (ctx) => {
+      engine.onFire((ctx) => {
         if (ctx.name === "recurring-job") {
           resolve(ctx.name);
         }
@@ -168,6 +168,40 @@ describe("CronEngine", () => {
     expect(updatedJob?.reminderPromptData).toBe('{"topic":"water"}');
     expect(updatedJob?.reminderFallbackText).toBe("Drink water.");
     expect((updatedJob?.nextRunAt.getTime() ?? 0) > Date.now()).toBe(true);
+  });
+
+  test("generic fire event does not collide with job named fire", async () => {
+    await engine.schedule({
+      name: "fire",
+      scope: "scope-a",
+      pattern: "*/5 * * * *",
+    });
+
+    const internals = engine as unknown as TEngineWithInternals;
+    internals.db
+      .query(
+        "UPDATE cron_engine_test_jobs SET nextRunAt = $ts WHERE name = $name AND scope = $scope",
+      )
+      .run({
+        $ts: Date.now() - 1_000,
+        $name: "fire",
+        $scope: "scope-a",
+      });
+
+    const namedEvents: string[] = [];
+    const fireEvents: string[] = [];
+
+    engine.on("fire", (ctx) => {
+      namedEvents.push(ctx.name);
+    });
+    engine.onFire((ctx) => {
+      fireEvents.push(ctx.name);
+    });
+
+    await internals.tick();
+
+    expect(namedEvents).toEqual(["fire"]);
+    expect(fireEvents).toEqual(["fire"]);
   });
 
   test("tick removes one-time job after firing", async () => {

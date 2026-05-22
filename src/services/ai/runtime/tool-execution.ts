@@ -1,5 +1,7 @@
 import type { ChatMessageToolCall } from "@openrouter/sdk/models";
 import type { ZodType } from "zod";
+import { Config } from "../../../config";
+import type { TCronEngineJob } from "../../../lib/cron-engine";
 import type { TOption } from "../../../types";
 import { createLogger } from "../../../utils/logger";
 import { CronSingleton } from "../../cron";
@@ -30,6 +32,40 @@ import type { TNormalizedToolResult } from "./types";
 const logger = createLogger("AI RUNTIME");
 
 type TToolValidationResult<T> = { success: true; data: T } | { success: false; error: string };
+
+function formatLocalDateTime(date: Date, timezone: string) {
+  return date.toLocaleString("sv-SE-u-nu-latn", {
+    timeZone: timezone,
+    hourCycle: "h23",
+  });
+}
+
+function formatLocalTime(date: Date, timezone: string) {
+  return date.toLocaleTimeString("sv-SE-u-nu-latn", {
+    timeZone: timezone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  });
+}
+
+function serializeCronJobForModel(job: TCronEngineJob) {
+  const timezone = Config.ai.instructions.timezone;
+
+  return {
+    ...job,
+    timezone,
+    nextRunAtLocal: formatLocalDateTime(job.nextRunAt, timezone),
+    nextRunAtLocalTime: formatLocalTime(job.nextRunAt, timezone),
+    lastRunAtLocal:
+      job.lastRunAt === undefined ? undefined : formatLocalDateTime(job.lastRunAt, timezone),
+    createdAtLocal: formatLocalDateTime(job.createdAt, timezone),
+  };
+}
+
+function serializeCronJobsForModel(jobs: TCronEngineJob[]) {
+  return jobs.map((job) => serializeCronJobForModel(job));
+}
 
 function createSuccessfulToolResult(
   toolCall: ChatMessageToolCall,
@@ -174,7 +210,7 @@ export async function executeToolCall(args: {
 
       const jobs = await CronSingleton.instance.getAllJobs(resolvedChatId);
 
-      return createSuccessfulToolResult(toolCall, jobs);
+      return createSuccessfulToolResult(toolCall, serializeCronJobsForModel(jobs));
     }
     case SCHEDULE_RECURRING_TOOL: {
       const resolvedChatId = requireChatId(toolCall, chatId);
@@ -210,7 +246,7 @@ export async function executeToolCall(args: {
         );
       }
 
-      return createSuccessfulToolResult(toolCall, result);
+      return createSuccessfulToolResult(toolCall, serializeCronJobForModel(result));
     }
     case UNSCHEDULE_RECURRING_TOOL: {
       const resolvedChatId = requireChatId(toolCall, chatId);
@@ -237,7 +273,7 @@ export async function executeToolCall(args: {
         );
       }
 
-      return createSuccessfulToolResult(toolCall, result);
+      return createSuccessfulToolResult(toolCall, serializeCronJobForModel(result));
     }
     default: {
       return createFailedToolResult(toolCall, `Unknown tool requested: ${toolName}`);

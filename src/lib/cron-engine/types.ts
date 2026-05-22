@@ -131,4 +131,5 @@ export type TCronEngineError = {
 export type TCronEngineOptions = {
   dbFile: string;
   tableName?: string;
+  timezone?: string;
 };

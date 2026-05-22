@@ -1,6 +1,8 @@
 import { EventEmitter } from "node:events";
+import { Config } from "../../config";
 import {
   CronEngine,
+  isReservedCronJobEventName,
   type TCronEngineError,
   type TCronEngineJob,
   type TCronEngineJobContext,
@@ -10,6 +12,7 @@ import {
 import type { TOption } from "../../types";
 
 export class CronSingleton extends EventEmitter {
+  private static readonly CRON_EVENT = Symbol("cron-event");
   private static _instance: TOption<CronSingleton>;
   private static DEFAULT_DB_FILE = "cron-engine.db";
   private static dbFile = CronSingleton.DEFAULT_DB_FILE;
@@ -18,10 +21,16 @@ export class CronSingleton extends EventEmitter {
   private constructor() {
     super();
 
-    this.engine = new CronEngine({ dbFile: CronSingleton.dbFile });
+    this.engine = new CronEngine({
+      dbFile: CronSingleton.dbFile,
+      timezone: Config.ai.instructions.timezone,
+    });
 
-    this.engine.on("fire", (ctx: TCronEngineJobContext) => {
-      this.emit(ctx.name, ctx);
+    this.engine.onFire((ctx: TCronEngineJobContext) => {
+      this.emit(CronSingleton.CRON_EVENT, ctx);
+      if (!isReservedCronJobEventName(ctx.name)) {
+        this.emit(ctx.name, ctx);
+      }
     });
   }
 
@@ -51,6 +60,10 @@ export class CronSingleton extends EventEmitter {
 
   public setup(pollIntervalMs = 10_000) {
     this.engine.setup(pollIntervalMs);
+  }
+
+  public onCronEvent(listener: (ctx: TCronEngineJobContext) => void) {
+    return this.on(CronSingleton.CRON_EVENT, listener);
   }
 
   public async schedule(args: TScheduleRecurringArgs): Promise<TCronEngineJob | TCronEngineError> {
