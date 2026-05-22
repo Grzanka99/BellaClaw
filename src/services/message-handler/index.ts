@@ -95,6 +95,11 @@ export class MessageHandler {
       });
     }
 
+    history.push({
+      role: ERole.System,
+      content: createCurrentTimeContext(),
+    });
+
     const [
       listCronJobsInstructions,
       scheduleOnceInstructions,
@@ -332,4 +337,23 @@ export class MessageHandler {
   private async generateResponseMessageFromToolCall() {
     throw "Not implemented";
   }
+}
+
+function createCurrentTimeContext() {
+  const now = new Date();
+  const timezone = Config.ai.instructions.timezone;
+
+  return [
+    "Current time context:",
+    `UTC: ${now.toISOString()}`,
+    `Timezone: ${timezone}`,
+    `Local: ${now.toLocaleString("sv-SE-u-nu-latn", {
+      timeZone: timezone,
+      hourCycle: "h23",
+    })}`,
+    `Weekday: ${now.toLocaleString("en-US-u-nu-latn", {
+      timeZone: timezone,
+      weekday: "long",
+    })}`,
+  ].join("\n");
 }
