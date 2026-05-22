@@ -1,0 +1,68 @@
+<instructions>
+
+  <purpose>
+    Schedule one-time events that fire once at a specific future date and time.
+    Use this tool when the user wants a reminder, alarm, timer, or notification that should not repeat.
+  </purpose>
+
+  <tool>
+    <name>schedule-once</name>
+    <description>
+      Creates a one-time cron job identified by a unique name that fires at the provided fireAt timestamp.
+      The job removes itself after firing. Also stores either direct reminder text or LLM regeneration data
+      with a fallback message. Returns the scheduled job details including the fire time.
+    </description>
+  </tool>
+
+  <datetime_rules>
+    <rule>Use the configured timezone when interpreting relative or local times: {{config.ai.instructions.timezone}}</rule>
+    <rule>Convert the final scheduled time to an ISO 8601 timestamp for fireAt</rule>
+    <rule>If the user's requested date or time is ambiguous, ask a clarifying question before calling this tool</rule>
+    <rule>Never schedule a fireAt in the past</rule>
+  </datetime_rules>
+
+  <usage_rules>
+    <rule>Always confirm the exact one-time fire date and time with the user before calling this tool</rule>
+    <rule>Use this tool for non-repeating reminders; use schedule-recurring when the user asks for repetition</rule>
+    <rule>Choose clear, descriptive names for jobs so they can be easily referenced later</rule>
+    <rule>If a one-time job with the same name already exists, set overwrite to true only if the user explicitly agrees to replace it</rule>
+    <rule>Always provide reminderText for direct reminders, or reminderPromptData plus reminderFallbackText for generated reminders</rule>
+    <rule>Pass reminderPromptData as a serialized JSON string, not as a nested object</rule>
+    <rule>Inform the user of the scheduled fire time after successfully scheduling</rule>
+  </usage_rules>
+
+  <examples>
+    <example>
+      <context>User says: "Remind me tomorrow at 9 to call the dentist"</context>
+      <toolCall>
+        <name>call-dentist</name>
+        <fireAt>2026-05-23T09:00:00+02:00</fireAt>
+        <reminderText>Reminder to call the dentist.</reminderText>
+      </toolCall>
+      <reasoning>One reminder at a specific future time, so schedule a one-time job.</reasoning>
+    </example>
+
+    <example>
+      <context>User says: "Za 20 minut przypomnij mi wyjąć pranie"</context>
+      <toolCall>
+        <name>laundry-reminder</name>
+        <fireAt>2026-05-22T14:20:00+02:00</fireAt>
+        <group>home</group>
+        <reminderText>Przypomnienie: wyjmij pranie.</reminderText>
+      </toolCall>
+      <reasoning>A relative timer that fires once.</reasoning>
+    </example>
+
+    <example>
+      <context>User says: "Tomorrow afternoon remind me to prepare for the meeting, make it motivating"</context>
+      <toolCall>
+        <name>meeting-prep-reminder</name>
+        <fireAt>2026-05-23T15:00:00+02:00</fireAt>
+        <reminderPromptData>{"topic":"meeting preparation","tone":"motivating"}</reminderPromptData>
+        <reminderFallbackText>Time to prepare for the meeting.</reminderFallbackText>
+      </toolCall>
+      <reasoning>User requested generated tone; store prompt data plus fallback.</reasoning>
+    </example>
+  </examples>
+
+</instructions>

@@ -17,6 +17,7 @@ import {
 import { readXmlAndInjectConfig } from "../ai/instructions/read-xml-and-inject-config";
 import { SDefineMessageImportance } from "../ai/tools/define-message-importance/handler";
 import { listCronJobsTool } from "../ai/tools/list-cron-jobs/definition";
+import { scheduleOnceTool } from "../ai/tools/schedule-once/definition";
 import { scheduleRecurringTool } from "../ai/tools/schedule-recurring/definition";
 import { unscheduleRecurringTool } from "../ai/tools/unschedule-recurring/definition";
 import { Memory } from "../memory";
@@ -96,10 +97,12 @@ export class MessageHandler {
 
     const [
       listCronJobsInstructions,
+      scheduleOnceInstructions,
       scheduleRecurringInstructions,
       unscheduleRecurringInstructions,
     ] = await Promise.all([
       readXmlAndInjectConfig("./src/services/ai/tools/list-cron-jobs/instructions.xml", Config),
+      readXmlAndInjectConfig("./src/services/ai/tools/schedule-once/instructions.xml", Config),
       readXmlAndInjectConfig("./src/services/ai/tools/schedule-recurring/instructions.xml", Config),
       readXmlAndInjectConfig(
         "./src/services/ai/tools/unschedule-recurring/instructions.xml",
@@ -109,6 +112,7 @@ export class MessageHandler {
 
     const tools = [
       { definition: listCronJobsTool, instructions: listCronJobsInstructions },
+      { definition: scheduleOnceTool, instructions: scheduleOnceInstructions },
       { definition: scheduleRecurringTool, instructions: scheduleRecurringInstructions },
       { definition: unscheduleRecurringTool, instructions: unscheduleRecurringInstructions },
     ];

@@ -14,6 +14,8 @@ import {
 } from "../tools/define-message-importance/handler";
 import { LIST_CRON_JOBS_TOOL } from "../tools/list-cron-jobs/definition";
 import { SListCronJobsArgs } from "../tools/list-cron-jobs/handler";
+import { SCHEDULE_ONCE_TOOL } from "../tools/schedule-once/definition";
+import { SScheduleOnceArgs, type TScheduleOnceArgs } from "../tools/schedule-once/handler";
 import { SCHEDULE_RECURRING_TOOL } from "../tools/schedule-recurring/definition";
 import {
   SScheduleRecurringArgs,
@@ -211,6 +213,39 @@ export async function executeToolCall(args: {
       const jobs = await CronSingleton.instance.getAllJobs(resolvedChatId);
 
       return createSuccessfulToolResult(toolCall, serializeCronJobsForModel(jobs));
+    }
+    case SCHEDULE_ONCE_TOOL: {
+      const resolvedChatId = requireChatId(toolCall, chatId);
+
+      if (resolvedChatId === undefined) {
+        return createFailedToolResult(toolCall, `chatId is required for tool: ${toolName}`);
+      }
+
+      const parsed = parseAndValidateToolArgs<TScheduleOnceArgs>(toolCall, SScheduleOnceArgs);
+
+      if (!parsed.success) {
+        return createFailedToolResult(toolCall, parsed.error);
+      }
+
+      const result = await CronSingleton.instance.scheduleOnce({
+        name: parsed.data.name,
+        scope: resolvedChatId,
+        fireAt: parsed.data.fireAt,
+        group: parsed.data.group,
+        reminderText: parsed.data.reminderText,
+        reminderPromptData: parsed.data.reminderPromptData,
+        reminderFallbackText: parsed.data.reminderFallbackText,
+        overwrite: parsed.data.overwrite,
+      });
+
+      if ("error" in result) {
+        return createFailedToolResult(
+          toolCall,
+          `schedule-once failed during ${result.operation}: ${normalizeError(result.error)}`,
+        );
+      }
+
+      return createSuccessfulToolResult(toolCall, serializeCronJobForModel(result));
     }
     case SCHEDULE_RECURRING_TOOL: {
       const resolvedChatId = requireChatId(toolCall, chatId);

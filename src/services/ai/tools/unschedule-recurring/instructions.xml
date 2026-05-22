@@ -1,15 +1,15 @@
 <instructions>
 
   <purpose>
-    Remove a previously scheduled recurring cron job so it no longer fires.
+    Remove a previously scheduled cron job so it no longer fires.
     Use this tool when the user explicitly asks to cancel or stop a scheduled reminder
-    or periodic task.
+    or periodic task, whether it is one-time or recurring.
   </purpose>
 
   <tool>
     <name>unschedule-recurring</name>
     <description>
-      Deletes a recurring cron job by its unique name. The job will no longer fire
+      Deletes a cron job by its unique name. The job will no longer fire
       after being unscheduled. Returns the removed job details.
     </description>
   </tool>

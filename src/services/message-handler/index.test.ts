@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
 import { LIST_CRON_JOBS_TOOL } from "../ai/tools/list-cron-jobs/definition";
+import { SCHEDULE_ONCE_TOOL } from "../ai/tools/schedule-once/definition";
 import { SCHEDULE_RECURRING_TOOL } from "../ai/tools/schedule-recurring/definition";
 import { UNSCHEDULE_RECURRING_TOOL } from "../ai/tools/unschedule-recurring/definition";
 import { ERole } from "../ai/types";
@@ -9,6 +10,7 @@ const EXPECTED_CRON_TOOL_NAMES = [
   LIST_CRON_JOBS_TOOL,
   SCHEDULE_RECURRING_TOOL,
   UNSCHEDULE_RECURRING_TOOL,
+  SCHEDULE_ONCE_TOOL,
 ];
 
 type TAiConnectorInternals = {
