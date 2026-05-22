@@ -106,7 +106,12 @@ function validateRangeOrValue(segment: string, min: number, max: number): boolea
 
     const aNum = Number(a);
     const bNum = Number(b);
-    if (Number.isNaN(aNum) || Number.isNaN(bNum)) {
+    if (
+      Number.isNaN(aNum) ||
+      Number.isNaN(bNum) ||
+      !Number.isInteger(aNum) ||
+      !Number.isInteger(bNum)
+    ) {
       return false;
     }
 
@@ -122,7 +127,7 @@ function validateRangeOrValue(segment: string, min: number, max: number): boolea
   }
 
   const n = Number(segment);
-  if (Number.isNaN(n)) {
+  if (Number.isNaN(n) || !Number.isInteger(n)) {
     return false;
   }
 
