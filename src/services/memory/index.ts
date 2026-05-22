@@ -4,7 +4,9 @@ import { AsyncQueue } from "../../utils/async-queue";
 import { createLogger, type TLogger } from "../../utils/logger";
 import { SMemory, type TFindMemoryArgs, type TMemory, type TSaveArgs } from "./types";
 
-export const PERSISTENT_MEMORY_DB = "persistent-memory.db" as const;
+export const DEFAULT_PERSISTENT_MEMORY_DB = "persistent-memory.db" as const;
+
+const MEMORY_DB_FILE = Bun.env.MEMORY_DB_FILE ?? DEFAULT_PERSISTENT_MEMORY_DB;
 
 export const CREATE_MEMORIES_TABLE = `
   CREATE TABLE IF NOT EXISTS memories (
@@ -40,7 +42,7 @@ export class Memory {
   private logger: TLogger = createLogger("MEMORY");
 
   // NOTE: To simplify and improve tests setup
-  private static MEMORY_FILE = PERSISTENT_MEMORY_DB;
+  private static MEMORY_FILE = MEMORY_DB_FILE;
 
   private constructor() {
     this.queue = new AsyncQueue();

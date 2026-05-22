@@ -1,0 +1,13 @@
+.git
+.gitignore
+.opencode
+node_modules
+coverage
+dist
+out
+tmp
+plans
+*.db
+.env
+.env.*
+README.md
