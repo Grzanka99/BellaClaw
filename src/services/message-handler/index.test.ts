@@ -2,14 +2,14 @@ import { afterEach, describe, expect, mock, test } from "bun:test";
 import { LIST_CRON_JOBS_TOOL } from "../ai/tools/list-cron-jobs/definition";
 import { SCHEDULE_ONCE_TOOL } from "../ai/tools/schedule-once/definition";
 import { SCHEDULE_RECURRING_TOOL } from "../ai/tools/schedule-recurring/definition";
-import { UNSCHEDULE_RECURRING_TOOL } from "../ai/tools/unschedule-recurring/definition";
+import { UNSCHEDULE_CRON_JOB_TOOL } from "../ai/tools/unschedule-cron-job/definition";
 import { ERole } from "../ai/types";
 import { MessageHandler } from "./index";
 
 const EXPECTED_CRON_TOOL_NAMES = [
   LIST_CRON_JOBS_TOOL,
   SCHEDULE_RECURRING_TOOL,
-  UNSCHEDULE_RECURRING_TOOL,
+  UNSCHEDULE_CRON_JOB_TOOL,
   SCHEDULE_ONCE_TOOL,
 ];
 

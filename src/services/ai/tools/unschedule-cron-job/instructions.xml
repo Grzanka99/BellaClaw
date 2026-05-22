@@ -7,7 +7,7 @@
   </purpose>
 
   <tool>
-    <name>unschedule-recurring</name>
+    <name>unschedule-cron-job</name>
     <description>
       Deletes a cron job by its unique name. The job will no longer fire
       after being unscheduled. Returns the removed job details.
