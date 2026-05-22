@@ -15,7 +15,7 @@ export class CronSingleton extends EventEmitter {
   private static readonly CRON_EVENT = Symbol("cron-event");
   private static _instance: TOption<CronSingleton>;
   private static DEFAULT_DB_FILE = "cron-engine.db";
-  private static dbFile = CronSingleton.DEFAULT_DB_FILE;
+  private static dbFile = Bun.env.CRON_DB_FILE ?? CronSingleton.DEFAULT_DB_FILE;
   private engine: CronEngine;
 
   private constructor() {

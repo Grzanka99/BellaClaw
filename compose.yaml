@@ -1,0 +1,17 @@
+services:
+  bellaclaw:
+    build:
+      context: .
+      dockerfile: Containerfile
+    container_name: bellaclaw
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      MEMORY_DB_FILE: /app/data/persistent-memory.db
+      CRON_DB_FILE: /app/data/cron-engine.db
+    volumes:
+      - bellaclaw-data:/app/data
+
+volumes:
+  bellaclaw-data:

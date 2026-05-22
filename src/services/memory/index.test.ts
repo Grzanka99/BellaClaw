@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, unlinkSync } from "node:fs";
 import { ERole } from "../ai/types";
-import { Memory, PERSISTENT_MEMORY_DB } from "./index";
+import { DEFAULT_PERSISTENT_MEMORY_DB, Memory } from "./index";
 import { EMemoryImportance } from "./types";
 
 const TEST_DB = "test-memory.db";
@@ -27,7 +27,7 @@ describe("Memory", () => {
     if (existsSync(TEST_DB)) {
       unlinkSync(TEST_DB);
     }
-    resetMemoryInstance(PERSISTENT_MEMORY_DB);
+    resetMemoryInstance(DEFAULT_PERSISTENT_MEMORY_DB);
   });
 
   describe("instance", () => {

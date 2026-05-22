@@ -19,6 +19,8 @@ Ships with a default "Bellatrix" persona -- a darkly elegant assistant that resp
 | `DISCORD_TOKEN` | Yes | Discord bot token |
 | `OPENROUTER_API_KEY` | Yes | OpenRouter API key |
 | `OLLAMA_BASE_URL` | No | Ollama base URL (defaults to `http://localhost:11434`) |
+| `MEMORY_DB_FILE` | No | SQLite path for persistent memory |
+| `CRON_DB_FILE` | No | SQLite path for scheduled jobs |
 
 ### Install Dependencies
 
@@ -31,6 +33,18 @@ bun install
 ```bash
 bun run start
 ```
+
+### Run With Podman In Background
+
+1. Copy the repo to the server.
+2. Create a `.env` file there with at least `DISCORD_TOKEN` and `OPENROUTER_API_KEY`.
+3. Start it in the background:
+
+```bash
+podman compose up -d --build
+```
+
+The container stores SQLite data in a named volume and restarts automatically.
 
 ### Dev Mode (file-watch)
 
