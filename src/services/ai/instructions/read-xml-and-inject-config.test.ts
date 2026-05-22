@@ -1,0 +1,148 @@
+import { describe, expect, test } from "bun:test";
+import { Config } from "../../../config";
+
+const mockConfig = {
+  ...Config,
+  ai: {
+    ...Config.ai,
+    instructions: {
+      ...Config.ai.instructions,
+      timezone: "Europe/Warsaw",
+      assistantName: "Bellatrix",
+      language: "Polish",
+      timeFormat: "24-hour format (e.g. 14:30, not 2:30 PM)",
+      memoryRetention: {
+        low: "Discard after short-term context window",
+        medium: "Keep for several weeks, review periodically",
+        high: "Keep indefinitely, reference in future conversations",
+      },
+    },
+  },
+};
+
+describe("readXmlAndInjectConfig", () => {
+  test("injects top-level config values into XML placeholders", async () => {
+    const { readXmlAndInjectConfig } = await import("./read-xml-and-inject-config");
+
+    const tempPath = `/tmp/test-inject-${Date.now()}.xml`;
+    await Bun.write(tempPath, `Hello {{config.ai.instructions.assistantName}}!`);
+
+    const result = await readXmlAndInjectConfig(tempPath, mockConfig);
+    expect(result).toBe("Hello Bellatrix!");
+
+    await Bun.file(tempPath).delete();
+  });
+
+  test("injects nested config values like memoryRetention.high", async () => {
+    const { readXmlAndInjectConfig } = await import("./read-xml-and-inject-config");
+
+    const tempPath = `/tmp/test-inject-nested-${Date.now()}.xml`;
+    await Bun.write(
+      tempPath,
+      `<retention>{{config.ai.instructions.memoryRetention.high}}</retention>`,
+    );
+
+    const result = await readXmlAndInjectConfig(tempPath, mockConfig);
+    expect(result).toBe(
+      "<retention>Keep indefinitely, reference in future conversations</retention>",
+    );
+
+    await Bun.file(tempPath).delete();
+  });
+
+  test("injects multiple different placeholders in one file", async () => {
+    const { readXmlAndInjectConfig } = await import("./read-xml-and-inject-config");
+
+    const tempPath = `/tmp/test-inject-multi-${Date.now()}.xml`;
+    await Bun.write(
+      tempPath,
+      `Always use the {{config.ai.instructions.timezone}} timezone. Reply in {{config.ai.instructions.language}}. Name: {{config.ai.instructions.assistantName}}.`,
+    );
+
+    const result = await readXmlAndInjectConfig(tempPath, mockConfig);
+    expect(result).toBe("Always use the Europe/Warsaw timezone. Reply in Polish. Name: Bellatrix.");
+
+    await Bun.file(tempPath).delete();
+  });
+
+  test("leaves non-config curly braces untouched", async () => {
+    const { readXmlAndInjectConfig } = await import("./read-xml-and-inject-config");
+
+    const tempPath = `/tmp/test-inject-plain-${Date.now()}.xml`;
+    await Bun.write(tempPath, `User id: {user.id}, timezone: {{config.ai.instructions.timezone}}`);
+
+    const result = await readXmlAndInjectConfig(tempPath, mockConfig);
+    expect(result).toBe("User id: {user.id}, timezone: Europe/Warsaw");
+
+    await Bun.file(tempPath).delete();
+  });
+
+  test("throws on missing config path", async () => {
+    const { readXmlAndInjectConfig } = await import("./read-xml-and-inject-config");
+
+    const tempPath = `/tmp/test-inject-missing-${Date.now()}.xml`;
+    await Bun.write(tempPath, `Value: {{config.ai.instructions.nonexistent}}`);
+
+    await expect(readXmlAndInjectConfig(tempPath, mockConfig)).rejects.toThrow(
+      'readXmlAndInjectConfig: "config.ai.instructions.nonexistent" is undefined',
+    );
+
+    await Bun.file(tempPath).delete();
+  });
+
+  test("throws on config path that hits a non-object value", async () => {
+    const { readXmlAndInjectConfig } = await import("./read-xml-and-inject-config");
+
+    const tempPath = `/tmp/test-inject-nonobj-${Date.now()}.xml`;
+    await Bun.write(tempPath, `Value: {{config.ai.instructions.timezone.foo}}`);
+
+    await expect(readXmlAndInjectConfig(tempPath, mockConfig)).rejects.toThrow(
+      `cannot resolve "config.ai.instructions.timezone.foo"`,
+    );
+
+    await Bun.file(tempPath).delete();
+  });
+
+  test("resolves nested placeholders where config values contain other placeholders", async () => {
+    const { readXmlAndInjectConfig } = await import("./read-xml-and-inject-config");
+
+    const nestedConfig = {
+      ...mockConfig,
+      ai: {
+        ...mockConfig.ai,
+        instructions: {
+          ...mockConfig.ai.instructions,
+          assistantName: "Nyx",
+          platform: "Discord DMs",
+          preferredReplyLength: "1-3 sentences",
+          persona: `You are {{config.ai.instructions.assistantName}}, communicating via {{config.ai.instructions.platform}}. Prefer {{config.ai.instructions.preferredReplyLength}}.`,
+        },
+      },
+    };
+
+    const tempPath = `/tmp/test-inject-nested-refs-${Date.now()}.xml`;
+    await Bun.write(tempPath, `<persona>{{config.ai.instructions.persona}}</persona>`);
+
+    const result = await readXmlAndInjectConfig(tempPath, nestedConfig);
+    expect(result).toBe(
+      "<persona>You are Nyx, communicating via Discord DMs. Prefer 1-3 sentences.</persona>",
+    );
+
+    await Bun.file(tempPath).delete();
+  });
+
+  test("injects into actual base-system.xml file and resolves all placeholders", async () => {
+    const { readXmlAndInjectConfig } = await import("./read-xml-and-inject-config");
+
+    const result = await readXmlAndInjectConfig(
+      "./src/services/ai/instructions/base-system.xml",
+      mockConfig,
+    );
+
+    expect(result).toContain("Europe/Warsaw");
+    expect(result).toContain("Polish");
+    expect(result).toContain("Bellatrix");
+    expect(result).toContain("Discord direct messages");
+    expect(result).not.toContain("{{config.");
+  });
+});

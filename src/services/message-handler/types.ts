@@ -1,5 +1,5 @@
 import type { Snowflake } from "discord.js";
-import type { ERole } from "../ai-providers/types";
+import type { ERole } from "../ai/types";
 
 export type TMessageAuthor =
   | {

@@ -1,11 +1,8 @@
 // @ts-nocheck
-// biome-ignore-all lint
+// biome-ignore-all lint: legacy queue implementation kept as-is
 
 export class AsyncQueue {
-  private queue: Array<
-    // biome-ignore lint/suspicious/noExplicitAny: <explanation>
-    [() => Promise<unknown>, (v: any) => void, (v: string) => void]
-  > = [];
+  private queue: Array<[() => Promise<unknown>, (v: any) => void, (v: string) => void]> = [];
   private isRunning = false;
 
   private resolver: (v: boolean) => void = (_) => {};

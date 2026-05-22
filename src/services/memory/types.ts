@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ERole } from "../ai-providers/types";
+import { ERole } from "../ai/types";
 
 export enum EMemoryImportance {
   Low = "low",

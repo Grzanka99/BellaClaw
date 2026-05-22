@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, unlinkSync } from "node:fs";
-import { ERole } from "../ai-providers/types";
+import { ERole } from "../ai/types";
 import { Memory, PERSISTENT_MEMORY_DB } from "./index";
 import { EMemoryImportance } from "./types";
 

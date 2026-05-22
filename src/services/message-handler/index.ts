@@ -1,28 +1,36 @@
+import { z } from "zod";
+import { Config } from "../../config";
 import type { TOption } from "../../types";
 import { AsyncQueue } from "../../utils/async-queue";
 import { createLogger, type TLogger } from "../../utils/logger";
-import { OllamaAiProvider } from "../ai-providers/ollama";
-import { OpenrouterAiProvider } from "../ai-providers/openrouter";
 import {
+  AiConnector,
   DEFINE_MESSAGE_IMPORTANCE_TOOL,
   defineMessageImportanceTool,
-} from "../ai-providers/tools/define-message-importance/definition";
-import type { TDefineMessageImportance } from "../ai-providers/tools/define-message-importance/handler";
-import {
+  EModelPurpose,
+  ERole,
   SEARCH_MEMORY_TOOL,
   searchMemoryTool,
-} from "../ai-providers/tools/search-memory/definition";
-import type { TSearchMemory } from "../ai-providers/tools/search-memory/handler";
-import type { THistoryItem, TPrompt } from "../ai-providers/types";
-import { EModelPurpose, ERole } from "../ai-providers/types";
+  type THistoryItem,
+  type TPrompt,
+} from "../ai/api";
+import { readXmlAndInjectConfig } from "../ai/instructions/read-xml-and-inject-config";
+import { SDefineMessageImportance } from "../ai/tools/define-message-importance/handler";
+import { listCronJobsTool } from "../ai/tools/list-cron-jobs/definition";
+import { scheduleRecurringTool } from "../ai/tools/schedule-recurring/definition";
+import { unscheduleRecurringTool } from "../ai/tools/unschedule-recurring/definition";
 import { Memory } from "../memory";
-import { EMemoryImportance, type TMemory } from "../memory/types";
+import { EMemoryImportance, SMemory, type TMemory } from "../memory/types";
 import type { TIncommingMessage, TOutgoingMessage } from "./types";
+
+const SSearchMemoryToolResult = z.object({
+  memories: z.array(SMemory),
+});
 
 export class MessageHandler {
   private static _instances = new Map<string, MessageHandler>();
   private logger: TLogger;
-  private ai = OpenrouterAiProvider.instance;
+  private ai = AiConnector.instance;
   private queue = new AsyncQueue();
   private memory = Memory.instance;
 
@@ -86,33 +94,55 @@ export class MessageHandler {
       });
     }
 
+    const [
+      listCronJobsInstructions,
+      scheduleRecurringInstructions,
+      unscheduleRecurringInstructions,
+    ] = await Promise.all([
+      readXmlAndInjectConfig("./src/services/ai/tools/list-cron-jobs/instructions.xml", Config),
+      readXmlAndInjectConfig("./src/services/ai/tools/schedule-recurring/instructions.xml", Config),
+      readXmlAndInjectConfig(
+        "./src/services/ai/tools/unschedule-recurring/instructions.xml",
+        Config,
+      ),
+    ]);
+
+    const tools = [
+      { definition: listCronJobsTool, instructions: listCronJobsInstructions },
+      { definition: scheduleRecurringTool, instructions: scheduleRecurringInstructions },
+      { definition: unscheduleRecurringTool, instructions: unscheduleRecurringInstructions },
+    ];
+
     const chatStart = performance.now();
-    const aiRes = await this.ai.chatWithTools({
+    const aiRes = await this.ai.runAssistantToolLoop({
       prompt: {
         role: ERole.User,
         content: [{ type: "text", text: message.message.content }],
       },
       history,
+      purpose: EModelPurpose.ChatAccurate,
       user: {
         username: message.author.username,
         id: message.author.id,
         displayName: message.author.username,
       },
-      tools: [],
-      model: this.ai.getModel(EModelPurpose.ChatAccurate),
+      tools,
+      chatId: message.chatId,
     });
     this.logger.info(
       `handleMessage: AI chat completed (${(performance.now() - chatStart).toFixed(0)}ms)`,
     );
 
-    if (!aiRes) {
-      this.logger.warning("handleMessage: AI returned undefined, aborting");
+    if (aiRes.finalResponse === undefined) {
+      this.logger.warning("handleMessage: AI returned no final response, aborting");
       return undefined;
     }
 
+    const finalResponse = aiRes.finalResponse;
+
     this.queue.enqueue(async () => {
       const respImpStart = performance.now();
-      const responseImportance = await this.defineMessageImportance(aiRes.response);
+      const responseImportance = await this.defineMessageImportance(finalResponse);
       this.logger.info(
         `handleMessage: response importance: ${responseImportance} (${(performance.now() - respImpStart).toFixed(0)}ms)`,
       );
@@ -122,7 +152,7 @@ export class MessageHandler {
           chatId: message.chatId,
           message: {
             type: "text",
-            content: aiRes.response,
+            content: finalResponse,
           },
           author: {
             type: ERole.Assistant,
@@ -135,15 +165,16 @@ export class MessageHandler {
     this.logger.info(
       `handleMessage: done (${(performance.now() - handleMessageStart).toFixed(0)}ms)`,
     );
-    return aiRes.response;
+    return finalResponse;
   }
 
   private async defineMessageImportance(message: string): Promise<EMemoryImportance> {
     const start = performance.now();
 
-    const INSTRUCTIONS = await Bun.file(
-      "./src/services/ai-providers/tools/define-message-importance/instructions.xml",
-    ).text();
+    const INSTRUCTIONS = await readXmlAndInjectConfig(
+      "./src/services/ai/tools/define-message-importance/instructions.xml",
+      Config,
+    );
 
     const system: THistoryItem = {
       role: ERole.System,
@@ -155,31 +186,37 @@ export class MessageHandler {
       content: [{ type: "text", text: message }],
     };
 
-    const res = await this.ai.toolCall<TDefineMessageImportance>({
+    const res = await this.ai.runToolTask({
       prompt: uMessage,
-      instructions: [system],
-      tools: [defineMessageImportanceTool],
-      model: this.ai.getModel(EModelPurpose.ToolCheap),
+      history: [system],
+      tools: [{ definition: defineMessageImportanceTool }],
+      purpose: EModelPurpose.ToolCheap,
+      chatId: undefined,
+      user: undefined,
     });
 
-    if (!res) {
+    const realRes = res.toolResults.find(
+      (toolResult) => toolResult.toolName === DEFINE_MESSAGE_IMPORTANCE_TOOL && toolResult.success,
+    );
+
+    if (realRes === undefined) {
       this.logger.error(
         `defineMessageImportance: failed, defaulting to low (${(performance.now() - start).toFixed(0)}ms)`,
       );
       return EMemoryImportance.Low;
     }
 
-    const realRes = res.toolCallsResults.find((el) => el.tool === DEFINE_MESSAGE_IMPORTANCE_TOOL);
+    const parsed = SDefineMessageImportance.safeParse(realRes.data);
 
-    if (!realRes) {
+    if (!parsed.success) {
       this.logger.error(
-        `defineMessageImportance: no tool call result found, defaulting to low (${(performance.now() - start).toFixed(0)}ms)`,
+        `defineMessageImportance: invalid tool result, defaulting to low (${(performance.now() - start).toFixed(0)}ms)`,
       );
       return EMemoryImportance.Low;
     }
 
     this.logger.info(`defineMessageImportance: done (${(performance.now() - start).toFixed(0)}ms)`);
-    return realRes.data.importance;
+    return parsed.data.importance;
   }
 
   private async saveMessageToDatabase(
@@ -220,9 +257,10 @@ export class MessageHandler {
       return [];
     }
 
-    const INSTRUCTIONS = await Bun.file(
-      "./src/services/ai-providers/tools/search-memory/instructions.xml",
-    ).text();
+    const INSTRUCTIONS = await readXmlAndInjectConfig(
+      "./src/services/ai/tools/search-memory/instructions.xml",
+      Config,
+    );
 
     const system: THistoryItem = {
       role: ERole.System,
@@ -234,27 +272,30 @@ export class MessageHandler {
       content: [{ type: "text", text: message.message.content }],
     };
 
-    const res = await this.ai.toolCall<TSearchMemory>({
+    const res = await this.ai.runToolTask({
       prompt: uMessage,
-      instructions: [system],
-      tools: [searchMemoryTool],
-      model: this.ai.getModel(EModelPurpose.ToolCheap),
+      history: [system],
+      tools: [{ definition: searchMemoryTool }],
+      purpose: EModelPurpose.ToolCheap,
       chatId: message.chatId,
+      user: undefined,
     });
 
-    if (!res) {
-      this.logger.error(
-        `searchMemories: failed to determine if memory should be searched (${(performance.now() - start).toFixed(0)}ms)`,
-      );
-      return [];
-    }
-
-    const filtered = res.toolCallsResults.filter((el) => el.tool === SEARCH_MEMORY_TOOL);
     const allFound: TMemory[] = [];
-
     const seen = new Set<number>();
-    for (const f of filtered) {
-      for (const m of f.data.memories) {
+
+    for (const toolResult of res.toolResults) {
+      if (toolResult.toolName !== SEARCH_MEMORY_TOOL || !toolResult.success) {
+        continue;
+      }
+
+      const parsed = SSearchMemoryToolResult.safeParse(toolResult.data);
+
+      if (!parsed.success) {
+        continue;
+      }
+
+      for (const m of parsed.data.memories) {
         if (!seen.has(m.id)) {
           seen.add(m.id);
           allFound.push(m);
