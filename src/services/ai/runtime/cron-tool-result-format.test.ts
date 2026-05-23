@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, unlinkSync } from "node:fs";
+import { existsSync, mkdirSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import type { ChatMessageToolCall } from "@openrouter/sdk/models";
 import { Config } from "../../../config";
@@ -8,7 +8,8 @@ import { LIST_CRON_JOBS_TOOL } from "../tools/list-cron-jobs/definition";
 import { SCHEDULE_RECURRING_TOOL } from "../tools/schedule-recurring/definition";
 import { executeToolCall } from "./tool-execution";
 
-const tempDir = Bun.env.TMPDIR ?? "/var/folders/q5/24yvwq2937j076ff04yjn_dc0000gn/T/opencode";
+const tempDir = join(Bun.cwd, "tmp");
+mkdirSync(tempDir, { recursive: true });
 const TEST_DB = join(tempDir, "test-ai-runtime-cron-tool-result-format.db");
 
 type TCronSingletonStatic = {
