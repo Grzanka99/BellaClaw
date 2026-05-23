@@ -1,11 +1,12 @@
 import type { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, unlinkSync } from "node:fs";
+import { existsSync, mkdirSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import type { AsyncQueue } from "../../utils/async-queue";
 import { CronEngine } from "./index";
 
-const tempDir = Bun.env.TMPDIR ?? "/var/folders/q5/24yvwq2937j076ff04yjn_dc0000gn/T/opencode";
+const tempDir = join(Bun.cwd, "tmp");
+mkdirSync(tempDir, { recursive: true });
 const TEST_DB = join(tempDir, "test-cron-engine-runtime-safety.db");
 const TABLE_NAME = "cron_engine_runtime_safety_jobs";
 

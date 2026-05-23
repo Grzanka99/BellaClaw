@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, unlinkSync } from "node:fs";
+import { existsSync, mkdirSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { CronEngine, ECronEngineJobType } from "./index";
 
-const tempDir = Bun.env.TMPDIR ?? "/var/folders/q5/24yvwq2937j076ff04yjn_dc0000gn/T/opencode";
+const tempDir = join(Bun.cwd, "tmp");
+mkdirSync(tempDir, { recursive: true });
 const TEST_DB = join(tempDir, "test-cron-engine.db");
 
 type TEngineWithInternals = {
