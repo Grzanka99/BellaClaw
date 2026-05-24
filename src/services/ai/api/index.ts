@@ -1,6 +1,7 @@
 import { Config } from "../../../config";
 import { createLogger } from "../../../utils/logger";
 import { OllamaAiProvider } from "../providers/ollama";
+import { OpencodeGoAiProvider } from "../providers/opencode-go";
 import { OpenrouterAiProvider } from "../providers/openrouter";
 import {
   runAssistantToolLoop,
@@ -58,6 +59,9 @@ export class AiConnector {
       }
       case EAiProvider.Openrouter: {
         return OpenrouterAiProvider.instance;
+      }
+      case EAiProvider.OpencodeGo: {
+        return OpencodeGoAiProvider.instance;
       }
       default: {
         return OllamaAiProvider.instance;

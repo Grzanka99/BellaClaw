@@ -11,6 +11,9 @@
   "private": true,
   "scripts": {
     "dev": "bun run --watch src/index.ts",
+    "server:down": "podman compose down",
+    "server:init": "podman compose up -d --build",
+    "server:update": "podman compose build --no-cache && podman compose up -d --force-recreate",
     "start": "bun run src/index.ts",
     "test": "bun test"
   },

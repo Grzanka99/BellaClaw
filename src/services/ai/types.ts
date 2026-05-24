@@ -3,6 +3,7 @@ import type { ToolDefinitionJson } from "@openrouter/sdk/models";
 export enum EAiProvider {
   Openrouter = "openrouter",
   Ollama = "ollama",
+  OpencodeGo = "opencode-go",
 }
 
 export enum ERole {
