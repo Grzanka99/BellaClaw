@@ -1,5 +1,6 @@
 import type { ChatMessageToolCall } from "@openrouter/sdk/models";
 import type { TOption } from "../../../types";
+import { logger } from "../../../utils/logger";
 import { DEFINE_MESSAGE_IMPORTANCE_TOOL } from "../tools/define-message-importance/definition";
 import { LIST_CRON_JOBS_TOOL } from "../tools/list-cron-jobs/definition";
 import { SCHEDULE_ONCE_TOOL } from "../tools/schedule-once/definition";
@@ -26,6 +27,8 @@ export async function executeToolCall(args: {
   if (!allowedToolNames.has(toolName)) {
     return createFailedToolResult(toolCall, `Unknown tool requested: ${toolName}`);
   }
+
+  logger.info(`[TOOL CALL] calling: ${toolName}`);
 
   switch (toolName) {
     case DEFINE_MESSAGE_IMPORTANCE_TOOL: {

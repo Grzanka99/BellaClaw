@@ -5,6 +5,11 @@ import {
   MODEL_OLLAMA_NEMOTRON_3_SUPER,
 } from "./services/ai/providers/ollama/models";
 import {
+  MODEL_OPENCODE_GO_DEEPSEEK_V4_FLASH,
+  MODEL_OPENCODE_GO_DEEPSEEK_V4_PRO,
+  MODEL_OPENCODE_GO_KIMI_K2_6,
+} from "./services/ai/providers/opencode-go/models";
+import {
   MODEL_OPENROUTER_FREE,
   MODEL_OPENROUTER_GEMINI_3_1_PRO_PREVIEW,
   MODEL_OPENROUTER_GEMINI_3_FLASH_PREVIEW,
@@ -37,6 +42,9 @@ const SConfig = z.object({
       openrouter: z.object({
         models: SProviderModels,
       }),
+      opencodeGo: z.object({
+        models: SProviderModels,
+      }),
     }),
     instructions: z.object({
       persona: z.string(),
@@ -56,7 +64,7 @@ export type TConfig = z.infer<typeof SConfig>;
 
 export const Config: TConfig = {
   ai: {
-    provider: EAiProvider.Openrouter,
+    provider: EAiProvider.OpencodeGo,
     providers: {
       ollama: {
         models: {
@@ -74,6 +82,15 @@ export const Config: TConfig = {
           general: MODEL_OPENROUTER_FREE,
           chat: MODEL_OPENROUTER_GPT_5_4_MINI,
           chatAccurate: MODEL_OPENROUTER_GEMINI_3_1_PRO_PREVIEW,
+        },
+      },
+      opencodeGo: {
+        models: {
+          toolCheap: MODEL_OPENCODE_GO_DEEPSEEK_V4_FLASH,
+          toolAccurate: MODEL_OPENCODE_GO_KIMI_K2_6,
+          general: MODEL_OPENCODE_GO_DEEPSEEK_V4_PRO,
+          chat: MODEL_OPENCODE_GO_KIMI_K2_6,
+          chatAccurate: MODEL_OPENCODE_GO_KIMI_K2_6,
         },
       },
     },
