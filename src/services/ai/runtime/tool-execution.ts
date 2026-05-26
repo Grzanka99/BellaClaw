@@ -7,12 +7,16 @@ import { SCHEDULE_ONCE_TOOL } from "../tools/schedule-once/definition";
 import { SCHEDULE_RECURRING_TOOL } from "../tools/schedule-recurring/definition";
 import { SEARCH_MEMORY_TOOL } from "../tools/search-memory/definition";
 import { UNSCHEDULE_CRON_JOB_TOOL } from "../tools/unschedule-cron-job/definition";
+import { WEB_FETCH_TOOL } from "../tools/web-fetch/definition";
+import { WEB_SEARCH_TOOL } from "../tools/web-search/definition";
 import { executeDefineMessageImportanceTool } from "./tools/executors/define-message-importance";
 import { executeListCronJobsTool } from "./tools/executors/list-cron-jobs";
 import { executeScheduleOnceTool } from "./tools/executors/schedule-once";
 import { executeScheduleRecurringTool } from "./tools/executors/schedule-recurring";
 import { executeSearchMemoryTool } from "./tools/executors/search-memory";
 import { executeUnscheduleCronJobTool } from "./tools/executors/unschedule-cron-job";
+import { executeWebFetchTool } from "./tools/executors/web-fetch";
+import { executeWebSearchTool } from "./tools/executors/web-search";
 import { createFailedToolResult } from "./tools/results";
 import type { TNormalizedToolResult } from "./types";
 
@@ -48,6 +52,12 @@ export async function executeToolCall(args: {
     }
     case UNSCHEDULE_CRON_JOB_TOOL: {
       return executeUnscheduleCronJobTool(toolCall, chatId);
+    }
+    case WEB_SEARCH_TOOL: {
+      return executeWebSearchTool(toolCall);
+    }
+    case WEB_FETCH_TOOL: {
+      return executeWebFetchTool(toolCall);
     }
     default: {
       return createFailedToolResult(toolCall, `Unknown tool requested: ${toolName}`);

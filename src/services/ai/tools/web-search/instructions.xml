@@ -1,0 +1,41 @@
+<instructions>
+
+  <purpose>
+    Search the public web for current or external information that is not available in the conversation context.
+  </purpose>
+
+  <tool>
+    <name>web-search</name>
+    <description>
+      Searches DuckDuckGo HTML results and returns organic result titles, URLs, and snippets.
+      Empty results are allowed and mean no relevant result was found by the search endpoint.
+    </description>
+  </tool>
+
+  <usage_rules>
+    <rule>Use this only when the user needs current, external, or source-backed information.</rule>
+    <rule>Do not use it for simple conversation, internal memory recall, or facts already present in context.</rule>
+    <rule>Prefer a focused query and a limit of 3-5 unless the user asks for broader research.</rule>
+    <rule>Use web-fetch afterward only when result content is needed to answer accurately.</rule>
+    <rule>Do not claim you searched if the tool failed; explain briefly that search was unavailable.</rule>
+  </usage_rules>
+
+  <examples>
+    <example>
+      <context>User asks: "What changed in Bun this week?"</context>
+      <toolCall>
+        <query>Bun release notes this week</query>
+        <limit>5</limit>
+      </toolCall>
+    </example>
+
+    <example>
+      <context>User asks: "How do I use the Discord.js Client class?"</context>
+      <toolCall>
+        <query>discord.js Client documentation</query>
+        <limit>3</limit>
+      </toolCall>
+    </example>
+  </examples>
+
+</instructions>

@@ -1,0 +1,43 @@
+<instructions>
+
+  <purpose>
+    Fetch a public web page when the assistant needs the actual page contents to answer accurately.
+  </purpose>
+
+  <tool>
+    <name>web-fetch</name>
+    <description>
+      Fetches a public http or https URL, follows validated redirects, rejects unsupported or binary content,
+      and returns markdown, text, or HTML content with truncation metadata.
+    </description>
+  </tool>
+
+  <usage_rules>
+    <rule>Use this for public web URLs only; do not attempt localhost, private network, or non-http URLs.</rule>
+    <rule>Prefer markdown for normal reading and summarization.</rule>
+    <rule>Use text when the user wants plain extracted text.</rule>
+    <rule>Use html only when raw markup is specifically useful.</rule>
+    <rule>If content is truncated, say that the answer is based on the fetched portion when relevant.</rule>
+    <rule>Do not expose raw tool errors or JSON payloads to the user.</rule>
+  </usage_rules>
+
+  <examples>
+    <example>
+      <context>User asks: "Summarize this page: https://example.com/article"</context>
+      <toolCall>
+        <url>https://example.com/article</url>
+        <format>markdown</format>
+      </toolCall>
+    </example>
+
+    <example>
+      <context>User asks: "Get the raw HTML for this docs page"</context>
+      <toolCall>
+        <url>https://example.com/docs</url>
+        <format>html</format>
+        <timeout>60</timeout>
+      </toolCall>
+    </example>
+  </examples>
+
+</instructions>

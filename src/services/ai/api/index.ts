@@ -31,6 +31,10 @@ export {
 export type { TDefineMessageImportance } from "../tools/define-message-importance/handler";
 export { SEARCH_MEMORY_TOOL, searchMemoryTool } from "../tools/search-memory/definition";
 export type { TSearchMemory } from "../tools/search-memory/handler";
+export { WEB_FETCH_TOOL, webFetchTool } from "../tools/web-fetch/definition";
+export type { TWebFetch } from "../tools/web-fetch/handler";
+export { WEB_SEARCH_TOOL, webSearchTool } from "../tools/web-search/definition";
+export type { TWebSearch } from "../tools/web-search/handler";
 export type { THistoryItem, TPrompt } from "../types";
 export { EAiProvider, EModelPurpose, ERole } from "../types";
 export type TAiUser = TRuntimeUser;
@@ -72,11 +76,16 @@ export class AiConnector {
   public async runAssistantToolLoop(
     args: TAssistantToolLoopArgs,
   ): Promise<TAssistantToolLoopResult> {
-    return runAssistantToolLoop({
+    const start = performance.now();
+    this.logger.info(`runAssistantToolLoop: start`);
+    const res = await runAssistantToolLoop({
       ...args,
       requestAssistantTurn:
         args.requestAssistantTurn ?? this.provider.requestAssistantTurn.bind(this.provider),
     });
+
+    this.logger.info(`runAssistantToolLoop: done (${(performance.now() - start).toFixed(0)}ms)`);
+    return res;
   }
 
   public async runToolTask(args: TToolTaskArgs): Promise<TToolTaskResult> {
