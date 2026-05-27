@@ -1,5 +1,9 @@
 import type { ChatMessageToolCall } from "@openrouter/sdk/models";
-import { SWebFetchArgs, type TWebFetchArgs } from "../../../tools/web-fetch/handler";
+import {
+  SWebFetchArgs,
+  type TWebFetch,
+  type TWebFetchArgs,
+} from "../../../tools/web-fetch/handler";
 import { formatWebContent, isSupportedTextContentType } from "../../../tools/web-shared/html";
 import { fetchTextWithLimit } from "../../../tools/web-shared/http";
 import { normalizeError } from "../../serialization";
@@ -8,6 +12,7 @@ import { parseAndValidateToolArgs } from "../args";
 import { createFailedToolResult, createSuccessfulToolResult } from "../results";
 
 const FETCH_MAX_BYTES = 5_000_000;
+const MAX_FORMATTED_CHARS = 80_000;
 
 export async function executeWebFetchTool(
   toolCall: ChatMessageToolCall,
@@ -27,9 +32,9 @@ export async function executeWebFetchTool(
   }
 }
 
-export async function fetchWeb(args: TWebFetchArgs) {
+export async function fetchWeb(args: TWebFetchArgs): Promise<TWebFetch> {
   const format = args.format ?? "markdown";
-  const timeoutSeconds = args.timeout ?? 30;
+  const timeoutSeconds = args.timeout ?? 15;
   const { response, text, url } = await fetchTextWithLimit({
     url: args.url,
     timeoutMs: timeoutSeconds * 1000,
@@ -38,18 +43,19 @@ export async function fetchWeb(args: TWebFetchArgs) {
     headers: {
       accept: acceptHeaderForFormat(format),
     },
+    validateResponseHeaders(response) {
+      assertSupportedContentType(response.headers.get("content-type") ?? "");
+    },
   });
   const contentType = response.headers.get("content-type") ?? "";
-
-  if (!isSupportedTextContentType(contentType)) {
-    throw new Error("Unsupported or binary content type");
-  }
-
   const isHtml = isHtmlContentType(contentType);
-  const formatted = await formatWebContent({
-    html: isHtml || format === "html" ? text : escapePlainTextForFormatting(text),
-    format,
-  });
+  const formatted =
+    !isHtml && format === "text"
+      ? truncatePlainText(text)
+      : await formatWebContent({
+          html: isHtml || format === "html" ? text : escapePlainTextForFormatting(text),
+          format,
+        });
 
   return {
     url,
@@ -75,9 +81,27 @@ function acceptHeaderForFormat(format: "markdown" | "text" | "html"): string {
 }
 
 function isHtmlContentType(contentType: string): boolean {
-  const normalized = contentType.toLowerCase();
+  const [mediaType = ""] = contentType.split(";");
+  const normalized = mediaType.trim().toLowerCase();
 
-  return normalized.includes("text/html") || normalized.includes("application/xhtml+xml");
+  return normalized === "text/html" || normalized === "application/xhtml+xml";
+}
+
+function assertSupportedContentType(contentType: string): void {
+  if (!isSupportedTextContentType(contentType)) {
+    throw new Error(`Unsupported content type: ${contentType === "" ? "unknown" : contentType}`);
+  }
+}
+
+function truncatePlainText(text: string): { content: string; truncated: boolean } {
+  if (text.length <= MAX_FORMATTED_CHARS) {
+    return { content: text, truncated: false };
+  }
+
+  return {
+    content: text.slice(0, MAX_FORMATTED_CHARS),
+    truncated: true,
+  };
 }
 
 function escapePlainTextForFormatting(text: string): string {

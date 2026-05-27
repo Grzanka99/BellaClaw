@@ -32,6 +32,7 @@ const BASE_SYSTEM_INSTRUCTIONS_PATH = "./src/services/ai/instructions/base-syste
 export type TOllamaRequestMessage = {
   role: string;
   content: string;
+  thinking?: string;
   tool_calls?: NonNullable<TOllamaMessage["tool_calls"]>;
   tool_name?: string;
 };
@@ -89,6 +90,10 @@ function isOllamaChatResponse(value: unknown): value is TOllamaChatResponse {
     return false;
   }
 
+  if (value.message.thinking !== undefined && typeof value.message.thinking !== "string") {
+    return false;
+  }
+
   if (value.message.tool_calls !== undefined && !isOllamaToolCalls(value.message.tool_calls)) {
     return false;
   }
@@ -141,7 +146,7 @@ export function buildOllamaMessages(args: TRequestAssistantTurnArgs): TOllamaReq
         break;
       }
       case EAssistantLoopConversationItemKind.AssistantToolCalls: {
-        messages.push({
+        const message: TOllamaRequestMessage = {
           role: ERole.Assistant,
           content: item.content,
           tool_calls: item.toolCalls.map((toolCall) => ({
@@ -150,7 +155,13 @@ export function buildOllamaMessages(args: TRequestAssistantTurnArgs): TOllamaReq
               arguments: parseArgumentsForOllama(toolCall.function.arguments),
             },
           })),
-        });
+        };
+
+        if (item.reasoningContent !== undefined) {
+          message.thinking = item.reasoningContent;
+        }
+
+        messages.push(message);
         break;
       }
       case EAssistantLoopConversationItemKind.ToolResult: {
@@ -266,6 +277,7 @@ export class OllamaAiProvider {
     return {
       response: responseText,
       toolCalls,
+      reasoningContent: message.thinking,
     };
   }
 }

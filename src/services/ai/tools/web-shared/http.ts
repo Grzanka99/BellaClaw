@@ -1,7 +1,19 @@
+import { lookup } from "node:dns/promises";
+import type { IncomingHttpHeaders, IncomingMessage } from "node:http";
+import { request as requestHttp } from "node:http";
+import { request as requestHttps } from "node:https";
+import { Readable } from "node:stream";
+import type { TOption } from "../../../../types";
+
 export type TFetchWithLimitResult = {
   response: Response;
   text: string;
   url: string;
+};
+
+type TResolvedHttpUrl = {
+  href: string;
+  address: TOption<string>;
 };
 
 type THttpHeaders = Record<string, string>;
@@ -13,6 +25,7 @@ const BROWSER_HEADERS = {
 } satisfies THttpHeaders;
 
 const MAX_REDIRECTS = 5;
+const DEFAULT_FETCH = globalThis.fetch;
 
 export function createBrowserHeaders(headers: THttpHeaders = {}): THttpHeaders {
   return {
@@ -53,15 +66,23 @@ export async function fetchTextWithLimit(args: {
   maxBytes: number;
   headers?: THttpHeaders;
   followRedirects?: boolean;
+  validateResponseHeaders?: (response: Response) => void;
 }): Promise<TFetchWithLimitResult> {
   let currentUrl = validatePublicHttpUrl(args.url);
   let redirects = 0;
+  const deadline = performance.now() + args.timeoutMs;
 
   while (true) {
-    const response = await fetch(currentUrl, {
-      headers: createBrowserHeaders(args.headers),
-      redirect: "manual",
-      signal: AbortSignal.timeout(args.timeoutMs),
+    const resolved = await validateResolvedPublicHttpUrl(
+      currentUrl,
+      getRemainingTimeoutMs(deadline),
+    );
+    currentUrl = resolved.href;
+
+    const response = await fetchResolvedHttpUrl({
+      resolved,
+      timeoutMs: getRemainingTimeoutMs(deadline),
+      headers: args.headers,
     });
 
     if (isRedirect(response.status)) {
@@ -91,12 +112,14 @@ export async function fetchTextWithLimit(args: {
     const contentLength = response.headers.get("content-length");
 
     if (contentLength !== null) {
-      const parsedLength = Number(contentLength);
+      const parsedLength = parseContentLength(contentLength);
 
       if (Number.isFinite(parsedLength) && parsedLength > args.maxBytes) {
         throw new Error("Response is too large");
       }
     }
+
+    args.validateResponseHeaders?.(response);
 
     return {
       response,
@@ -104,6 +127,197 @@ export async function fetchTextWithLimit(args: {
       url: currentUrl,
     };
   }
+}
+
+async function validateResolvedPublicHttpUrl(
+  rawUrl: string,
+  timeoutMs: number,
+): Promise<TResolvedHttpUrl> {
+  const href = validatePublicHttpUrl(rawUrl);
+
+  if (globalThis.fetch !== DEFAULT_FETCH) {
+    return {
+      href,
+      address: "",
+    };
+  }
+
+  const url = new URL(href);
+  const hostname = normalizeHostname(url.hostname);
+  const addresses = await resolveHostname(hostname, timeoutMs);
+  const address = addresses[0];
+
+  if (address === undefined) {
+    throw new Error("Hostname did not resolve to any IP address");
+  }
+
+  for (const address of addresses) {
+    if (isBlockedIpLiteral(normalizeHostname(address.address))) {
+      throw new Error("Hostname resolves to a local, private, or special-use IP address");
+    }
+  }
+
+  return {
+    href,
+    address: address.address,
+  };
+}
+
+async function fetchResolvedHttpUrl(args: {
+  resolved: TResolvedHttpUrl;
+  timeoutMs: number;
+  headers?: THttpHeaders;
+}): Promise<Response> {
+  if (globalThis.fetch !== DEFAULT_FETCH) {
+    return await fetch(args.resolved.href, {
+      headers: createBrowserHeaders(args.headers),
+      redirect: "manual",
+      signal: AbortSignal.timeout(args.timeoutMs),
+    });
+  }
+
+  return await new Promise<Response>((resolve, reject) => {
+    const url = new URL(args.resolved.href);
+    const address = args.resolved.address;
+
+    if (address === undefined) {
+      reject(new Error("Resolved request is missing pinned IP address"));
+      return;
+    }
+
+    const requestOptions = {
+      hostname: address,
+      port: getPort(url),
+      path: `${url.pathname}${url.search}`,
+      method: "GET",
+      headers: createPinnedRequestHeaders(url, args.headers),
+    };
+    const handleResponse = (response: IncomingMessage) => {
+      const status = response.statusCode;
+
+      if (status === undefined) {
+        reject(new Error("HTTP response is missing status code"));
+        return;
+      }
+
+      try {
+        resolve(
+          new Response(Readable.toWeb(response), {
+            status,
+            statusText: response.statusMessage,
+            headers: createResponseHeaders(response.headers),
+          }),
+        );
+      } catch (error) {
+        reject(error);
+      }
+    };
+    const request =
+      url.protocol === "https:"
+        ? requestHttps(
+            {
+              ...requestOptions,
+              servername: normalizeHostname(url.hostname),
+            },
+            handleResponse,
+          )
+        : requestHttp(requestOptions, handleResponse);
+
+    request.setTimeout(args.timeoutMs, () => {
+      request.destroy(new Error("Request timed out"));
+    });
+    request.on("error", reject);
+    request.end();
+  });
+}
+
+function createPinnedRequestHeaders(url: URL, headers: THttpHeaders = {}): THttpHeaders {
+  const requestHeaders = createBrowserHeaders(headers);
+
+  for (const key of Object.keys(requestHeaders)) {
+    if (key.toLowerCase() === "host") {
+      delete requestHeaders[key];
+    }
+  }
+
+  return {
+    ...requestHeaders,
+    host: url.host,
+  };
+}
+
+function createResponseHeaders(headers: IncomingHttpHeaders): Headers {
+  const result = new Headers();
+
+  for (const [name, value] of Object.entries(headers)) {
+    if (value === undefined) {
+      continue;
+    }
+
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        result.append(name, item);
+      }
+
+      continue;
+    }
+
+    result.append(name, value);
+  }
+
+  return result;
+}
+
+function getPort(url: URL): number {
+  if (url.port !== "") {
+    return Number(url.port);
+  }
+
+  return url.protocol === "https:" ? 443 : 80;
+}
+
+async function resolveHostname(
+  hostname: string,
+  timeoutMs: number,
+): Promise<{ address: string }[]> {
+  return await Promise.race([
+    lookup(hostname, { all: true }),
+    new Promise<{ address: string }[]>((_, reject) => {
+      AbortSignal.timeout(timeoutMs).addEventListener(
+        "abort",
+        () => {
+          reject(new Error("Request timed out"));
+        },
+        { once: true },
+      );
+    }),
+  ]);
+}
+
+function getRemainingTimeoutMs(deadline: number): number {
+  const remaining = Math.ceil(deadline - performance.now());
+
+  if (remaining <= 0) {
+    throw new Error("Request timed out");
+  }
+
+  return remaining;
+}
+
+function parseContentLength(contentLength: string): number {
+  const normalized = contentLength.trim();
+
+  if (!/^\d+$/.test(normalized)) {
+    return Number.NaN;
+  }
+
+  const parsedLength = Number.parseInt(normalized, 10);
+
+  if (!Number.isFinite(parsedLength)) {
+    return Number.NaN;
+  }
+
+  return parsedLength;
 }
 
 function isRedirect(status: number): boolean {
@@ -214,6 +428,7 @@ function isBlockedIpv4(parts: number[]): boolean {
   return (
     first === 0 ||
     first === 10 ||
+    (first === 100 && second >= 64 && second <= 127) ||
     first === 127 ||
     (first === 169 && second === 254) ||
     (first === 172 && second >= 16 && second <= 31) ||
@@ -280,6 +495,7 @@ function isBlockedIpv6(parts: number[]): boolean {
     return false;
   }
 
+  const allZero = parts.every((part) => part === 0);
   const allButLastZero = parts.slice(0, 7).every((part) => part === 0);
   const isMappedIpv4 = parts.slice(0, 5).every((part) => part === 0) && sixth === 0xffff;
 
@@ -288,6 +504,9 @@ function isBlockedIpv6(parts: number[]): boolean {
   }
 
   return (
-    (allButLastZero && last === 1) || (first & 0xfe00) === 0xfc00 || (first & 0xffc0) === 0xfe80
+    allZero ||
+    (allButLastZero && last === 1) ||
+    (first & 0xfe00) === 0xfc00 ||
+    (first & 0xffc0) === 0xfe80
   );
 }

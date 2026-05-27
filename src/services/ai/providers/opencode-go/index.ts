@@ -37,6 +37,7 @@ const SOpencodeGoChatResponse = z.object({
       message: z
         .object({
           content: z.string().nullable().optional(),
+          reasoning_content: z.string().nullable().optional(),
           tool_calls: z.array(SOpencodeGoToolCall).optional(),
         })
         .optional(),
@@ -49,6 +50,7 @@ export type TOpencodeGoRequestMessage = {
   content: string | null;
   tool_calls?: ChatMessageToolCall[];
   tool_call_id?: string;
+  reasoning_content?: string;
 };
 
 type TOpencodeGoToolCall = z.infer<typeof SOpencodeGoToolCall>;
@@ -109,11 +111,14 @@ export function buildOpencodeGoMessages(
         break;
       }
       case EAssistantLoopConversationItemKind.AssistantToolCalls: {
-        messages.push({
+        const message: TOpencodeGoRequestMessage = {
           role: ERole.Assistant,
           content: item.content.trim().length > 0 ? item.content : null,
           tool_calls: item.toolCalls,
-        });
+          reasoning_content: item.reasoningContent ?? "",
+        };
+
+        messages.push(message);
         break;
       }
       case EAssistantLoopConversationItemKind.ToolResult: {
@@ -248,6 +253,7 @@ export class OpencodeGoAiProvider {
     return {
       response: responseText,
       toolCalls,
+      reasoningContent: message.reasoning_content ?? undefined,
     };
   }
 }

@@ -1,5 +1,5 @@
 import { OpenRouter } from "@openrouter/sdk";
-import type { Message } from "@openrouter/sdk/models";
+import type { AssistantMessage, Message } from "@openrouter/sdk/models";
 import { Config } from "../../../../config";
 import type { TOption } from "../../../../types";
 import { createLogger } from "../../../../utils/logger";
@@ -63,11 +63,17 @@ export function buildOpenrouterMessages(
         break;
       }
       case EAssistantLoopConversationItemKind.AssistantToolCalls: {
-        messages.push({
+        const message: AssistantMessage = {
           role: ERole.Assistant,
           content: item.content,
           toolCalls: item.toolCalls,
-        });
+        };
+
+        if (item.reasoningContent !== undefined) {
+          message.reasoning = item.reasoningContent;
+        }
+
+        messages.push(message);
         break;
       }
       case EAssistantLoopConversationItemKind.ToolResult: {
@@ -148,6 +154,7 @@ export class OpenrouterAiProvider {
     return {
       response: extractTextContent(message.content),
       toolCalls: message.toolCalls ?? [],
+      reasoningContent: message.reasoning ?? undefined,
     };
   }
 }

@@ -19,7 +19,7 @@ function createToolCall(id: string, name: string, argumentsText: string): ChatMe
 
 describe("web tool execution", () => {
   beforeEach(() => {
-    globalThis.fetch = (async (input) => {
+    globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
 
       if (url.startsWith("https://html.duckduckgo.com/html/")) {
@@ -37,7 +37,7 @@ describe("web tool execution", () => {
       return new Response("<body><h1>Fetched Page</h1></body>", {
         headers: { "content-type": "text/html" },
       });
-    }) as typeof fetch;
+    }) as unknown as typeof fetch;
   });
 
   afterEach(() => {

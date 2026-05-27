@@ -5,7 +5,7 @@ describe("SWebFetchArgs", () => {
   test("accepts valid args", () => {
     expect(SWebFetchArgs.safeParse({ url: "https://example.com" }).success).toBe(true);
     expect(
-      SWebFetchArgs.safeParse({ url: "http://example.com", format: "text", timeout: 120 }).success,
+      SWebFetchArgs.safeParse({ url: "http://example.com", format: "text", timeout: 45 }).success,
     ).toBe(true);
   });
 
@@ -14,7 +14,7 @@ describe("SWebFetchArgs", () => {
     expect(SWebFetchArgs.safeParse({ url: "https://example.com", format: "pdf" }).success).toBe(
       false,
     );
-    expect(SWebFetchArgs.safeParse({ url: "https://example.com", timeout: 121 }).success).toBe(
+    expect(SWebFetchArgs.safeParse({ url: "https://example.com", timeout: 46 }).success).toBe(
       false,
     );
   });

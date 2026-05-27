@@ -32,6 +32,7 @@ export type TLoopAssistantToolCallsItem = {
   kind: EAssistantLoopConversationItemKind.AssistantToolCalls;
   content: string;
   toolCalls: ChatMessageToolCall[];
+  reasoningContent?: string;
 };
 
 export type TNormalizedToolResult = {
@@ -61,6 +62,7 @@ export type TRuntimeConversationItem =
 export type TRuntimeAssistantTurn = {
   response: string;
   toolCalls: ChatMessageToolCall[];
+  reasoningContent?: string;
 };
 
 export type TAssistantToolActivity = {

@@ -72,6 +72,7 @@ export async function runAssistantToolLoop(
       kind: EAssistantLoopConversationItemKind.AssistantToolCalls,
       content: assistantTurn.response,
       toolCalls: assistantTurn.toolCalls,
+      reasoningContent: assistantTurn.reasoningContent,
     });
 
     const toolCallBatchSignature = buildToolCallBatchSignature(assistantTurn.toolCalls);

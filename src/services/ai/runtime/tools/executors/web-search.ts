@@ -1,6 +1,11 @@
 import type { ChatMessageToolCall } from "@openrouter/sdk/models";
-import { SWebSearchArgs, type TWebSearchArgs } from "../../../tools/web-search/handler";
-import { fetchTextWithLimit } from "../../../tools/web-shared/http";
+import type { TOption } from "../../../../../types";
+import {
+  SWebSearchArgs,
+  type TWebSearchArgs,
+  type TWebSearchResult,
+} from "../../../tools/web-search/handler";
+import { fetchTextWithLimit, validatePublicHttpUrl } from "../../../tools/web-shared/http";
 import { normalizeError } from "../../serialization";
 import type { TNormalizedToolResult } from "../../types";
 import { parseAndValidateToolArgs } from "../args";
@@ -8,12 +13,6 @@ import { createFailedToolResult, createSuccessfulToolResult } from "../results";
 
 const SEARCH_TIMEOUT_MS = 25_000;
 const SEARCH_MAX_BYTES = 1_000_000;
-
-type TParsedResult = {
-  title: string;
-  url: string;
-  snippet: string;
-};
 
 export async function executeWebSearchTool(
   toolCall: ChatMessageToolCall,
@@ -36,7 +35,7 @@ export async function executeWebSearchTool(
   }
 }
 
-async function searchWeb(args: TWebSearchArgs): Promise<TParsedResult[]> {
+async function searchWeb(args: TWebSearchArgs): Promise<TWebSearchResult[]> {
   const limit = args.limit ?? 5;
   const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(args.query)}`;
   const { text } = await fetchTextWithLimit({
@@ -46,6 +45,7 @@ async function searchWeb(args: TWebSearchArgs): Promise<TParsedResult[]> {
     headers: {
       accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     },
+    followRedirects: true,
   });
 
   return parseDuckDuckGoResults(text, limit);
@@ -54,39 +54,81 @@ async function searchWeb(args: TWebSearchArgs): Promise<TParsedResult[]> {
 export async function parseDuckDuckGoResults(
   html: string,
   limit: number,
-): Promise<TParsedResult[]> {
-  const rawResults: TParsedResult[] = [];
-  let currentResult: TParsedResult | undefined;
+): Promise<TWebSearchResult[]> {
+  const rawResults: TWebSearchResult[] = [];
+  let currentContainer: TOption<TWebSearchResult>;
+  let currentTitleResult: TOption<TWebSearchResult>;
+  let currentSnippetResult: TOption<TWebSearchResult>;
+  let lastStandaloneResult: TOption<TWebSearchResult>;
 
   await new HTMLRewriter()
+    .on(".result", {
+      element(element) {
+        const result: TWebSearchResult = { title: "", url: "", snippet: "" };
+        currentContainer = result;
+
+        element.onEndTag(() => {
+          if (currentContainer === result) {
+            currentContainer = undefined;
+          }
+
+          if (result.url !== "") {
+            rawResults.push(result);
+          }
+        });
+      },
+    })
     .on("a.result__a", {
       element(element) {
         const href = element.getAttribute("href");
 
         if (href === null) {
-          currentResult = undefined;
+          currentTitleResult = undefined;
           return;
         }
 
-        currentResult = {
-          title: "",
-          url: decodeDuckDuckGoUrl(href),
-          snippet: "",
-        };
-        rawResults.push(currentResult);
+        const decodedUrl = decodeDuckDuckGoUrl(href);
+
+        if (decodedUrl === undefined) {
+          currentTitleResult = undefined;
+          return;
+        }
+
+        const result = currentContainer ?? { title: "", url: "", snippet: "" };
+        result.url = decodedUrl;
+        currentTitleResult = result;
+
+        if (currentContainer === undefined) {
+          rawResults.push(result);
+          lastStandaloneResult = result;
+        }
+
+        element.onEndTag(() => {
+          if (currentTitleResult === result) {
+            currentTitleResult = undefined;
+          }
+        });
       },
       text(text) {
-        if (currentResult !== undefined) {
-          currentResult.title = `${currentResult.title}${text.text}`;
+        if (currentTitleResult !== undefined) {
+          currentTitleResult.title = `${currentTitleResult.title}${text.text}`;
         }
       },
     })
     .on(".result__snippet", {
-      text(text) {
-        const lastResult = rawResults.at(-1);
+      element(element) {
+        const result = currentContainer ?? lastStandaloneResult;
+        currentSnippetResult = result;
 
-        if (lastResult !== undefined) {
-          lastResult.snippet = `${lastResult.snippet}${text.text}`;
+        element.onEndTag(() => {
+          if (currentSnippetResult === result) {
+            currentSnippetResult = undefined;
+          }
+        });
+      },
+      text(text) {
+        if (currentSnippetResult !== undefined) {
+          currentSnippetResult.snippet = `${currentSnippetResult.snippet}${text.text}`;
         }
       },
     })
@@ -94,11 +136,11 @@ export async function parseDuckDuckGoResults(
     .text();
 
   const seen = new Set<string>();
-  const results: TParsedResult[] = [];
+  const results: TWebSearchResult[] = [];
 
   for (const result of rawResults) {
-    const title = normalizeText(result.title);
-    const snippet = normalizeText(result.snippet);
+    const title = normalizeText(decodeHtmlEntities(result.title));
+    const snippet = normalizeText(decodeHtmlEntities(result.snippet));
 
     if (title === "" || result.url === "" || seen.has(result.url)) {
       continue;
@@ -115,15 +157,79 @@ export async function parseDuckDuckGoResults(
   return results;
 }
 
-function decodeDuckDuckGoUrl(href: string): string {
-  const url = new URL(href, "https://duckduckgo.com");
-  const uddg = url.searchParams.get("uddg");
+function decodeDuckDuckGoUrl(href: string): TOption<string> {
+  let url: URL;
 
-  if (url.pathname === "/l/" && uddg !== null) {
-    return uddg;
+  try {
+    url = new URL(href, "https://duckduckgo.com");
+  } catch {
+    return undefined;
   }
 
-  return url.href;
+  const uddg = url.searchParams.get("uddg");
+  const candidate = url.pathname === "/l/" && uddg !== null ? uddg : url.href;
+
+  try {
+    return validatePublicHttpUrl(candidate);
+  } catch {
+    return undefined;
+  }
+}
+
+function decodeHtmlEntities(value: string): string {
+  return value.replace(/&(#x[\da-f]+|#\d+|[a-z]+);/gi, (match, entity) => {
+    const decoded = decodeHtmlEntity(entity);
+
+    return decoded ?? match;
+  });
+}
+
+function decodeHtmlEntity(entity: string): TOption<string> {
+  if (entity.startsWith("#x") || entity.startsWith("#X")) {
+    return decodeNumericHtmlEntity(entity.slice(2), 16);
+  }
+
+  if (entity.startsWith("#")) {
+    return decodeNumericHtmlEntity(entity.slice(1), 10);
+  }
+
+  switch (entity.toLowerCase()) {
+    case "amp": {
+      return "&";
+    }
+    case "apos": {
+      return "'";
+    }
+    case "gt": {
+      return ">";
+    }
+    case "lt": {
+      return "<";
+    }
+    case "nbsp": {
+      return " ";
+    }
+    case "quot": {
+      return '"';
+    }
+    default: {
+      return undefined;
+    }
+  }
+}
+
+function decodeNumericHtmlEntity(value: string, radix: number): TOption<string> {
+  const codePoint = Number.parseInt(value, radix);
+
+  if (!Number.isInteger(codePoint) || codePoint < 0 || codePoint > 0x10ffff) {
+    return undefined;
+  }
+
+  try {
+    return String.fromCodePoint(codePoint);
+  } catch {
+    return undefined;
+  }
 }
 
 function normalizeText(value: string): string {

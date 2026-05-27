@@ -76,16 +76,11 @@ export class AiConnector {
   public async runAssistantToolLoop(
     args: TAssistantToolLoopArgs,
   ): Promise<TAssistantToolLoopResult> {
-    const start = performance.now();
-    this.logger.info(`runAssistantToolLoop: start`);
-    const res = await runAssistantToolLoop({
+    return runAssistantToolLoop({
       ...args,
       requestAssistantTurn:
         args.requestAssistantTurn ?? this.provider.requestAssistantTurn.bind(this.provider),
     });
-
-    this.logger.info(`runAssistantToolLoop: done (${(performance.now() - start).toFixed(0)}ms)`);
-    return res;
   }
 
   public async runToolTask(args: TToolTaskArgs): Promise<TToolTaskResult> {

@@ -6,7 +6,7 @@ const originalFetch = globalThis.fetch;
 type TMockFetch = (input: Parameters<typeof fetch>[0]) => Promise<Response>;
 
 function useMockFetch(handler: TMockFetch) {
-  globalThis.fetch = handler as typeof fetch;
+  globalThis.fetch = handler as unknown as typeof fetch;
 }
 
 describe("fetchWeb", () => {

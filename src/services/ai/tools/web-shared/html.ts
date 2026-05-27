@@ -6,6 +6,7 @@ export type TFormattedWebContent = {
 };
 
 const MAX_FORMATTED_CHARS = 80_000;
+const HIDDEN_ELEMENT_SELECTOR = "script, style, noscript, iframe, object, embed";
 
 export async function formatWebContent(args: {
   html: string;
@@ -23,7 +24,7 @@ export async function formatWebContent(args: {
       break;
     }
     case "markdown": {
-      content = new TurndownService().turndown(args.html);
+      content = new TurndownService().turndown(await stripHiddenMarkup(args.html));
       break;
     }
   }
@@ -43,7 +44,7 @@ export async function extractVisibleText(html: string): Promise<string> {
   let skippedDepth = 0;
 
   await new HTMLRewriter()
-    .on("script, style, noscript, iframe, object, embed", {
+    .on(HIDDEN_ELEMENT_SELECTOR, {
       element(element) {
         skippedDepth += 1;
         element.onEndTag(() => {
@@ -64,16 +65,30 @@ export async function extractVisibleText(html: string): Promise<string> {
   return chunks.join(" ").replace(/\s+/g, " ").trim();
 }
 
+async function stripHiddenMarkup(html: string): Promise<string> {
+  return await new HTMLRewriter()
+    .on(HIDDEN_ELEMENT_SELECTOR, {
+      element(element) {
+        element.remove();
+      },
+    })
+    .transform(new Response(html, { headers: { "content-type": "text/html" } }))
+    .text();
+}
+
 export function isSupportedTextContentType(contentType: string): boolean {
-  const normalized = contentType.toLowerCase();
+  const mediaType = getMediaType(contentType);
 
   return (
-    normalized.includes("text/html") ||
-    normalized.includes("text/plain") ||
-    normalized.includes("application/xhtml+xml") ||
-    normalized.includes("application/xml") ||
-    normalized.includes("text/xml") ||
-    normalized.includes("application/json") ||
-    normalized.startsWith("text/")
+    mediaType === "application/xhtml+xml" ||
+    mediaType === "application/xml" ||
+    mediaType === "application/json" ||
+    mediaType.startsWith("text/")
   );
+}
+
+function getMediaType(contentType: string): string {
+  const [mediaType = ""] = contentType.split(";");
+
+  return mediaType.trim().toLowerCase();
 }

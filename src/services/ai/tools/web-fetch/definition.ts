@@ -23,8 +23,8 @@ export const webFetchTool: ToolDefinitionJson = {
         timeout: {
           type: "integer",
           minimum: 1,
-          maximum: 120,
-          description: "Timeout in seconds. Defaults to 30 and cannot exceed 120.",
+          maximum: 45,
+          description: "Timeout in seconds. Defaults to 15 and cannot exceed 45.",
         },
       },
       required: ["url"],

@@ -4,6 +4,7 @@ import type { TRuntimeUser } from "../../runtime";
 export type TOllamaMessage = {
   role: string;
   content: string;
+  thinking?: string;
   tool_calls?: Array<{
     function: {
       name: string;
