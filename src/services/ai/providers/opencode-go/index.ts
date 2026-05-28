@@ -111,9 +111,15 @@ export function buildOpencodeGoMessages(
         break;
       }
       case EAssistantLoopConversationItemKind.AssistantToolCalls: {
+        let content: string | null = null;
+
+        if (item.content.trim().length > 0) {
+          content = item.content;
+        }
+
         const message: TOpencodeGoRequestMessage = {
           role: ERole.Assistant,
-          content: item.content.trim().length > 0 ? item.content : null,
+          content,
           tool_calls: item.toolCalls,
           reasoning_content: item.reasoningContent ?? "",
         };

@@ -1,4 +1,5 @@
 import z from "zod";
+import type { TFetchWebArgs, TFetchWebResult } from "../../../../lib/web";
 
 export const SWebFetchArgs = z.object({
   url: z
@@ -9,12 +10,6 @@ export const SWebFetchArgs = z.object({
   timeout: z.number().int().min(1).max(45).optional(),
 });
 
-export type TWebFetchArgs = z.infer<typeof SWebFetchArgs>;
+export type TWebFetchArgs = TFetchWebArgs;
 
-export type TWebFetch = {
-  url: string;
-  contentType: string;
-  format: "markdown" | "text" | "html";
-  content: string;
-  truncated: boolean;
-};
+export type TWebFetch = TFetchWebResult;
