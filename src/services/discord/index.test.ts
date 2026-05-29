@@ -3,9 +3,11 @@ import { existsSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { ECronEngineJobType, type TCronEngineJobContext } from "../../lib/cron-engine";
 import { CronSingleton } from "../cron";
+import { DEFAULT_PERSISTENT_MEMORY_DB, Memory } from "../memory";
 import { DiscordSingleton } from "./index";
 
 const TEST_DB = join(import.meta.dir, "../../../test-discord-cron-service.db");
+const TEST_MEMORY_DB = join(import.meta.dir, "../../../test-discord-memory.db");
 
 type TDiscordSingletonInternals = {
   ai: {
@@ -30,6 +32,16 @@ type TCronSingletonStatic = {
   _instance: CronSingleton | undefined;
 };
 
+function resetMemoryInstance(dbPath: string) {
+  const MemoryWithInternals = Memory as unknown as {
+    _instance: Memory | undefined;
+    MEMORY_FILE: string;
+  };
+
+  MemoryWithInternals._instance = undefined;
+  MemoryWithInternals.MEMORY_FILE = dbPath;
+}
+
 function cleanupSingletons() {
   const CronSingletonWithInternals = CronSingleton as unknown as TCronSingletonStatic;
   CronSingletonWithInternals._instance?.destroy();
@@ -41,6 +53,12 @@ function cleanupSingletons() {
 
   if (existsSync(TEST_DB)) {
     unlinkSync(TEST_DB);
+  }
+
+  resetMemoryInstance(DEFAULT_PERSISTENT_MEMORY_DB);
+
+  if (existsSync(TEST_MEMORY_DB)) {
+    unlinkSync(TEST_MEMORY_DB);
   }
 }
 
@@ -65,6 +83,7 @@ describe("DiscordSingleton", () => {
   beforeEach(() => {
     cleanupSingletons();
     CronSingleton.setDbFile(TEST_DB);
+    resetMemoryInstance(TEST_MEMORY_DB);
   });
 
   afterEach(() => {
