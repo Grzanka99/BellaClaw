@@ -1,211 +1,143 @@
-import type { TOption } from "../../types";
-import { fetchTextWithLimit, validatePublicHttpUrl } from "./http";
+import z from "zod";
 import type { TSearchWebArgs, TWebSearchResult } from "./types";
 
+const TAVILY_SEARCH_URL = "https://api.tavily.com/search";
 const SEARCH_TIMEOUT_MS = 25_000;
-const SEARCH_MAX_BYTES = 1_000_000;
+const DEFAULT_MAX_RESULTS = 5;
+const RESPONSE_MESSAGE_MAX_LENGTH = 300;
+
+const STavilySearchResult = z.object({
+  title: z.string(),
+  url: z.string(),
+  content: z.string(),
+  score: z.number(),
+});
+
+const STavilySearchResponse = z.object({
+  results: z.array(STavilySearchResult),
+});
+
+type TTavilySearchRequest = {
+  query: string;
+  search_depth: "basic";
+  max_results: number;
+  include_answer: false;
+  include_raw_content: false;
+  include_images: false;
+  topic?: "general" | "news" | "finance";
+  time_range?: "day" | "week" | "month" | "year";
+};
 
 export async function searchWeb(args: TSearchWebArgs): Promise<TWebSearchResult[]> {
-  const limit = args.limit ?? 5;
-  const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(args.query)}`;
-  const { text } = await fetchTextWithLimit({
-    url,
-    timeoutMs: SEARCH_TIMEOUT_MS,
-    maxBytes: SEARCH_MAX_BYTES,
+  const apiKey = Bun.env.TAVILY_API_KEY?.trim();
+
+  if (apiKey === undefined || apiKey.length === 0) {
+    throw new Error("TAVILY_API_KEY is required for web search");
+  }
+
+  let maxResults = DEFAULT_MAX_RESULTS;
+
+  if (args.maxResults !== undefined) {
+    maxResults = args.maxResults;
+  }
+
+  const body: TTavilySearchRequest = {
+    query: args.query,
+    search_depth: "basic",
+    max_results: maxResults,
+    include_answer: false,
+    include_raw_content: false,
+    include_images: false,
+  };
+
+  if (args.topic !== undefined) {
+    body.topic = args.topic;
+  }
+
+  if (args.timeRange !== undefined) {
+    body.time_range = args.timeRange;
+  }
+
+  const response = await fetch(TAVILY_SEARCH_URL, {
+    method: "POST",
     headers: {
-      accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      accept: "application/json",
+      authorization: `Bearer ${apiKey}`,
+      "content-type": "application/json",
     },
-    followRedirects: true,
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(SEARCH_TIMEOUT_MS),
   });
 
-  return parseDuckDuckGoResults(text, limit);
-}
+  if (!response.ok) {
+    const message = await readShortResponseMessage(response);
 
-export async function parseDuckDuckGoResults(
-  html: string,
-  limit: number,
-): Promise<TWebSearchResult[]> {
-  const rawResults: TWebSearchResult[] = [];
-  let currentContainer: TOption<TWebSearchResult>;
-  let currentTitleResult: TOption<TWebSearchResult>;
-  let currentSnippetResult: TOption<TWebSearchResult>;
-  let lastStandaloneResult: TOption<TWebSearchResult>;
-
-  await new HTMLRewriter()
-    .on(".result", {
-      element(element) {
-        const result: TWebSearchResult = { title: "", url: "", snippet: "" };
-        currentContainer = result;
-
-        element.onEndTag(() => {
-          if (currentContainer === result) {
-            currentContainer = undefined;
-          }
-
-          if (result.url !== "") {
-            rawResults.push(result);
-          }
-        });
-      },
-    })
-    .on("a.result__a", {
-      element(element) {
-        const href = element.getAttribute("href");
-
-        if (href === null) {
-          currentTitleResult = undefined;
-          return;
-        }
-
-        const decodedUrl = decodeDuckDuckGoUrl(href);
-
-        if (decodedUrl === undefined) {
-          currentTitleResult = undefined;
-          return;
-        }
-
-        const result = currentContainer ?? { title: "", url: "", snippet: "" };
-        result.url = decodedUrl;
-        currentTitleResult = result;
-
-        if (currentContainer === undefined) {
-          rawResults.push(result);
-          lastStandaloneResult = result;
-        }
-
-        element.onEndTag(() => {
-          if (currentTitleResult === result) {
-            currentTitleResult = undefined;
-          }
-        });
-      },
-      text(text) {
-        if (currentTitleResult !== undefined) {
-          currentTitleResult.title = `${currentTitleResult.title}${text.text}`;
-        }
-      },
-    })
-    .on(".result__snippet", {
-      element(element) {
-        const result = currentContainer ?? lastStandaloneResult;
-        currentSnippetResult = result;
-
-        element.onEndTag(() => {
-          if (currentSnippetResult === result) {
-            currentSnippetResult = undefined;
-          }
-        });
-      },
-      text(text) {
-        if (currentSnippetResult !== undefined) {
-          currentSnippetResult.snippet = `${currentSnippetResult.snippet}${text.text}`;
-        }
-      },
-    })
-    .transform(new Response(html, { headers: { "content-type": "text/html" } }))
-    .text();
-
-  const seen = new Set<string>();
-  const results: TWebSearchResult[] = [];
-
-  for (const result of rawResults) {
-    const title = normalizeText(decodeHtmlEntities(result.title));
-    const snippet = normalizeText(decodeHtmlEntities(result.snippet));
-
-    if (title === "" || result.url === "" || seen.has(result.url)) {
-      continue;
+    if (response.status === 432) {
+      throw new Error(
+        `Tavily quota exhausted: plan or API key limit reached (HTTP 432): ${message}`,
+      );
     }
 
-    seen.add(result.url);
-    results.push({ title, url: result.url, snippet });
-
-    if (results.length >= limit) {
-      break;
+    if (response.status === 433) {
+      throw new Error(`Tavily quota exhausted: pay-as-you-go limit reached (HTTP 433): ${message}`);
     }
+
+    throw new Error(`Tavily search failed with status ${response.status}: ${message}`);
   }
 
-  return results;
-}
-
-function decodeDuckDuckGoUrl(href: string): TOption<string> {
-  let url: URL;
+  let responseJson: unknown;
 
   try {
-    url = new URL(href, "https://duckduckgo.com");
-  } catch {
-    return undefined;
+    responseJson = await response.json();
+  } catch (error) {
+    throw new Error(`Tavily search returned invalid JSON: ${normalizeUnknownError(error)}`);
   }
 
-  const uddg = url.searchParams.get("uddg");
-  let candidate = url.href;
+  const parsed = STavilySearchResponse.safeParse(responseJson);
 
-  if (url.pathname === "/l/" && uddg !== null) {
-    candidate = uddg;
+  if (!parsed.success) {
+    throw new Error(`Tavily search returned malformed response: ${parsed.error.message}`);
   }
+
+  return parsed.data.results;
+}
+
+async function readShortResponseMessage(response: Response): Promise<string> {
+  let text = "";
 
   try {
-    return validatePublicHttpUrl(candidate);
-  } catch {
-    return undefined;
+    text = await response.text();
+  } catch (error) {
+    text = normalizeUnknownError(error);
   }
+
+  const normalized = text.replace(/\s+/g, " ").trim();
+
+  if (normalized.length > RESPONSE_MESSAGE_MAX_LENGTH) {
+    return `${normalized.slice(0, RESPONSE_MESSAGE_MAX_LENGTH)}...`;
+  }
+
+  if (normalized.length > 0) {
+    return normalized;
+  }
+
+  const statusText = response.statusText.trim();
+
+  if (statusText.length > 0) {
+    return statusText;
+  }
+
+  return "no response body";
 }
 
-function decodeHtmlEntities(value: string): string {
-  return value.replace(/&(#x[\da-f]+|#\d+|[a-z]+);/gi, (match, entity) => {
-    const decoded = decodeHtmlEntity(entity);
-
-    return decoded ?? match;
-  });
-}
-
-function decodeHtmlEntity(entity: string): TOption<string> {
-  if (entity.startsWith("#x") || entity.startsWith("#X")) {
-    return decodeNumericHtmlEntity(entity.slice(2), 16);
+function normalizeUnknownError(error: unknown): string {
+  if (typeof error === "string") {
+    return error;
   }
 
-  if (entity.startsWith("#")) {
-    return decodeNumericHtmlEntity(entity.slice(1), 10);
+  if (error instanceof Error) {
+    return error.message;
   }
 
-  switch (entity.toLowerCase()) {
-    case "amp": {
-      return "&";
-    }
-    case "apos": {
-      return "'";
-    }
-    case "gt": {
-      return ">";
-    }
-    case "lt": {
-      return "<";
-    }
-    case "nbsp": {
-      return " ";
-    }
-    case "quot": {
-      return '"';
-    }
-    default: {
-      return undefined;
-    }
-  }
-}
-
-function decodeNumericHtmlEntity(value: string, radix: number): TOption<string> {
-  const codePoint = Number.parseInt(value, radix);
-
-  if (!Number.isInteger(codePoint) || codePoint < 0 || codePoint > 0x10ffff) {
-    return undefined;
-  }
-
-  try {
-    return String.fromCodePoint(codePoint);
-  } catch {
-    return undefined;
-  }
-}
-
-function normalizeText(value: string): string {
-  return value.replace(/\s+/g, " ").trim();
+  return String(error);
 }

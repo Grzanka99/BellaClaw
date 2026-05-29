@@ -8,6 +8,7 @@ export type TFormattedWebContent = {
 
 const MAX_FORMATTED_CHARS = 80_000;
 const HIDDEN_ELEMENT_SELECTOR = "script, style, noscript, iframe, object, embed";
+const HIDDEN_TEXT_SELECTOR = `head, title, ${HIDDEN_ELEMENT_SELECTOR}`;
 
 export async function formatWebContent(args: {
   html: string;
@@ -41,11 +42,13 @@ export async function formatWebContent(args: {
 }
 
 export async function extractVisibleText(html: string): Promise<string> {
-  const chunks: string[] = [];
+  const bodyChunks: string[] = [];
+  const documentChunks: string[] = [];
+  let bodyElementFound = false;
   let skippedDepth = 0;
 
   await new HTMLRewriter()
-    .on(HIDDEN_ELEMENT_SELECTOR, {
+    .on(HIDDEN_TEXT_SELECTOR, {
       element(element) {
         skippedDepth += 1;
         element.onEndTag(() => {
@@ -53,17 +56,31 @@ export async function extractVisibleText(html: string): Promise<string> {
         });
       },
     })
-    .on("body", {
+    .onDocument({
       text(text) {
         if (skippedDepth === 0) {
-          chunks.push(text.text);
+          documentChunks.push(text.text);
+        }
+      },
+    })
+    .on("body", {
+      element() {
+        bodyElementFound = true;
+      },
+      text(text) {
+        if (skippedDepth === 0) {
+          bodyChunks.push(text.text);
         }
       },
     })
     .transform(new Response(html, { headers: { "content-type": "text/html" } }))
     .text();
 
-  return chunks.join(" ").replace(/\s+/g, " ").trim();
+  if (bodyElementFound) {
+    return bodyChunks.join(" ").replace(/\s+/g, " ").trim();
+  }
+
+  return documentChunks.join(" ").replace(/\s+/g, " ").trim();
 }
 
 async function stripHiddenMarkup(html: string): Promise<string> {

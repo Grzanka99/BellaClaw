@@ -144,13 +144,17 @@ describe("runAssistantToolLoop", () => {
     expect(result.toolActivity).toHaveLength(1);
   });
 
-  test("stops at the max iteration guard", async () => {
+  test("asks for a final response at the max iteration guard", async () => {
     let turn = 0;
 
     const result = await runAssistantToolLoop(
       createLoopArgs({
         maxIterations: 2,
-        requestAssistantTurn: async () => {
+        requestAssistantTurn: async ({ tools }) => {
+          if (tools.length === 0) {
+            return { response: "Final after tool limit.", toolCalls: [] };
+          }
+
           turn += 1;
 
           return {
@@ -168,8 +172,66 @@ describe("runAssistantToolLoop", () => {
     );
 
     expect(result.stopReason).toBe(EAssistantLoopStopReason.MaxIterations);
-    expect(result.finalResponse).toBeUndefined();
+    expect(result.finalResponse).toBe("Final after tool limit.");
     expect(result.iterations).toBe(2);
     expect(result.toolActivity).toHaveLength(2);
+  });
+
+  test("rejects extra tool calls after the max iteration guard", async () => {
+    let finalAttempts = 0;
+
+    const result = await runAssistantToolLoop(
+      createLoopArgs({
+        maxIterations: 1,
+        requestAssistantTurn: async ({ conversation, tools }) => {
+          if (tools.length > 0) {
+            return {
+              response: "",
+              toolCalls: [
+                createToolCall(
+                  "first-call",
+                  "define-message-importance",
+                  JSON.stringify({ importance: "low", reasoning: "first request" }),
+                ),
+              ],
+            };
+          }
+
+          finalAttempts += 1;
+
+          if (finalAttempts === 1) {
+            return {
+              response: "",
+              toolCalls: [
+                createToolCall(
+                  "extra-call",
+                  "define-message-importance",
+                  JSON.stringify({ importance: "medium", reasoning: "extra request" }),
+                ),
+              ],
+            };
+          }
+
+          const sawRejectedToolCall = conversation.some((item) => {
+            if (item.kind !== EAssistantLoopConversationItemKind.ToolResult) {
+              return false;
+            }
+
+            return item.result.toolCallId === "extra-call" && item.result.success === false;
+          });
+
+          if (sawRejectedToolCall) {
+            return { response: "Final after rejected tool call.", toolCalls: [] };
+          }
+
+          return { response: "", toolCalls: [] };
+        },
+      }),
+    );
+
+    expect(result.stopReason).toBe(EAssistantLoopStopReason.MaxIterations);
+    expect(result.finalResponse).toBe("Final after rejected tool call.");
+    expect(finalAttempts).toBe(2);
+    expect(result.toolActivity).toHaveLength(1);
   });
 });

@@ -7,7 +7,7 @@
   <tool>
     <name>web-search</name>
     <description>
-      Searches DuckDuckGo HTML results and returns organic result titles, URLs, and snippets.
+      Searches Tavily and returns result titles, URLs, content summaries, and relevance scores.
       Empty results are allowed and mean no relevant result was found by the search endpoint.
     </description>
   </tool>
@@ -15,9 +15,11 @@
   <usage_rules>
     <rule>Use this only when the user needs current, external, or source-backed information.</rule>
     <rule>Do not use it for simple conversation, internal memory recall, or facts already present in context.</rule>
-    <rule>Prefer a focused query and a limit of 3-5 unless the user asks for broader research.</rule>
+    <rule>Prefer a focused query and maxResults of 3-5 unless the user asks for broader research.</rule>
+    <rule>Use topic news for news queries, finance for finance/market queries, and general otherwise.</rule>
+    <rule>Use timeRange only when freshness matters: day, week, month, or year.</rule>
     <rule>Use web-fetch afterward only when result content is needed to answer accurately.</rule>
-    <rule>Do not claim you searched if the tool failed; explain briefly that search was unavailable.</rule>
+    <rule>If the tool fails because of authentication, quota, or service errors, do not retry the same search. Explain briefly that search was unavailable.</rule>
   </usage_rules>
 
   <examples>
@@ -25,7 +27,9 @@
       <context>User asks: "What changed in Bun this week?"</context>
       <toolCall>
         <query>Bun release notes this week</query>
-        <limit>5</limit>
+        <maxResults>5</maxResults>
+        <topic>news</topic>
+        <timeRange>week</timeRange>
       </toolCall>
     </example>
 
@@ -33,7 +37,8 @@
       <context>User asks: "How do I use the Discord.js Client class?"</context>
       <toolCall>
         <query>discord.js Client documentation</query>
-        <limit>3</limit>
+        <maxResults>3</maxResults>
+        <topic>general</topic>
       </toolCall>
     </example>
   </examples>

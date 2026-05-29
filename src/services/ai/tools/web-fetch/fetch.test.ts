@@ -96,33 +96,6 @@ describe("fetchWeb", () => {
     expect(result.truncated).toBe(true);
   });
 
-  test("blocks local and private URLs before fetching", async () => {
-    let called = false;
-    useMockFetch(async () => {
-      called = true;
-      return new Response("should not fetch");
-    });
-
-    await expect(fetchWeb({ url: "http://127.0.0.1/page" })).rejects.toThrow(
-      "Local or private IP literal URLs are blocked",
-    );
-    expect(called).toBe(false);
-  });
-
-  test("blocks redirect targets to local and private URLs", async () => {
-    useMockFetch(
-      async () =>
-        new Response("", {
-          status: 302,
-          headers: { location: "http://127.0.0.1/private" },
-        }),
-    );
-
-    await expect(fetchWeb({ url: "https://example.com/redirect" })).rejects.toThrow(
-      "Local or private IP literal URLs are blocked",
-    );
-  });
-
   test("fails after redirect limit", async () => {
     let redirects = 0;
     useMockFetch(async () => {

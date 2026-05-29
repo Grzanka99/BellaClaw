@@ -6,8 +6,6 @@ import type { TNormalizedToolResult } from "../../types";
 import { parseAndValidateToolArgs } from "../args";
 import { createFailedToolResult, createSuccessfulToolResult } from "../results";
 
-export { parseDuckDuckGoResults } from "../../../../../lib/web";
-
 export async function executeWebSearchTool(
   toolCall: ChatMessageToolCall,
 ): Promise<TNormalizedToolResult> {

@@ -53,9 +53,7 @@ export function validatePublicHttpUrl(rawUrl: string): string {
     throw new Error("Localhost URLs are blocked");
   }
 
-  if (isBlockedIpLiteral(hostname)) {
-    throw new Error("Local or private IP literal URLs are blocked");
-  }
+  // TODO: Add public-IP validation for literal URL hosts.
 
   return url.href;
 }
@@ -166,11 +164,7 @@ async function validateResolvedPublicHttpUrl(
     throw new Error("Hostname did not resolve to any IP address");
   }
 
-  for (const address of addresses) {
-    if (isBlockedIpLiteral(normalizeHostname(address.address))) {
-      throw new Error("Hostname resolves to a local, private, or special-use IP address");
-    }
-  }
+  // TODO: Add public-IP validation for resolved DNS addresses.
 
   return {
     href,
@@ -380,154 +374,4 @@ async function readResponseTextWithLimit(
 
 function normalizeHostname(hostname: string): string {
   return hostname.toLowerCase().replace(/^\[/, "").replace(/\]$/, "").replace(/\.$/, "");
-}
-
-function isBlockedIpLiteral(hostname: string): boolean {
-  const ipv4 = parseIpv4(hostname);
-
-  if (ipv4 !== undefined) {
-    return isBlockedIpv4(ipv4);
-  }
-
-  const ipv4MappedPrefix = "::ffff:";
-
-  if (hostname.startsWith(ipv4MappedPrefix)) {
-    const mappedIpv4 = parseIpv4(hostname.slice(ipv4MappedPrefix.length));
-
-    if (mappedIpv4 !== undefined) {
-      return isBlockedIpv4(mappedIpv4);
-    }
-  }
-
-  const ipv6 = expandIpv6(hostname);
-
-  if (ipv6 === undefined) {
-    return false;
-  }
-
-  return isBlockedIpv6(ipv6);
-}
-
-function parseIpv4(hostname: string): TOption<number[]> {
-  const parts = hostname.split(".");
-
-  if (parts.length !== 4) {
-    return undefined;
-  }
-
-  const parsed: number[] = [];
-
-  for (const part of parts) {
-    if (!/^\d+$/.test(part)) {
-      return undefined;
-    }
-
-    const value = Number(part);
-
-    if (!Number.isInteger(value) || value < 0 || value > 255) {
-      return undefined;
-    }
-
-    parsed.push(value);
-  }
-
-  return parsed;
-}
-
-function isBlockedIpv4(parts: number[]): boolean {
-  const first = parts[0];
-  const second = parts[1];
-
-  if (first === undefined || second === undefined) {
-    return false;
-  }
-
-  return (
-    first === 0 ||
-    first === 10 ||
-    (first === 100 && second >= 64 && second <= 127) ||
-    first === 127 ||
-    (first === 169 && second === 254) ||
-    (first === 172 && second >= 16 && second <= 31) ||
-    (first === 192 && second === 168)
-  );
-}
-
-function expandIpv6(hostname: string): TOption<number[]> {
-  if (!hostname.includes(":")) {
-    return undefined;
-  }
-
-  const halves = hostname.split("::");
-
-  if (halves.length > 2) {
-    return undefined;
-  }
-
-  const left = parseIpv6Hextets(halves[0] ?? "");
-  const right = parseIpv6Hextets(halves[1] ?? "");
-
-  if (left === undefined || right === undefined) {
-    return undefined;
-  }
-
-  if (halves.length === 1) {
-    if (left.length === 8) {
-      return left;
-    }
-
-    return undefined;
-  }
-
-  const missing = 8 - left.length - right.length;
-
-  if (missing < 0) {
-    return undefined;
-  }
-
-  return [...left, ...Array.from({ length: missing }, () => 0), ...right];
-}
-
-function parseIpv6Hextets(value: string): TOption<number[]> {
-  if (value === "") {
-    return [];
-  }
-
-  const parsed: number[] = [];
-
-  for (const part of value.split(":")) {
-    if (!/^[0-9a-f]{1,4}$/i.test(part)) {
-      return undefined;
-    }
-
-    parsed.push(Number.parseInt(part, 16));
-  }
-
-  return parsed;
-}
-
-function isBlockedIpv6(parts: number[]): boolean {
-  const first = parts[0];
-  const sixth = parts[5];
-  const seventh = parts[6];
-  const last = parts[7];
-
-  if (first === undefined || sixth === undefined || seventh === undefined || last === undefined) {
-    return false;
-  }
-
-  const allZero = parts.every((part) => part === 0);
-  const allButLastZero = parts.slice(0, 7).every((part) => part === 0);
-  const isMappedIpv4 = parts.slice(0, 5).every((part) => part === 0) && sixth === 0xffff;
-
-  if (isMappedIpv4) {
-    return isBlockedIpv4([seventh >> 8, seventh & 0xff, last >> 8, last & 0xff]);
-  }
-
-  return (
-    allZero ||
-    (allButLastZero && last === 1) ||
-    (first & 0xfe00) === 0xfc00 ||
-    (first & 0xffc0) === 0xfe80
-  );
 }

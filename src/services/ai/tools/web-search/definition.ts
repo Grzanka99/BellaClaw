@@ -7,22 +7,33 @@ export const webSearchTool: ToolDefinitionJson = {
   function: {
     name: WEB_SEARCH_TOOL,
     description:
-      "Search the public web for current information using DuckDuckGo HTML results. Use for recent facts, news, documentation, or sources not available in conversation context.",
+      "Search the public web with Tavily for current information. Use for recent facts, news, documentation, or sources not available in conversation context.",
     parameters: {
       type: "object",
       properties: {
         query: {
           type: "string",
-          description: "Search query to submit to DuckDuckGo.",
+          description: "Search query to submit to Tavily.",
         },
-        limit: {
+        maxResults: {
           type: "integer",
           minimum: 1,
           maximum: 10,
           description: "Maximum number of results to return. Defaults to 5.",
         },
+        topic: {
+          type: "string",
+          enum: ["general", "news", "finance"],
+          description: "Search topic. Defaults to general.",
+        },
+        timeRange: {
+          type: "string",
+          enum: ["day", "week", "month", "year"],
+          description: "Optional time range for freshness filtering.",
+        },
       },
       required: ["query"],
+      additionalProperties: false,
     },
   },
 };

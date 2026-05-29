@@ -1,6 +1,6 @@
 # BellaClaw
 
-My take on building an AI personal assistant. I tried using OpenClaw but found it burned through tokens fast due to large context (could be a skill issue on my part). So I decided to just build something from scratch -- partly as practice, partly for fun.
+My (maybe not) AI Slopware, a vibecoded take on building an AI personal assistant. I tried using OpenClaw but found it burned through tokens fast due to large context (could be a skill issue on my part). So I decided to just build something from scratch -- partly as practice, partly for fun.
 
 Ships with a default "Bellatrix" persona -- a darkly elegant assistant that responds in Polish (I will fix it later).
 

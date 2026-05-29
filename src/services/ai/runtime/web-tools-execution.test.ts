@@ -5,6 +5,7 @@ import { WEB_SEARCH_TOOL } from "../tools/web-search/definition";
 import { executeToolCall } from "./tool-execution";
 
 const originalFetch = globalThis.fetch;
+const originalTavilyApiKey = Bun.env.TAVILY_API_KEY;
 
 function createToolCall(id: string, name: string, argumentsText: string): ChatMessageToolCall {
   return {
@@ -19,6 +20,7 @@ function createToolCall(id: string, name: string, argumentsText: string): ChatMe
 
 describe("web tool execution", () => {
   beforeEach(() => {
+    Bun.env.TAVILY_API_KEY = "test-key";
     globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
       let url: string;
 
@@ -30,15 +32,19 @@ describe("web tool execution", () => {
         url = input.url;
       }
 
-      if (url.startsWith("https://html.duckduckgo.com/html/")) {
+      if (url === "https://api.tavily.com/search") {
         return new Response(
-          `
-          <html><body>
-            <a class="result__a" href="https://example.com/result">Result Title</a>
-            <a class="result__snippet">Result snippet.</a>
-          </body></html>
-        `,
-          { headers: { "content-type": "text/html" } },
+          JSON.stringify({
+            results: [
+              {
+                title: "Result Title",
+                url: "https://example.com/result",
+                content: "Result content.",
+                score: 0.82,
+              },
+            ],
+          }),
+          { headers: { "content-type": "application/json" } },
         );
       }
 
@@ -49,6 +55,12 @@ describe("web tool execution", () => {
   });
 
   afterEach(() => {
+    if (originalTavilyApiKey === undefined) {
+      delete Bun.env.TAVILY_API_KEY;
+    } else {
+      Bun.env.TAVILY_API_KEY = originalTavilyApiKey;
+    }
+
     globalThis.fetch = originalFetch;
   });
 
@@ -57,7 +69,7 @@ describe("web tool execution", () => {
       toolCall: createToolCall(
         "search-call",
         WEB_SEARCH_TOOL,
-        JSON.stringify({ query: "example", limit: 1 }),
+        JSON.stringify({ query: "example", maxResults: 1 }),
       ),
       chatId: undefined,
       allowedToolNames: new Set([WEB_SEARCH_TOOL]),
@@ -70,7 +82,12 @@ describe("web tool execution", () => {
       data: {
         query: "example",
         results: [
-          { title: "Result Title", url: "https://example.com/result", snippet: "Result snippet." },
+          {
+            title: "Result Title",
+            url: "https://example.com/result",
+            content: "Result content.",
+            score: 0.82,
+          },
         ],
       },
     });
@@ -106,7 +123,7 @@ describe("web tool execution", () => {
       toolCall: createToolCall(
         "bad-search",
         WEB_SEARCH_TOOL,
-        JSON.stringify({ query: "", limit: 1 }),
+        JSON.stringify({ query: "", maxResults: 1 }),
       ),
       chatId: undefined,
       allowedToolNames: new Set([WEB_SEARCH_TOOL]),
