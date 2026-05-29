@@ -5,6 +5,8 @@ import { createLogger, type TLogger } from "../../utils/logger";
 import { AiConnector } from "../ai/api";
 import { ERole } from "../ai/types";
 import { CronSingleton } from "../cron";
+import { Memory } from "../memory";
+import { EMemoryImportance } from "../memory/types";
 import { MessageHandler } from "../message-handler";
 
 export class DiscordSingleton {
@@ -84,6 +86,26 @@ export class DiscordSingleton {
     } catch (error) {
       this.logger.error(
         `handleCronFire: failed to deliver reminder "${ctx.name}" to user ${userId}: ${String(error)}`,
+      );
+      return;
+    }
+
+    try {
+      const saveResult = await Memory.instance.save({
+        chatId: userId,
+        author: ERole.Assistant,
+        importance: EMemoryImportance.Low,
+        message: `[CRON REMINDER ${ctx.name}]: ${text}`,
+      });
+
+      if ("operation" in saveResult) {
+        this.logger.error(
+          `handleCronFire: failed to save reminder "${ctx.name}" to memory for user ${userId}: ${String(saveResult.error)}`,
+        );
+      }
+    } catch (error) {
+      this.logger.error(
+        `handleCronFire: failed to save reminder "${ctx.name}" to memory for user ${userId}: ${String(error)}`,
       );
     }
   }
