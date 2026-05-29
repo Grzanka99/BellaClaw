@@ -19,6 +19,7 @@ Ships with a default "Bellatrix" persona -- a darkly elegant assistant that resp
 | `DISCORD_TOKEN` | Yes | Discord bot token |
 | `OPENCODE_API_KEY` | Yes | opencode API key |
 | `OPENROUTER_API_KEY` | No | OpenRouter API key, required only when using the OpenRouter provider |
+| `TAVILY_API_KEY` | No | Tavily API key, required for web search |
 | `OLLAMA_BASE_URL` | No | Ollama base URL (defaults to `http://localhost:11434`) |
 | `MEMORY_DB_FILE` | No | SQLite path for persistent memory |
 | `CRON_DB_FILE` | No | SQLite path for scheduled jobs |
@@ -38,7 +39,7 @@ bun run start
 ### Run With Podman In Background
 
 1. Copy the repo to the server.
-2. Create a `.env` file there with at least `DISCORD_TOKEN` and `OPENCODE_API_KEY`.
+2. Create a `.env` file there with at least `DISCORD_TOKEN` and `OPENCODE_API_KEY`. Add `TAVILY_API_KEY` if you want web search to work.
 3. Start it in the background:
 
 ```bash
