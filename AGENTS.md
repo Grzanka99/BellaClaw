@@ -133,3 +133,5 @@ src/services/ai/tools/<tool-name>/
         return undefined
     }
     ```
+- Avoid ternary operators. Prefer explicit `if`/`else` statements for conditional logic.
+- Do not add single-use helper functions for trivial logic. Keep one-off predicates, transforms, and short code blocks inline. Extract only when the helper names a distinct domain concept, isolates a separate concern, or replaces a bulky/noisy block.

@@ -13,6 +13,8 @@ import {
   searchMemoryTool,
   type THistoryItem,
   type TPrompt,
+  webFetchTool,
+  webSearchTool,
 } from "../ai/api";
 import { readXmlAndInjectConfig } from "../ai/instructions/read-xml-and-inject-config";
 import { SDefineMessageImportance } from "../ai/tools/define-message-importance/handler";
@@ -105,6 +107,8 @@ export class MessageHandler {
       scheduleOnceInstructions,
       scheduleRecurringInstructions,
       unscheduleCronJobInstructions,
+      webSearchInstructions,
+      webFetchInstructions,
     ] = await Promise.all([
       readXmlAndInjectConfig("./src/services/ai/tools/list-cron-jobs/instructions.xml", Config),
       readXmlAndInjectConfig("./src/services/ai/tools/schedule-once/instructions.xml", Config),
@@ -113,6 +117,8 @@ export class MessageHandler {
         "./src/services/ai/tools/unschedule-cron-job/instructions.xml",
         Config,
       ),
+      readXmlAndInjectConfig("./src/services/ai/tools/web-search/instructions.xml", Config),
+      readXmlAndInjectConfig("./src/services/ai/tools/web-fetch/instructions.xml", Config),
     ]);
 
     const tools = [
@@ -120,6 +126,8 @@ export class MessageHandler {
       { definition: scheduleOnceTool, instructions: scheduleOnceInstructions },
       { definition: scheduleRecurringTool, instructions: scheduleRecurringInstructions },
       { definition: unscheduleCronJobTool, instructions: unscheduleCronJobInstructions },
+      { definition: webSearchTool, instructions: webSearchInstructions },
+      { definition: webFetchTool, instructions: webFetchInstructions },
     ];
 
     const chatStart = performance.now();
