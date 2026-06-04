@@ -1,33 +1,34 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, unlinkSync } from "node:fs";
+import { sql } from "drizzle-orm";
 import { ERole } from "../ai/types";
-import { DEFAULT_PERSISTENT_MEMORY_DB, Memory } from "./index";
+import { DatabaseConnector } from "../database";
+
+const { Memory } = await import("./index");
+
 import { EMemoryImportance } from "./types";
 
-const TEST_DB = "test-memory.db";
+async function resetTestDatabase() {
+  const db = DatabaseConnector.instance.database;
 
-function resetMemoryInstance(dbPath: string) {
+  await db.run(sql`DELETE FROM memories`);
+  await db.run(sql`DELETE FROM sqlite_sequence WHERE name = 'memories'`);
+}
+
+function resetMemoryInstance() {
   const MemoryWithPrivate = Memory as unknown as {
-    _instance: Memory | undefined;
-    MEMORY_FILE: string;
+    _instance: unknown;
   };
   MemoryWithPrivate._instance = undefined;
-  MemoryWithPrivate.MEMORY_FILE = dbPath;
 }
 
 describe("Memory", () => {
-  beforeEach(() => {
-    if (existsSync(TEST_DB)) {
-      unlinkSync(TEST_DB);
-    }
-    resetMemoryInstance(TEST_DB);
+  beforeEach(async () => {
+    await resetTestDatabase();
+    resetMemoryInstance();
   });
 
   afterEach(() => {
-    if (existsSync(TEST_DB)) {
-      unlinkSync(TEST_DB);
-    }
-    resetMemoryInstance(DEFAULT_PERSISTENT_MEMORY_DB);
+    resetMemoryInstance();
   });
 
   describe("instance", () => {
