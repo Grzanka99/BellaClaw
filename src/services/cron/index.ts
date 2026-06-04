@@ -14,15 +14,12 @@ import type { TOption } from "../../types";
 export class CronSingleton extends EventEmitter {
   private static readonly CRON_EVENT = Symbol("cron-event");
   private static _instance: TOption<CronSingleton>;
-  private static DEFAULT_DB_FILE = "cron-engine.db";
-  private static dbFile = Bun.env.CRON_DB_FILE ?? CronSingleton.DEFAULT_DB_FILE;
   private engine: CronEngine;
 
   private constructor() {
     super();
 
     this.engine = new CronEngine({
-      dbFile: CronSingleton.dbFile,
       timezone: Config.ai.instructions.timezone,
     });
 
@@ -40,22 +37,6 @@ export class CronSingleton extends EventEmitter {
     }
 
     return CronSingleton._instance;
-  }
-
-  public static setDbFile(dbFile: string) {
-    if (CronSingleton._instance) {
-      throw new Error("Cannot change cron DB file while CronSingleton instance is active");
-    }
-
-    CronSingleton.dbFile = dbFile;
-  }
-
-  public static resetDbFile() {
-    if (CronSingleton._instance) {
-      throw new Error("Cannot reset cron DB file while CronSingleton instance is active");
-    }
-
-    CronSingleton.dbFile = CronSingleton.DEFAULT_DB_FILE;
   }
 
   public setup(pollIntervalMs = 10_000) {

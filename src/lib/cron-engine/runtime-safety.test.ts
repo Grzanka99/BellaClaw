@@ -1,80 +1,59 @@
-import type { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, unlinkSync } from "node:fs";
-import { join } from "node:path";
+import { and, eq } from "drizzle-orm";
+import { DatabaseConnector } from "../../services/database";
+import { cronEngineJobsTable } from "../../services/database/schema";
+import { resetCronEngineJobsTable } from "../../services/database/test-utils";
 import type { AsyncQueue } from "../../utils/async-queue";
 import { CronEngine } from "./index";
 
-const tempDir = join(Bun.cwd, "tmp");
-mkdirSync(tempDir, { recursive: true });
-const TEST_DB = join(tempDir, "test-cron-engine-runtime-safety.db");
-const TABLE_NAME = "cron_engine_runtime_safety_jobs";
-
 type TEngineWithInternals = {
-  db: Database;
   queue: AsyncQueue;
   tick: () => Promise<void>;
 };
 
 async function forceJobDue(engine: CronEngine, name: string, scope: string) {
   const internals = engine as unknown as TEngineWithInternals;
+  const db = DatabaseConnector.instance.database;
 
   await internals.queue.enqueue(async () => {
-    internals.db
-      .query(`UPDATE ${TABLE_NAME} SET nextRunAt = $ts WHERE name = $name AND scope = $scope`)
-      .run({
-        $ts: Date.now() - 1_000,
-        $name: name,
-        $scope: scope,
-      });
+    await db
+      .update(cronEngineJobsTable)
+      .set({ nextRunAt: Date.now() - 1_000 })
+      .where(and(eq(cronEngineJobsTable.name, name), eq(cronEngineJobsTable.scope, scope)));
   });
 }
 
 async function insertDueOneTimeJob(engine: CronEngine, name: string, scope: string) {
   const internals = engine as unknown as TEngineWithInternals;
+  const db = DatabaseConnector.instance.database;
 
   await internals.queue.enqueue(async () => {
-    internals.db
-      .query(
-        `INSERT INTO ${TABLE_NAME} (name, scope, "group", type, pattern, reminderText, reminderPromptData, reminderFallbackText, nextRunAt, lastRunAt, createdAt)
-         VALUES ($name, $scope, $group, $type, $pattern, $reminderText, $reminderPromptData, $reminderFallbackText, $nextRunAt, $lastRunAt, $createdAt)`,
-      )
-      .run({
-        $name: name,
-        $scope: scope,
-        $group: null,
-        $type: "onetime",
-        $pattern: null,
-        $reminderText: null,
-        $reminderPromptData: null,
-        $reminderFallbackText: null,
-        $nextRunAt: Date.now() - 1_000,
-        $lastRunAt: null,
-        $createdAt: Date.now(),
-      });
+    await db.insert(cronEngineJobsTable).values({
+      name,
+      scope,
+      group: null,
+      type: "onetime",
+      pattern: null,
+      reminderText: null,
+      reminderPromptData: null,
+      reminderFallbackText: null,
+      nextRunAt: Date.now() - 1_000,
+      lastRunAt: null,
+      createdAt: Date.now(),
+    });
   });
 }
 
 describe("CronEngine runtime safety", () => {
   let engine: CronEngine;
 
-  beforeEach(() => {
-    if (existsSync(TEST_DB)) {
-      unlinkSync(TEST_DB);
-    }
-
-    engine = new CronEngine({
-      dbFile: TEST_DB,
-      tableName: TABLE_NAME,
-    });
+  beforeEach(async () => {
+    await resetCronEngineJobsTable();
+    engine = new CronEngine({});
   });
 
   afterEach(() => {
     engine.destroy();
-
-    if (existsSync(TEST_DB)) {
-      unlinkSync(TEST_DB);
-    }
   });
 
   test("overlapping ticks fire a due job once", async () => {

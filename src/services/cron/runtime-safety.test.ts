@@ -1,16 +1,11 @@
-import type { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, unlinkSync } from "node:fs";
-import { join } from "node:path";
 import type { AsyncQueue } from "../../utils/async-queue";
+import { DatabaseConnector } from "../database";
+import { cronEngineJobsTable } from "../database/schema";
+import { resetCronEngineJobsTable } from "../database/test-utils";
 import { CronSingleton } from "./index";
 
-const tempDir = join(Bun.cwd, "tmp");
-mkdirSync(tempDir, { recursive: true });
-const TEST_DB = join(tempDir, "test-cron-singleton-runtime-safety.db");
-
 type TEngineWithInternals = {
-  db: Database;
   queue: AsyncQueue;
   tick: () => Promise<void>;
 };
@@ -26,42 +21,33 @@ type TCronSingletonStatic = {
 function cleanupCronSingleton() {
   const CronSingletonWithInternals = CronSingleton as unknown as TCronSingletonStatic;
   CronSingletonWithInternals._instance?.destroy();
-  CronSingleton.resetDbFile();
-
-  if (existsSync(TEST_DB)) {
-    unlinkSync(TEST_DB);
-  }
 }
 
 async function insertDueOneTimeJob(cron: CronSingleton, name: string, scope: string) {
   const internals = cron as unknown as TCronSingletonInternals;
+  const db = DatabaseConnector.instance.database;
 
   await internals.engine.queue.enqueue(async () => {
-    internals.engine.db
-      .query(
-        `INSERT INTO cron_engine_jobs (name, scope, "group", type, pattern, reminderText, reminderPromptData, reminderFallbackText, nextRunAt, lastRunAt, createdAt)
-         VALUES ($name, $scope, $group, $type, $pattern, $reminderText, $reminderPromptData, $reminderFallbackText, $nextRunAt, $lastRunAt, $createdAt)`,
-      )
-      .run({
-        $name: name,
-        $scope: scope,
-        $group: null,
-        $type: "onetime",
-        $pattern: null,
-        $reminderText: null,
-        $reminderPromptData: null,
-        $reminderFallbackText: null,
-        $nextRunAt: Date.now() - 1_000,
-        $lastRunAt: null,
-        $createdAt: Date.now(),
-      });
+    await db.insert(cronEngineJobsTable).values({
+      name,
+      scope,
+      group: null,
+      type: "onetime",
+      pattern: null,
+      reminderText: null,
+      reminderPromptData: null,
+      reminderFallbackText: null,
+      nextRunAt: Date.now() - 1_000,
+      lastRunAt: null,
+      createdAt: Date.now(),
+    });
   });
 }
 
 describe("CronSingleton runtime safety", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     cleanupCronSingleton();
-    CronSingleton.setDbFile(TEST_DB);
+    await resetCronEngineJobsTable();
   });
 
   afterEach(() => {

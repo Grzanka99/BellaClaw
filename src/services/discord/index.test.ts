@@ -1,14 +1,11 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
-import { existsSync, unlinkSync } from "node:fs";
-import { join } from "node:path";
 import { ECronEngineJobType, type TCronEngineJobContext } from "../../lib/cron-engine";
 import { ERole } from "../ai/types";
 import { CronSingleton } from "../cron";
+import { resetCronEngineJobsTable } from "../database/test-utils";
 import { Memory } from "../memory";
 import { EMemoryImportance } from "../memory/types";
 import { DiscordSingleton } from "./index";
-
-const TEST_DB = join(import.meta.dir, "../../../test-discord-cron-service.db");
 
 type TDiscordSingletonInternals = {
   ai: {
@@ -62,14 +59,9 @@ function cleanupSingletons() {
   const CronSingletonWithInternals = CronSingleton as unknown as TCronSingletonStatic;
   CronSingletonWithInternals._instance?.destroy();
   CronSingletonWithInternals._instance = undefined;
-  CronSingleton.resetDbFile();
 
   const DiscordSingletonWithInternals = DiscordSingleton as unknown as TDiscordSingletonStatic;
   DiscordSingletonWithInternals._instance = undefined;
-
-  if (existsSync(TEST_DB)) {
-    unlinkSync(TEST_DB);
-  }
 
   resetMemoryInstance();
 }
@@ -92,9 +84,9 @@ function createCronContext(overrides: Partial<TCronEngineJobContext> = {}): TCro
 }
 
 describe("DiscordSingleton", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     cleanupSingletons();
-    CronSingleton.setDbFile(TEST_DB);
+    await resetCronEngineJobsTable();
     mockMemoryInstance();
   });
 

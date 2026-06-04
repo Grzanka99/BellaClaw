@@ -1,16 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, unlinkSync } from "node:fs";
-import { join } from "node:path";
+import { and, eq } from "drizzle-orm";
 import { ECronEngineJobType, type TCronEngineJobContext } from "../../lib/cron-engine";
+import { DatabaseConnector } from "../database";
+import { cronEngineJobsTable } from "../database/schema";
+import { resetCronEngineJobsTable } from "../database/test-utils";
 import { CronSingleton } from "./index";
-
-const tempDir = join(Bun.cwd, "tmp");
-mkdirSync(tempDir, { recursive: true });
-const TEST_DB = join(tempDir, "test-cron-service.db");
 
 type TCronSingletonInternals = {
   engine: {
-    db: import("bun:sqlite").Database;
     tick: () => Promise<void>;
   };
 };
@@ -22,38 +19,25 @@ type TCronSingletonStatic = {
 function cleanupCronSingleton() {
   const CronSingletonWithInternals = CronSingleton as unknown as TCronSingletonStatic;
   CronSingletonWithInternals._instance?.destroy();
-  CronSingleton.resetDbFile();
 }
 
-function forceJobDue(cron: CronSingleton, name: string, scope: string) {
-  const internals = cron as unknown as TCronSingletonInternals;
+async function forceJobDue(name: string, scope: string) {
+  const db = DatabaseConnector.instance.database;
 
-  internals.engine.db
-    .query("UPDATE cron_engine_jobs SET nextRunAt = $ts WHERE name = $name AND scope = $scope")
-    .run({
-      $ts: Date.now() - 1_000,
-      $name: name,
-      $scope: scope,
-    });
+  await db
+    .update(cronEngineJobsTable)
+    .set({ nextRunAt: Date.now() - 1_000 })
+    .where(and(eq(cronEngineJobsTable.name, name), eq(cronEngineJobsTable.scope, scope)));
 }
 
 describe("CronSingleton", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     cleanupCronSingleton();
-
-    if (existsSync(TEST_DB)) {
-      unlinkSync(TEST_DB);
-    }
-
-    CronSingleton.setDbFile(TEST_DB);
+    await resetCronEngineJobsTable();
   });
 
   afterEach(() => {
     cleanupCronSingleton();
-
-    if (existsSync(TEST_DB)) {
-      unlinkSync(TEST_DB);
-    }
   });
 
   test("keeps jobs isolated per user and preserves service fields", async () => {
@@ -174,7 +158,7 @@ describe("CronSingleton", () => {
 
     expect("error" in scheduled).toBe(false);
 
-    forceJobDue(cron, "one-time-job", "user-a");
+    await forceJobDue("one-time-job", "user-a");
 
     const fired = new Promise<TCronEngineJobContext>((resolve) => {
       cron.on("one-time-job", (ctx) => {
@@ -217,7 +201,7 @@ describe("CronSingleton", () => {
 
     expect("error" in scheduled).toBe(false);
 
-    forceJobDue(cron, "recurring-job", "user-a");
+    await forceJobDue("recurring-job", "user-a");
 
     const fired = new Promise<TCronEngineJobContext>((resolve) => {
       cron.on("recurring-job", (ctx) => {
@@ -269,7 +253,7 @@ describe("CronSingleton", () => {
 
     expect("error" in scheduled).toBe(false);
 
-    forceJobDue(cron, "cron-event", "user-a");
+    await forceJobDue("cron-event", "user-a");
 
     const namedEvents: TCronEngineJobContext[] = [];
     const cronEvents: TCronEngineJobContext[] = [];

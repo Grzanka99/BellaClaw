@@ -32,5 +32,5 @@ export const cronEngineJobsTable = sqliteTable(
 export type TInsertMemory = typeof memoriesTable.$inferInsert;
 export type TSelectMemory = typeof memoriesTable.$inferSelect;
 
-export type TInsertCronJob = typeof memoriesTable.$inferInsert;
-export type TSelectMemoryCronJob = typeof memoriesTable.$inferSelect;
+export type TInsertCronJob = typeof cronEngineJobsTable.$inferInsert;
+export type TSelectCronJob = typeof cronEngineJobsTable.$inferSelect;
