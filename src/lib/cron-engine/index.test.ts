@@ -1,37 +1,51 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, unlinkSync } from "node:fs";
-import { join } from "node:path";
+import { and, eq } from "drizzle-orm";
+import { DatabaseConnector } from "../../services/database";
+import { cronEngineJobsTable } from "../../services/database/schema";
+import { resetCronEngineJobsTable } from "../../services/database/test-utils";
 import { CronEngine, ECronEngineJobType } from "./index";
 
-const tempDir = join(Bun.cwd, "tmp");
-mkdirSync(tempDir, { recursive: true });
-const TEST_DB = join(tempDir, "test-cron-engine.db");
-
 type TEngineWithInternals = {
-  db: import("bun:sqlite").Database;
   tick: () => Promise<void>;
 };
+
+async function forceJobDue(name: string, scope: string) {
+  const db = DatabaseConnector.instance.database;
+
+  await db
+    .update(cronEngineJobsTable)
+    .set({ nextRunAt: Date.now() - 1_000 })
+    .where(and(eq(cronEngineJobsTable.name, name), eq(cronEngineJobsTable.scope, scope)));
+}
+
+async function insertDueOneTimeJob() {
+  const db = DatabaseConnector.instance.database;
+
+  await db.insert(cronEngineJobsTable).values({
+    name: "one-time-job",
+    scope: "scope-a",
+    group: '{"kind":"one-time"}',
+    type: "onetime",
+    pattern: null,
+    reminderText: "One-time reminder.",
+    reminderPromptData: null,
+    reminderFallbackText: "One-time reminder.",
+    nextRunAt: Date.now() - 1_000,
+    lastRunAt: null,
+    createdAt: Date.now(),
+  });
+}
 
 describe("CronEngine", () => {
   let engine: CronEngine;
 
-  beforeEach(() => {
-    if (existsSync(TEST_DB)) {
-      unlinkSync(TEST_DB);
-    }
-
-    engine = new CronEngine({
-      dbFile: TEST_DB,
-      tableName: "cron_engine_test_jobs",
-    });
+  beforeEach(async () => {
+    await resetCronEngineJobsTable();
+    engine = new CronEngine({});
   });
 
   afterEach(() => {
     engine.destroy();
-
-    if (existsSync(TEST_DB)) {
-      unlinkSync(TEST_DB);
-    }
   });
 
   test("schedule rejects invalid cron pattern", async () => {
@@ -113,15 +127,7 @@ describe("CronEngine", () => {
     });
 
     const internals = engine as unknown as TEngineWithInternals;
-    internals.db
-      .query(
-        "UPDATE cron_engine_test_jobs SET nextRunAt = $ts WHERE name = $name AND scope = $scope",
-      )
-      .run({
-        $ts: Date.now() - 1_000,
-        $name: "recurring-job",
-        $scope: "scope-a",
-      });
+    await forceJobDue("recurring-job", "scope-a");
 
     const namedEvent = new Promise<{
       name: string;
@@ -179,15 +185,7 @@ describe("CronEngine", () => {
     });
 
     const internals = engine as unknown as TEngineWithInternals;
-    internals.db
-      .query(
-        "UPDATE cron_engine_test_jobs SET nextRunAt = $ts WHERE name = $name AND scope = $scope",
-      )
-      .run({
-        $ts: Date.now() - 1_000,
-        $name: "fire",
-        $scope: "scope-a",
-      });
+    await forceJobDue("fire", "scope-a");
 
     const namedEvents: string[] = [];
     const fireEvents: string[] = [];
@@ -207,24 +205,7 @@ describe("CronEngine", () => {
 
   test("tick removes one-time job after firing", async () => {
     const internals = engine as unknown as TEngineWithInternals;
-    internals.db
-      .query(
-        `INSERT INTO cron_engine_test_jobs (name, scope, "group", type, pattern, reminderText, reminderPromptData, reminderFallbackText, nextRunAt, lastRunAt, createdAt)
-         VALUES ($name, $scope, $group, $type, $pattern, $reminderText, $reminderPromptData, $reminderFallbackText, $nextRunAt, $lastRunAt, $createdAt)`,
-      )
-      .run({
-        $name: "one-time-job",
-        $scope: "scope-a",
-        $group: '{"kind":"one-time"}',
-        $type: "onetime",
-        $pattern: null,
-        $reminderText: "One-time reminder.",
-        $reminderPromptData: null,
-        $reminderFallbackText: "One-time reminder.",
-        $nextRunAt: Date.now() - 1_000,
-        $lastRunAt: null,
-        $createdAt: Date.now(),
-      });
+    await insertDueOneTimeJob();
 
     const namedEvent = new Promise<{
       type: ECronEngineJobType;

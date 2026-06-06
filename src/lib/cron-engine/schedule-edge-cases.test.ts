@@ -1,32 +1,17 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, unlinkSync } from "node:fs";
-import { join } from "node:path";
+import { resetCronEngineJobsTable } from "../../services/database/test-utils";
 import { CronEngine } from "./index";
-
-const tempDir = join(Bun.cwd, "tmp");
-mkdirSync(tempDir, { recursive: true });
-const TEST_DB = join(tempDir, "test-cron-engine-schedule-edge-cases.db");
 
 describe("CronEngine schedule edge cases", () => {
   let engine: CronEngine;
 
-  beforeEach(() => {
-    if (existsSync(TEST_DB)) {
-      unlinkSync(TEST_DB);
-    }
-
-    engine = new CronEngine({
-      dbFile: TEST_DB,
-      tableName: "cron_engine_schedule_edge_cases",
-    });
+  beforeEach(async () => {
+    await resetCronEngineJobsTable();
+    engine = new CronEngine({});
   });
 
   afterEach(() => {
     engine.destroy();
-
-    if (existsSync(TEST_DB)) {
-      unlinkSync(TEST_DB);
-    }
   });
 
   test("returns a structured error for unschedulable valid cron patterns", async () => {

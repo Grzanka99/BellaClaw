@@ -1,6 +1,8 @@
-import { Database } from "bun:sqlite";
 import { EventEmitter } from "node:events";
+import { and, asc, eq, lte } from "drizzle-orm";
 import { z } from "zod";
+import { DatabaseConnector } from "../../services/database";
+import { cronEngineJobsTable } from "../../services/database/schema";
 import type { TOption } from "../../types";
 import { AsyncQueue } from "../../utils/async-queue";
 import { createLogger } from "../../utils/logger";
@@ -16,7 +18,6 @@ import {
   type TScheduleRecurringArgs,
 } from "./types";
 
-const DEFAULT_TABLE_NAME = "cron_engine_jobs";
 const RESERVED_CRON_JOB_EVENT_NAMES = new Set(["error", "newListener", "removeListener"]);
 
 export * from "./parser";
@@ -28,10 +29,9 @@ export function isReservedCronJobEventName(name: string) {
 
 export class CronEngine extends EventEmitter {
   private static readonly FIRE_EVENT = Symbol("cron-engine-fire");
-  private db: Database;
+  private db = DatabaseConnector.instance.database;
   private queue: AsyncQueue;
   private logger = createLogger("CRON ENGINE");
-  private tableName: string;
   private timezone: TOption<string>;
   private tickInterval: TOption<ReturnType<typeof setInterval>>;
   private isTicking = false;
@@ -39,14 +39,8 @@ export class CronEngine extends EventEmitter {
   public constructor(options: TCronEngineOptions) {
     super();
 
-    this.tableName = CronEngine.validateTableName(options.tableName ?? DEFAULT_TABLE_NAME);
     this.timezone = options.timezone;
     this.queue = new AsyncQueue();
-    this.db = new Database(options.dbFile);
-
-    this.queue.enqueue(async () => {
-      this.db.run(this.createTableQuery());
-    });
   }
 
   public setup(pollIntervalMs = 10_000) {
@@ -84,7 +78,7 @@ export class CronEngine extends EventEmitter {
 
     try {
       return await this.queue.enqueue(async () => {
-        const existing = this.getJobByNormalizedScope(args.name, normalizedScope);
+        const existing = await this.getJobByNormalizedScope(args.name, normalizedScope);
 
         if (existing && existing.type !== ECronEngineJobType.Recurring) {
           return this.createCrossTypeScheduleError(args.name, existing.type);
@@ -94,54 +88,39 @@ export class CronEngine extends EventEmitter {
           return this.createDuplicateJobError(args.name);
         }
 
-        const rowParams = {
-          $name: args.name,
-          $scope: normalizedScope,
-          $group: args.group ?? null,
-          $type: ECronEngineJobType.Recurring,
-          $pattern: args.pattern,
-          $reminderText: args.reminderText ?? null,
-          $reminderPromptData: args.reminderPromptData ?? null,
-          $reminderFallbackText: args.reminderFallbackText ?? args.reminderText ?? null,
-          $nextRunAt: nextRunAt.getTime(),
-          $lastRunAt: null,
-          $createdAt: scheduledAt.getTime(),
+        const rowValues = {
+          name: args.name,
+          scope: normalizedScope,
+          group: args.group ?? null,
+          type: ECronEngineJobType.Recurring,
+          pattern: args.pattern,
+          reminderText: args.reminderText ?? null,
+          reminderPromptData: args.reminderPromptData ?? null,
+          reminderFallbackText: args.reminderFallbackText ?? args.reminderText ?? null,
+          nextRunAt: nextRunAt.getTime(),
+          lastRunAt: null,
+          createdAt: scheduledAt.getTime(),
         };
 
-        if (args.overwrite === true) {
-          const row = this.db
-            .query(
-              `INSERT INTO ${this.tableName} (name, scope, "group", type, pattern, nextRunAt, lastRunAt, createdAt, reminderText, reminderPromptData, reminderFallbackText)
-               VALUES ($name, $scope, $group, $type, $pattern, $nextRunAt, $lastRunAt, $createdAt, $reminderText, $reminderPromptData, $reminderFallbackText)
-                ON CONFLICT(name, scope) DO UPDATE SET
-                 "group" = $group, type = $type, pattern = $pattern, nextRunAt = $nextRunAt, lastRunAt = $lastRunAt, createdAt = $createdAt,
-                 reminderText = $reminderText, reminderPromptData = $reminderPromptData, reminderFallbackText = $reminderFallbackText
-                WHERE type = $type
-                RETURNING *`,
+        if (existing && args.overwrite === true) {
+          const row = await this.db
+            .update(cronEngineJobsTable)
+            .set(rowValues)
+            .where(
+              and(
+                eq(cronEngineJobsTable.name, args.name),
+                eq(cronEngineJobsTable.scope, normalizedScope),
+                eq(cronEngineJobsTable.type, ECronEngineJobType.Recurring),
+              ),
             )
-            .get(rowParams);
+            .returning()
+            .get();
 
-          const job = this.parseJobRow(row);
-          if (job) {
-            return job;
-          }
-
-          const currentJob = this.getJobByNormalizedScope(args.name, normalizedScope);
-          if (currentJob) {
-            return this.createCrossTypeScheduleError(args.name, currentJob.type);
-          }
-
-          return this.createScheduledJobReadbackError();
+          return this.parseJobRow(row) ?? this.createScheduledJobReadbackError();
         }
 
         try {
-          const row = this.db
-            .query(
-              `INSERT INTO ${this.tableName} (name, scope, "group", type, pattern, nextRunAt, lastRunAt, createdAt, reminderText, reminderPromptData, reminderFallbackText)
-               VALUES ($name, $scope, $group, $type, $pattern, $nextRunAt, $lastRunAt, $createdAt, $reminderText, $reminderPromptData, $reminderFallbackText)
-                RETURNING *`,
-            )
-            .get(rowParams);
+          const row = await this.db.insert(cronEngineJobsTable).values(rowValues).returning().get();
 
           const job = this.parseJobRow(row);
           if (job) {
@@ -150,7 +129,7 @@ export class CronEngine extends EventEmitter {
 
           return this.createScheduledJobReadbackError();
         } catch (error) {
-          const currentJob = this.getJobByNormalizedScope(args.name, normalizedScope);
+          const currentJob = await this.getJobByNormalizedScope(args.name, normalizedScope);
           if (currentJob) {
             if (currentJob.type !== ECronEngineJobType.Recurring) {
               return this.createCrossTypeScheduleError(args.name, currentJob.type);
@@ -182,7 +161,7 @@ export class CronEngine extends EventEmitter {
 
     try {
       return await this.queue.enqueue(async () => {
-        const existing = this.getJobByNormalizedScope(args.name, normalizedScope);
+        const existing = await this.getJobByNormalizedScope(args.name, normalizedScope);
 
         if (existing && existing.type !== ECronEngineJobType.OneTime) {
           return this.createCrossTypeScheduleError(args.name, existing.type);
@@ -192,54 +171,39 @@ export class CronEngine extends EventEmitter {
           return this.createDuplicateJobError(args.name);
         }
 
-        const rowParams = {
-          $name: args.name,
-          $scope: normalizedScope,
-          $group: args.group ?? null,
-          $type: ECronEngineJobType.OneTime,
-          $pattern: null,
-          $reminderText: args.reminderText ?? null,
-          $reminderPromptData: args.reminderPromptData ?? null,
-          $reminderFallbackText: args.reminderFallbackText ?? args.reminderText ?? null,
-          $nextRunAt: args.fireAt.getTime(),
-          $lastRunAt: null,
-          $createdAt: Date.now(),
+        const rowValues = {
+          name: args.name,
+          scope: normalizedScope,
+          group: args.group ?? null,
+          type: ECronEngineJobType.OneTime,
+          pattern: null,
+          reminderText: args.reminderText ?? null,
+          reminderPromptData: args.reminderPromptData ?? null,
+          reminderFallbackText: args.reminderFallbackText ?? args.reminderText ?? null,
+          nextRunAt: args.fireAt.getTime(),
+          lastRunAt: null,
+          createdAt: Date.now(),
         };
 
-        if (args.overwrite === true) {
-          const row = this.db
-            .query(
-              `INSERT INTO ${this.tableName} (name, scope, "group", type, pattern, nextRunAt, lastRunAt, createdAt, reminderText, reminderPromptData, reminderFallbackText)
-               VALUES ($name, $scope, $group, $type, $pattern, $nextRunAt, $lastRunAt, $createdAt, $reminderText, $reminderPromptData, $reminderFallbackText)
-                ON CONFLICT(name, scope) DO UPDATE SET
-                 "group" = $group, type = $type, pattern = $pattern, nextRunAt = $nextRunAt, lastRunAt = $lastRunAt, createdAt = $createdAt,
-                 reminderText = $reminderText, reminderPromptData = $reminderPromptData, reminderFallbackText = $reminderFallbackText
-                WHERE type = $type
-                RETURNING *`,
+        if (existing && args.overwrite === true) {
+          const row = await this.db
+            .update(cronEngineJobsTable)
+            .set(rowValues)
+            .where(
+              and(
+                eq(cronEngineJobsTable.name, args.name),
+                eq(cronEngineJobsTable.scope, normalizedScope),
+                eq(cronEngineJobsTable.type, ECronEngineJobType.OneTime),
+              ),
             )
-            .get(rowParams);
+            .returning()
+            .get();
 
-          const job = this.parseJobRow(row);
-          if (job) {
-            return job;
-          }
-
-          const currentJob = this.getJobByNormalizedScope(args.name, normalizedScope);
-          if (currentJob) {
-            return this.createCrossTypeScheduleError(args.name, currentJob.type);
-          }
-
-          return this.createScheduledJobReadbackError();
+          return this.parseJobRow(row) ?? this.createScheduledJobReadbackError();
         }
 
         try {
-          const row = this.db
-            .query(
-              `INSERT INTO ${this.tableName} (name, scope, "group", type, pattern, nextRunAt, lastRunAt, createdAt, reminderText, reminderPromptData, reminderFallbackText)
-               VALUES ($name, $scope, $group, $type, $pattern, $nextRunAt, $lastRunAt, $createdAt, $reminderText, $reminderPromptData, $reminderFallbackText)
-                RETURNING *`,
-            )
-            .get(rowParams);
+          const row = await this.db.insert(cronEngineJobsTable).values(rowValues).returning().get();
 
           const job = this.parseJobRow(row);
           if (job) {
@@ -248,7 +212,7 @@ export class CronEngine extends EventEmitter {
 
           return this.createScheduledJobReadbackError();
         } catch (error) {
-          const currentJob = this.getJobByNormalizedScope(args.name, normalizedScope);
+          const currentJob = await this.getJobByNormalizedScope(args.name, normalizedScope);
           if (currentJob) {
             if (currentJob.type !== ECronEngineJobType.OneTime) {
               return this.createCrossTypeScheduleError(args.name, currentJob.type);
@@ -272,9 +236,16 @@ export class CronEngine extends EventEmitter {
   ): Promise<TCronEngineJob | TCronEngineError> {
     try {
       const res = await this.queue.enqueue(async () => {
-        const row = this.db
-          .query(`DELETE FROM ${this.tableName} WHERE name = $name AND scope = $scope RETURNING *`)
-          .get({ $name: name, $scope: this.normalizeScope(scope) });
+        const row = await this.db
+          .delete(cronEngineJobsTable)
+          .where(
+            and(
+              eq(cronEngineJobsTable.name, name),
+              eq(cronEngineJobsTable.scope, this.normalizeScope(scope)),
+            ),
+          )
+          .returning()
+          .get();
 
         const job = this.parseJobRow(row);
         if (!job) {
@@ -297,12 +268,17 @@ export class CronEngine extends EventEmitter {
 
   public async getAllJobs(scope?: string): Promise<TCronEngineJob[]> {
     const results = await this.queue.enqueue(async () => {
-      const rows =
-        scope === undefined
-          ? this.db.query(`SELECT * FROM ${this.tableName} ORDER BY nextRunAt ASC`).all()
-          : this.db
-              .query(`SELECT * FROM ${this.tableName} WHERE scope = $scope ORDER BY nextRunAt ASC`)
-              .all({ $scope: this.normalizeScope(scope) });
+      let query = this.db
+        .select()
+        .from(cronEngineJobsTable)
+        .orderBy(asc(cronEngineJobsTable.nextRunAt))
+        .$dynamic();
+
+      if (scope !== undefined) {
+        query = query.where(eq(cronEngineJobsTable.scope, this.normalizeScope(scope)));
+      }
+
+      const rows = await query;
 
       const parsed = z.array(SCronEngineJob).safeParse(rows);
       if (!parsed.success) {
@@ -333,8 +309,6 @@ export class CronEngine extends EventEmitter {
       clearInterval(this.tickInterval);
       this.tickInterval = undefined;
     }
-
-    this.db.close();
   }
 
   public async tick() {
@@ -348,9 +322,10 @@ export class CronEngine extends EventEmitter {
       const now = Date.now();
 
       const jobs = await this.queue.enqueue(async () => {
-        const results = this.db
-          .query(`SELECT * FROM ${this.tableName} WHERE nextRunAt <= $now`)
-          .all({ $now: now });
+        const results = await this.db
+          .select()
+          .from(cronEngineJobsTable)
+          .where(lte(cronEngineJobsTable.nextRunAt, now));
 
         const parsed = z.array(SCronEngineJob).safeParse(results);
         if (!parsed.success) {
@@ -366,25 +341,29 @@ export class CronEngine extends EventEmitter {
           if (job.type === ECronEngineJobType.Recurring && job.pattern) {
             const nextRun = getNextFireTime(job.pattern, new Date(now), this.timezone);
             await this.queue.enqueue(async () => {
-              this.db
-                .query(
-                  `UPDATE ${this.tableName} SET nextRunAt = $nextRunAt, lastRunAt = $lastRunAt WHERE name = $name AND scope = $scope`,
-                )
-                .run({
-                  $nextRunAt: nextRun.getTime(),
-                  $lastRunAt: now,
-                  $name: job.name,
-                  $scope: this.normalizeScope(job.scope),
-                });
+              await this.db
+                .update(cronEngineJobsTable)
+                .set({
+                  nextRunAt: nextRun.getTime(),
+                  lastRunAt: now,
+                })
+                .where(
+                  and(
+                    eq(cronEngineJobsTable.name, job.name),
+                    eq(cronEngineJobsTable.scope, this.normalizeScope(job.scope)),
+                  ),
+                );
             });
           } else if (job.type === ECronEngineJobType.OneTime) {
             await this.queue.enqueue(async () => {
-              this.db
-                .query(`DELETE FROM ${this.tableName} WHERE name = $name AND scope = $scope`)
-                .run({
-                  $name: job.name,
-                  $scope: this.normalizeScope(job.scope),
-                });
+              await this.db
+                .delete(cronEngineJobsTable)
+                .where(
+                  and(
+                    eq(cronEngineJobsTable.name, job.name),
+                    eq(cronEngineJobsTable.scope, this.normalizeScope(job.scope)),
+                  ),
+                );
             });
           }
 
@@ -413,26 +392,6 @@ export class CronEngine extends EventEmitter {
     } finally {
       this.isTicking = false;
     }
-  }
-
-  private createTableQuery() {
-    return `
-      CREATE TABLE IF NOT EXISTS ${this.tableName} (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
-        scope TEXT NOT NULL,
-        "group" TEXT,
-        type TEXT NOT NULL,
-        pattern TEXT,
-        reminderText TEXT,
-        reminderPromptData TEXT,
-        reminderFallbackText TEXT,
-        nextRunAt INTEGER NOT NULL,
-        lastRunAt INTEGER,
-        createdAt INTEGER NOT NULL,
-        UNIQUE(name, scope)
-      )
-    `;
   }
 
   private normalizeScope(scope: TOption<string>) {
@@ -487,20 +446,18 @@ export class CronEngine extends EventEmitter {
     return parsed.data;
   }
 
-  private getJobByNormalizedScope(name: string, normalizedScope: string): TOption<TCronEngineJob> {
-    const row = this.db
-      .query(`SELECT * FROM ${this.tableName} WHERE name = $name AND scope = $scope`)
-      .get({ $name: name, $scope: normalizedScope });
+  private async getJobByNormalizedScope(
+    name: string,
+    normalizedScope: string,
+  ): Promise<TOption<TCronEngineJob>> {
+    const row = await this.db
+      .select()
+      .from(cronEngineJobsTable)
+      .where(
+        and(eq(cronEngineJobsTable.name, name), eq(cronEngineJobsTable.scope, normalizedScope)),
+      )
+      .get();
 
     return this.parseJobRow(row);
-  }
-
-  private static validateTableName(tableName: string) {
-    const isValid = /^[A-Za-z_][A-Za-z0-9_]*$/.test(tableName);
-    if (!isValid) {
-      throw new Error(`Invalid cron engine table name: ${tableName}`);
-    }
-
-    return tableName;
   }
 }

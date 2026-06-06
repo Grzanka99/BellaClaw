@@ -11,6 +11,7 @@ Ships with a default "Bellatrix" persona -- a darkly elegant assistant that resp
 - [Bun](https://bun.sh) installed
 - A Discord bot token
 - An opencode API key
+- A libSQL database, for example Turso
 
 ### Environment Variables
 
@@ -18,11 +19,11 @@ Ships with a default "Bellatrix" persona -- a darkly elegant assistant that resp
 |---|---|---|
 | `DISCORD_TOKEN` | Yes | Discord bot token |
 | `OPENCODE_API_KEY` | Yes | opencode API key |
+| `TURSO_CONNECTION_URL` | Yes | libSQL/Turso database connection URL |
+| `TURSO_AUTH_TOKEN` | Yes | libSQL/Turso auth token |
 | `OPENROUTER_API_KEY` | No | OpenRouter API key, required only when using the OpenRouter provider |
 | `TAVILY_API_KEY` | No | Tavily API key, required for web search |
 | `OLLAMA_BASE_URL` | No | Ollama base URL (defaults to `http://localhost:11434`) |
-| `MEMORY_DB_FILE` | No | SQLite path for persistent memory |
-| `CRON_DB_FILE` | No | SQLite path for scheduled jobs |
 
 ### Install Dependencies
 
@@ -39,14 +40,14 @@ bun run start
 ### Run With Podman In Background
 
 1. Copy the repo to the server.
-2. Create a `.env` file there with at least `DISCORD_TOKEN` and `OPENCODE_API_KEY`. Add `TAVILY_API_KEY` if you want web search to work.
+2. Create a `.env` file there with at least `DISCORD_TOKEN`, `OPENCODE_API_KEY`, `TURSO_CONNECTION_URL`, and `TURSO_AUTH_TOKEN`. Add `TAVILY_API_KEY` if you want web search to work.
 3. Start it in the background:
 
 ```bash
 podman compose up -d --build
 ```
 
-The container stores SQLite data in a named volume and restarts automatically.
+The container restarts automatically.
 
 ### Dev Mode (file-watch)
 
@@ -71,6 +72,6 @@ bun run dev
 
 1. User sends a Discord DM.
 2. Three operations run in parallel: importance classification, recent memory retrieval, and AI-driven memory search.
-3. The incoming message is saved to SQLite with its importance tag.
+3. The incoming message is saved to the libSQL database with its importance tag.
 4. Conversation history (recent + searched memories) is assembled and sent to the AI model along with the system prompt.
 5. The AI response is sent back as a Discord DM, then classified and saved to the database asynchronously.

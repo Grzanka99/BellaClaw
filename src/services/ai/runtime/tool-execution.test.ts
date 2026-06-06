@@ -1,16 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, unlinkSync } from "node:fs";
-import { join } from "node:path";
 import type { ChatMessageToolCall } from "@openrouter/sdk/models";
 import { CronSingleton } from "../../cron";
+import { resetCronEngineJobsTable } from "../../database/test-utils";
 import { DEFINE_MESSAGE_IMPORTANCE_TOOL } from "../tools/define-message-importance/definition";
 import { LIST_CRON_JOBS_TOOL } from "../tools/list-cron-jobs/definition";
 import { SCHEDULE_RECURRING_TOOL } from "../tools/schedule-recurring/definition";
 import { executeToolCall } from "./tool-execution";
-
-const tempDir = join(Bun.cwd, "tmp");
-mkdirSync(tempDir, { recursive: true });
-const TEST_DB = join(tempDir, "test-ai-runtime-tool-execution.db");
 
 type TCronSingletonStatic = {
   _instance: CronSingleton | undefined;
@@ -19,7 +14,6 @@ type TCronSingletonStatic = {
 function cleanupCronSingleton() {
   const CronSingletonWithInternals = CronSingleton as unknown as TCronSingletonStatic;
   CronSingletonWithInternals._instance?.destroy();
-  CronSingleton.resetDbFile();
 }
 
 function createToolCall(id: string, name: string, argumentsText: string): ChatMessageToolCall {
@@ -34,22 +28,13 @@ function createToolCall(id: string, name: string, argumentsText: string): ChatMe
 }
 
 describe("executeToolCall", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     cleanupCronSingleton();
-
-    if (existsSync(TEST_DB)) {
-      unlinkSync(TEST_DB);
-    }
-
-    CronSingleton.setDbFile(TEST_DB);
+    await resetCronEngineJobsTable();
   });
 
   afterEach(() => {
     cleanupCronSingleton();
-
-    if (existsSync(TEST_DB)) {
-      unlinkSync(TEST_DB);
-    }
   });
 
   test("returns parsed data for local validation-only tools", async () => {
