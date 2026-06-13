@@ -93,7 +93,7 @@ export class MessageHandler {
     if (foundHistory.length) {
       history.push({
         role: ERole.System,
-        content: `messages you asked to receive for context: ${foundHistory}`,
+        content: `messages you asked to receive for context: ${JSON.stringify(foundHistory)}`,
       });
     }
 
