@@ -1,6 +1,5 @@
 import { z } from "zod";
 import { Config } from "../../config";
-import type { TOption } from "../../types";
 import { AsyncQueue } from "../../utils/async-queue";
 import { createLogger, type TLogger } from "../../utils/logger";
 import {
@@ -56,7 +55,7 @@ export class MessageHandler {
     return newInstance;
   }
 
-  public async handleMessage(message: TIncommingMessage): Promise<TOption<string>> {
+  public async handleMessage(message: TIncommingMessage): Promise<string> {
     const handleMessageStart = performance.now();
     this.logger.info("handleMessage: start");
 
@@ -151,8 +150,8 @@ export class MessageHandler {
     );
 
     if (aiRes.finalResponse === undefined) {
-      this.logger.warning("handleMessage: AI returned no final response, aborting");
-      return undefined;
+      this.logger.warning("handleMessage: AI returned no final response");
+      return "Something went wrong.";
     }
 
     const finalResponse = aiRes.finalResponse;
