@@ -10,8 +10,8 @@ export const SSearchMemoryArgs = z.object({
   searchString: z.string().optional(),
   timeRange: z
     .object({
-      start: z.string(),
-      end: z.string(),
+      start: z.coerce.date(),
+      end: z.coerce.date(),
     })
     .optional(),
   limit: z.number().int().positive().optional(),
@@ -50,12 +50,7 @@ export async function handleSearchMemory(
     searchString: args.searchString,
     importance: args.importance,
     limit: args.limit,
-    timeRange: args.timeRange
-      ? {
-          start: new Date(args.timeRange.start),
-          end: new Date(args.timeRange.end),
-        }
-      : undefined,
+    timeRange: args.timeRange,
   });
 
   if ("operation" in result) {
