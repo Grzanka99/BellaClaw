@@ -59,7 +59,13 @@ export class DiscordSingleton {
       },
     });
 
-    message.author.send(String(res));
+    try {
+      await message.author.send(res);
+    } catch (error) {
+      this.logger.error(
+        `handleMessage: failed to send message to user ${message.author.id}: ${String(error)}`,
+      );
+    }
   }
 
   private async onReady(c: Client<true>) {
