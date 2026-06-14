@@ -1,10 +1,9 @@
-import type { Snowflake } from "discord.js";
 import type { ERole } from "../ai/types";
 
 export type TMessageAuthor =
   | {
       type: ERole.User;
-      id: Snowflake;
+      id: string;
       username: string;
     }
   | { type: ERole.Assistant };
@@ -17,7 +16,7 @@ export type TIncommingMessage = {
   };
   author: {
     type: ERole.User;
-    id: Snowflake;
+    id: string;
     username: string;
   };
 };

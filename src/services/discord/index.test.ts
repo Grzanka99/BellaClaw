@@ -5,12 +5,12 @@ import { CronSingleton } from "../cron";
 import { resetCronEngineJobsTable } from "../database/test-utils";
 import { Memory } from "../memory";
 import { EMemoryImportance } from "../memory/types";
+import { MessageHandler } from "../message-handler";
+import { MessagingAdapter } from "../messaging";
+import { EMessagePlatform, type TMessageTransport } from "../messaging/types";
 import { DiscordSingleton } from "./index";
 
 type TDiscordSingletonInternals = {
-  ai: {
-    runToolTask: typeof import("../ai/api").AiConnector.prototype.runToolTask;
-  };
   client: {
     users: {
       fetch: (userId: string) => Promise<{
@@ -18,7 +18,10 @@ type TDiscordSingletonInternals = {
       }>;
     };
   };
-  handleCronFire: (ctx: TCronEngineJobContext) => Promise<void>;
+  handleMessage: (message: {
+    author: { id: string; username: string };
+    content: string;
+  }) => Promise<void>;
   onReady: (client: { user: { tag: string } }) => Promise<void>;
 };
 
@@ -28,6 +31,19 @@ type TDiscordSingletonStatic = {
 
 type TCronSingletonStatic = {
   _instance: CronSingleton | undefined;
+};
+
+type TMessagingAdapterInternals = {
+  ai: {
+    runToolTask: typeof import("../ai/api").AiConnector.prototype.runToolTask;
+  };
+  transports: Map<EMessagePlatform, TMessageTransport>;
+  cronListenerRegistered: boolean;
+  handleCronFire: (ctx: TCronEngineJobContext) => Promise<void>;
+};
+
+type TMessagingAdapterStatic = {
+  _instance: MessagingAdapter | undefined;
 };
 
 function resetMemoryInstance() {
@@ -63,13 +79,18 @@ function cleanupSingletons() {
   const DiscordSingletonWithInternals = DiscordSingleton as unknown as TDiscordSingletonStatic;
   DiscordSingletonWithInternals._instance = undefined;
 
+  const MessagingAdapterWithInternals = MessagingAdapter as unknown as TMessagingAdapterStatic;
+  MessagingAdapterWithInternals._instance = undefined;
+
+  (MessageHandler as unknown as { _instances: Map<string, MessageHandler> })._instances.clear();
+
   resetMemoryInstance();
 }
 
 function createCronContext(overrides: Partial<TCronEngineJobContext> = {}): TCronEngineJobContext {
   return {
     name: "study-checkin",
-    scope: "user-1",
+    scope: "discord:user-1",
     group: undefined,
     type: ECronEngineJobType.Recurring,
     pattern: "*/30 * * * *",
@@ -94,7 +115,7 @@ describe("DiscordSingleton", () => {
     cleanupSingletons();
   });
 
-  test("starts cron after Discord client is ready", async () => {
+  test("does not start cron after Discord client is ready", async () => {
     const discord = DiscordSingleton.instance as unknown as TDiscordSingletonInternals;
     const cron = CronSingleton.instance as unknown as { setup: () => void };
     const setupMock = mock(() => {});
@@ -107,63 +128,249 @@ describe("DiscordSingleton", () => {
       },
     });
 
-    expect(setupMock).toHaveBeenCalledTimes(1);
+    expect(setupMock).toHaveBeenCalledTimes(0);
+  });
+
+  test("forwards inbound Discord messages to messaging adapter", async () => {
+    const discord = DiscordSingleton.instance as unknown as TDiscordSingletonInternals;
+    const adapter = MessagingAdapter.instance as unknown as {
+      handleInboundMessage: typeof MessagingAdapter.prototype.handleInboundMessage;
+    };
+    const handleInboundMessageMock = mock(async () => {});
+
+    adapter.handleInboundMessage = handleInboundMessageMock;
+    discord.client = {
+      user: {
+        id: "bot-1",
+      },
+      users: {
+        fetch: mock(async () => ({
+          send: mock(async () => {}),
+        })),
+      },
+    } as never;
+
+    await discord.handleMessage({
+      author: {
+        id: "user-1",
+        username: "TestUser",
+      },
+      content: "hello",
+    });
+
+    expect(handleInboundMessageMock).toHaveBeenCalledWith({
+      platform: EMessagePlatform.Discord,
+      chatId: "user-1",
+      author: {
+        id: "user-1",
+        username: "TestUser",
+      },
+      message: {
+        type: "text",
+        content: "hello",
+      },
+    });
+  });
+});
+
+describe("MessagingAdapter", () => {
+  beforeEach(async () => {
+    cleanupSingletons();
+    await resetCronEngineJobsTable();
+    mockMemoryInstance();
+  });
+
+  afterEach(() => {
+    cleanupSingletons();
+  });
+
+  test("sends non-empty assistant replies through originating transport", async () => {
+    const sendTextMock = mock(async (_chatId: string, _text: string) => {});
+    const adapter = MessagingAdapter.instance;
+    const handleMessageMock = mock(async () => "test response");
+
+    (
+      MessageHandler as unknown as {
+        _instances: Map<string, { handleMessage: typeof handleMessageMock }>;
+      }
+    )._instances.set("discord:user-1", {
+      handleMessage: handleMessageMock,
+    });
+
+    adapter.registerTransport({
+      platform: EMessagePlatform.Discord,
+      sendText: sendTextMock,
+    });
+
+    await adapter.handleInboundMessage({
+      platform: EMessagePlatform.Discord,
+      chatId: "user-1",
+      author: {
+        id: "user-1",
+        username: "TestUser",
+      },
+      message: {
+        type: "text",
+        content: "hello",
+      },
+    });
+
+    expect(handleMessageMock).toHaveBeenCalledWith({
+      chatId: "discord:user-1",
+      author: {
+        type: ERole.User,
+        id: "user-1",
+        username: "TestUser",
+      },
+      message: {
+        type: "text",
+        content: "hello",
+      },
+    });
+    expect(sendTextMock).toHaveBeenCalledWith("user-1", "test response");
+  });
+
+  test("does not send empty assistant replies", async () => {
+    const sendTextMock = mock(async (_chatId: string, _text: string) => {});
+    const adapter = MessagingAdapter.instance;
+    const handleMessageMock = mock(async () => "   ");
+
+    (
+      MessageHandler as unknown as {
+        _instances: Map<string, { handleMessage: typeof handleMessageMock }>;
+      }
+    )._instances.set("discord:user-1", {
+      handleMessage: handleMessageMock,
+    });
+
+    adapter.registerTransport({
+      platform: EMessagePlatform.Discord,
+      sendText: sendTextMock,
+    });
+
+    await adapter.handleInboundMessage({
+      platform: EMessagePlatform.Discord,
+      chatId: "user-1",
+      author: {
+        id: "user-1",
+        username: "TestUser",
+      },
+      message: {
+        type: "text",
+        content: "hello",
+      },
+    });
+
+    expect(sendTextMock).toHaveBeenCalledTimes(0);
   });
 
   test("uses generated reminder text when reminderPromptData is present", async () => {
-    const discord = DiscordSingleton.instance as unknown as TDiscordSingletonInternals;
-    const sendMock = mock(async (_text: string) => {});
-    const fetchMock = mock(async (_userId: string) => ({
-      send: sendMock,
-    }));
+    const adapter = MessagingAdapter.instance as unknown as TMessagingAdapterInternals;
+    const sendTextMock = mock(async (_chatId: string, _text: string) => {});
     const runToolTaskMock = mock(async () => ({
       assistantResponse: "Stay focused on your study session.",
       toolCalls: [],
       toolResults: [],
     }));
 
-    discord.client = {
-      users: {
-        fetch: fetchMock,
-      },
-    };
-    discord.ai = {
+    adapter.transports.set(EMessagePlatform.Discord, {
+      platform: EMessagePlatform.Discord,
+      sendText: sendTextMock,
+    });
+    adapter.ai = {
       runToolTask: runToolTaskMock,
     };
 
-    await discord.handleCronFire(
+    await adapter.handleCronFire(
       createCronContext({
         reminderPromptData: '{"topic":"study","tone":"encouraging"}',
       }),
     );
 
     expect(runToolTaskMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock).toHaveBeenCalledWith("user-1");
-    expect(sendMock).toHaveBeenCalledWith("Stay focused on your study session.");
+    expect(sendTextMock).toHaveBeenCalledWith("user-1", "Stay focused on your study session.");
+  });
+
+  test("routes cron reminders by canonical platform scope", async () => {
+    const adapter = MessagingAdapter.instance as unknown as TMessagingAdapterInternals;
+    const sendTextMock = mock(async (_chatId: string, _text: string) => {});
+
+    adapter.transports.set(EMessagePlatform.Discord, {
+      platform: EMessagePlatform.Discord,
+      sendText: sendTextMock,
+    });
+
+    await adapter.handleCronFire(
+      createCronContext({
+        reminderText: "Reminder text.",
+      }),
+    );
+
+    expect(sendTextMock).toHaveBeenCalledWith("user-1", "Reminder text.");
+    expect(Memory.instance.save).toHaveBeenCalledWith({
+      chatId: "discord:user-1",
+      author: ERole.Assistant,
+      importance: EMemoryImportance.Low,
+      message: "[CRON REMINDER study-checkin]: Reminder text.",
+    });
+  });
+
+  test("skips signal cron reminders when no Signal transport is registered", async () => {
+    const adapter = MessagingAdapter.instance as unknown as TMessagingAdapterInternals;
+    const sendTextMock = mock(async (_chatId: string, _text: string) => {});
+
+    adapter.transports.set(EMessagePlatform.Discord, {
+      platform: EMessagePlatform.Discord,
+      sendText: sendTextMock,
+    });
+
+    await adapter.handleCronFire(
+      createCronContext({
+        scope: "signal:signal-chat-1",
+        reminderText: "Reminder text.",
+      }),
+    );
+
+    expect(sendTextMock).toHaveBeenCalledTimes(0);
+  });
+
+  test("skips invalid cron scopes", async () => {
+    const adapter = MessagingAdapter.instance as unknown as TMessagingAdapterInternals;
+    const sendTextMock = mock(async (_chatId: string, _text: string) => {});
+
+    adapter.transports.set(EMessagePlatform.Discord, {
+      platform: EMessagePlatform.Discord,
+      sendText: sendTextMock,
+    });
+
+    await adapter.handleCronFire(
+      createCronContext({
+        scope: "user-1",
+        reminderText: "Reminder text.",
+      }),
+    );
+
+    expect(sendTextMock).toHaveBeenCalledTimes(0);
   });
 
   test("falls back when generated reminder text is empty", async () => {
-    const discord = DiscordSingleton.instance as unknown as TDiscordSingletonInternals;
-    const sendMock = mock(async (_text: string) => {});
-    const fetchMock = mock(async (_userId: string) => ({
-      send: sendMock,
-    }));
+    const adapter = MessagingAdapter.instance as unknown as TMessagingAdapterInternals;
+    const sendTextMock = mock(async (_chatId: string, _text: string) => {});
     const runToolTaskMock = mock(async () => ({
       assistantResponse: "   ",
       toolCalls: [],
       toolResults: [],
     }));
 
-    discord.client = {
-      users: {
-        fetch: fetchMock,
-      },
-    };
-    discord.ai = {
+    adapter.transports.set(EMessagePlatform.Discord, {
+      platform: EMessagePlatform.Discord,
+      sendText: sendTextMock,
+    });
+    adapter.ai = {
       runToolTask: runToolTaskMock,
     };
 
-    await discord.handleCronFire(
+    await adapter.handleCronFire(
       createCronContext({
         reminderPromptData: '{"topic":"study","tone":"encouraging"}',
         reminderFallbackText: "Fallback reminder.",
@@ -171,32 +378,27 @@ describe("DiscordSingleton", () => {
     );
 
     expect(runToolTaskMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock).toHaveBeenCalledWith("user-1");
-    expect(sendMock).toHaveBeenCalledWith("Fallback reminder.");
+    expect(sendTextMock).toHaveBeenCalledWith("user-1", "Fallback reminder.");
   });
 
   test("falls back when direct reminder text is blank", async () => {
-    const discord = DiscordSingleton.instance as unknown as TDiscordSingletonInternals;
-    const sendMock = mock(async (_text: string) => {});
-    const fetchMock = mock(async (_userId: string) => ({
-      send: sendMock,
-    }));
+    const adapter = MessagingAdapter.instance as unknown as TMessagingAdapterInternals;
+    const sendTextMock = mock(async (_chatId: string, _text: string) => {});
     const runToolTaskMock = mock(async () => ({
       assistantResponse: "should not be used",
       toolCalls: [],
       toolResults: [],
     }));
 
-    discord.client = {
-      users: {
-        fetch: fetchMock,
-      },
-    };
-    discord.ai = {
+    adapter.transports.set(EMessagePlatform.Discord, {
+      platform: EMessagePlatform.Discord,
+      sendText: sendTextMock,
+    });
+    adapter.ai = {
       runToolTask: runToolTaskMock,
     };
 
-    await discord.handleCronFire(
+    await adapter.handleCronFire(
       createCronContext({
         reminderText: "   ",
         reminderFallbackText: "Fallback reminder.",
@@ -204,7 +406,6 @@ describe("DiscordSingleton", () => {
     );
 
     expect(runToolTaskMock).toHaveBeenCalledTimes(0);
-    expect(fetchMock).toHaveBeenCalledWith("user-1");
-    expect(sendMock).toHaveBeenCalledWith("Fallback reminder.");
+    expect(sendTextMock).toHaveBeenCalledWith("user-1", "Fallback reminder.");
   });
 });

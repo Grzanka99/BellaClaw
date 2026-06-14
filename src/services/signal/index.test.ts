@@ -1,0 +1,149 @@
+import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { MessagingAdapter } from "../messaging";
+import { EMessagePlatform } from "../messaging/types";
+import { SignalClient } from "./client";
+import { SignalSingleton } from "./index";
+
+type TSignalSingletonStatic = {
+  _instance: SignalSingleton | undefined;
+};
+
+type TSignalSingletonInternals = {
+  retryDelayMs: number;
+  handleInboundMessage: (message: {
+    sourceNumber: string;
+    sourceName: string;
+    message: string;
+  }) => Promise<void>;
+};
+
+type TMessagingAdapterStatic = {
+  _instance: MessagingAdapter | undefined;
+};
+
+function cleanupSingletons() {
+  const SignalSingletonWithInternals = SignalSingleton as unknown as TSignalSingletonStatic;
+  SignalSingletonWithInternals._instance = undefined;
+
+  const MessagingAdapterWithInternals = MessagingAdapter as unknown as TMessagingAdapterStatic;
+  MessagingAdapterWithInternals._instance = undefined;
+}
+
+describe("SignalSingleton", () => {
+  beforeEach(() => {
+    cleanupSingletons();
+    Bun.env.SIGNAL_ENABLED = undefined;
+    Bun.env.SIGNAL_PHONE_NUMBER = undefined;
+    Bun.env.SIGNAL_CLI_RPC_URL = undefined;
+  });
+
+  afterEach(() => {
+    cleanupSingletons();
+    Bun.env.SIGNAL_ENABLED = undefined;
+    Bun.env.SIGNAL_PHONE_NUMBER = undefined;
+    Bun.env.SIGNAL_CLI_RPC_URL = undefined;
+  });
+
+  test("disabled setup does not initialize Signal client", async () => {
+    const readinessMock = mock(async () => true);
+    const originalCheckReadiness = SignalClient.prototype.checkReadiness;
+    SignalClient.prototype.checkReadiness = readinessMock;
+
+    await SignalSingleton.instance.setup();
+
+    expect(readinessMock).toHaveBeenCalledTimes(0);
+    SignalClient.prototype.checkReadiness = originalCheckReadiness;
+  });
+
+  test("retries receive subscription until active", async () => {
+    Bun.env.SIGNAL_ENABLED = "true";
+    Bun.env.SIGNAL_PHONE_NUMBER = "+100";
+    Bun.env.SIGNAL_CLI_RPC_URL = "http://127.0.0.1:8080";
+
+    const originalCheckReadiness = SignalClient.prototype.checkReadiness;
+    const originalSubscribe = SignalClient.prototype.subscribe;
+    const readinessMock = mock(async () => true);
+    let subscribeCalls = 0;
+    const subscribeMock = mock(async () => {
+      subscribeCalls += 1;
+      if (subscribeCalls === 1) {
+        return undefined;
+      }
+
+      return () => {};
+    });
+    SignalClient.prototype.checkReadiness = readinessMock;
+    SignalClient.prototype.subscribe = subscribeMock;
+
+    const signal = SignalSingleton.instance as unknown as TSignalSingletonInternals;
+    signal.retryDelayMs = 1;
+
+    await SignalSingleton.instance.setup();
+
+    expect(readinessMock).toHaveBeenCalledTimes(2);
+    expect(subscribeMock).toHaveBeenCalledTimes(2);
+
+    SignalClient.prototype.checkReadiness = originalCheckReadiness;
+    SignalClient.prototype.subscribe = originalSubscribe;
+  });
+
+  test("retries readiness then resolves after success without duplicate subscriptions", async () => {
+    Bun.env.SIGNAL_ENABLED = "true";
+    Bun.env.SIGNAL_PHONE_NUMBER = "+100";
+    Bun.env.SIGNAL_CLI_RPC_URL = "http://127.0.0.1:8080";
+
+    const originalCheckReadiness = SignalClient.prototype.checkReadiness;
+    const originalSubscribe = SignalClient.prototype.subscribe;
+    let readinessCalls = 0;
+    const readinessMock = mock(async () => {
+      readinessCalls += 1;
+      return readinessCalls > 1;
+    });
+    const subscribeMock = mock(async () => () => {});
+    SignalClient.prototype.checkReadiness = readinessMock;
+    SignalClient.prototype.subscribe = subscribeMock;
+
+    const signal = SignalSingleton.instance as unknown as TSignalSingletonInternals;
+    signal.retryDelayMs = 1;
+
+    const firstSetup = SignalSingleton.instance.setup();
+    const secondSetup = SignalSingleton.instance.setup();
+    await Promise.all([firstSetup, secondSetup]);
+
+    expect(readinessMock).toHaveBeenCalledTimes(2);
+    expect(subscribeMock).toHaveBeenCalledTimes(1);
+
+    SignalClient.prototype.checkReadiness = originalCheckReadiness;
+    SignalClient.prototype.subscribe = originalSubscribe;
+  });
+
+  test("forwards inbound messages to messaging adapter", async () => {
+    Bun.env.SIGNAL_PHONE_NUMBER = "+100";
+    const signal = SignalSingleton.instance as unknown as TSignalSingletonInternals;
+    const adapter = MessagingAdapter.instance as unknown as {
+      handleInboundMessage: typeof MessagingAdapter.prototype.handleInboundMessage;
+    };
+    const handleInboundMessageMock = mock(async () => {});
+
+    adapter.handleInboundMessage = handleInboundMessageMock;
+
+    await signal.handleInboundMessage({
+      sourceNumber: "+200",
+      sourceName: "Alice",
+      message: "hello",
+    });
+
+    expect(handleInboundMessageMock).toHaveBeenCalledWith({
+      platform: EMessagePlatform.Signal,
+      chatId: "+200",
+      author: {
+        id: "+200",
+        username: "Alice",
+      },
+      message: {
+        type: "text",
+        content: "hello",
+      },
+    });
+  });
+});
