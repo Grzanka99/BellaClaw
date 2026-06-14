@@ -13,7 +13,6 @@ import {
   webFetchTool,
   webSearchTool,
 } from "../ai/api";
-import { readXmlAndInjectConfig } from "../ai/instructions/read-xml-and-inject-config";
 import { SDefineMessageImportance } from "../ai/tools/define-message-importance/handler";
 import { listCronJobsTool } from "../ai/tools/list-cron-jobs/definition";
 import { scheduleOnceTool } from "../ai/tools/schedule-once/definition";
@@ -21,6 +20,7 @@ import { scheduleRecurringTool } from "../ai/tools/schedule-recurring/definition
 import { unscheduleCronJobTool } from "../ai/tools/unschedule-cron-job/definition";
 import { Memory } from "../memory";
 import { EMemoryImportance, type TMemory } from "../memory/types";
+import { MessageHandlerInstructions } from "./instructions";
 import type { TIncommingMessage, TOutgoingMessage } from "./types";
 
 export class MessageHandler {
@@ -78,35 +78,20 @@ export class MessageHandler {
       content: createCurrentTimeContext(),
     });
 
-    const [
-      searchMemoryInstructions,
-      listCronJobsInstructions,
-      scheduleOnceInstructions,
-      scheduleRecurringInstructions,
-      unscheduleCronJobInstructions,
-      webSearchInstructions,
-      webFetchInstructions,
-    ] = await Promise.all([
-      readXmlAndInjectConfig("./src/services/ai/tools/search-memory/instructions.xml", Config),
-      readXmlAndInjectConfig("./src/services/ai/tools/list-cron-jobs/instructions.xml", Config),
-      readXmlAndInjectConfig("./src/services/ai/tools/schedule-once/instructions.xml", Config),
-      readXmlAndInjectConfig("./src/services/ai/tools/schedule-recurring/instructions.xml", Config),
-      readXmlAndInjectConfig(
-        "./src/services/ai/tools/unschedule-cron-job/instructions.xml",
-        Config,
-      ),
-      readXmlAndInjectConfig("./src/services/ai/tools/web-search/instructions.xml", Config),
-      readXmlAndInjectConfig("./src/services/ai/tools/web-fetch/instructions.xml", Config),
-    ]);
-
     const tools = [
-      { definition: searchMemoryTool, instructions: searchMemoryInstructions },
-      { definition: listCronJobsTool, instructions: listCronJobsInstructions },
-      { definition: scheduleOnceTool, instructions: scheduleOnceInstructions },
-      { definition: scheduleRecurringTool, instructions: scheduleRecurringInstructions },
-      { definition: unscheduleCronJobTool, instructions: unscheduleCronJobInstructions },
-      { definition: webSearchTool, instructions: webSearchInstructions },
-      { definition: webFetchTool, instructions: webFetchInstructions },
+      { definition: searchMemoryTool, instructions: MessageHandlerInstructions.searchMemory },
+      { definition: listCronJobsTool, instructions: MessageHandlerInstructions.listCronJobs },
+      { definition: scheduleOnceTool, instructions: MessageHandlerInstructions.scheduleOnce },
+      {
+        definition: scheduleRecurringTool,
+        instructions: MessageHandlerInstructions.scheduleRecurring,
+      },
+      {
+        definition: unscheduleCronJobTool,
+        instructions: MessageHandlerInstructions.unscheduleCronJob,
+      },
+      { definition: webSearchTool, instructions: MessageHandlerInstructions.webSearch },
+      { definition: webFetchTool, instructions: MessageHandlerInstructions.webFetch },
     ];
 
     const chatStart = performance.now();
@@ -167,14 +152,9 @@ export class MessageHandler {
   private async defineMessageImportance(message: string): Promise<EMemoryImportance> {
     const start = performance.now();
 
-    const INSTRUCTIONS = await readXmlAndInjectConfig(
-      "./src/services/ai/tools/define-message-importance/instructions.xml",
-      Config,
-    );
-
     const system: THistoryItem = {
       role: ERole.System,
-      content: INSTRUCTIONS,
+      content: MessageHandlerInstructions.defineMessageImportance,
     };
 
     const uMessage: TPrompt = {
