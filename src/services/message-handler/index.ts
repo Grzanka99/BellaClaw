@@ -1,4 +1,3 @@
-import { z } from "zod";
 import { Config } from "../../config";
 import { AsyncQueue } from "../../utils/async-queue";
 import { createLogger, type TLogger } from "../../utils/logger";
@@ -8,7 +7,6 @@ import {
   defineMessageImportanceTool,
   EModelPurpose,
   ERole,
-  SEARCH_MEMORY_TOOL,
   searchMemoryTool,
   type THistoryItem,
   type TPrompt,
@@ -22,12 +20,8 @@ import { scheduleOnceTool } from "../ai/tools/schedule-once/definition";
 import { scheduleRecurringTool } from "../ai/tools/schedule-recurring/definition";
 import { unscheduleCronJobTool } from "../ai/tools/unschedule-cron-job/definition";
 import { Memory } from "../memory";
-import { EMemoryImportance, SMemory, type TMemory } from "../memory/types";
+import { EMemoryImportance, type TMemory } from "../memory/types";
 import type { TIncommingMessage, TOutgoingMessage } from "./types";
-
-const SSearchMemoryToolResult = z.object({
-  memories: z.array(SMemory),
-});
 
 export class MessageHandler {
   private static _instances = new Map<string, MessageHandler>();
@@ -60,13 +54,12 @@ export class MessageHandler {
     this.logger.info("handleMessage: start");
 
     const parallelStart = performance.now();
-    const [importance, last30, byAiDecision] = await Promise.all([
+    const [importance, last30] = await Promise.all([
       this.defineMessageImportance(message.message.content),
       this.retrieveMemory(message.chatId),
-      this.searchMemories(message),
     ]);
     this.logger.info(
-      `handleMessage: parallel ops completed (${(performance.now() - parallelStart).toFixed(0)}ms) — importance: ${importance}, recent: ${last30.length}, search: ${byAiDecision.length}`,
+      `handleMessage: parallel ops completed (${(performance.now() - parallelStart).toFixed(0)}ms) — importance: ${importance}, recent: ${last30.length}`,
     );
 
     this.queue.enqueue(() => this.saveMessageToDatabase(message, importance));
@@ -80,28 +73,13 @@ export class MessageHandler {
       });
     }
 
-    const foundHistory = [];
-
-    for (const el of byAiDecision.toReversed()) {
-      foundHistory.push({
-        role: el.author,
-        content: el.message,
-      });
-    }
-
-    if (foundHistory.length) {
-      history.push({
-        role: ERole.System,
-        content: `messages you asked to receive for context: ${JSON.stringify(foundHistory)}`,
-      });
-    }
-
     history.push({
       role: ERole.System,
       content: createCurrentTimeContext(),
     });
 
     const [
+      searchMemoryInstructions,
       listCronJobsInstructions,
       scheduleOnceInstructions,
       scheduleRecurringInstructions,
@@ -109,6 +87,7 @@ export class MessageHandler {
       webSearchInstructions,
       webFetchInstructions,
     ] = await Promise.all([
+      readXmlAndInjectConfig("./src/services/ai/tools/search-memory/instructions.xml", Config),
       readXmlAndInjectConfig("./src/services/ai/tools/list-cron-jobs/instructions.xml", Config),
       readXmlAndInjectConfig("./src/services/ai/tools/schedule-once/instructions.xml", Config),
       readXmlAndInjectConfig("./src/services/ai/tools/schedule-recurring/instructions.xml", Config),
@@ -121,6 +100,7 @@ export class MessageHandler {
     ]);
 
     const tools = [
+      { definition: searchMemoryTool, instructions: searchMemoryInstructions },
       { definition: listCronJobsTool, instructions: listCronJobsInstructions },
       { definition: scheduleOnceTool, instructions: scheduleOnceInstructions },
       { definition: scheduleRecurringTool, instructions: scheduleRecurringInstructions },
@@ -259,68 +239,6 @@ export class MessageHandler {
         return true;
       }
     }
-  }
-
-  // NOTE: Ask proper LLM to call tool to read database for more memories,
-  // Can be done with note that last 30 messages will be included regardless
-  private async searchMemories(message: TIncommingMessage): Promise<TMemory[]> {
-    const start = performance.now();
-
-    if (message.author.type !== ERole.User) {
-      this.logger.info(
-        `searchMemories: done (${(performance.now() - start).toFixed(0)}ms) — skipped, not a user message`,
-      );
-      return [];
-    }
-
-    const INSTRUCTIONS = await readXmlAndInjectConfig(
-      "./src/services/ai/tools/search-memory/instructions.xml",
-      Config,
-    );
-
-    const system: THistoryItem = {
-      role: ERole.System,
-      content: INSTRUCTIONS,
-    };
-
-    const uMessage: TPrompt = {
-      role: ERole.User,
-      content: [{ type: "text", text: message.message.content }],
-    };
-
-    const res = await this.ai.runToolTask({
-      prompt: uMessage,
-      history: [system],
-      tools: [{ definition: searchMemoryTool }],
-      purpose: EModelPurpose.ToolCheap,
-      chatId: message.chatId,
-      user: undefined,
-    });
-
-    const allFound: TMemory[] = [];
-    const seen = new Set<number>();
-
-    for (const toolResult of res.toolResults) {
-      if (toolResult.toolName !== SEARCH_MEMORY_TOOL || !toolResult.success) {
-        continue;
-      }
-
-      const parsed = SSearchMemoryToolResult.safeParse(toolResult.data);
-
-      if (!parsed.success) {
-        continue;
-      }
-
-      for (const m of parsed.data.memories) {
-        if (!seen.has(m.id)) {
-          seen.add(m.id);
-          allFound.push(m);
-        }
-      }
-    }
-
-    this.logger.info(`searchMemories: done (${(performance.now() - start).toFixed(0)}ms)`);
-    return allFound;
   }
 
   // NOTE: Retrieve memory based on tool call response, always retrieve last 30 messages
