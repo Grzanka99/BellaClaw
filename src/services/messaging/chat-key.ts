@@ -38,12 +38,3 @@ export function parseCanonicalChatKey(value: string): TOption<TCanonicalChatKey>
 
   return undefined;
 }
-
-export function isCanonicalChatKey(value: string) {
-  const parsed = parseCanonicalChatKey(value);
-  if (parsed === undefined) {
-    return false;
-  }
-
-  return true;
-}

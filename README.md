@@ -82,13 +82,13 @@ podman compose --profile signal up -d --build
 
 Keep the `signal-cli-data` volume. It stores Signal link/session state; deleting it requires linking again.
 
-For a host fallback, run `signal-cli-rest-api` bound to localhost only and point BellaClaw at it:
+For local development without compose, run `signal-cli-rest-api` bound to localhost only and point BellaClaw at it:
 
 ```bash
 podman run -d --name bellaclaw-signal-cli -e MODE=json-rpc -p 127.0.0.1:8080:8080 -v "${SIGNAL_CLI_DATA_DIR:-./signal-cli-data}:/home/.local/share/signal-cli" bbernhard/signal-cli-rest-api:0.100-rootless
 ```
 
-Use `SIGNAL_CLI_RPC_URL=http://127.0.0.1:8080` for the host fallback. Do not expose this port publicly.
+Use `SIGNAL_CLI_RPC_URL=http://127.0.0.1:8080` for this non-compose setup. The compose setup sets `SIGNAL_CLI_RPC_URL=http://signal-cli:8080` for the sidecar container. Do not expose this port publicly.
 
 ### Dev Mode (file-watch)
 

@@ -23,6 +23,9 @@ type TMessagingAdapterStatic = {
   _instance: MessagingAdapter | undefined;
 };
 
+const originalCheckReadiness = SignalClient.prototype.checkReadiness;
+const originalSubscribe = SignalClient.prototype.subscribe;
+
 function cleanupSingletons() {
   const SignalSingletonWithInternals = SignalSingleton as unknown as TSignalSingletonStatic;
   SignalSingletonWithInternals._instance = undefined;
@@ -40,6 +43,8 @@ describe("SignalSingleton", () => {
   });
 
   afterEach(() => {
+    SignalClient.prototype.checkReadiness = originalCheckReadiness;
+    SignalClient.prototype.subscribe = originalSubscribe;
     cleanupSingletons();
     Bun.env.SIGNAL_ENABLED = undefined;
     Bun.env.SIGNAL_PHONE_NUMBER = undefined;
@@ -48,13 +53,11 @@ describe("SignalSingleton", () => {
 
   test("disabled setup does not initialize Signal client", async () => {
     const readinessMock = mock(async () => true);
-    const originalCheckReadiness = SignalClient.prototype.checkReadiness;
     SignalClient.prototype.checkReadiness = readinessMock;
 
     await SignalSingleton.instance.setup();
 
     expect(readinessMock).toHaveBeenCalledTimes(0);
-    SignalClient.prototype.checkReadiness = originalCheckReadiness;
   });
 
   test("retries receive subscription until active", async () => {
@@ -62,8 +65,6 @@ describe("SignalSingleton", () => {
     Bun.env.SIGNAL_PHONE_NUMBER = "+100";
     Bun.env.SIGNAL_CLI_RPC_URL = "http://127.0.0.1:8080";
 
-    const originalCheckReadiness = SignalClient.prototype.checkReadiness;
-    const originalSubscribe = SignalClient.prototype.subscribe;
     const readinessMock = mock(async () => true);
     let subscribeCalls = 0;
     const subscribeMock = mock(async () => {
@@ -84,9 +85,6 @@ describe("SignalSingleton", () => {
 
     expect(readinessMock).toHaveBeenCalledTimes(2);
     expect(subscribeMock).toHaveBeenCalledTimes(2);
-
-    SignalClient.prototype.checkReadiness = originalCheckReadiness;
-    SignalClient.prototype.subscribe = originalSubscribe;
   });
 
   test("retries readiness then resolves after success without duplicate subscriptions", async () => {
@@ -94,8 +92,6 @@ describe("SignalSingleton", () => {
     Bun.env.SIGNAL_PHONE_NUMBER = "+100";
     Bun.env.SIGNAL_CLI_RPC_URL = "http://127.0.0.1:8080";
 
-    const originalCheckReadiness = SignalClient.prototype.checkReadiness;
-    const originalSubscribe = SignalClient.prototype.subscribe;
     let readinessCalls = 0;
     const readinessMock = mock(async () => {
       readinessCalls += 1;
@@ -114,9 +110,6 @@ describe("SignalSingleton", () => {
 
     expect(readinessMock).toHaveBeenCalledTimes(2);
     expect(subscribeMock).toHaveBeenCalledTimes(1);
-
-    SignalClient.prototype.checkReadiness = originalCheckReadiness;
-    SignalClient.prototype.subscribe = originalSubscribe;
   });
 
   test("forwards inbound messages to messaging adapter", async () => {
