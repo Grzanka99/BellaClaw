@@ -1,19 +1,16 @@
 import { Client, Events, GatewayIntentBits, type Message, Partials } from "discord.js";
-import { generateReminderText } from "../../handlers/generate-reminder-text";
-import type { TCronEngineJobContext } from "../../lib/cron-engine";
+import type { TOption } from "../../types";
 import { createLogger, type TLogger } from "../../utils/logger";
-import { AiConnector } from "../ai/api";
-import { ERole } from "../ai/types";
-import { CronSingleton } from "../cron";
-import { Memory } from "../memory";
-import { EMemoryImportance } from "../memory/types";
-import { MessageHandler } from "../message-handler";
+import { MessagingAdapter } from "../messaging";
+import { EMessagePlatform, type TMessageTransport } from "../messaging/types";
 
-export class DiscordSingleton {
+export class DiscordSingleton implements TMessageTransport {
   private static _instance: DiscordSingleton;
   private logger: TLogger = createLogger("DISCORD");
-  private ai = AiConnector.instance;
   private client: Client;
+  private readyPromise: TOption<Promise<void>>;
+  private messageHandlerRegistered = false;
+  public platform = EMessagePlatform.Discord;
 
   private constructor() {
     this.client = new Client({
@@ -36,6 +33,10 @@ export class DiscordSingleton {
   }
 
   private async handleMessage(message: Message) {
+    if (message.author.bot) {
+      return;
+    }
+
     if (message.author.id === this.client.user?.id) {
       return;
     }
@@ -44,12 +45,14 @@ export class DiscordSingleton {
       return;
     }
 
-    const messageHandler = MessageHandler.getInstance(message.author.id);
+    if (message.content.trim().length === 0) {
+      return;
+    }
 
-    const res = await messageHandler.handleMessage({
+    await MessagingAdapter.instance.handleInboundMessage({
+      platform: EMessagePlatform.Discord,
       chatId: message.author.id,
       author: {
-        type: ERole.User,
         username: message.author.username,
         id: message.author.id,
       },
@@ -58,68 +61,44 @@ export class DiscordSingleton {
         content: message.content,
       },
     });
-
-    try {
-      await message.author.send(res);
-    } catch (error) {
-      this.logger.error(
-        `handleMessage: failed to send message to user ${message.author.id}: ${String(error)}`,
-      );
-    }
   }
 
   private async onReady(c: Client<true>) {
     this.logger.info(`Logged in as ${c.user.tag}!`);
-    CronSingleton.instance.setup();
   }
 
-  private async handleCronFire(ctx: TCronEngineJobContext) {
-    const userId = ctx.scope;
-    if (userId === undefined) {
-      this.logger.warning(`handleCronFire: job "${ctx.name}" has no scope, skipping delivery`);
-      return;
+  public async sendText(chatId: string, text: string): Promise<void> {
+    const user = await this.client.users.fetch(chatId);
+    await user.send(text);
+  }
+
+  public setup(): Promise<void> {
+    if (this.readyPromise !== undefined) {
+      return this.readyPromise;
     }
 
-    const text = await generateReminderText(ctx, this.ai);
-    if (text === undefined) {
-      this.logger.info(`handleCronFire: job "${ctx.name}" has no reminder text, skipping delivery`);
-      return;
-    }
+    MessagingAdapter.instance.registerTransport(this);
 
-    try {
-      const user = await this.client.users.fetch(userId);
-      await user.send(text);
-    } catch (error) {
-      this.logger.error(
-        `handleCronFire: failed to deliver reminder "${ctx.name}" to user ${userId}: ${String(error)}`,
-      );
-      return;
-    }
+    this.readyPromise = new Promise((resolve, reject) => {
+      const readyListener = (client: Client<true>) => {
+        void this.onReady(client);
+        resolve();
+      };
 
-    try {
-      const saveResult = await Memory.instance.save({
-        chatId: userId,
-        author: ERole.Assistant,
-        importance: EMemoryImportance.Low,
-        message: `[CRON REMINDER ${ctx.name}]: ${text}`,
+      this.client.once(Events.ClientReady, readyListener);
+
+      this.client.login(Bun.env.DISCORD_TOKEN).catch((error) => {
+        this.client.off(Events.ClientReady, readyListener);
+        this.readyPromise = undefined;
+        reject(error);
       });
+    });
 
-      if ("operation" in saveResult) {
-        this.logger.error(
-          `handleCronFire: failed to save reminder "${ctx.name}" to memory for user ${userId}: ${String(saveResult.error)}`,
-        );
-      }
-    } catch (error) {
-      this.logger.error(
-        `handleCronFire: failed to save reminder "${ctx.name}" to memory for user ${userId}: ${String(error)}`,
-      );
+    if (!this.messageHandlerRegistered) {
+      this.client.on(Events.MessageCreate, this.handleMessage.bind(this));
+      this.messageHandlerRegistered = true;
     }
-  }
 
-  public setup() {
-    this.client.once(Events.ClientReady, this.onReady.bind(this));
-    this.client.on(Events.MessageCreate, this.handleMessage.bind(this));
-    CronSingleton.instance.onCronEvent(this.handleCronFire.bind(this));
-    this.client.login(Bun.env.DISCORD_TOKEN);
+    return this.readyPromise;
   }
 }

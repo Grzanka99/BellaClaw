@@ -91,5 +91,12 @@ describe("MessageHandler", () => {
     for (const name of EXPECTED_CRON_TOOL_NAMES) {
       expect(toolNames).toContain(name);
     }
+
+    expect(internals.memory.save).toHaveBeenCalledWith({
+      chatId: "test-chat-id",
+      author: ERole.User,
+      importance: "low",
+      message: "hello",
+    });
   });
 });

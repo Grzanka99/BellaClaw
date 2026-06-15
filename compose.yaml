@@ -7,3 +7,21 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    environment:
+      - SIGNAL_CLI_RPC_URL=http://signal-cli:8080
+
+  signal-cli:
+    image: bbernhard/signal-cli-rest-api:0.100-rootless
+    container_name: bellaclaw-signal-cli
+    profiles:
+      - signal
+    restart: unless-stopped
+    environment:
+      - MODE=json-rpc
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - signal-cli-data:/home/.local/share/signal-cli
+
+volumes:
+  signal-cli-data:

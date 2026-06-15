@@ -202,7 +202,7 @@ export class MessageHandler {
     switch (message.author.type) {
       case ERole.User: {
         await this.memory.save({
-          chatId: message.author.id,
+          chatId: message.chatId,
           author: ERole.User,
           importance,
           message: message.message.content,
