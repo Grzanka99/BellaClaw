@@ -9,7 +9,6 @@ export class SignalSingleton implements TMessageTransport {
   private logger: TLogger = createLogger("SIGNAL");
   private client: TOption<SignalClient>;
   private setupPromise: TOption<Promise<void>>;
-  private typingInFlightByRecipient = new Map<string, number>();
   private retryDelayMs = 2000;
   public platform = EMessagePlatform.Signal;
 
@@ -38,7 +37,13 @@ export class SignalSingleton implements TMessageTransport {
     }
 
     this.setupPromise = this.setupWithRetries();
-    await this.setupPromise;
+    try {
+      await this.setupPromise;
+    } finally {
+      if (this.client === undefined) {
+        this.setupPromise = undefined;
+      }
+    }
   }
 
   private async setupWithRetries() {
@@ -128,10 +133,7 @@ export class SignalSingleton implements TMessageTransport {
       }
     }
 
-    const inFlightCount = this.typingInFlightByRecipient.get(message.sourceNumber) ?? 0;
-    this.typingInFlightByRecipient.set(message.sourceNumber, inFlightCount + 1);
-
-    if (inFlightCount === 0 && client !== undefined) {
+    if (client !== undefined) {
       void client.showTyping(message.sourceNumber).catch((error) => {
         this.logger.error(`showTyping failed: ${String(error)}`);
       });
@@ -151,16 +153,7 @@ export class SignalSingleton implements TMessageTransport {
         },
       });
     } finally {
-      const currentCount = this.typingInFlightByRecipient.get(message.sourceNumber) ?? 1;
-      const nextCount = currentCount - 1;
-
-      if (nextCount <= 0) {
-        this.typingInFlightByRecipient.delete(message.sourceNumber);
-      } else {
-        this.typingInFlightByRecipient.set(message.sourceNumber, nextCount);
-      }
-
-      if (currentCount === 1 && client !== undefined) {
+      if (client !== undefined) {
         try {
           await client.hideTyping(message.sourceNumber);
         } catch (error) {

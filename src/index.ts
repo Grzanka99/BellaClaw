@@ -5,8 +5,8 @@ async function init(): Promise<void> {
   console.time("init");
 
   await MessagingAdapter.instance.migrateData();
-  await SignalSingleton.instance.setup();
   await MessagingAdapter.instance.setup();
+  await SignalSingleton.instance.setup();
 
   console.timeEnd("init");
 }

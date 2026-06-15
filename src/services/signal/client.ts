@@ -8,7 +8,6 @@ const RECONNECT_DELAY_MS = 5000;
 const SSignalReceiveEnvelope = z.object({
   source: z.string().nullable().optional(),
   sourceNumber: z.string().nullable().optional(),
-  sourceUuid: z.string().nullable().optional(),
   sourceName: z.string().nullable().optional(),
   profileName: z.string().nullable().optional(),
   timestamp: z.number().optional(),
@@ -221,34 +220,26 @@ export class SignalClient {
       socket = new WebSocket(receiveUrl);
 
       socket.onmessage = (event) => {
-        if (typeof event.data === "string") {
-          this.handleReceivePayload(event.data, onMessage);
-          return;
-        }
+        void (async () => {
+          let raw: TOption<string>;
 
-        if (event.data instanceof ArrayBuffer) {
-          this.handleReceivePayload(new TextDecoder().decode(event.data), onMessage);
-          return;
-        }
+          if (typeof event.data === "string") {
+            raw = event.data;
+          } else if (event.data instanceof ArrayBuffer) {
+            raw = new TextDecoder().decode(event.data);
+          } else if (event.data instanceof Uint8Array) {
+            raw = new TextDecoder().decode(event.data);
+          } else if (event.data instanceof Blob) {
+            raw = await event.data.text();
+          } else {
+            this.logger.warning("subscribe: unsupported websocket message data type");
+            return;
+          }
 
-        if (event.data instanceof Uint8Array) {
-          this.handleReceivePayload(new TextDecoder().decode(event.data), onMessage);
-          return;
-        }
-
-        if (event.data instanceof Blob) {
-          void event.data
-            .text()
-            .then((raw) => {
-              this.handleReceivePayload(raw, onMessage);
-            })
-            .catch((error) => {
-              this.logger.error(`subscribe: failed to read websocket message: ${String(error)}`);
-            });
-          return;
-        }
-
-        this.logger.warning("subscribe: unsupported websocket message data type");
+          this.handleReceivePayload(raw, onMessage);
+        })().catch((error) => {
+          this.logger.error(`subscribe: failed to read websocket message: ${String(error)}`);
+        });
       };
 
       socket.onerror = () => {
