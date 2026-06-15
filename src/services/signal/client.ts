@@ -11,10 +11,12 @@ const SSignalReceiveEnvelope = z.object({
   sourceUuid: z.string().nullable().optional(),
   sourceName: z.string().nullable().optional(),
   profileName: z.string().nullable().optional(),
+  timestamp: z.number().optional(),
   dataMessage: z
     .object({
       message: z.string().optional(),
       groupInfo: z.unknown().optional(),
+      timestamp: z.number().optional(),
     })
     .optional(),
 });
@@ -27,6 +29,7 @@ export type TSignalInboundMessage = {
   sourceNumber: string;
   sourceName: string;
   message: string;
+  timestamp: TOption<number>;
 };
 
 export type TSignalClientConfig = {
@@ -63,7 +66,7 @@ export function parseSignalReceiveMessage(raw: string): TOption<TSignalInboundMe
     return undefined;
   }
 
-  if (dataMessage.groupInfo !== undefined) {
+  if (dataMessage.groupInfo !== undefined && dataMessage.groupInfo !== null) {
     return undefined;
   }
 
@@ -93,6 +96,7 @@ export function parseSignalReceiveMessage(raw: string): TOption<TSignalInboundMe
     sourceNumber,
     sourceName,
     message,
+    timestamp: dataMessage.timestamp ?? envelope.timestamp,
   };
 }
 
@@ -162,10 +166,44 @@ export class SignalClient {
     }
   }
 
+  public async showTyping(recipient: string): Promise<void> {
+    await this.setTypingIndicator("PUT", recipient, "showTyping");
+  }
+
+  public async hideTyping(recipient: string): Promise<void> {
+    await this.setTypingIndicator("DELETE", recipient, "hideTyping");
+  }
+
+  public async sendReadReceipt(recipient: string, timestamp: number): Promise<void> {
+    let response: Response;
+    try {
+      response = await fetch(new URL(`/v1/receipts/${this.phoneNumber}`, this.baseUrl), {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          recipient,
+          timestamp,
+          receipt_type: "read",
+        }),
+      });
+    } catch (error) {
+      this.logger.error(`sendReadReceipt: failed to reach signal-cli-rest-api: ${String(error)}`);
+      throw error;
+    }
+
+    if (!response.ok) {
+      this.logger.error(`sendReadReceipt: /v1/receipts returned ${response.status}`);
+      throw new Error(`Signal read receipt failed with status ${response.status}`);
+    }
+  }
+
   public async subscribe(
     onMessage: (message: TSignalInboundMessage) => void | Promise<void>,
   ): Promise<TOption<() => void>> {
     const receiveUrl = new URL(`/v1/receive/${this.phoneNumber}`, this.baseUrl);
+    receiveUrl.searchParams.set("send_read_receipts", "true");
     if (receiveUrl.protocol === "http:") {
       receiveUrl.protocol = "ws:";
     } else if (receiveUrl.protocol === "https:") {
@@ -287,6 +325,31 @@ export class SignalClient {
         socket = undefined;
       }
     };
+  }
+
+  private async setTypingIndicator(
+    method: "PUT" | "DELETE",
+    recipient: string,
+    operation: string,
+  ): Promise<void> {
+    let response: Response;
+    try {
+      response = await fetch(new URL(`/v1/typing-indicator/${this.phoneNumber}`, this.baseUrl), {
+        method,
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ recipient }),
+      });
+    } catch (error) {
+      this.logger.error(`${operation}: failed to reach signal-cli-rest-api: ${String(error)}`);
+      throw error;
+    }
+
+    if (!response.ok) {
+      this.logger.error(`${operation}: /v1/typing-indicator returned ${response.status}`);
+      throw new Error(`Signal typing indicator failed with status ${response.status}`);
+    }
   }
 
   private handleReceivePayload(

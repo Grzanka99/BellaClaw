@@ -32,6 +32,7 @@ describe("parseSignalReceiveMessage", () => {
           sourceName: "Alice",
           dataMessage: {
             message: "hello",
+            timestamp: 123,
           },
         },
       }),
@@ -41,6 +42,29 @@ describe("parseSignalReceiveMessage", () => {
       sourceNumber: "+111",
       sourceName: "Alice",
       message: "hello",
+      timestamp: 123,
+    });
+  });
+
+  test("parses direct text messages with null group info", () => {
+    const result = parseSignalReceiveMessage(
+      JSON.stringify({
+        envelope: {
+          sourceNumber: "+111",
+          sourceName: "Alice",
+          dataMessage: {
+            message: "hello",
+            groupInfo: null,
+          },
+        },
+      }),
+    );
+
+    expect(result).toEqual({
+      sourceNumber: "+111",
+      sourceName: "Alice",
+      message: "hello",
+      timestamp: undefined,
     });
   });
 
@@ -52,6 +76,7 @@ describe("parseSignalReceiveMessage", () => {
           sourceNumber: null,
           sourceName: null,
           profileName: "Bob",
+          timestamp: 456,
           dataMessage: {
             message: "hello",
           },
@@ -63,6 +88,7 @@ describe("parseSignalReceiveMessage", () => {
       sourceNumber: "+222",
       sourceName: "Bob",
       message: "hello",
+      timestamp: 456,
     });
   });
 
@@ -158,6 +184,38 @@ describe("SignalClient", () => {
     await expect(client.sendText("+200", "hello")).rejects.toThrow("network down");
   });
 
+  test("sends read receipt with configured sender and message timestamp", async () => {
+    const fetchMock = mock(async () => new Response(null, { status: 204 }));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const client = new SignalClient({ baseUrl: "http://127.0.0.1:8080", phoneNumber: "+100" });
+
+    await client.sendReadReceipt("+200", 123);
+
+    expect(fetchMock).toHaveBeenCalledWith(new URL("http://127.0.0.1:8080/v1/receipts/+100"), {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        recipient: "+200",
+        timestamp: 123,
+        receipt_type: "read",
+      }),
+    });
+  });
+
+  test("throws on read receipt failure", async () => {
+    const fetchMock = mock(async () => new Response("failed", { status: 500 }));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const client = new SignalClient({ baseUrl: "http://127.0.0.1:8080", phoneNumber: "+100" });
+
+    await expect(client.sendReadReceipt("+200", 123)).rejects.toThrow(
+      "Signal read receipt failed with status 500",
+    );
+  });
+
   test("returns unsubscribe after initial websocket open", async () => {
     globalThis.WebSocket = TestWebSocket as unknown as typeof WebSocket;
 
@@ -170,7 +228,7 @@ describe("SignalClient", () => {
     if (socket === undefined) {
       throw new Error("expected websocket");
     }
-    expect(String(socket.url)).toBe("ws://127.0.0.1:8080/v1/receive/+100");
+    expect(String(socket.url)).toBe("ws://127.0.0.1:8080/v1/receive/+100?send_read_receipts=true");
 
     socket.onopen?.();
 
@@ -285,6 +343,7 @@ describe("SignalClient", () => {
             sourceNumber: "+200",
             dataMessage: {
               message: "hello",
+              timestamp: 123,
             },
           },
         }),
@@ -320,6 +379,7 @@ describe("SignalClient", () => {
               sourceNumber: "+200",
               dataMessage: {
                 message: "hello",
+                timestamp: 123,
               },
             },
           }),
@@ -331,6 +391,7 @@ describe("SignalClient", () => {
       sourceNumber: "+200",
       sourceName: "+200",
       message: "hello",
+      timestamp: 123,
     });
     unsubscribe?.();
   });

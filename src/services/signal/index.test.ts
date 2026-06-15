@@ -10,10 +10,12 @@ type TSignalSingletonStatic = {
 
 type TSignalSingletonInternals = {
   retryDelayMs: number;
+  client: Pick<SignalClient, "sendReadReceipt" | "showTyping" | "hideTyping"> | undefined;
   handleInboundMessage: (message: {
     sourceNumber: string;
     sourceName: string;
     message: string;
+    timestamp: number | undefined;
   }) => Promise<void>;
 };
 
@@ -124,15 +126,25 @@ describe("SignalSingleton", () => {
       handleInboundMessage: typeof MessagingAdapter.prototype.handleInboundMessage;
     };
     const handleInboundMessageMock = mock(async () => {});
+    const sendReadReceiptMock = mock(async () => {});
+    const showTypingMock = mock(async () => {});
+    const hideTypingMock = mock(async () => {});
 
     adapter.handleInboundMessage = handleInboundMessageMock;
+    signal.client = {
+      sendReadReceipt: sendReadReceiptMock,
+      showTyping: showTypingMock,
+      hideTyping: hideTypingMock,
+    };
 
     await signal.handleInboundMessage({
       sourceNumber: "+200",
       sourceName: "Alice",
       message: "hello",
+      timestamp: 123,
     });
 
+    expect(sendReadReceiptMock).toHaveBeenCalledWith("+200", 123);
     expect(handleInboundMessageMock).toHaveBeenCalledWith({
       platform: EMessagePlatform.Signal,
       chatId: "+200",
@@ -145,5 +157,36 @@ describe("SignalSingleton", () => {
         content: "hello",
       },
     });
+  });
+
+  test("does not wait for typing indicator before forwarding inbound messages", async () => {
+    Bun.env.SIGNAL_PHONE_NUMBER = "+100";
+    const signal = SignalSingleton.instance as unknown as TSignalSingletonInternals;
+    const adapter = MessagingAdapter.instance as unknown as {
+      handleInboundMessage: typeof MessagingAdapter.prototype.handleInboundMessage;
+    };
+    const handleInboundMessageMock = mock(async () => {});
+
+    adapter.handleInboundMessage = handleInboundMessageMock;
+    signal.client = {
+      sendReadReceipt: mock(async () => {}),
+      showTyping: mock(() => new Promise<void>(() => {})),
+      hideTyping: mock(async () => {}),
+    };
+
+    const result = await Promise.race([
+      signal
+        .handleInboundMessage({
+          sourceNumber: "+200",
+          sourceName: "Alice",
+          message: "hello",
+          timestamp: 123,
+        })
+        .then(() => "handled"),
+      Bun.sleep(20).then(() => "timeout"),
+    ]);
+
+    expect(result).toBe("handled");
+    expect(handleInboundMessageMock).toHaveBeenCalledTimes(1);
   });
 });
