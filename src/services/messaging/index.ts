@@ -37,7 +37,6 @@ export class MessagingAdapter {
   }
 
   public async setup() {
-    await this.migrateData();
     this.ensureCronListener();
     CronSingleton.instance.setup();
   }
