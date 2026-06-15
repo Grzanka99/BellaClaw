@@ -11,7 +11,7 @@ services:
       - SIGNAL_CLI_RPC_URL=http://signal-cli:8080
 
   signal-cli:
-    image: bbernhard/signal-cli-rest-api:0.100-rootless
+    image: docker.io/bbernhard/signal-cli-rest-api:0.100-rootless
     container_name: bellaclaw-signal-cli
     profiles:
       - signal
