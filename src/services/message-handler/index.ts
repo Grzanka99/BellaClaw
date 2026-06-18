@@ -18,6 +18,7 @@ import { listCronJobsTool } from "../ai/tools/list-cron-jobs/definition";
 import { scheduleOnceTool } from "../ai/tools/schedule-once/definition";
 import { scheduleRecurringTool } from "../ai/tools/schedule-recurring/definition";
 import { unscheduleCronJobTool } from "../ai/tools/unschedule-cron-job/definition";
+import { updateCronJobTool } from "../ai/tools/update-cron-job/definition";
 import { Memory } from "../memory";
 import { EMemoryImportance, type TMemory } from "../memory/types";
 import { MessageHandlerInstructions } from "./instructions";
@@ -89,6 +90,10 @@ export class MessageHandler {
       {
         definition: unscheduleCronJobTool,
         instructions: MessageHandlerInstructions.unscheduleCronJob,
+      },
+      {
+        definition: updateCronJobTool,
+        instructions: MessageHandlerInstructions.updateCronJob,
       },
       { definition: webSearchTool, instructions: MessageHandlerInstructions.webSearch },
       { definition: webFetchTool, instructions: MessageHandlerInstructions.webFetch },

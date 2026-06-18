@@ -7,6 +7,7 @@ export type TMessageHandlerInstructions = {
   scheduleOnce: string;
   scheduleRecurring: string;
   unscheduleCronJob: string;
+  updateCronJob: string;
   webSearch: string;
   webFetch: string;
   defineMessageImportance: string;
@@ -19,6 +20,7 @@ async function loadMessageHandlerInstructions(): Promise<TMessageHandlerInstruct
     scheduleOnce,
     scheduleRecurring,
     unscheduleCronJob,
+    updateCronJob,
     webSearch,
     webFetch,
     defineMessageImportance,
@@ -28,6 +30,7 @@ async function loadMessageHandlerInstructions(): Promise<TMessageHandlerInstruct
     readXmlAndInjectConfig("./src/services/ai/tools/schedule-once/instructions.xml", Config),
     readXmlAndInjectConfig("./src/services/ai/tools/schedule-recurring/instructions.xml", Config),
     readXmlAndInjectConfig("./src/services/ai/tools/unschedule-cron-job/instructions.xml", Config),
+    readXmlAndInjectConfig("./src/services/ai/tools/update-cron-job/instructions.xml", Config),
     readXmlAndInjectConfig("./src/services/ai/tools/web-search/instructions.xml", Config),
     readXmlAndInjectConfig("./src/services/ai/tools/web-fetch/instructions.xml", Config),
     readXmlAndInjectConfig(
@@ -42,6 +45,7 @@ async function loadMessageHandlerInstructions(): Promise<TMessageHandlerInstruct
     scheduleOnce,
     scheduleRecurring,
     unscheduleCronJob,
+    updateCronJob,
     webSearch,
     webFetch,
     defineMessageImportance,

@@ -12,6 +12,7 @@ import { LIST_CRON_JOBS_TOOL } from "../ai/tools/list-cron-jobs/definition";
 import { SCHEDULE_ONCE_TOOL } from "../ai/tools/schedule-once/definition";
 import { SCHEDULE_RECURRING_TOOL } from "../ai/tools/schedule-recurring/definition";
 import { UNSCHEDULE_CRON_JOB_TOOL } from "../ai/tools/unschedule-cron-job/definition";
+import { UPDATE_CRON_JOB_TOOL } from "../ai/tools/update-cron-job/definition";
 import { EMemoryImportance } from "../memory/types";
 import { MessageHandler } from "./index";
 import { MessageHandlerInstructions } from "./instructions";
@@ -153,13 +154,14 @@ describe("MessageHandler instruction cache", () => {
 
     expect(runAssistantToolLoopArgs).toHaveLength(2);
     for (const args of runAssistantToolLoopArgs) {
-      expect(args.tools).toHaveLength(7);
+      expect(args.tools).toHaveLength(8);
       expect(args.tools.map((tool) => tool.definition.function.name)).toEqual([
         SEARCH_MEMORY_TOOL,
         LIST_CRON_JOBS_TOOL,
         SCHEDULE_ONCE_TOOL,
         SCHEDULE_RECURRING_TOOL,
         UNSCHEDULE_CRON_JOB_TOOL,
+        UPDATE_CRON_JOB_TOOL,
         WEB_SEARCH_TOOL,
         WEB_FETCH_TOOL,
       ]);
@@ -169,6 +171,7 @@ describe("MessageHandler instruction cache", () => {
         MessageHandlerInstructions.scheduleOnce,
         MessageHandlerInstructions.scheduleRecurring,
         MessageHandlerInstructions.unscheduleCronJob,
+        MessageHandlerInstructions.updateCronJob,
         MessageHandlerInstructions.webSearch,
         MessageHandlerInstructions.webFetch,
       ]);
