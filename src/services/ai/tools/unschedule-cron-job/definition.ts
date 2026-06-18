@@ -7,13 +7,13 @@ export const unscheduleCronJobTool: ToolDefinitionJson = {
   function: {
     name: UNSCHEDULE_CRON_JOB_TOOL,
     description:
-      "Remove a previously scheduled cron job by name. Use this to cancel one-time reminders, recurring reminders, or periodic tasks that are no longer needed.",
+      "Cancel a previously scheduled cron job by name. Use this to deactivate one-time reminders, recurring reminders, or periodic tasks that are no longer needed.",
     parameters: {
       type: "object",
       properties: {
         name: {
           type: "string",
-          description: "The unique name of the one-time or recurring cron job to remove.",
+          description: "The unique name of the one-time or recurring cron job to cancel.",
         },
       },
       required: ["name"],

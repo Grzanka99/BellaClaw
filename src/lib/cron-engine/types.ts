@@ -6,6 +6,18 @@ export enum ECronEngineJobType {
   OneTime = "onetime",
 }
 
+export enum ECronEngineJobStatus {
+  Active = "active",
+  Completed = "completed",
+  Cancelled = "cancelled",
+}
+
+export enum ECronEngineFinishedReason {
+  Fired = "fired",
+  Unscheduled = "unscheduled",
+  Overwritten = "overwritten",
+}
+
 const SReminderContentJobFields = z.object({
   reminderText: z
     .string()
@@ -80,6 +92,27 @@ export const SCronEngineJob = z
       .nullable()
       .transform((value) => (value !== null ? new Date(value) : undefined)),
     createdAt: z.number().transform((value) => new Date(value)),
+    status: z.enum(ECronEngineJobStatus),
+    finishedAt: z
+      .number()
+      .nullable()
+      .transform((value) => {
+        if (value !== null) {
+          return new Date(value);
+        }
+
+        return undefined;
+      }),
+    finishedReason: z
+      .enum(ECronEngineFinishedReason)
+      .nullable()
+      .transform((value) => {
+        if (value !== null) {
+          return value;
+        }
+
+        return undefined;
+      }),
   })
   .extend(SReminderContentJobFields.shape);
 

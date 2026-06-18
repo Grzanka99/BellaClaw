@@ -78,6 +78,37 @@ describe("CronEngine runtime safety", () => {
     expect(await engine.getJob("overlap-job", "scope-a")).toBeUndefined();
   });
 
+  test("parallel engines fire a recurring due occurrence once", async () => {
+    const secondEngine = new CronEngine({});
+
+    try {
+      const scheduled = await engine.schedule({
+        name: "parallel-recurring",
+        scope: "scope-a",
+        pattern: "*/5 * * * *",
+      });
+      expect("error" in scheduled).toBe(false);
+
+      await forceJobDue(engine, "parallel-recurring", "scope-a");
+
+      const fireEvents: string[] = [];
+      engine.onFire((ctx) => {
+        fireEvents.push(ctx.name);
+      });
+      secondEngine.onFire((ctx) => {
+        fireEvents.push(ctx.name);
+      });
+
+      const internals = engine as unknown as TEngineWithInternals;
+      const secondInternals = secondEngine as unknown as TEngineWithInternals;
+      await Promise.all([internals.tick(), secondInternals.tick()]);
+
+      expect(fireEvents).toEqual(["parallel-recurring"]);
+    } finally {
+      secondEngine.destroy();
+    }
+  });
+
   test("reserved EventEmitter names are rejected when scheduling", async () => {
     for (const name of ["error", "newListener", "removeListener"]) {
       const recurring = await engine.schedule({
