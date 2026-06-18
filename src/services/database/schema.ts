@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import { integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 export const memoriesTable = sqliteTable("memories", {
@@ -25,8 +26,15 @@ export const cronEngineJobsTable = sqliteTable(
     nextRunAt: integer("nextRunAt").notNull(),
     lastRunAt: integer("lastRunAt"),
     createdAt: integer("createdAt").notNull(),
+    status: text("status").notNull().default("active"),
+    finishedAt: integer("finishedAt"),
+    finishedReason: text("finishedReason"),
   },
-  (table) => [uniqueIndex("cron_engine_jobs_name_scope_unique").on(table.name, table.scope)],
+  (table) => [
+    uniqueIndex("cron_engine_jobs_name_scope_unique")
+      .on(table.name, table.scope)
+      .where(sql`${table.status} = 'active'`),
+  ],
 );
 
 export type TInsertMemory = typeof memoriesTable.$inferInsert;

@@ -8,6 +8,8 @@ import { AsyncQueue } from "../../utils/async-queue";
 import { createLogger } from "../../utils/logger";
 import { getNextFireTime, isValidCron } from "./parser";
 import {
+  ECronEngineFinishedReason,
+  ECronEngineJobStatus,
   ECronEngineJobType,
   SCronEngineJob,
   type TCronEngineError,
@@ -100,21 +102,39 @@ export class CronEngine extends EventEmitter {
           nextRunAt: nextRunAt.getTime(),
           lastRunAt: null,
           createdAt: scheduledAt.getTime(),
+          status: ECronEngineJobStatus.Active,
+          finishedAt: null,
+          finishedReason: null,
         };
 
         if (existing && args.overwrite === true) {
-          const row = await this.db
-            .update(cronEngineJobsTable)
-            .set(rowValues)
-            .where(
-              and(
-                eq(cronEngineJobsTable.name, args.name),
-                eq(cronEngineJobsTable.scope, normalizedScope),
-                eq(cronEngineJobsTable.type, ECronEngineJobType.Recurring),
-              ),
-            )
-            .returning()
-            .get();
+          const row = await this.db.transaction(async (tx) => {
+            const claimedRow = await tx
+              .update(cronEngineJobsTable)
+              .set({
+                status: ECronEngineJobStatus.Cancelled,
+                finishedAt: Date.now(),
+                finishedReason: ECronEngineFinishedReason.Overwritten,
+              })
+              .where(
+                and(
+                  eq(cronEngineJobsTable.id, existing.id),
+                  eq(cronEngineJobsTable.status, ECronEngineJobStatus.Active),
+                ),
+              )
+              .returning()
+              .get();
+
+            if (!claimedRow) {
+              return undefined;
+            }
+
+            return tx.insert(cronEngineJobsTable).values(rowValues).returning().get();
+          });
+
+          if (!row) {
+            return this.createOverwriteInactiveJobError(args.name);
+          }
 
           return this.parseJobRow(row) ?? this.createScheduledJobReadbackError();
         }
@@ -183,21 +203,39 @@ export class CronEngine extends EventEmitter {
           nextRunAt: args.fireAt.getTime(),
           lastRunAt: null,
           createdAt: Date.now(),
+          status: ECronEngineJobStatus.Active,
+          finishedAt: null,
+          finishedReason: null,
         };
 
         if (existing && args.overwrite === true) {
-          const row = await this.db
-            .update(cronEngineJobsTable)
-            .set(rowValues)
-            .where(
-              and(
-                eq(cronEngineJobsTable.name, args.name),
-                eq(cronEngineJobsTable.scope, normalizedScope),
-                eq(cronEngineJobsTable.type, ECronEngineJobType.OneTime),
-              ),
-            )
-            .returning()
-            .get();
+          const row = await this.db.transaction(async (tx) => {
+            const claimedRow = await tx
+              .update(cronEngineJobsTable)
+              .set({
+                status: ECronEngineJobStatus.Cancelled,
+                finishedAt: Date.now(),
+                finishedReason: ECronEngineFinishedReason.Overwritten,
+              })
+              .where(
+                and(
+                  eq(cronEngineJobsTable.id, existing.id),
+                  eq(cronEngineJobsTable.status, ECronEngineJobStatus.Active),
+                ),
+              )
+              .returning()
+              .get();
+
+            if (!claimedRow) {
+              return undefined;
+            }
+
+            return tx.insert(cronEngineJobsTable).values(rowValues).returning().get();
+          });
+
+          if (!row) {
+            return this.createOverwriteInactiveJobError(args.name);
+          }
 
           return this.parseJobRow(row) ?? this.createScheduledJobReadbackError();
         }
@@ -236,12 +274,19 @@ export class CronEngine extends EventEmitter {
   ): Promise<TCronEngineJob | TCronEngineError> {
     try {
       const res = await this.queue.enqueue(async () => {
+        const finishedAt = Date.now();
         const row = await this.db
-          .delete(cronEngineJobsTable)
+          .update(cronEngineJobsTable)
+          .set({
+            status: ECronEngineJobStatus.Cancelled,
+            finishedAt,
+            finishedReason: ECronEngineFinishedReason.Unscheduled,
+          })
           .where(
             and(
               eq(cronEngineJobsTable.name, name),
               eq(cronEngineJobsTable.scope, this.normalizeScope(scope)),
+              eq(cronEngineJobsTable.status, ECronEngineJobStatus.Active),
             ),
           )
           .returning()
@@ -275,7 +320,14 @@ export class CronEngine extends EventEmitter {
         .$dynamic();
 
       if (scope !== undefined) {
-        query = query.where(eq(cronEngineJobsTable.scope, this.normalizeScope(scope)));
+        query = query.where(
+          and(
+            eq(cronEngineJobsTable.scope, this.normalizeScope(scope)),
+            eq(cronEngineJobsTable.status, ECronEngineJobStatus.Active),
+          ),
+        );
+      } else {
+        query = query.where(eq(cronEngineJobsTable.status, ECronEngineJobStatus.Active));
       }
 
       const rows = await query;
@@ -325,7 +377,12 @@ export class CronEngine extends EventEmitter {
         const results = await this.db
           .select()
           .from(cronEngineJobsTable)
-          .where(lte(cronEngineJobsTable.nextRunAt, now));
+          .where(
+            and(
+              lte(cronEngineJobsTable.nextRunAt, now),
+              eq(cronEngineJobsTable.status, ECronEngineJobStatus.Active),
+            ),
+          );
 
         const parsed = z.array(SCronEngineJob).safeParse(results);
         if (!parsed.success) {
@@ -338,10 +395,12 @@ export class CronEngine extends EventEmitter {
 
       for (const job of jobs) {
         try {
+          let claimedJob: TOption<TCronEngineJob>;
+
           if (job.type === ECronEngineJobType.Recurring && job.pattern) {
             const nextRun = getNextFireTime(job.pattern, new Date(now), this.timezone);
-            await this.queue.enqueue(async () => {
-              await this.db
+            const row = await this.queue.enqueue(async () => {
+              return this.db
                 .update(cronEngineJobsTable)
                 .set({
                   nextRunAt: nextRun.getTime(),
@@ -349,22 +408,39 @@ export class CronEngine extends EventEmitter {
                 })
                 .where(
                   and(
-                    eq(cronEngineJobsTable.name, job.name),
-                    eq(cronEngineJobsTable.scope, this.normalizeScope(job.scope)),
+                    eq(cronEngineJobsTable.id, job.id),
+                    eq(cronEngineJobsTable.status, ECronEngineJobStatus.Active),
+                    eq(cronEngineJobsTable.nextRunAt, job.nextRunAt.getTime()),
                   ),
-                );
+                )
+                .returning()
+                .get();
             });
+            claimedJob = this.parseJobRow(row);
           } else if (job.type === ECronEngineJobType.OneTime) {
-            await this.queue.enqueue(async () => {
-              await this.db
-                .delete(cronEngineJobsTable)
+            const row = await this.queue.enqueue(async () => {
+              return this.db
+                .update(cronEngineJobsTable)
+                .set({
+                  status: ECronEngineJobStatus.Completed,
+                  lastRunAt: now,
+                  finishedAt: now,
+                  finishedReason: ECronEngineFinishedReason.Fired,
+                })
                 .where(
                   and(
-                    eq(cronEngineJobsTable.name, job.name),
-                    eq(cronEngineJobsTable.scope, this.normalizeScope(job.scope)),
+                    eq(cronEngineJobsTable.id, job.id),
+                    eq(cronEngineJobsTable.status, ECronEngineJobStatus.Active),
                   ),
-                );
+                )
+                .returning()
+                .get();
             });
+            claimedJob = this.parseJobRow(row);
+          }
+
+          if (!claimedJob) {
+            continue;
           }
 
           const ctx: TCronEngineJobContext = {
@@ -433,6 +509,10 @@ export class CronEngine extends EventEmitter {
     return { operation: "schedule", error: "Failed to read back scheduled job" };
   }
 
+  private createOverwriteInactiveJobError(name: string): TCronEngineError {
+    return { operation: "schedule", error: `Job '${name}' is no longer active.` };
+  }
+
   private createReservedJobNameError(name: string): TCronEngineError {
     return { operation: "schedule", error: `Job name '${name}' is reserved by EventEmitter` };
   }
@@ -454,7 +534,11 @@ export class CronEngine extends EventEmitter {
       .select()
       .from(cronEngineJobsTable)
       .where(
-        and(eq(cronEngineJobsTable.name, name), eq(cronEngineJobsTable.scope, normalizedScope)),
+        and(
+          eq(cronEngineJobsTable.name, name),
+          eq(cronEngineJobsTable.scope, normalizedScope),
+          eq(cronEngineJobsTable.status, ECronEngineJobStatus.Active),
+        ),
       )
       .get();
 

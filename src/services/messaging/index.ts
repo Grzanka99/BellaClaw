@@ -9,7 +9,6 @@ import { Memory } from "../memory";
 import { EMemoryImportance } from "../memory/types";
 import { MessageHandler } from "../message-handler";
 import { createCanonicalChatKey, parseCanonicalChatKey } from "./chat-key";
-import { MessagingDataMigration } from "./migration";
 import type { EMessagePlatform, TMessageTransport, TPlatformMessage } from "./types";
 
 export class MessagingAdapter {
@@ -18,8 +17,6 @@ export class MessagingAdapter {
   private transports = new Map<EMessagePlatform, TMessageTransport>();
   private ai = AiConnector.instance;
   private cronListenerRegistered = false;
-  private migration = new MessagingDataMigration();
-  private migrationPromise: TOption<Promise<void>>;
 
   private constructor() {}
 
@@ -39,15 +36,6 @@ export class MessagingAdapter {
   public async setup() {
     this.ensureCronListener();
     CronSingleton.instance.setup();
-  }
-
-  public async migrateData() {
-    if (this.migrationPromise !== undefined) {
-      return this.migrationPromise;
-    }
-
-    this.migrationPromise = this.migration.migrateRawDiscordScopes();
-    return this.migrationPromise;
   }
 
   public async handleInboundMessage(message: TPlatformMessage) {

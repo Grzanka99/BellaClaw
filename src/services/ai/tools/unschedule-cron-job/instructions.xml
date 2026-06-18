@@ -1,7 +1,7 @@
 <instructions>
 
   <purpose>
-    Remove a previously scheduled cron job so it no longer fires.
+    Cancel a previously scheduled cron job so it no longer fires.
     Use this tool when the user explicitly asks to cancel or stop a scheduled reminder
     or periodic task, whether it is one-time or recurring.
   </purpose>
@@ -9,15 +9,15 @@
   <tool>
     <name>unschedule-cron-job</name>
     <description>
-      Deletes a cron job by its unique name. The job will no longer fire
-      after being unscheduled. Returns the removed job details.
+      Deactivates a cron job by its unique name. The job will no longer fire
+      after being unscheduled. Returns the cancelled job details.
     </description>
   </tool>
 
   <usage_rules>
-    <rule>Always confirm with the user which job they want to remove before calling this tool</rule>
+    <rule>Always confirm with the user which job they want to cancel before calling this tool</rule>
     <rule>Use the exact job name that was provided when the job was originally scheduled</rule>
-    <rule>Inform the user once the job has been successfully removed</rule>
+    <rule>Inform the user once the job has been successfully cancelled</rule>
     <rule>If the job name does not exist, inform the user that no matching job was found</rule>
   </usage_rules>
 

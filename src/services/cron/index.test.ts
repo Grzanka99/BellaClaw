@@ -144,7 +144,7 @@ describe("CronSingleton", () => {
     });
   });
 
-  test("fires one-time jobs with mapped context and removes them", async () => {
+  test("fires one-time jobs with mapped context and deactivates them", async () => {
     const cron = CronSingleton.instance;
     const internals = cron as unknown as TCronSingletonInternals;
 
