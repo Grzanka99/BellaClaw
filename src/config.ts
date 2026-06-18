@@ -7,7 +7,7 @@ import {
 import {
   MODEL_OPENCODE_GO_DEEPSEEK_V4_FLASH,
   MODEL_OPENCODE_GO_DEEPSEEK_V4_PRO,
-  MODEL_OPENCODE_GO_KIMI_K2_6,
+  MODEL_OPENCODE_GO_GLM_5_2,
 } from "./services/ai/providers/opencode-go/models";
 import {
   MODEL_OPENROUTER_FREE,
@@ -87,10 +87,10 @@ export const Config: TConfig = {
       opencodeGo: {
         models: {
           toolCheap: MODEL_OPENCODE_GO_DEEPSEEK_V4_FLASH,
-          toolAccurate: MODEL_OPENCODE_GO_KIMI_K2_6,
+          toolAccurate: MODEL_OPENCODE_GO_GLM_5_2,
           general: MODEL_OPENCODE_GO_DEEPSEEK_V4_PRO,
-          chat: MODEL_OPENCODE_GO_KIMI_K2_6,
-          chatAccurate: MODEL_OPENCODE_GO_KIMI_K2_6,
+          chat: MODEL_OPENCODE_GO_GLM_5_2,
+          chatAccurate: MODEL_OPENCODE_GO_GLM_5_2,
         },
       },
     },
