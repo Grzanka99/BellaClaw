@@ -1,0 +1,59 @@
+<instructions>
+
+  <purpose>
+    Update existing scheduled reminders created by schedule-once or schedule-recurring.
+    Use this tool when the user wants to change the time, recurrence, group, or reminder content
+    of a reminder that already exists.
+  </purpose>
+
+  <tool>
+    <name>update-cron-job</name>
+    <description>
+      Updates an existing one-time or recurring cron job by name. Omitted fields keep their existing
+      values. Recurring reminders can update pattern. One-time reminders can update fireAt.
+      Reminder content updates replace the existing reminder content.
+    </description>
+  </tool>
+
+  <usage_rules>
+    <rule>Use list-cron-jobs first when the existing reminder name or type is uncertain</rule>
+    <rule>Always confirm the exact schedule or content change with the user before calling this tool</rule>
+    <rule>Use pattern only for existing recurring reminders</rule>
+    <rule>Use fireAt only for existing one-time reminders</rule>
+    <rule>Never set fireAt in the past</rule>
+    <rule>When changing generated reminder content, provide reminderPromptData and reminderFallbackText together</rule>
+    <rule>When changing direct reminder content, provide reminderText only</rule>
+    <rule>Omit fields that should stay unchanged</rule>
+    <rule>Inform the user of the updated next fire time after successfully updating</rule>
+  </usage_rules>
+
+  <examples>
+    <example>
+      <context>User says: "Move my dentist reminder to tomorrow at 10"</context>
+      <toolCall>
+        <name>dentist-reminder</name>
+        <fireAt>2026-05-23T10:00:00+02:00</fireAt>
+      </toolCall>
+      <reasoning>The existing one-time reminder keeps its content and only changes fireAt.</reasoning>
+    </example>
+
+    <example>
+      <context>User says: "Change my water reminder to every day at 10 instead"</context>
+      <toolCall>
+        <name>drink-water</name>
+        <pattern>0 10 * * *</pattern>
+      </toolCall>
+      <reasoning>The existing recurring reminder keeps its content and only changes pattern.</reasoning>
+    </example>
+
+    <example>
+      <context>User says: "Change the text of my standup reminder to say prepare notes"</context>
+      <toolCall>
+        <name>standup-reminder</name>
+        <reminderText>Reminder: prepare notes for standup.</reminderText>
+      </toolCall>
+      <reasoning>The reminder schedule stays unchanged and the direct reminder content is replaced.</reasoning>
+    </example>
+  </examples>
+
+</instructions>

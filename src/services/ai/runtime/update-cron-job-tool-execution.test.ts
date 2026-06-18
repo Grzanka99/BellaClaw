@@ -1,0 +1,161 @@
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import type { ChatMessageToolCall } from "@openrouter/sdk/models";
+import { ECronEngineJobType } from "../../../lib/cron-engine";
+import { CronSingleton } from "../../cron";
+import { resetCronEngineJobsTable } from "../../database/test-utils";
+import { SCHEDULE_ONCE_TOOL } from "../tools/schedule-once/definition";
+import { SCHEDULE_RECURRING_TOOL } from "../tools/schedule-recurring/definition";
+import { UPDATE_CRON_JOB_TOOL } from "../tools/update-cron-job/definition";
+import { executeToolCall } from "./tool-execution";
+
+type TCronSingletonStatic = {
+  _instance: CronSingleton | undefined;
+};
+
+function cleanupCronSingleton() {
+  const CronSingletonWithInternals = CronSingleton as unknown as TCronSingletonStatic;
+  CronSingletonWithInternals._instance?.destroy();
+}
+
+function createToolCall(id: string, name: string, argumentsText: string): ChatMessageToolCall {
+  return {
+    id,
+    type: "function",
+    function: {
+      name,
+      arguments: argumentsText,
+    },
+  };
+}
+
+describe("update-cron-job tool execution", () => {
+  beforeEach(async () => {
+    cleanupCronSingleton();
+    await resetCronEngineJobsTable();
+  });
+
+  afterEach(() => {
+    cleanupCronSingleton();
+  });
+
+  test("updates recurring reminder pattern and preserves content", async () => {
+    const chatId = "runtime-update-recurring-user";
+
+    await executeToolCall({
+      toolCall: createToolCall(
+        "schedule-cron",
+        SCHEDULE_RECURRING_TOOL,
+        JSON.stringify({
+          name: "drink-water",
+          pattern: "0 9 * * *",
+          group: "health",
+          reminderText: "Drink water.",
+        }),
+      ),
+      chatId,
+      allowedToolNames: new Set([SCHEDULE_RECURRING_TOOL, UPDATE_CRON_JOB_TOOL]),
+    });
+
+    const updateResult = await executeToolCall({
+      toolCall: createToolCall(
+        "update-cron",
+        UPDATE_CRON_JOB_TOOL,
+        JSON.stringify({
+          name: "drink-water",
+          pattern: "0 10 * * *",
+        }),
+      ),
+      chatId,
+      allowedToolNames: new Set([SCHEDULE_RECURRING_TOOL, UPDATE_CRON_JOB_TOOL]),
+    });
+
+    expect(updateResult.success).toBe(true);
+    expect(updateResult.data).toMatchObject({
+      name: "drink-water",
+      scope: chatId,
+      group: "health",
+      type: ECronEngineJobType.Recurring,
+      pattern: "0 10 * * *",
+      reminderText: "Drink water.",
+      reminderFallbackText: "Drink water.",
+    });
+  });
+
+  test("updates one-time reminder text and preserves fire time", async () => {
+    const chatId = "runtime-update-once-user";
+    const fireAt = new Date(Date.now() + 60_000).toISOString();
+
+    await executeToolCall({
+      toolCall: createToolCall(
+        "schedule-once",
+        SCHEDULE_ONCE_TOOL,
+        JSON.stringify({
+          name: "stretch-once",
+          fireAt,
+          reminderPromptData: '{"topic":"stretching"}',
+          reminderFallbackText: "Stretch now.",
+        }),
+      ),
+      chatId,
+      allowedToolNames: new Set([SCHEDULE_ONCE_TOOL, UPDATE_CRON_JOB_TOOL]),
+    });
+
+    const updateResult = await executeToolCall({
+      toolCall: createToolCall(
+        "update-once",
+        UPDATE_CRON_JOB_TOOL,
+        JSON.stringify({
+          name: "stretch-once",
+          reminderText: "Stand up and stretch.",
+        }),
+      ),
+      chatId,
+      allowedToolNames: new Set([SCHEDULE_ONCE_TOOL, UPDATE_CRON_JOB_TOOL]),
+    });
+
+    expect(updateResult.success).toBe(true);
+    expect(updateResult.data).toMatchObject({
+      name: "stretch-once",
+      scope: chatId,
+      type: ECronEngineJobType.OneTime,
+      pattern: undefined,
+      reminderText: "Stand up and stretch.",
+      reminderPromptData: undefined,
+      reminderFallbackText: "Stand up and stretch.",
+    });
+  });
+
+  test("rejects one-time schedule fields for recurring reminders", async () => {
+    const chatId = "runtime-update-invalid-user";
+
+    await executeToolCall({
+      toolCall: createToolCall(
+        "schedule-cron",
+        SCHEDULE_RECURRING_TOOL,
+        JSON.stringify({
+          name: "drink-water",
+          pattern: "0 9 * * *",
+          reminderText: "Drink water.",
+        }),
+      ),
+      chatId,
+      allowedToolNames: new Set([SCHEDULE_RECURRING_TOOL, UPDATE_CRON_JOB_TOOL]),
+    });
+
+    const updateResult = await executeToolCall({
+      toolCall: createToolCall(
+        "update-cron",
+        UPDATE_CRON_JOB_TOOL,
+        JSON.stringify({
+          name: "drink-water",
+          fireAt: new Date(Date.now() + 60_000).toISOString(),
+        }),
+      ),
+      chatId,
+      allowedToolNames: new Set([SCHEDULE_RECURRING_TOOL, UPDATE_CRON_JOB_TOOL]),
+    });
+
+    expect(updateResult.success).toBe(false);
+    expect(updateResult.error).toContain("fireAt can only update one-time reminders");
+  });
+});
