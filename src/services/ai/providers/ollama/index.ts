@@ -1,6 +1,6 @@
-import { Config } from "../../../../config";
 import type { TOption } from "../../../../types";
 import { createLogger } from "../../../../utils/logger";
+import { EConfigKey, type TConfigRecord } from "../../../settings/schema";
 import { readXmlAndInjectConfig } from "../../instructions/read-xml-and-inject-config";
 import {
   EAssistantLoopConversationItemKind,
@@ -21,9 +21,6 @@ import {
   convertToolsForOllama,
   type TOllamaMessage,
 } from "./converters";
-
-export type TOllamaModel =
-  (typeof Config.ai.providers.ollama.models)[keyof typeof Config.ai.providers.ollama.models];
 
 const OLLAMA_BASE_URL = Bun.env.OLLAMA_BASE_URL ?? "http://localhost:11434";
 
@@ -101,8 +98,8 @@ function isOllamaChatResponse(value: unknown): value is TOllamaChatResponse {
   return true;
 }
 
-export async function readBaseSystemText(): Promise<string> {
-  return readXmlAndInjectConfig(BASE_SYSTEM_INSTRUCTIONS_PATH, Config);
+export async function readBaseSystemText(settings: TConfigRecord): Promise<string> {
+  return readXmlAndInjectConfig(BASE_SYSTEM_INSTRUCTIONS_PATH, settings);
 }
 
 export function buildOllamaSystemContent(
@@ -227,30 +224,28 @@ export class OllamaAiProvider {
     return OllamaAiProvider._instance;
   }
 
-  public getModel(purpose: EModelPurpose): TOllamaModel {
-    const { models } = Config.ai.providers.ollama;
-
+  public getModel(purpose: EModelPurpose, settings: TConfigRecord): string {
     switch (purpose) {
       case EModelPurpose.ToolCheap:
-        return models.toolCheap;
+        return settings[EConfigKey.AiProvidersOllamaModelsToolCheap];
       case EModelPurpose.General:
-        return models.general;
+        return settings[EConfigKey.AiProvidersOllamaModelsGeneral];
       case EModelPurpose.Chat:
-        return models.chat;
+        return settings[EConfigKey.AiProvidersOllamaModelsChat];
       case EModelPurpose.ChatAccurate:
-        return models.chatAccurate;
+        return settings[EConfigKey.AiProvidersOllamaModelsChatAccurate];
       case EModelPurpose.ToolAccurate:
-        return models.toolAccurate;
+        return settings[EConfigKey.AiProvidersOllamaModelsToolAccurate];
     }
   }
 
   public async requestAssistantTurn(
     args: TRequestAssistantTurnArgs,
   ): Promise<TOption<TRuntimeAssistantTurn>> {
-    const model = this.getModel(args.purpose);
+    const model = this.getModel(args.purpose, args.settings);
 
     this.logger.info(`requestAssistantTurn: start, model=${model}`);
-    const baseSystemText = await readBaseSystemText();
+    const baseSystemText = await readBaseSystemText(args.settings);
     const messages = buildOllamaMessages(args);
 
     const res = await ollamaChat({

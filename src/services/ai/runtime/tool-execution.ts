@@ -1,6 +1,7 @@
 import type { ChatMessageToolCall } from "@openrouter/sdk/models";
 import type { TOption } from "../../../types";
 import { logger } from "../../../utils/logger";
+import { EConfigKey, type TConfigRecord } from "../../settings/schema";
 import { DEFINE_MESSAGE_IMPORTANCE_TOOL } from "../tools/define-message-importance/definition";
 import { LIST_CRON_JOBS_TOOL } from "../tools/list-cron-jobs/definition";
 import { SCHEDULE_ONCE_TOOL } from "../tools/schedule-once/definition";
@@ -26,9 +27,11 @@ export async function executeToolCall(args: {
   toolCall: ChatMessageToolCall;
   chatId: TOption<string>;
   allowedToolNames: Set<string>;
+  settings: TConfigRecord;
 }): Promise<TNormalizedToolResult> {
-  const { toolCall, chatId, allowedToolNames } = args;
+  const { toolCall, chatId, allowedToolNames, settings } = args;
   const toolName = toolCall.function.name;
+  const ownerTimezone = settings[EConfigKey.AiInstructionsTimezone];
 
   if (!allowedToolNames.has(toolName)) {
     return createFailedToolResult(toolCall, `Unknown tool requested: ${toolName}`);
@@ -44,19 +47,19 @@ export async function executeToolCall(args: {
       return executeSearchMemoryTool(toolCall, chatId);
     }
     case LIST_CRON_JOBS_TOOL: {
-      return executeListCronJobsTool(toolCall, chatId);
+      return executeListCronJobsTool(toolCall, chatId, ownerTimezone);
     }
     case SCHEDULE_ONCE_TOOL: {
-      return executeScheduleOnceTool(toolCall, chatId);
+      return executeScheduleOnceTool(toolCall, chatId, ownerTimezone);
     }
     case SCHEDULE_RECURRING_TOOL: {
-      return executeScheduleRecurringTool(toolCall, chatId);
+      return executeScheduleRecurringTool(toolCall, chatId, ownerTimezone);
     }
     case UNSCHEDULE_CRON_JOB_TOOL: {
-      return executeUnscheduleCronJobTool(toolCall, chatId);
+      return executeUnscheduleCronJobTool(toolCall, chatId, ownerTimezone);
     }
     case UPDATE_CRON_JOB_TOOL: {
-      return executeUpdateCronJobTool(toolCall, chatId);
+      return executeUpdateCronJobTool(toolCall, chatId, ownerTimezone);
     }
     case WEB_SEARCH_TOOL: {
       return executeWebSearchTool(toolCall);

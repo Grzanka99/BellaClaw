@@ -1,4 +1,3 @@
-import { Config } from "../../config";
 import { AsyncQueue } from "../../utils/async-queue";
 import { createLogger, type TLogger } from "../../utils/logger";
 import {
@@ -21,7 +20,9 @@ import { unscheduleCronJobTool } from "../ai/tools/unschedule-cron-job/definitio
 import { updateCronJobTool } from "../ai/tools/update-cron-job/definition";
 import { Memory } from "../memory";
 import { EMemoryImportance, type TMemory } from "../memory/types";
-import { MessageHandlerInstructions } from "./instructions";
+import { SettingsService } from "../settings";
+import { EConfigKey, type TConfigRecord } from "../settings/schema";
+import { getMessageHandlerInstructions } from "./instructions";
 import type { TIncommingMessage, TOutgoingMessage } from "./types";
 
 export class MessageHandler {
@@ -54,9 +55,12 @@ export class MessageHandler {
     const handleMessageStart = performance.now();
     this.logger.info("handleMessage: start");
 
+    const settings = await SettingsService.instance.getAll(message.chatId);
+    const instructions = await getMessageHandlerInstructions(message.chatId, settings);
+
     const parallelStart = performance.now();
     const [importance, last30] = await Promise.all([
-      this.defineMessageImportance(message.message.content),
+      this.defineMessageImportance(message.message.content, message.chatId, settings),
       this.retrieveMemory(message.chatId),
     ]);
     this.logger.info(
@@ -76,27 +80,27 @@ export class MessageHandler {
 
     history.push({
       role: ERole.System,
-      content: createCurrentTimeContext(),
+      content: createCurrentTimeContext(settings),
     });
 
     const tools = [
-      { definition: searchMemoryTool, instructions: MessageHandlerInstructions.searchMemory },
-      { definition: listCronJobsTool, instructions: MessageHandlerInstructions.listCronJobs },
-      { definition: scheduleOnceTool, instructions: MessageHandlerInstructions.scheduleOnce },
+      { definition: searchMemoryTool, instructions: instructions.searchMemory },
+      { definition: listCronJobsTool, instructions: instructions.listCronJobs },
+      { definition: scheduleOnceTool, instructions: instructions.scheduleOnce },
       {
         definition: scheduleRecurringTool,
-        instructions: MessageHandlerInstructions.scheduleRecurring,
+        instructions: instructions.scheduleRecurring,
       },
       {
         definition: unscheduleCronJobTool,
-        instructions: MessageHandlerInstructions.unscheduleCronJob,
+        instructions: instructions.unscheduleCronJob,
       },
       {
         definition: updateCronJobTool,
-        instructions: MessageHandlerInstructions.updateCronJob,
+        instructions: instructions.updateCronJob,
       },
-      { definition: webSearchTool, instructions: MessageHandlerInstructions.webSearch },
-      { definition: webFetchTool, instructions: MessageHandlerInstructions.webFetch },
+      { definition: webSearchTool, instructions: instructions.webSearch },
+      { definition: webFetchTool, instructions: instructions.webFetch },
     ];
 
     const chatStart = performance.now();
@@ -114,6 +118,7 @@ export class MessageHandler {
       },
       tools,
       chatId: message.chatId,
+      settings,
     });
     this.logger.info(
       `handleMessage: AI chat completed (${(performance.now() - chatStart).toFixed(0)}ms)`,
@@ -128,7 +133,11 @@ export class MessageHandler {
 
     this.queue.enqueue(async () => {
       const respImpStart = performance.now();
-      const responseImportance = await this.defineMessageImportance(finalResponse);
+      const responseImportance = await this.defineMessageImportance(
+        finalResponse,
+        message.chatId,
+        settings,
+      );
       this.logger.info(
         `handleMessage: response importance: ${responseImportance} (${(performance.now() - respImpStart).toFixed(0)}ms)`,
       );
@@ -154,12 +163,18 @@ export class MessageHandler {
     return finalResponse;
   }
 
-  private async defineMessageImportance(message: string): Promise<EMemoryImportance> {
+  private async defineMessageImportance(
+    message: string,
+    ownerKey: string,
+    settings: TConfigRecord,
+  ): Promise<EMemoryImportance> {
     const start = performance.now();
+
+    const instructions = await getMessageHandlerInstructions(ownerKey, settings);
 
     const system: THistoryItem = {
       role: ERole.System,
-      content: MessageHandlerInstructions.defineMessageImportance,
+      content: instructions.defineMessageImportance,
     };
 
     const uMessage: TPrompt = {
@@ -174,6 +189,7 @@ export class MessageHandler {
       purpose: EModelPurpose.ToolCheap,
       chatId: undefined,
       user: undefined,
+      settings,
     });
 
     const realRes = res.toolResults.find(
@@ -249,9 +265,9 @@ export class MessageHandler {
   }
 }
 
-function createCurrentTimeContext() {
+function createCurrentTimeContext(settings: TConfigRecord) {
   const now = new Date();
-  const timezone = Config.ai.instructions.timezone;
+  const timezone = settings[EConfigKey.AiInstructionsTimezone];
 
   return [
     "Current time context:",

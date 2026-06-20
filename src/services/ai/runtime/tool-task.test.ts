@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { ChatMessageToolCall, ToolDefinitionJson } from "@openrouter/sdk/models";
+import { DefaultConfigRecord } from "../../settings/schema";
 import { defineMessageImportanceTool } from "../tools/define-message-importance/definition";
 import { EModelPurpose, ERole, type TPrompt, type TToolEntry } from "../types";
 import { runToolTask } from "./tool-task";
@@ -39,6 +40,7 @@ function createArgs(overrides: Partial<TRunToolTaskArgs>): TRunToolTaskArgs {
       username: "wanna",
       displayName: "Misiaczek",
     },
+    settings: DefaultConfigRecord,
     requestAssistantTurn: async () => ({ response: "", toolCalls: [] }),
     ...overrides,
   };

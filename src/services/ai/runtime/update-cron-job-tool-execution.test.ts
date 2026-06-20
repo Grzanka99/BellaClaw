@@ -3,6 +3,7 @@ import type { ChatMessageToolCall } from "@openrouter/sdk/models";
 import { ECronEngineJobType } from "../../../lib/cron-engine";
 import { CronSingleton } from "../../cron";
 import { resetCronEngineJobsTable } from "../../database/test-utils";
+import { DefaultConfigRecord } from "../../settings/schema";
 import { SCHEDULE_ONCE_TOOL } from "../tools/schedule-once/definition";
 import { SCHEDULE_RECURRING_TOOL } from "../tools/schedule-recurring/definition";
 import { UPDATE_CRON_JOB_TOOL } from "../tools/update-cron-job/definition";
@@ -54,6 +55,7 @@ describe("update-cron-job tool execution", () => {
       ),
       chatId,
       allowedToolNames: new Set([SCHEDULE_RECURRING_TOOL, UPDATE_CRON_JOB_TOOL]),
+      settings: DefaultConfigRecord,
     });
 
     const updateResult = await executeToolCall({
@@ -67,6 +69,7 @@ describe("update-cron-job tool execution", () => {
       ),
       chatId,
       allowedToolNames: new Set([SCHEDULE_RECURRING_TOOL, UPDATE_CRON_JOB_TOOL]),
+      settings: DefaultConfigRecord,
     });
 
     expect(updateResult.success).toBe(true);
@@ -105,6 +108,7 @@ describe("update-cron-job tool execution", () => {
       ),
       chatId,
       allowedToolNames: new Set([UPDATE_CRON_JOB_TOOL]),
+      settings: DefaultConfigRecord,
     });
 
     expect(updateResult.success).toBe(true);
@@ -135,6 +139,7 @@ describe("update-cron-job tool execution", () => {
       ),
       chatId,
       allowedToolNames: new Set([SCHEDULE_ONCE_TOOL, UPDATE_CRON_JOB_TOOL]),
+      settings: DefaultConfigRecord,
     });
 
     const updateResult = await executeToolCall({
@@ -148,6 +153,7 @@ describe("update-cron-job tool execution", () => {
       ),
       chatId,
       allowedToolNames: new Set([SCHEDULE_ONCE_TOOL, UPDATE_CRON_JOB_TOOL]),
+      settings: DefaultConfigRecord,
     });
 
     expect(updateResult.success).toBe(true);
@@ -177,6 +183,7 @@ describe("update-cron-job tool execution", () => {
       ),
       chatId,
       allowedToolNames: new Set([SCHEDULE_RECURRING_TOOL, UPDATE_CRON_JOB_TOOL]),
+      settings: DefaultConfigRecord,
     });
 
     const updateResult = await executeToolCall({
@@ -190,6 +197,7 @@ describe("update-cron-job tool execution", () => {
       ),
       chatId,
       allowedToolNames: new Set([SCHEDULE_RECURRING_TOOL, UPDATE_CRON_JOB_TOOL]),
+      settings: DefaultConfigRecord,
     });
 
     expect(updateResult.success).toBe(false);

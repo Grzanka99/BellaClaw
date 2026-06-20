@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { ChatMessageToolCall } from "@openrouter/sdk/models";
 import { CronSingleton } from "../../cron";
 import { resetCronEngineJobsTable } from "../../database/test-utils";
+import { DefaultConfigRecord } from "../../settings/schema";
 import { DEFINE_MESSAGE_IMPORTANCE_TOOL } from "../tools/define-message-importance/definition";
 import { LIST_CRON_JOBS_TOOL } from "../tools/list-cron-jobs/definition";
 import { SCHEDULE_RECURRING_TOOL } from "../tools/schedule-recurring/definition";
@@ -48,6 +49,7 @@ describe("executeToolCall", () => {
       toolCall,
       chatId: undefined,
       allowedToolNames: new Set([DEFINE_MESSAGE_IMPORTANCE_TOOL]),
+      settings: DefaultConfigRecord,
     });
 
     expect(result).toEqual({
@@ -64,11 +66,13 @@ describe("executeToolCall", () => {
       toolCall: createToolCall("bad-json", DEFINE_MESSAGE_IMPORTANCE_TOOL, "{"),
       chatId: undefined,
       allowedToolNames: new Set([DEFINE_MESSAGE_IMPORTANCE_TOOL]),
+      settings: DefaultConfigRecord,
     });
     const unknownTool = await executeToolCall({
       toolCall: createToolCall("unknown", "unknown-tool", "{}"),
       chatId: undefined,
       allowedToolNames: new Set([DEFINE_MESSAGE_IMPORTANCE_TOOL]),
+      settings: DefaultConfigRecord,
     });
 
     expect(invalidJson).toMatchObject({
@@ -91,6 +95,7 @@ describe("executeToolCall", () => {
       toolCall: createToolCall("list-cron", LIST_CRON_JOBS_TOOL, "{}"),
       chatId: undefined,
       allowedToolNames: new Set([LIST_CRON_JOBS_TOOL]),
+      settings: DefaultConfigRecord,
     });
 
     expect(result).toEqual({
@@ -118,11 +123,13 @@ describe("executeToolCall", () => {
       ),
       chatId,
       allowedToolNames: new Set([SCHEDULE_RECURRING_TOOL, LIST_CRON_JOBS_TOOL]),
+      settings: DefaultConfigRecord,
     });
     const listResult = await executeToolCall({
       toolCall: createToolCall("list-cron", LIST_CRON_JOBS_TOOL, "{}"),
       chatId,
       allowedToolNames: new Set([SCHEDULE_RECURRING_TOOL, LIST_CRON_JOBS_TOOL]),
+      settings: DefaultConfigRecord,
     });
 
     expect(scheduleResult.success).toBe(true);
@@ -162,6 +169,7 @@ describe("executeToolCall", () => {
       ),
       chatId: "runtime-cron-user",
       allowedToolNames: new Set([SCHEDULE_RECURRING_TOOL]),
+      settings: DefaultConfigRecord,
     });
 
     expect(result.success).toBe(false);

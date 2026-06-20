@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Config } from "../../../config";
+import { DefaultConfigRecord, EConfigKey, type TConfigRecord } from "../../settings/schema";
 
 const mockConfig = {
   ...Config,
@@ -144,5 +145,27 @@ describe("readXmlAndInjectConfig", () => {
     expect(result).toContain("Bellatrix");
     expect(result).toContain("Discord direct messages");
     expect(result).not.toContain("{{config.");
+  });
+
+  test("resolves placeholders from a flat TConfigRecord keyed by dotted strings", async () => {
+    const { readXmlAndInjectConfig } = await import("./read-xml-and-inject-config");
+
+    const record: TConfigRecord = {
+      ...DefaultConfigRecord,
+      [EConfigKey.AiInstructionsAssistantName]: "Nyx",
+      [EConfigKey.AiInstructionsTimezone]: "America/New_York",
+      [EConfigKey.AiInstructionsLanguage]: "English",
+    };
+
+    const tempPath = `/tmp/test-inject-record-${Date.now()}.xml`;
+    await Bun.write(
+      tempPath,
+      `Name: {{config.ai.instructions.assistantName}}, TZ: {{config.ai.instructions.timezone}}, Lang: {{config.ai.instructions.language}}`,
+    );
+
+    const result = await readXmlAndInjectConfig(tempPath, record);
+    expect(result).toBe("Name: Nyx, TZ: America/New_York, Lang: English");
+
+    await Bun.file(tempPath).delete();
   });
 });

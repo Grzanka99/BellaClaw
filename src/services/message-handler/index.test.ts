@@ -6,6 +6,8 @@ import { UNSCHEDULE_CRON_JOB_TOOL } from "../ai/tools/unschedule-cron-job/defini
 import { UPDATE_CRON_JOB_TOOL } from "../ai/tools/update-cron-job/definition";
 import { ERole } from "../ai/types";
 import { Memory } from "../memory";
+import { SettingsService } from "../settings";
+import { DefaultConfigRecord } from "../settings/schema";
 import { MessageHandler } from "./index";
 
 const EXPECTED_CRON_TOOL_NAMES = [
@@ -34,14 +36,29 @@ function resetMemoryInstance() {
   MemoryWithPrivate._instance = undefined;
 }
 
+function mockSettingsService() {
+  const SettingsServiceStatic = SettingsService as unknown as { _instance: unknown };
+  SettingsServiceStatic._instance = {
+    getAll: mock(async () => DefaultConfigRecord),
+  };
+}
+
+function resetSettingsInstance() {
+  const SettingsServiceStatic = SettingsService as unknown as { _instance: unknown };
+  SettingsServiceStatic._instance = undefined;
+}
+
 describe("MessageHandler", () => {
   beforeEach(() => {
     resetMemoryInstance();
+    resetSettingsInstance();
+    mockSettingsService();
   });
 
   afterEach(() => {
     (MessageHandler as unknown as { _instances: Map<string, MessageHandler> })._instances.clear();
     resetMemoryInstance();
+    resetSettingsInstance();
   });
 
   test("handleMessage passes cron tools into runAssistantToolLoop", async () => {

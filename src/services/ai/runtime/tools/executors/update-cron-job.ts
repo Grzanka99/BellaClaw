@@ -16,6 +16,7 @@ import { createFailedToolResult, createSuccessfulToolResult } from "../results";
 export async function executeUpdateCronJobTool(
   toolCall: ChatMessageToolCall,
   chatId: TOption<string>,
+  ownerTimezone: string,
 ): Promise<TNormalizedToolResult> {
   const resolvedChatId = requireChatId(toolCall, chatId);
 
@@ -75,6 +76,7 @@ export async function executeUpdateCronJobTool(
       reminderPromptData,
       reminderFallbackText,
       overwrite: true,
+      timezone: existing.timezone,
     });
 
     if ("error" in result) {
@@ -84,7 +86,7 @@ export async function executeUpdateCronJobTool(
       );
     }
 
-    return createSuccessfulToolResult(toolCall, serializeCronJobForModel(result));
+    return createSuccessfulToolResult(toolCall, serializeCronJobForModel(result, ownerTimezone));
   }
 
   if (parsed.data.pattern !== undefined) {
@@ -103,6 +105,7 @@ export async function executeUpdateCronJobTool(
     reminderPromptData,
     reminderFallbackText,
     overwrite: true,
+    timezone: existing.timezone,
   });
 
   if ("error" in result) {
@@ -112,5 +115,5 @@ export async function executeUpdateCronJobTool(
     );
   }
 
-  return createSuccessfulToolResult(toolCall, serializeCronJobForModel(result));
+  return createSuccessfulToolResult(toolCall, serializeCronJobForModel(result, ownerTimezone));
 }

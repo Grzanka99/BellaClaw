@@ -2,6 +2,8 @@ import { Config } from "../config";
 import type { TCronEngineJobContext } from "../lib/cron-engine";
 import type { AiConnector } from "../services/ai/api";
 import { EModelPurpose, ERole, type THistoryItem, type TPrompt } from "../services/ai/types";
+import { SettingsService } from "../services/settings";
+import { DefaultConfigRecord, EConfigKey, type TConfigRecord } from "../services/settings/schema";
 import type { TOption } from "../types";
 import { createLogger } from "../utils/logger";
 
@@ -30,6 +32,28 @@ export async function generateReminderText(
     return ctx.reminderFallbackText;
   }
 
+  let timezone: TOption<string> = ctx.timezone;
+  let settings: TConfigRecord = DefaultConfigRecord;
+
+  if (ctx.scope !== undefined) {
+    try {
+      const loaded = await SettingsService.instance.getAll(ctx.scope);
+      settings = loaded;
+
+      if (timezone === undefined) {
+        timezone = loaded[EConfigKey.AiInstructionsTimezone];
+      }
+    } catch (error) {
+      logger.warning(
+        `generateReminderText: failed to load settings for scope "${ctx.scope}": ${String(error)}`,
+      );
+    }
+  }
+
+  if (timezone === undefined) {
+    timezone = Config.ai.instructions.timezone;
+  }
+
   const history: THistoryItem[] = [
     {
       role: ERole.System,
@@ -48,9 +72,7 @@ export async function generateReminderText(
           ctx.reminderPromptData,
           "",
           "Firing context JSON:",
-          JSON.stringify(
-            createFiringContext(ctx.nextRunAt, ctx.timezone ?? Config.ai.instructions.timezone),
-          ),
+          JSON.stringify(createFiringContext(ctx.nextRunAt, timezone)),
         ].join("\n"),
       },
     ],
@@ -64,6 +86,7 @@ export async function generateReminderText(
       purpose: EModelPurpose.ChatAccurate,
       chatId: undefined,
       user: undefined,
+      settings,
     });
 
     const generatedText = res.assistantResponse.trim();

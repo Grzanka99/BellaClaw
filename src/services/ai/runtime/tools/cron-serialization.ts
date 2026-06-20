@@ -17,8 +17,8 @@ function formatLocalTime(date: Date, timezone: string) {
   });
 }
 
-export function serializeCronJobForModel(job: TCronEngineJob) {
-  const timezone = job.timezone ?? Config.ai.instructions.timezone;
+export function serializeCronJobForModel(job: TCronEngineJob, timezoneFallback?: string) {
+  const timezone = job.timezone ?? timezoneFallback ?? Config.ai.instructions.timezone;
 
   return {
     ...job,
@@ -31,6 +31,6 @@ export function serializeCronJobForModel(job: TCronEngineJob) {
   };
 }
 
-export function serializeCronJobsForModel(jobs: TCronEngineJob[]) {
-  return jobs.map((job) => serializeCronJobForModel(job));
+export function serializeCronJobsForModel(jobs: TCronEngineJob[], timezoneFallback?: string) {
+  return jobs.map((job) => serializeCronJobForModel(job, timezoneFallback));
 }

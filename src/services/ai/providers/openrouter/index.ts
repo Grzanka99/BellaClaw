@@ -1,8 +1,8 @@
 import { OpenRouter } from "@openrouter/sdk";
 import type { AssistantMessage, Message } from "@openrouter/sdk/models";
-import { Config } from "../../../../config";
 import type { TOption } from "../../../../types";
 import { createLogger } from "../../../../utils/logger";
+import { EConfigKey, type TConfigRecord } from "../../../settings/schema";
 import { readXmlAndInjectConfig } from "../../instructions/read-xml-and-inject-config";
 import {
   EAssistantLoopConversationItemKind,
@@ -12,9 +12,6 @@ import {
 } from "../../runtime";
 import { extractTextContent, serializeForModel } from "../../runtime/serialization";
 import { EModelPurpose, ERole } from "../../types";
-
-export type TOpenrouterModel =
-  (typeof Config.ai.providers.openrouter.models)[keyof typeof Config.ai.providers.openrouter.models];
 
 const OPENROUTER_API_KEY = Bun.env.OPENROUTER_API_KEY ?? "";
 
@@ -27,8 +24,8 @@ function buildUserContextMessage(user: TRuntimeUser): Message {
   };
 }
 
-export async function readBaseSystemText(): Promise<string> {
-  return readXmlAndInjectConfig(BASE_SYSTEM_INSTRUCTIONS_PATH, Config);
+export async function readBaseSystemText(settings: TConfigRecord): Promise<string> {
+  return readXmlAndInjectConfig(BASE_SYSTEM_INSTRUCTIONS_PATH, settings);
 }
 
 export function buildOpenrouterMessages(
@@ -111,30 +108,28 @@ export class OpenrouterAiProvider {
     return OpenrouterAiProvider._instance;
   }
 
-  public getModel(purpose: EModelPurpose): TOpenrouterModel {
-    const { models } = Config.ai.providers.openrouter;
-
+  public getModel(purpose: EModelPurpose, settings: TConfigRecord): string {
     switch (purpose) {
       case EModelPurpose.ToolCheap:
-        return models.toolCheap;
+        return settings[EConfigKey.AiProvidersOpenrouterModelsToolCheap];
       case EModelPurpose.General:
-        return models.general;
+        return settings[EConfigKey.AiProvidersOpenrouterModelsGeneral];
       case EModelPurpose.ToolAccurate:
-        return models.toolAccurate;
+        return settings[EConfigKey.AiProvidersOpenrouterModelsToolAccurate];
       case EModelPurpose.Chat:
-        return models.chat;
+        return settings[EConfigKey.AiProvidersOpenrouterModelsChat];
       case EModelPurpose.ChatAccurate:
-        return models.chatAccurate;
+        return settings[EConfigKey.AiProvidersOpenrouterModelsChatAccurate];
     }
   }
 
   public async requestAssistantTurn(
     args: TRequestAssistantTurnArgs,
   ): Promise<TOption<TRuntimeAssistantTurn>> {
-    const model = this.getModel(args.purpose);
+    const model = this.getModel(args.purpose, args.settings);
 
     this.logger.info(`Calling ${model}`);
-    const baseSystemText = await readBaseSystemText();
+    const baseSystemText = await readBaseSystemText(args.settings);
     const messages = buildOpenrouterMessages(args, baseSystemText);
 
     const res = await this.openrouter.chat.send({

@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
-import { Config } from "../../config";
 import { ERole } from "../ai/types";
 import { Memory } from "../memory";
+import { SettingsService } from "../settings";
+import { DefaultConfigRecord, EConfigKey } from "../settings/schema";
 import { MessageHandler } from "./index";
 
 type TAiConnectorInternals = {
@@ -22,14 +23,35 @@ function resetMemoryInstance() {
   MemoryWithPrivate._instance = undefined;
 }
 
+function resetSettingsInstance() {
+  const SettingsServiceStatic = SettingsService as unknown as { _instance: unknown };
+  SettingsServiceStatic._instance = undefined;
+}
+
+const OWNER_TIMEZONE = "America/New_York";
+
+function mockSettingsService() {
+  const record = {
+    ...DefaultConfigRecord,
+    [EConfigKey.AiInstructionsTimezone]: OWNER_TIMEZONE,
+  };
+  const SettingsServiceStatic = SettingsService as unknown as { _instance: unknown };
+  SettingsServiceStatic._instance = {
+    getAll: mock(async () => record),
+  };
+}
+
 describe("MessageHandler current time context", () => {
   beforeEach(() => {
     resetMemoryInstance();
+    resetSettingsInstance();
+    mockSettingsService();
   });
 
   afterEach(() => {
     (MessageHandler as unknown as { _instances: Map<string, MessageHandler> })._instances.clear();
     resetMemoryInstance();
+    resetSettingsInstance();
   });
 
   test("passes current time context into assistant tool loop history", async () => {
@@ -82,7 +104,7 @@ describe("MessageHandler current time context", () => {
     expect(currentTimeContext).toBeDefined();
     expect(currentTimeContext?.role).toBe(ERole.System);
     expect(currentTimeContext?.content).toContain("UTC:");
-    expect(currentTimeContext?.content).toContain(`Timezone: ${Config.ai.instructions.timezone}`);
+    expect(currentTimeContext?.content).toContain(`Timezone: ${OWNER_TIMEZONE}`);
     expect(currentTimeContext?.content).toContain("Local:");
     expect(currentTimeContext?.content).toContain("Weekday:");
   });

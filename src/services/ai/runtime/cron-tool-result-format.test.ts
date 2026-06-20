@@ -3,6 +3,7 @@ import type { ChatMessageToolCall } from "@openrouter/sdk/models";
 import { Config } from "../../../config";
 import { CronSingleton } from "../../cron";
 import { resetCronEngineJobsTable } from "../../database/test-utils";
+import { DefaultConfigRecord } from "../../settings/schema";
 import { LIST_CRON_JOBS_TOOL } from "../tools/list-cron-jobs/definition";
 import { SCHEDULE_RECURRING_TOOL } from "../tools/schedule-recurring/definition";
 import { executeToolCall } from "./tool-execution";
@@ -67,11 +68,13 @@ describe("cron tool result formatting", () => {
       ),
       chatId,
       allowedToolNames: new Set([SCHEDULE_RECURRING_TOOL, LIST_CRON_JOBS_TOOL]),
+      settings: DefaultConfigRecord,
     });
     const listResult = await executeToolCall({
       toolCall: createToolCall("list-cron", LIST_CRON_JOBS_TOOL, "{}"),
       chatId,
       allowedToolNames: new Set([SCHEDULE_RECURRING_TOOL, LIST_CRON_JOBS_TOOL]),
+      settings: DefaultConfigRecord,
     });
 
     expect(scheduleResult.success).toBe(true);

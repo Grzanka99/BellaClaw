@@ -11,6 +11,7 @@ import { createFailedToolResult, createSuccessfulToolResult } from "../results";
 export async function executeListCronJobsTool(
   toolCall: ChatMessageToolCall,
   chatId: TOption<string>,
+  ownerTimezone: string,
 ): Promise<TNormalizedToolResult> {
   const resolvedChatId = requireChatId(toolCall, chatId);
 
@@ -29,5 +30,5 @@ export async function executeListCronJobsTool(
 
   const jobs = await CronSingleton.instance.getAllJobs(resolvedChatId);
 
-  return createSuccessfulToolResult(toolCall, serializeCronJobsForModel(jobs));
+  return createSuccessfulToolResult(toolCall, serializeCronJobsForModel(jobs, ownerTimezone));
 }

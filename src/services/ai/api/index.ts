@@ -1,5 +1,6 @@
-import { Config } from "../../../config";
+import type { TOption } from "../../../types";
 import { createLogger } from "../../../utils/logger";
+import { EConfigKey, type TConfigRecord } from "../../settings/schema";
 import { OllamaAiProvider } from "../providers/ollama";
 import { OpencodeGoAiProvider } from "../providers/opencode-go";
 import { OpenrouterAiProvider } from "../providers/openrouter";
@@ -8,6 +9,8 @@ import {
   runToolTask,
   type TAssistantToolLoopArgs,
   type TAssistantToolLoopResult,
+  type TRequestAssistantTurnArgs,
+  type TRuntimeAssistantTurn,
   type TRuntimeUser,
   type TToolTaskArgs,
   type TToolTaskResult,
@@ -39,13 +42,18 @@ export type { THistoryItem, TPrompt } from "../types";
 export { EAiProvider, EModelPurpose, ERole } from "../types";
 export type TAiUser = TRuntimeUser;
 
+type TAiProviderInstance = {
+  requestAssistantTurn: (
+    args: TRequestAssistantTurnArgs,
+  ) => Promise<TOption<TRuntimeAssistantTurn>>;
+};
+
 export class AiConnector {
   private static _instance: AiConnector;
   private logger = createLogger("AI CONNECTOR");
-  private providerName = Config.ai.provider;
 
   private constructor() {
-    this.logger.info(`Using provider: ${this.providerName}`);
+    this.logger.info("AiConnector initialized");
   }
 
   public static get instance(): AiConnector {
@@ -56,8 +64,10 @@ export class AiConnector {
     return AiConnector._instance;
   }
 
-  private get provider() {
-    switch (this.providerName) {
+  private selectProvider(settings: TConfigRecord): TAiProviderInstance {
+    const providerName = settings[EConfigKey.AiProvider];
+
+    switch (providerName) {
       case EAiProvider.Ollama: {
         return OllamaAiProvider.instance;
       }
@@ -68,7 +78,7 @@ export class AiConnector {
         return OpencodeGoAiProvider.instance;
       }
       default: {
-        return OllamaAiProvider.instance;
+        throw new Error(`Unknown AI provider: ${providerName}`);
       }
     }
   }
@@ -76,17 +86,22 @@ export class AiConnector {
   public async runAssistantToolLoop(
     args: TAssistantToolLoopArgs,
   ): Promise<TAssistantToolLoopResult> {
+    if (args.requestAssistantTurn !== undefined) {
+      return runAssistantToolLoop({ ...args, requestAssistantTurn: args.requestAssistantTurn });
+    }
+
+    const provider = this.selectProvider(args.settings);
     return runAssistantToolLoop({
       ...args,
-      requestAssistantTurn:
-        args.requestAssistantTurn ?? this.provider.requestAssistantTurn.bind(this.provider),
+      requestAssistantTurn: provider.requestAssistantTurn.bind(provider),
     });
   }
 
   public async runToolTask(args: TToolTaskArgs): Promise<TToolTaskResult> {
+    const provider = this.selectProvider(args.settings);
     return runToolTask({
       ...args,
-      requestAssistantTurn: this.provider.requestAssistantTurn.bind(this.provider),
+      requestAssistantTurn: provider.requestAssistantTurn.bind(provider),
     });
   }
 }

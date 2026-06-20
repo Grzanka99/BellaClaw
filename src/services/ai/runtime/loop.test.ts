@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { ChatMessageToolCall, ToolDefinitionJson } from "@openrouter/sdk/models";
+import { DefaultConfigRecord } from "../../settings/schema";
 import { defineMessageImportanceTool } from "../tools/define-message-importance/definition";
 import { EModelPurpose, ERole, type TPrompt, type TToolEntry } from "../types";
 import { runAssistantToolLoop } from "./loop";
@@ -43,6 +44,7 @@ function createLoopArgs(overrides: Partial<TRunAssistantToolLoopArgs>): TRunAssi
     tools: [createToolEntry(defineMessageImportanceTool)],
     purpose: EModelPurpose.Chat,
     chatId: "user-1",
+    settings: DefaultConfigRecord,
     requestAssistantTurn: async () => ({ response: "", toolCalls: [] }),
     ...overrides,
   };
