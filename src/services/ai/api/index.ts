@@ -32,8 +32,17 @@ export {
   defineMessageImportanceTool,
 } from "../tools/define-message-importance/definition";
 export type { TDefineMessageImportance } from "../tools/define-message-importance/handler";
+export {
+  DEFINE_SETTINGS_INTENT_TOOL,
+  defineSettingsIntentTool,
+} from "../tools/define-settings-intent/definition";
+export type { TDefineSettingsIntent } from "../tools/define-settings-intent/handler";
+export { GET_SETTINGS_TOOL, getSettingsTool } from "../tools/get-settings/definition";
+export type { TGetSettingsArgs } from "../tools/get-settings/handler";
 export { SEARCH_MEMORY_TOOL, searchMemoryTool } from "../tools/search-memory/definition";
 export type { TSearchMemory } from "../tools/search-memory/handler";
+export { UPDATE_SETTINGS_TOOL, updateSettingsTool } from "../tools/update-settings/definition";
+export type { TUpdateSettingsArgs } from "../tools/update-settings/handler";
 export { WEB_FETCH_TOOL, webFetchTool } from "../tools/web-fetch/definition";
 export type { TWebFetch } from "../tools/web-fetch/handler";
 export { WEB_SEARCH_TOOL, webSearchTool } from "../tools/web-search/definition";

@@ -1,0 +1,80 @@
+<instructions>
+
+  <purpose>
+    Update the user's assistant settings. Only the fields explicitly provided are changed;
+    omitted fields keep their current value. After a successful update, the new effective
+    settings are returned and the assistant's instruction cache is invalidated, so the next
+    normal assistant turn uses the new values.
+  </purpose>
+
+  <tool>
+    <name>update-settings</name>
+    <description>
+      Updates one or more of: timezone, language, assistantName, addressStyle,
+      preferredReplyLength, aiProvider, ollamaChatModel, openrouterChatModel, opencodeGoChatModel.
+      At least one field must be provided. There is no arbitrary key/value field — only the
+      listed fields are accepted.
+    </description>
+  </tool>
+
+  <field_mapping>
+    - timezone — IANA timezone (e.g. Europe/Warsaw, America/New_York, UTC). Must be Intl-supported.
+    - language — conversation language for replies (e.g. Polish, English).
+    - assistantName — the assistant's display name.
+    - addressStyle — how the assistant should address the user.
+    - preferredReplyLength — preferred reply length (e.g. "1-3 sentences").
+    - aiProvider — one of: openrouter, ollama, opencode-go.
+    - ollamaChatModel — chat model for the ollama provider. Updates both the chat and chatAccurate model keys for ollama.
+    - openrouterChatModel — chat model for the openrouter provider. Updates both the chat and chatAccurate model keys for openrouter.
+    - opencodeGoChatModel — chat model for the opencode-go provider. Updates both the chat and chatAccurate model keys for opencode-go.
+  </field_mapping>
+
+  <usage_rules>
+    <rule>Provide at least one field. Calling update-settings with an empty object is invalid.</rule>
+    <rule>Only the provided fields are written. Omitted fields are left untouched.</rule>
+    <rule>Never invent or guess values. If the user did not specify a value for a field, omit it.</rule>
+    <rule>Never offer an arbitrary key/value field — only the listed fields are accepted.</rule>
+    <rule>
+      If the user's message contains BOTH a settings change AND a normal task (mixed intent),
+      apply only the settings change with this tool and then ask the user to resend the normal
+      task separately. Never attempt to execute the normal task from the settings loop.
+    </rule>
+    <rule>After a successful update, confirm the change to the user briefly in their language using the returned effective settings.</rule>
+    <rule>If the tool returns an error, tell the user which field/value was rejected and do not retry blindly.</rule>
+  </usage_rules>
+
+  <mixed_message_handling>
+    When the message is mixed (settings + normal task):
+    - Apply the settings change with update-settings.
+    - In the final reply, confirm the settings change.
+    - Explicitly ask the user to resend the normal task as a separate message.
+    - Do NOT call any tool outside the settings loop. Do NOT attempt the normal task.
+  </mixed_message_handling>
+
+  <examples>
+    <example>
+      <message>"change your timezone to UTC"</message>
+      <fields>{ "timezone": "UTC" }</fields>
+      <response>"Done — timezone is now UTC."</response>
+    </example>
+
+    <example>
+      <message>"use openrouter and switch your language to English"</message>
+      <fields>{ "aiProvider": "openrouter", "language": "English" }</fields>
+      <response>"Done — provider is openrouter and language is English."</response>
+    </example>
+
+    <example>
+      <message>"remind me to call mom at 5pm and change your name to Bella"</message>
+      <fields>{ "assistantName": "Bella" }</fields>
+      <response>"I've set my name to Bella. Please resend the reminder about calling mom at 5pm as a separate message — I can't set reminders from the settings conversation."</response>
+    </example>
+
+    <example>
+      <message>"set your opencode-go chat model to glm-5.2"</message>
+      <fields>{ "opencodeGoChatModel": "glm-5.2" }</fields>
+      <response>"Done — opencode-go chat model is now glm-5.2. It will apply on the next normal turn."</response>
+    </example>
+  </examples>
+
+</instructions>

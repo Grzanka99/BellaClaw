@@ -1,10 +1,14 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { ECronEngineJobType, type TCronEngineJobContext } from "../../lib/cron-engine";
+import type { TOption } from "../../types";
 import { ERole } from "../ai/types";
 import { CronSingleton } from "../cron";
 import { Memory } from "../memory";
 import { EMemoryImportance } from "../memory/types";
 import { MessageHandler } from "../message-handler";
+import type { TSettingsIntent } from "../settings-intent-classifier";
+import { SettingsIntentClassifier } from "../settings-intent-classifier";
+import { SettingsMessageHandler } from "../settings-message-handler";
 import { MessagingAdapter } from "./index";
 import { EMessagePlatform, type TMessageTransport } from "./types";
 
@@ -16,6 +20,9 @@ type TMessagingAdapterInternals = {
   ai: {
     runToolTask: typeof import("../ai/api").AiConnector.prototype.runToolTask;
   };
+  classifier: {
+    classify: typeof SettingsIntentClassifier.prototype.classify;
+  };
   transports: Map<EMessagePlatform, TMessageTransport>;
   handleCronFire: (ctx: TCronEngineJobContext) => Promise<void>;
 };
@@ -26,6 +33,10 @@ type TCronSingletonStatic = {
 
 type TMemoryStatic = {
   _instance: Memory | undefined;
+};
+
+type TSettingsIntentClassifierStatic = {
+  _instance: SettingsIntentClassifier | undefined;
 };
 
 function cleanupSingletons() {
@@ -40,6 +51,22 @@ function cleanupSingletons() {
   MemoryWithInternals._instance = undefined;
 
   (MessageHandler as unknown as { _instances: Map<string, MessageHandler> })._instances.clear();
+
+  const ClassifierWithInternals =
+    SettingsIntentClassifier as unknown as TSettingsIntentClassifierStatic;
+  ClassifierWithInternals._instance = undefined;
+
+  (
+    SettingsMessageHandler as unknown as { _instances: Map<string, SettingsMessageHandler> }
+  )._instances.clear();
+}
+
+function mockClassifierIntent(intent: TOption<TSettingsIntent>) {
+  const ClassifierWithInternals =
+    SettingsIntentClassifier as unknown as TSettingsIntentClassifierStatic;
+  ClassifierWithInternals._instance = {
+    classify: mock(async () => intent),
+  } as unknown as SettingsIntentClassifier;
 }
 
 function createTransport(platform: EMessagePlatform) {
@@ -146,6 +173,8 @@ describe("MessagingAdapter", () => {
     const adapter = MessagingAdapter.instance;
     const handleMessageMock = mock(async () => "test response");
 
+    mockClassifierIntent({ intent: "normal", reason: "casual greeting" });
+
     (
       MessageHandler as unknown as {
         _instances: Map<string, { handleMessage: typeof handleMessageMock }>;
@@ -191,6 +220,8 @@ describe("MessagingAdapter", () => {
     const sendTextMock = mock(async (_chatId: string, _text: string) => {});
     const adapter = MessagingAdapter.instance;
     const handleMessageMock = mock(async () => "   ");
+
+    mockClassifierIntent({ intent: "normal", reason: "casual greeting" });
 
     (
       MessageHandler as unknown as {
@@ -368,5 +399,189 @@ describe("MessagingAdapter", () => {
 
     expect(runToolTaskMock).toHaveBeenCalledTimes(0);
     expect(sendTextMock).toHaveBeenCalledWith("user-1", "Fallback reminder.");
+  });
+
+  test("routes settings-intent messages to SettingsMessageHandler", async () => {
+    const sendTextMock = mock(async (_chatId: string, _text: string) => {});
+    const adapter = MessagingAdapter.instance;
+    const settingsHandleMessageMock = mock(async () => "settings reply");
+    const normalHandleMessageMock = mock(async () => "normal reply");
+
+    mockClassifierIntent({ intent: "settings", reason: "change timezone" });
+
+    (
+      SettingsMessageHandler as unknown as {
+        _instances: Map<string, { handleMessage: typeof settingsHandleMessageMock }>;
+      }
+    )._instances.set("discord:user-1", {
+      handleMessage: settingsHandleMessageMock,
+    });
+    (
+      MessageHandler as unknown as {
+        _instances: Map<string, { handleMessage: typeof normalHandleMessageMock }>;
+      }
+    )._instances.set("discord:user-1", {
+      handleMessage: normalHandleMessageMock,
+    });
+
+    adapter.registerTransport({
+      platform: EMessagePlatform.Discord,
+      sendText: sendTextMock,
+    });
+
+    await adapter.handleInboundMessage({
+      platform: EMessagePlatform.Discord,
+      chatId: "user-1",
+      author: {
+        id: "user-1",
+        username: "TestUser",
+      },
+      message: {
+        type: "text",
+        content: "change your timezone to UTC",
+      },
+    });
+
+    expect(settingsHandleMessageMock).toHaveBeenCalledTimes(1);
+    expect(normalHandleMessageMock).toHaveBeenCalledTimes(0);
+    expect(sendTextMock).toHaveBeenCalledWith("user-1", "settings reply");
+  });
+
+  test("routes normal-intent messages to MessageHandler", async () => {
+    const sendTextMock = mock(async (_chatId: string, _text: string) => {});
+    const adapter = MessagingAdapter.instance;
+    const settingsHandleMessageMock = mock(async () => "settings reply");
+    const normalHandleMessageMock = mock(async () => "normal reply");
+
+    mockClassifierIntent({ intent: "normal", reason: "casual greeting" });
+
+    (
+      SettingsMessageHandler as unknown as {
+        _instances: Map<string, { handleMessage: typeof settingsHandleMessageMock }>;
+      }
+    )._instances.set("discord:user-1", {
+      handleMessage: settingsHandleMessageMock,
+    });
+    (
+      MessageHandler as unknown as {
+        _instances: Map<string, { handleMessage: typeof normalHandleMessageMock }>;
+      }
+    )._instances.set("discord:user-1", {
+      handleMessage: normalHandleMessageMock,
+    });
+
+    adapter.registerTransport({
+      platform: EMessagePlatform.Discord,
+      sendText: sendTextMock,
+    });
+
+    await adapter.handleInboundMessage({
+      platform: EMessagePlatform.Discord,
+      chatId: "user-1",
+      author: {
+        id: "user-1",
+        username: "TestUser",
+      },
+      message: {
+        type: "text",
+        content: "hello",
+      },
+    });
+
+    expect(normalHandleMessageMock).toHaveBeenCalledTimes(1);
+    expect(settingsHandleMessageMock).toHaveBeenCalledTimes(0);
+    expect(sendTextMock).toHaveBeenCalledWith("user-1", "normal reply");
+  });
+
+  test("falls back to MessageHandler when classifier returns no result", async () => {
+    const sendTextMock = mock(async (_chatId: string, _text: string) => {});
+    const adapter = MessagingAdapter.instance;
+    const settingsHandleMessageMock = mock(async () => "settings reply");
+    const normalHandleMessageMock = mock(async () => "normal reply");
+
+    mockClassifierIntent(undefined);
+
+    (
+      SettingsMessageHandler as unknown as {
+        _instances: Map<string, { handleMessage: typeof settingsHandleMessageMock }>;
+      }
+    )._instances.set("discord:user-1", {
+      handleMessage: settingsHandleMessageMock,
+    });
+    (
+      MessageHandler as unknown as {
+        _instances: Map<string, { handleMessage: typeof normalHandleMessageMock }>;
+      }
+    )._instances.set("discord:user-1", {
+      handleMessage: normalHandleMessageMock,
+    });
+
+    adapter.registerTransport({
+      platform: EMessagePlatform.Discord,
+      sendText: sendTextMock,
+    });
+
+    await adapter.handleInboundMessage({
+      platform: EMessagePlatform.Discord,
+      chatId: "user-1",
+      author: {
+        id: "user-1",
+        username: "TestUser",
+      },
+      message: {
+        type: "text",
+        content: "hello",
+      },
+    });
+
+    expect(normalHandleMessageMock).toHaveBeenCalledTimes(1);
+    expect(settingsHandleMessageMock).toHaveBeenCalledTimes(0);
+    expect(sendTextMock).toHaveBeenCalledWith("user-1", "normal reply");
+  });
+
+  test("does not invoke normal handler for mixed settings+task classified as settings", async () => {
+    const sendTextMock = mock(async (_chatId: string, _text: string) => {});
+    const adapter = MessagingAdapter.instance;
+    const settingsHandleMessageMock = mock(async () => "settings reply");
+    const normalHandleMessageMock = mock(async () => "normal reply");
+
+    mockClassifierIntent({ intent: "settings", reason: "mixed settings + task" });
+
+    (
+      SettingsMessageHandler as unknown as {
+        _instances: Map<string, { handleMessage: typeof settingsHandleMessageMock }>;
+      }
+    )._instances.set("discord:user-1", {
+      handleMessage: settingsHandleMessageMock,
+    });
+    (
+      MessageHandler as unknown as {
+        _instances: Map<string, { handleMessage: typeof normalHandleMessageMock }>;
+      }
+    )._instances.set("discord:user-1", {
+      handleMessage: normalHandleMessageMock,
+    });
+
+    adapter.registerTransport({
+      platform: EMessagePlatform.Discord,
+      sendText: sendTextMock,
+    });
+
+    await adapter.handleInboundMessage({
+      platform: EMessagePlatform.Discord,
+      chatId: "user-1",
+      author: {
+        id: "user-1",
+        username: "TestUser",
+      },
+      message: {
+        type: "text",
+        content: "remind me to call mom and change your timezone to UTC",
+      },
+    });
+
+    expect(settingsHandleMessageMock).toHaveBeenCalledTimes(1);
+    expect(normalHandleMessageMock).toHaveBeenCalledTimes(0);
+    expect(sendTextMock).toHaveBeenCalledWith("user-1", "settings reply");
   });
 });

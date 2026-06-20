@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { GET_SETTINGS_TOOL } from "../ai/tools/get-settings/definition";
 import { LIST_CRON_JOBS_TOOL } from "../ai/tools/list-cron-jobs/definition";
 import { SCHEDULE_ONCE_TOOL } from "../ai/tools/schedule-once/definition";
 import { SCHEDULE_RECURRING_TOOL } from "../ai/tools/schedule-recurring/definition";
 import { UNSCHEDULE_CRON_JOB_TOOL } from "../ai/tools/unschedule-cron-job/definition";
 import { UPDATE_CRON_JOB_TOOL } from "../ai/tools/update-cron-job/definition";
+import { UPDATE_SETTINGS_TOOL } from "../ai/tools/update-settings/definition";
 import { ERole } from "../ai/types";
 import { Memory } from "../memory";
 import { SettingsService } from "../settings";
@@ -17,6 +19,8 @@ const EXPECTED_CRON_TOOL_NAMES = [
   UPDATE_CRON_JOB_TOOL,
   SCHEDULE_ONCE_TOOL,
 ];
+
+const EXCLUDED_SETTINGS_TOOL_NAMES = [GET_SETTINGS_TOOL, UPDATE_SETTINGS_TOOL];
 
 type TAiConnectorInternals = {
   ai: {
@@ -109,6 +113,10 @@ describe("MessageHandler", () => {
 
     for (const name of EXPECTED_CRON_TOOL_NAMES) {
       expect(toolNames).toContain(name);
+    }
+
+    for (const name of EXCLUDED_SETTINGS_TOOL_NAMES) {
+      expect(toolNames).not.toContain(name);
     }
 
     expect(internals.memory.save).toHaveBeenCalledWith({

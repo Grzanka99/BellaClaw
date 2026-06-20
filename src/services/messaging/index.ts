@@ -8,6 +8,9 @@ import { CronSingleton } from "../cron";
 import { Memory } from "../memory";
 import { EMemoryImportance } from "../memory/types";
 import { MessageHandler } from "../message-handler";
+import type { TIncommingMessage } from "../message-handler/types";
+import { SettingsIntentClassifier } from "../settings-intent-classifier";
+import { SettingsMessageHandler } from "../settings-message-handler";
 import { createCanonicalChatKey, parseCanonicalChatKey } from "./chat-key";
 import type { EMessagePlatform, TMessageTransport, TPlatformMessage } from "./types";
 
@@ -46,8 +49,13 @@ export class MessagingAdapter {
     }
 
     const canonicalChatId = createCanonicalChatKey(message.platform, message.chatId);
-    const messageHandler = MessageHandler.getInstance(canonicalChatId);
-    const reply = await messageHandler.handleMessage({
+
+    const intent = await SettingsIntentClassifier.instance.classify(
+      message.message.content,
+      canonicalChatId,
+    );
+
+    const incomingMessage: TIncommingMessage = {
       chatId: canonicalChatId,
       author: {
         type: ERole.User,
@@ -55,7 +63,23 @@ export class MessagingAdapter {
         id: message.author.id,
       },
       message: message.message,
-    });
+    };
+
+    let reply: string;
+
+    if (intent !== undefined && intent.intent === "settings") {
+      const handler = SettingsMessageHandler.getInstance(canonicalChatId);
+      reply = await handler.handleMessage(incomingMessage);
+    } else {
+      if (intent === undefined) {
+        this.logger.warning(
+          `handleInboundMessage: settings-intent classifier returned no result for chat ${canonicalChatId}, routing to normal handler`,
+        );
+      }
+
+      const handler = MessageHandler.getInstance(canonicalChatId);
+      reply = await handler.handleMessage(incomingMessage);
+    }
 
     if (reply.trim().length === 0) {
       return;
