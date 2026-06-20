@@ -5,7 +5,7 @@ import { logger } from "../../../../utils/logger";
 
 export const SDefineSettingsIntent = z.object({
   intent: z.enum(["settings", "normal"]),
-  reason: z.string(),
+  reason: z.string().min(1),
 });
 
 export type TDefineSettingsIntent = z.infer<typeof SDefineSettingsIntent>;
