@@ -16,6 +16,7 @@ function createCronContext(overrides: Partial<TCronEngineJobContext> = {}): TCro
     lastRunAt: undefined,
     nextRunAt: new Date("2026-01-05T08:00:00.000Z"),
     createdAt: new Date("2026-01-01T08:00:00.000Z"),
+    timezone: undefined,
     ...overrides,
   };
 }
@@ -44,5 +45,30 @@ describe("generateReminderText", () => {
     expect(promptText).toContain('"timezone":"Europe/Warsaw"');
     expect(promptText).toContain('"localDateTime":"2026-01-05 09:00:00"');
     expect(promptText).toContain('"localWeekday":"Monday"');
+  });
+
+  test("uses ctx.timezone for reminder prompt when context provides one", async () => {
+    const capturedArgs: TToolTaskArgs[] = [];
+    const ai = {
+      runToolTask: mock(async (args: TToolTaskArgs): Promise<TToolTaskResult> => {
+        capturedArgs.push(args);
+
+        return {
+          assistantResponse: "Generated reminder.",
+          toolCalls: [],
+          toolResults: [],
+        };
+      }),
+    };
+
+    const result = await generateReminderText(
+      createCronContext({ timezone: "America/New_York" }),
+      ai,
+    );
+    const promptText = capturedArgs[0]?.prompt.content[0]?.text;
+
+    expect(result).toBe("Generated reminder.");
+    expect(promptText).toContain('"timezone":"America/New_York"');
+    expect(promptText).toContain('"localDateTime":"2026-01-05 03:00:00"');
   });
 });

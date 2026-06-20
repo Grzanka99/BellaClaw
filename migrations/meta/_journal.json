@@ -15,6 +15,13 @@
       "when": 1781796102184,
       "tag": "0001_tiresome_speed_demon",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1781987584869,
+      "tag": "0002_flaky_secret_warriors",
+      "breakpoints": true
     }
   ]
 }

@@ -48,7 +48,9 @@ export async function generateReminderText(
           ctx.reminderPromptData,
           "",
           "Firing context JSON:",
-          JSON.stringify(createFiringContext(ctx.nextRunAt)),
+          JSON.stringify(
+            createFiringContext(ctx.nextRunAt, ctx.timezone ?? Config.ai.instructions.timezone),
+          ),
         ].join("\n"),
       },
     ],
@@ -77,9 +79,7 @@ export async function generateReminderText(
   }
 }
 
-function createFiringContext(fireAt: Date) {
-  const timezone = Config.ai.instructions.timezone;
-
+function createFiringContext(fireAt: Date, timezone: string) {
   return {
     fireTimestamp: fireAt.toISOString(),
     timezone,

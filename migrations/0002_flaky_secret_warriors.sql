@@ -1,0 +1,1 @@
+ALTER TABLE `cron_engine_jobs` ADD `timezone` text;

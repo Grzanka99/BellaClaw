@@ -71,9 +71,10 @@ export class CronEngine extends EventEmitter {
 
     const normalizedScope = this.normalizeScope(args.scope);
     const scheduledAt = new Date();
+    const effectiveTimezone = args.timezone ?? this.timezone;
     let nextRunAt: Date;
     try {
-      nextRunAt = getNextFireTime(args.pattern, scheduledAt, this.timezone);
+      nextRunAt = getNextFireTime(args.pattern, scheduledAt, effectiveTimezone);
     } catch (error) {
       return this.createUnschedulablePatternError(args.pattern, error);
     }
@@ -105,6 +106,7 @@ export class CronEngine extends EventEmitter {
           status: ECronEngineJobStatus.Active,
           finishedAt: null,
           finishedReason: null,
+          timezone: effectiveTimezone ?? null,
         };
 
         if (existing && args.overwrite === true) {
@@ -178,6 +180,7 @@ export class CronEngine extends EventEmitter {
     }
 
     const normalizedScope = this.normalizeScope(args.scope);
+    const effectiveTimezone = args.timezone ?? this.timezone;
 
     try {
       return await this.queue.enqueue(async () => {
@@ -206,6 +209,7 @@ export class CronEngine extends EventEmitter {
           status: ECronEngineJobStatus.Active,
           finishedAt: null,
           finishedReason: null,
+          timezone: effectiveTimezone ?? null,
         };
 
         if (existing && args.overwrite === true) {
@@ -398,7 +402,8 @@ export class CronEngine extends EventEmitter {
           let claimedJob: TOption<TCronEngineJob>;
 
           if (job.type === ECronEngineJobType.Recurring && job.pattern) {
-            const nextRun = getNextFireTime(job.pattern, new Date(now), this.timezone);
+            const jobTimezone = job.timezone ?? this.timezone;
+            const nextRun = getNextFireTime(job.pattern, new Date(now), jobTimezone);
             const row = await this.queue.enqueue(async () => {
               return this.db
                 .update(cronEngineJobsTable)
@@ -455,6 +460,7 @@ export class CronEngine extends EventEmitter {
             lastRunAt: job.lastRunAt,
             nextRunAt: job.nextRunAt,
             createdAt: job.createdAt,
+            timezone: job.timezone ?? this.timezone,
           };
 
           this.emit(CronEngine.FIRE_EVENT, ctx);

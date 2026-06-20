@@ -67,6 +67,7 @@ function createCronContext(overrides: Partial<TCronEngineJobContext> = {}): TCro
     reminderPromptData: undefined,
     reminderFallbackText: "Fallback reminder.",
     createdAt: now,
+    timezone: undefined,
     ...overrides,
   };
 }

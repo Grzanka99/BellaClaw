@@ -29,6 +29,7 @@ export const cronEngineJobsTable = sqliteTable(
     status: text("status").notNull().default("active"),
     finishedAt: integer("finishedAt"),
     finishedReason: text("finishedReason"),
+    timezone: text("timezone"),
   },
   (table) => [
     uniqueIndex("cron_engine_jobs_name_scope_unique")
