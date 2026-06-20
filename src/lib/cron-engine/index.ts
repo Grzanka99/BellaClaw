@@ -196,6 +196,14 @@ export class CronEngine extends EventEmitter {
 
         const effectiveTimezone = args.timezone ?? existing?.timezone ?? this.timezone;
 
+        if (effectiveTimezone !== undefined) {
+          try {
+            new Intl.DateTimeFormat(undefined, { timeZone: effectiveTimezone });
+          } catch {
+            return { operation: "schedule", error: `Invalid timezone: ${effectiveTimezone}` };
+          }
+        }
+
         const rowValues = {
           name: args.name,
           scope: normalizedScope,
