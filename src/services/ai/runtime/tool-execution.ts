@@ -56,7 +56,7 @@ export async function executeToolCall(args: {
       return executeSearchMemoryTool(toolCall, chatId);
     }
     case LIST_CRON_JOBS_TOOL: {
-      return executeListCronJobsTool(toolCall, chatId, ownerTimezone);
+      return executeListCronJobsTool(toolCall, chatId);
     }
     case SCHEDULE_ONCE_TOOL: {
       return executeScheduleOnceTool(toolCall, chatId, ownerTimezone);
@@ -65,7 +65,7 @@ export async function executeToolCall(args: {
       return executeScheduleRecurringTool(toolCall, chatId, ownerTimezone);
     }
     case UNSCHEDULE_CRON_JOB_TOOL: {
-      return executeUnscheduleCronJobTool(toolCall, chatId, ownerTimezone);
+      return executeUnscheduleCronJobTool(toolCall, chatId);
     }
     case UPDATE_CRON_JOB_TOOL: {
       return executeUpdateCronJobTool(toolCall, chatId, ownerTimezone);

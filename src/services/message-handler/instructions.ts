@@ -66,7 +66,8 @@ async function loadMessageHandlerInstructions(
 }
 
 function buildSettingsSignature(settings: TConfigRecord): string {
-  const entries = Object.values(EConfigKey).map((key) => [key, settings[key]]);
+  const keys = Object.values(EConfigKey).sort();
+  const entries = keys.map((key) => [key, settings[key]]);
   return JSON.stringify(entries);
 }
 

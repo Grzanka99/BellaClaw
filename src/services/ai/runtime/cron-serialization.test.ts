@@ -56,12 +56,4 @@ describe("serializeCronJobForModel", () => {
       formatLocalDateTime(job.nextRunAt, Config.ai.instructions.timezone),
     );
   });
-
-  test("uses provided timezone fallback when job has no timezone", () => {
-    const job = createJob({ timezone: undefined });
-    const serialized = serializeCronJobForModel(job, "Asia/Tokyo");
-
-    expect(serialized.timezone).toBe("Asia/Tokyo");
-    expect(serialized.nextRunAtLocal).toBe(formatLocalDateTime(job.nextRunAt, "Asia/Tokyo"));
-  });
 });

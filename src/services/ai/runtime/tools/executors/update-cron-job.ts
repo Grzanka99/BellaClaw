@@ -76,7 +76,7 @@ export async function executeUpdateCronJobTool(
       reminderPromptData,
       reminderFallbackText,
       overwrite: true,
-      timezone: existing.timezone,
+      timezone: existing.timezone ?? ownerTimezone,
     });
 
     if ("error" in result) {
@@ -86,7 +86,7 @@ export async function executeUpdateCronJobTool(
       );
     }
 
-    return createSuccessfulToolResult(toolCall, serializeCronJobForModel(result, ownerTimezone));
+    return createSuccessfulToolResult(toolCall, serializeCronJobForModel(result));
   }
 
   if (parsed.data.pattern !== undefined) {
@@ -105,7 +105,7 @@ export async function executeUpdateCronJobTool(
     reminderPromptData,
     reminderFallbackText,
     overwrite: true,
-    timezone: existing.timezone,
+    timezone: existing.timezone ?? ownerTimezone,
   });
 
   if ("error" in result) {
@@ -115,5 +115,5 @@ export async function executeUpdateCronJobTool(
     );
   }
 
-  return createSuccessfulToolResult(toolCall, serializeCronJobForModel(result, ownerTimezone));
+  return createSuccessfulToolResult(toolCall, serializeCronJobForModel(result));
 }
