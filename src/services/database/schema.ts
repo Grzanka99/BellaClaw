@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { integer, primaryKey, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 export const memoriesTable = sqliteTable("memories", {
   id: integer("id").primaryKey({ autoIncrement: true }),
@@ -38,8 +38,23 @@ export const cronEngineJobsTable = sqliteTable(
   ],
 );
 
+export const userConfigsTable = sqliteTable(
+  "user_configs",
+  {
+    ownerKey: text("ownerKey").notNull(),
+    key: text("key").notNull(),
+    value: text("value").notNull(),
+    createdAt: integer("createdAt").notNull(),
+    updatedAt: integer("updatedAt").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.ownerKey, table.key] })],
+);
+
 export type TInsertMemory = typeof memoriesTable.$inferInsert;
 export type TSelectMemory = typeof memoriesTable.$inferSelect;
 
 export type TInsertCronJob = typeof cronEngineJobsTable.$inferInsert;
 export type TSelectCronJob = typeof cronEngineJobsTable.$inferSelect;
+
+export type TInsertUserConfig = typeof userConfigsTable.$inferInsert;
+export type TSelectUserConfig = typeof userConfigsTable.$inferSelect;
