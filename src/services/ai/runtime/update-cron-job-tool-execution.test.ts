@@ -81,6 +81,43 @@ describe("update-cron-job tool execution", () => {
     });
   });
 
+  test("updates recurring reminder and preserves existing timezone", async () => {
+    const chatId = "runtime-update-recurring-timezone-user";
+
+    const scheduled = await CronSingleton.instance.schedule({
+      name: "timezone-reminder",
+      scope: chatId,
+      pattern: "0 9 * * *",
+      timezone: "America/New_York",
+      reminderText: "Timezone reminder.",
+    });
+
+    expect("error" in scheduled).toBe(false);
+
+    const updateResult = await executeToolCall({
+      toolCall: createToolCall(
+        "update-cron-timezone",
+        UPDATE_CRON_JOB_TOOL,
+        JSON.stringify({
+          name: "timezone-reminder",
+          pattern: "0 10 * * *",
+        }),
+      ),
+      chatId,
+      allowedToolNames: new Set([UPDATE_CRON_JOB_TOOL]),
+    });
+
+    expect(updateResult.success).toBe(true);
+    expect(updateResult.data).toMatchObject({
+      name: "timezone-reminder",
+      timezone: "America/New_York",
+    });
+
+    const updatedJob = await CronSingleton.instance.getJob("timezone-reminder", chatId);
+
+    expect(updatedJob?.timezone).toBe("America/New_York");
+  });
+
   test("updates one-time reminder text and preserves fire time", async () => {
     const chatId = "runtime-update-once-user";
     const fireAt = new Date(Date.now() + 60_000).toISOString();

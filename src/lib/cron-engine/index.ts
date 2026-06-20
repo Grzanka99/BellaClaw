@@ -71,13 +71,6 @@ export class CronEngine extends EventEmitter {
 
     const normalizedScope = this.normalizeScope(args.scope);
     const scheduledAt = new Date();
-    const effectiveTimezone = args.timezone ?? this.timezone;
-    let nextRunAt: Date;
-    try {
-      nextRunAt = getNextFireTime(args.pattern, scheduledAt, effectiveTimezone);
-    } catch (error) {
-      return this.createUnschedulablePatternError(args.pattern, error);
-    }
 
     try {
       return await this.queue.enqueue(async () => {
@@ -89,6 +82,14 @@ export class CronEngine extends EventEmitter {
 
         if (existing && args.overwrite !== true) {
           return this.createDuplicateJobError(args.name);
+        }
+
+        const effectiveTimezone = args.timezone ?? existing?.timezone ?? this.timezone;
+        let nextRunAt: Date;
+        try {
+          nextRunAt = getNextFireTime(args.pattern, scheduledAt, effectiveTimezone);
+        } catch (error) {
+          return this.createUnschedulablePatternError(args.pattern, error);
         }
 
         const rowValues = {
@@ -180,7 +181,6 @@ export class CronEngine extends EventEmitter {
     }
 
     const normalizedScope = this.normalizeScope(args.scope);
-    const effectiveTimezone = args.timezone ?? this.timezone;
 
     try {
       return await this.queue.enqueue(async () => {
@@ -193,6 +193,8 @@ export class CronEngine extends EventEmitter {
         if (existing && args.overwrite !== true) {
           return this.createDuplicateJobError(args.name);
         }
+
+        const effectiveTimezone = args.timezone ?? existing?.timezone ?? this.timezone;
 
         const rowValues = {
           name: args.name,
