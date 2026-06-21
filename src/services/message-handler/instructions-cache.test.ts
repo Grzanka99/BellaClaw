@@ -212,7 +212,7 @@ describe("MessageHandler instruction cache", () => {
     expect(instructionReadCount).toBe(0);
   });
 
-  test("isolates instructions per owner and settings", async () => {
+  test("isolates instructions per owner", async () => {
     const tempPath = getTempXmlPath("test-inject-isolation");
     await Bun.write(
       tempPath,

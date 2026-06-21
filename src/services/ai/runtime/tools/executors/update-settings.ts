@@ -19,6 +19,18 @@ type TFieldUpdate = {
   value: string;
 };
 
+const UPDATE_FIELDS: Array<{
+  field: keyof TUpdateSettingsArgs;
+  key: EConfigKey;
+}> = [
+  { field: "timezone", key: EConfigKey.AiInstructionsTimezone },
+  { field: "language", key: EConfigKey.AiInstructionsLanguage },
+  { field: "assistantName", key: EConfigKey.AiInstructionsAssistantName },
+  { field: "addressStyle", key: EConfigKey.AiInstructionsAddressStyle },
+  { field: "preferredReplyLength", key: EConfigKey.AiInstructionsPreferredReplyLength },
+  { field: "aiProvider", key: EConfigKey.AiProvider },
+];
+
 export async function executeUpdateSettingsTool(
   toolCall: ChatMessageToolCall,
   chatId: TOption<string>,
@@ -59,14 +71,7 @@ export async function executeUpdateSettingsTool(
 
     const settings = await SettingsService.instance.getAll(resolvedChatId);
 
-    return createSuccessfulToolResult(toolCall, {
-      updatedFields: updates.map((u) => ({
-        field: u.field,
-        key: u.key,
-        value: u.value,
-      })),
-      settings,
-    });
+    return createSuccessfulToolResult(toolCall, { settings });
   } catch (error) {
     return createFailedToolResult(toolCall, `update-settings failed: ${normalizeError(error)}`);
   }
@@ -75,48 +80,12 @@ export async function executeUpdateSettingsTool(
 function collectUpdates(args: TUpdateSettingsArgs): TFieldUpdate[] {
   const updates: TFieldUpdate[] = [];
 
-  if (args.timezone !== undefined) {
-    updates.push({
-      field: "timezone",
-      key: EConfigKey.AiInstructionsTimezone,
-      value: args.timezone,
-    });
-  }
+  for (const mapping of UPDATE_FIELDS) {
+    const value = args[mapping.field];
 
-  if (args.language !== undefined) {
-    updates.push({
-      field: "language",
-      key: EConfigKey.AiInstructionsLanguage,
-      value: args.language,
-    });
-  }
-
-  if (args.assistantName !== undefined) {
-    updates.push({
-      field: "assistantName",
-      key: EConfigKey.AiInstructionsAssistantName,
-      value: args.assistantName,
-    });
-  }
-
-  if (args.addressStyle !== undefined) {
-    updates.push({
-      field: "addressStyle",
-      key: EConfigKey.AiInstructionsAddressStyle,
-      value: args.addressStyle,
-    });
-  }
-
-  if (args.preferredReplyLength !== undefined) {
-    updates.push({
-      field: "preferredReplyLength",
-      key: EConfigKey.AiInstructionsPreferredReplyLength,
-      value: args.preferredReplyLength,
-    });
-  }
-
-  if (args.aiProvider !== undefined) {
-    updates.push({ field: "aiProvider", key: EConfigKey.AiProvider, value: args.aiProvider });
+    if (value !== undefined) {
+      updates.push({ ...mapping, value });
+    }
   }
 
   return updates;

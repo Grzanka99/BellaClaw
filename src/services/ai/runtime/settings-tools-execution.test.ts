@@ -119,16 +119,9 @@ describe("settings tools execution", () => {
       expect(result.success).toBe(true);
 
       const data = result.data as {
-        updatedFields: Array<{ field: string; key: string; value: string }>;
         settings: TConfigRecord;
       };
 
-      expect(data.updatedFields).toHaveLength(1);
-      expect(data.updatedFields[0]).toMatchObject({
-        field: "timezone",
-        key: EConfigKey.AiInstructionsTimezone,
-        value: "America/New_York",
-      });
       expect(data.settings[EConfigKey.AiInstructionsTimezone]).toBe("America/New_York");
 
       const readBack = await SettingsService.instance.get(
@@ -159,14 +152,8 @@ describe("settings tools execution", () => {
       expect(result.success).toBe(true);
 
       const data = result.data as {
-        updatedFields: Array<{ field: string; value: string }>;
         settings: TConfigRecord;
       };
-
-      const fields = data.updatedFields.map((f) => f.field);
-      expect(fields).toContain("timezone");
-      expect(fields).toContain("language");
-      expect(fields).toContain("assistantName");
 
       expect(data.settings[EConfigKey.AiInstructionsTimezone]).toBe("Asia/Tokyo");
       expect(data.settings[EConfigKey.AiInstructionsLanguage]).toBe("English");
@@ -287,78 +274,12 @@ describe("settings tools execution", () => {
       expect(readBack).toBe("openrouter");
     });
 
-    test("updates ollamaChatModel and writes both chatAccurate and chat model keys", async () => {
-      const chatId = "settings-update-ollama-model";
+    test("rejects model update fields", async () => {
+      const chatId = "settings-update-model-field";
 
       const result = await executeToolCall({
         toolCall: createToolCall(
-          "update-ollama-model",
-          UPDATE_SETTINGS_TOOL,
-          JSON.stringify({ ollamaChatModel: "glm-5:cloud" }),
-        ),
-        chatId,
-        allowedToolNames: new Set([UPDATE_SETTINGS_TOOL]),
-        settings: DefaultConfigRecord,
-      });
-
-      expect(result.success).toBe(true);
-
-      const data = result.data as {
-        updatedFields: Array<{ field: string; key: string; value: string }>;
-      };
-
-      const keys = data.updatedFields.map((f) => f.key);
-      expect(keys).toContain(EConfigKey.AiProvidersOllamaModelsChatAccurate);
-      expect(keys).toContain(EConfigKey.AiProvidersOllamaModelsChat);
-
-      const chatAccurate = await SettingsService.instance.get(
-        chatId,
-        EConfigKey.AiProvidersOllamaModelsChatAccurate,
-      );
-      const chat = await SettingsService.instance.get(
-        chatId,
-        EConfigKey.AiProvidersOllamaModelsChat,
-      );
-
-      expect(chatAccurate).toBe("glm-5:cloud");
-      expect(chat).toBe("glm-5:cloud");
-    });
-
-    test("updates openrouterChatModel and writes both chatAccurate and chat model keys", async () => {
-      const chatId = "settings-update-openrouter-model";
-
-      const result = await executeToolCall({
-        toolCall: createToolCall(
-          "update-openrouter-model",
-          UPDATE_SETTINGS_TOOL,
-          JSON.stringify({ openrouterChatModel: "openai/gpt-5.4-mini" }),
-        ),
-        chatId,
-        allowedToolNames: new Set([UPDATE_SETTINGS_TOOL]),
-        settings: DefaultConfigRecord,
-      });
-
-      expect(result.success).toBe(true);
-
-      const chatAccurate = await SettingsService.instance.get(
-        chatId,
-        EConfigKey.AiProvidersOpenrouterModelsChatAccurate,
-      );
-      const chat = await SettingsService.instance.get(
-        chatId,
-        EConfigKey.AiProvidersOpenrouterModelsChat,
-      );
-
-      expect(chatAccurate).toBe("openai/gpt-5.4-mini");
-      expect(chat).toBe("openai/gpt-5.4-mini");
-    });
-
-    test("updates opencodeGoChatModel and writes both chatAccurate and chat model keys", async () => {
-      const chatId = "settings-update-opencodego-model";
-
-      const result = await executeToolCall({
-        toolCall: createToolCall(
-          "update-opencodego-model",
+          "update-model-field",
           UPDATE_SETTINGS_TOOL,
           JSON.stringify({ opencodeGoChatModel: "glm-5.2" }),
         ),
@@ -367,53 +288,8 @@ describe("settings tools execution", () => {
         settings: DefaultConfigRecord,
       });
 
-      expect(result.success).toBe(true);
-
-      const chatAccurate = await SettingsService.instance.get(
-        chatId,
-        EConfigKey.AiProvidersOpencodeGoModelsChatAccurate,
-      );
-      const chat = await SettingsService.instance.get(
-        chatId,
-        EConfigKey.AiProvidersOpencodeGoModelsChat,
-      );
-
-      expect(chatAccurate).toBe("glm-5.2");
-      expect(chat).toBe("glm-5.2");
-    });
-
-    test("does not update unrelated model-purpose keys when updating a chat model", async () => {
-      const chatId = "settings-update-model-isolation";
-
-      await executeToolCall({
-        toolCall: createToolCall(
-          "update-model-iso",
-          UPDATE_SETTINGS_TOOL,
-          JSON.stringify({ opencodeGoChatModel: "glm-5.2" }),
-        ),
-        chatId,
-        allowedToolNames: new Set([UPDATE_SETTINGS_TOOL]),
-        settings: DefaultConfigRecord,
-      });
-
-      const toolCheap = await SettingsService.instance.get(
-        chatId,
-        EConfigKey.AiProvidersOpencodeGoModelsToolCheap,
-      );
-      const toolAccurate = await SettingsService.instance.get(
-        chatId,
-        EConfigKey.AiProvidersOpencodeGoModelsToolAccurate,
-      );
-      const general = await SettingsService.instance.get(
-        chatId,
-        EConfigKey.AiProvidersOpencodeGoModelsGeneral,
-      );
-
-      expect(toolCheap).toBe(DefaultConfigRecord[EConfigKey.AiProvidersOpencodeGoModelsToolCheap]);
-      expect(toolAccurate).toBe(
-        DefaultConfigRecord[EConfigKey.AiProvidersOpencodeGoModelsToolAccurate],
-      );
-      expect(general).toBe(DefaultConfigRecord[EConfigKey.AiProvidersOpencodeGoModelsGeneral]);
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Unrecognized key");
     });
 
     test("fails when chatId is missing", async () => {

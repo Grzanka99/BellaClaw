@@ -132,7 +132,7 @@ describe("SettingsIntentClassifier", () => {
     expect(result).toEqual({ intent: "settings", reason: "change timezone" });
   });
 
-  test("uses default provider models while preserving user instruction injection", async () => {
+  test("passes stored settings through while injecting user instructions", async () => {
     const storedSettings: TConfigRecord = {
       ...DefaultConfigRecord,
       [EConfigKey.AiInstructionsLanguage]: "Klingon",
@@ -174,9 +174,9 @@ describe("SettingsIntentClassifier", () => {
       throw new Error("Expected captured runToolTask args");
     }
 
-    expect(args.settings[EConfigKey.AiProvider]).toBe(DefaultConfigRecord[EConfigKey.AiProvider]);
+    expect(args.settings[EConfigKey.AiProvider]).toBe("bad-provider");
     expect(args.settings[EConfigKey.AiProvidersOpencodeGoModelsToolCheap]).toBe(
-      DefaultConfigRecord[EConfigKey.AiProvidersOpencodeGoModelsToolCheap],
+      "bad-tool-cheap-model",
     );
     expect(args.settings[EConfigKey.AiInstructionsLanguage]).toBe("Klingon");
     expect(args.history[0]?.content).toContain("Classify in Klingon.");

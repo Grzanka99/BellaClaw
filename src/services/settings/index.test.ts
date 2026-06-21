@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { DatabaseConnector } from "../database";
 import { userConfigsTable } from "../database/schema";
 import { resetUserConfigsTable } from "../database/test-utils";
-import { DefaultConfigRecord, EConfigKey, type TConfigRecord } from "./schema";
+import { DefaultConfigRecord, EConfigKey } from "./schema";
 
 const { SettingsService } = await import("./index");
 
@@ -29,32 +29,10 @@ async function insertOwnerRow(ownerKey: string, key: string, value: string) {
   });
 }
 
-async function insertCompleteRecord(ownerKey: string, overrides: Partial<TConfigRecord> = {}) {
-  for (const key of Object.values(EConfigKey)) {
-    const value = overrides[key] ?? DefaultConfigRecord[key];
-    await insertOwnerRow(ownerKey, key, value);
-  }
-}
-
 async function getOwnerRows(ownerKey: string) {
   const db = DatabaseConnector.instance.database;
 
   return db.select().from(userConfigsTable).where(eq(userConfigsTable.ownerKey, ownerKey));
-}
-
-async function deleteOwnerRows(ownerKey: string) {
-  const db = DatabaseConnector.instance.database;
-
-  await db.delete(userConfigsTable).where(eq(userConfigsTable.ownerKey, ownerKey));
-}
-
-async function updateOwnerRow(ownerKey: string, key: string, value: string) {
-  const db = DatabaseConnector.instance.database;
-
-  await db
-    .update(userConfigsTable)
-    .set({ value, updatedAt: Date.now() })
-    .where(and(eq(userConfigsTable.ownerKey, ownerKey), eq(userConfigsTable.key, key)));
 }
 
 describe("SettingsService", () => {
@@ -68,7 +46,7 @@ describe("SettingsService", () => {
   });
 
   describe("getAll", () => {
-    test("missing owner seeds one default row per allowed key and returns DefaultConfigRecord", async () => {
+    test("missing owner returns DefaultConfigRecord without writing rows", async () => {
       const settings = SettingsService.instance;
       const ownerKey = "owner-missing";
 
@@ -78,14 +56,10 @@ describe("SettingsService", () => {
 
       const rows = await getOwnerRows(ownerKey);
 
-      expect(rows).toHaveLength(Object.values(EConfigKey).length);
-
-      for (const row of rows) {
-        expect(DefaultConfigRecord[row.key as EConfigKey]).toBe(row.value);
-      }
+      expect(rows).toHaveLength(0);
     });
 
-    test("concurrent first reads for the same owner both return defaults and leave exactly one row per allowed key", async () => {
+    test("concurrent first reads for the same owner both return defaults without writing rows", async () => {
       const settings = SettingsService.instance;
       const ownerKey = "owner-concurrent";
 
@@ -99,17 +73,10 @@ describe("SettingsService", () => {
 
       const rows = await getOwnerRows(ownerKey);
 
-      expect(rows).toHaveLength(Object.values(EConfigKey).length);
-
-      for (const key of Object.values(EConfigKey)) {
-        const keyRows = rows.filter((row) => row.key === key);
-
-        expect(keyRows).toHaveLength(1);
-        expect(keyRows[0]?.value).toBe(DefaultConfigRecord[key]);
-      }
+      expect(rows).toHaveLength(0);
     });
 
-    test("existing owner missing one allowed key auto-inserts that default on next getAll", async () => {
+    test("existing owner missing one allowed key uses default without inserting it", async () => {
       const settings = SettingsService.instance;
       const ownerKey = "owner-partial";
       const missingKey = EConfigKey.AiInstructionsTimezone;
@@ -128,11 +95,11 @@ describe("SettingsService", () => {
 
       const rows = await getOwnerRows(ownerKey);
 
-      expect(rows).toHaveLength(Object.values(EConfigKey).length);
+      expect(rows).toHaveLength(Object.values(EConfigKey).length - 1);
 
       const missingRow = rows.find((row) => row.key === missingKey);
 
-      expect(missingRow?.value).toBe(DefaultConfigRecord[missingKey]);
+      expect(missingRow).toBeUndefined();
     });
 
     test("returns a defensive copy so cache mutations do not leak", async () => {
@@ -233,8 +200,8 @@ describe("SettingsService", () => {
       const rowsA = await getOwnerRows("owner-a");
       const rowsB = await getOwnerRows("owner-b");
 
-      expect(rowsA).toHaveLength(Object.values(EConfigKey).length);
-      expect(rowsB).toHaveLength(Object.values(EConfigKey).length);
+      expect(rowsA).toHaveLength(1);
+      expect(rowsB).toHaveLength(1);
       expect(rowsA.find((row) => row.key === EConfigKey.AiInstructionsTimezone)?.value).toBe(
         "America/New_York",
       );
@@ -244,56 +211,8 @@ describe("SettingsService", () => {
     });
   });
 
-  describe("setup", () => {
-    test("loads complete valid existing rows into cache", async () => {
-      const settings = SettingsService.instance;
-      const ownerKey = "owner-setup";
-
-      await insertCompleteRecord(ownerKey, {
-        [EConfigKey.AiInstructionsTimezone]: "America/New_York",
-      });
-
-      await settings.setup();
-
-      await deleteOwnerRows(ownerKey);
-
-      const record = await settings.getAll(ownerKey);
-
-      expect(record[EConfigKey.AiInstructionsTimezone]).toBe("America/New_York");
-
-      const rows = await getOwnerRows(ownerKey);
-
-      expect(rows).toHaveLength(0);
-    });
-
-    test("skips incomplete owner without caching so next getAll seeds defaults", async () => {
-      const settings = SettingsService.instance;
-      const ownerKey = "owner-incomplete";
-
-      for (const key of Object.values(EConfigKey)) {
-        if (key === EConfigKey.AiInstructionsTimezone) {
-          continue;
-        }
-
-        await insertOwnerRow(ownerKey, key, DefaultConfigRecord[key]);
-      }
-
-      await settings.setup();
-
-      const record = await settings.getAll(ownerKey);
-
-      expect(record[EConfigKey.AiInstructionsTimezone]).toBe(
-        DefaultConfigRecord[EConfigKey.AiInstructionsTimezone],
-      );
-
-      const rows = await getOwnerRows(ownerKey);
-
-      expect(rows).toHaveLength(Object.values(EConfigKey).length);
-    });
-  });
-
   describe("invalid stored rows", () => {
-    test("unknown key is deleted and defaults are seeded on read", async () => {
+    test("unknown key is ignored on read", async () => {
       const settings = SettingsService.instance;
       const ownerKey = "owner-unknown-key";
 
@@ -305,11 +224,11 @@ describe("SettingsService", () => {
 
       const rows = await getOwnerRows(ownerKey);
 
-      expect(rows).toHaveLength(Object.values(EConfigKey).length);
-      expect(rows.find((row) => row.key === "unknown.key")).toBeUndefined();
+      expect(rows).toHaveLength(1);
+      expect(rows.find((row) => row.key === "unknown.key")?.value).toBe("whatever");
     });
 
-    test("invalid timezone resets to default on read", async () => {
+    test("invalid timezone is ignored on read", async () => {
       const settings = SettingsService.instance;
       const ownerKey = "owner-invalid-tz";
 
@@ -324,10 +243,10 @@ describe("SettingsService", () => {
       const rows = await getOwnerRows(ownerKey);
       const timezoneRow = rows.find((row) => row.key === EConfigKey.AiInstructionsTimezone);
 
-      expect(timezoneRow?.value).toBe(DefaultConfigRecord[EConfigKey.AiInstructionsTimezone]);
+      expect(timezoneRow?.value).toBe("Not/A_Real_Tz");
     });
 
-    test("invalid provider resets to default on read", async () => {
+    test("invalid provider is ignored on read", async () => {
       const settings = SettingsService.instance;
       const ownerKey = "owner-invalid-provider";
 
@@ -340,24 +259,7 @@ describe("SettingsService", () => {
       const rows = await getOwnerRows(ownerKey);
       const providerRow = rows.find((row) => row.key === EConfigKey.AiProvider);
 
-      expect(providerRow?.value).toBe(DefaultConfigRecord[EConfigKey.AiProvider]);
-    });
-  });
-
-  describe("invalidate", () => {
-    test("removes owner from cache so next getAll re-reads from DB", async () => {
-      const settings = SettingsService.instance;
-      const ownerKey = "owner-invalidate";
-
-      await settings.set(ownerKey, EConfigKey.AiInstructionsTimezone, "America/New_York");
-
-      settings.invalidate(ownerKey);
-
-      await updateOwnerRow(ownerKey, EConfigKey.AiInstructionsTimezone, "Asia/Tokyo");
-
-      const value = await settings.get(ownerKey, EConfigKey.AiInstructionsTimezone);
-
-      expect(value).toBe("Asia/Tokyo");
+      expect(providerRow?.value).toBe("invalid-provider");
     });
   });
 });

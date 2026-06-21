@@ -5,7 +5,7 @@ import { type TSelectUserConfig, userConfigsTable } from "../database/schema";
 import {
   ConfigValidators,
   DefaultConfigRecord,
-  EConfigKey,
+  type EConfigKey,
   isConfigKey,
   type TConfigRecord,
 } from "./schema";
@@ -29,10 +29,6 @@ export class SettingsService {
     return SettingsService._instance;
   }
 
-  public async setup(): Promise<void> {
-    this.cache.clear();
-  }
-
   public async getAll(ownerKey: string): Promise<TConfigRecord> {
     const cached = this.cache.get(ownerKey);
 
@@ -40,7 +36,8 @@ export class SettingsService {
       return { ...cached };
     }
 
-    const record = await this.loadOwnerRecord(ownerKey);
+    const rows = await this.selectOwnerRows(ownerKey);
+    const record = this.createRecord(rows);
     this.cache.set(ownerKey, record);
 
     return { ...record };
@@ -76,25 +73,15 @@ export class SettingsService {
 
     this.cache.delete(ownerKey);
 
-    const record = await this.loadOwnerRecord(ownerKey);
+    const rows = await this.selectOwnerRows(ownerKey);
+    const record = this.createRecord(rows);
     this.cache.set(ownerKey, record);
 
     return { ...record };
   }
 
-  public invalidate(ownerKey: string): void {
-    this.cache.delete(ownerKey);
-  }
-
-  private async loadOwnerRecord(ownerKey: string): Promise<TConfigRecord> {
-    const rows = await this.selectOwnerRows(ownerKey);
-    const validated = this.validateRows(rows);
-
-    return this.assembleRecord(validated);
-  }
-
-  private validateRows(rows: TSelectUserConfig[]): Map<EConfigKey, string> {
-    const byKey = new Map<EConfigKey, string>();
+  private createRecord(rows: TSelectUserConfig[]): TConfigRecord {
+    const record: TConfigRecord = { ...DefaultConfigRecord };
 
     for (const row of rows) {
       if (!isConfigKey(row.key)) {
@@ -108,21 +95,7 @@ export class SettingsService {
         continue;
       }
 
-      byKey.set(row.key, parsed.data);
-    }
-
-    return byKey;
-  }
-
-  private assembleRecord(byKey: Map<EConfigKey, string>): TConfigRecord {
-    const record: TConfigRecord = { ...DefaultConfigRecord };
-
-    for (const key of Object.values(EConfigKey)) {
-      const value = byKey.get(key);
-
-      if (value !== undefined) {
-        record[key] = value;
-      }
+      record[row.key] = parsed.data;
     }
 
     return record;

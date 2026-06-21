@@ -1,5 +1,5 @@
 import { readXmlAndInjectConfig } from "../ai/instructions/read-xml-and-inject-config";
-import { EConfigKey, type TConfigRecord } from "../settings/schema";
+import type { TConfigRecord } from "../settings/schema";
 
 export type TMessageHandlerInstructions = {
   searchMemory: string;
@@ -65,25 +65,18 @@ async function loadMessageHandlerInstructions(
   };
 }
 
-function buildSettingsSignature(settings: TConfigRecord): string {
-  const keys = Object.values(EConfigKey).sort();
-  const entries = keys.map((key) => [key, settings[key]]);
-  return JSON.stringify(entries);
-}
-
 export async function getMessageHandlerInstructions(
   ownerKey: string,
   settings: TConfigRecord,
 ): Promise<TMessageHandlerInstructions> {
-  const cacheKey = `${ownerKey}\n${buildSettingsSignature(settings)}`;
-  const cached = instructionsCache.get(cacheKey);
+  const cached = instructionsCache.get(ownerKey);
 
   if (cached !== undefined) {
     return cached;
   }
 
   const loaded = await loadMessageHandlerInstructions(settings);
-  instructionsCache.set(cacheKey, loaded);
+  instructionsCache.set(ownerKey, loaded);
   return loaded;
 }
 
@@ -93,11 +86,5 @@ export function invalidateMessageHandlerInstructions(ownerKey?: string): void {
     return;
   }
 
-  const prefix = `${ownerKey}\n`;
-
-  for (const key of instructionsCache.keys()) {
-    if (key.startsWith(prefix)) {
-      instructionsCache.delete(key);
-    }
-  }
+  instructionsCache.delete(ownerKey);
 }
