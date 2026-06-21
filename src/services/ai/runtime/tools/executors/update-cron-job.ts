@@ -16,7 +16,6 @@ import { createFailedToolResult, createSuccessfulToolResult } from "../results";
 export async function executeUpdateCronJobTool(
   toolCall: ChatMessageToolCall,
   chatId: TOption<string>,
-  _ownerTimezone: string,
 ): Promise<TNormalizedToolResult> {
   const resolvedChatId = requireChatId(toolCall, chatId);
 

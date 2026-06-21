@@ -68,7 +68,7 @@ export async function executeToolCall(args: {
       return executeUnscheduleCronJobTool(toolCall, chatId);
     }
     case UPDATE_CRON_JOB_TOOL: {
-      return executeUpdateCronJobTool(toolCall, chatId, ownerTimezone);
+      return executeUpdateCronJobTool(toolCall, chatId);
     }
     case WEB_SEARCH_TOOL: {
       return executeWebSearchTool(toolCall);
