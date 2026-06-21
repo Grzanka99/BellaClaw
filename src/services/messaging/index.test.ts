@@ -305,6 +305,27 @@ describe("MessagingAdapter", () => {
     });
   });
 
+  test("skips blank cron reminder text", async () => {
+    const adapter = MessagingAdapter.instance as unknown as TMessagingAdapterInternals;
+    const sendTextMock = mock(async (_chatId: string, _text: string) => {});
+    const saveMock = mockMemoryInstance();
+
+    adapter.transports.set(EMessagePlatform.Discord, {
+      platform: EMessagePlatform.Discord,
+      sendText: sendTextMock,
+    });
+
+    await adapter.handleCronFire(
+      createCronContext({
+        reminderText: "   ",
+        reminderFallbackText: undefined,
+      }),
+    );
+
+    expect(sendTextMock).toHaveBeenCalledTimes(0);
+    expect(saveMock).toHaveBeenCalledTimes(0);
+  });
+
   test("skips signal cron reminders when no Signal transport is registered", async () => {
     const adapter = MessagingAdapter.instance as unknown as TMessagingAdapterInternals;
     const sendTextMock = mock(async (_chatId: string, _text: string) => {});

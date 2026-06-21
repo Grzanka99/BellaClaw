@@ -19,7 +19,7 @@ export function handleGetSettingsArgs(toolCall: ChatMessageToolCall): TOption<TG
   const parsed = SGetSettingsArgs.safeParse(argsJson);
 
   if (!parsed.success) {
-    logger.error("handleGetSettingsArgs: Zod validation failed");
+    logger.error(`handleGetSettingsArgs: Zod validation failed: ${parsed.error.message}`);
     return undefined;
   }
 

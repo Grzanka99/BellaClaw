@@ -1,9 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { ChatMessageToolCall } from "@openrouter/sdk/models";
-import { Config } from "../../../config";
 import { CronSingleton } from "../../cron";
 import { resetCronEngineJobsTable } from "../../database/test-utils";
-import { DefaultConfigRecord } from "../../settings/schema";
+import { DefaultConfigRecord, EConfigKey } from "../../settings/schema";
 import { LIST_CRON_JOBS_TOOL } from "../tools/list-cron-jobs/definition";
 import { SCHEDULE_RECURRING_TOOL } from "../tools/schedule-recurring/definition";
 import { executeToolCall } from "./tool-execution";
@@ -28,16 +27,16 @@ function createToolCall(id: string, name: string, argumentsText: string): ChatMe
   };
 }
 
-function formatLocalDateTime(date: Date) {
+function formatLocalDateTime(date: Date, timezone: string) {
   return date.toLocaleString("sv-SE-u-nu-latn", {
-    timeZone: Config.ai.instructions.timezone,
+    timeZone: timezone,
     hourCycle: "h23",
   });
 }
 
-function formatLocalTime(date: Date) {
+function formatLocalTime(date: Date, timezone: string) {
   return date.toLocaleTimeString("sv-SE-u-nu-latn", {
-    timeZone: Config.ai.instructions.timezone,
+    timeZone: timezone,
     hour: "2-digit",
     minute: "2-digit",
     hourCycle: "h23",
@@ -56,6 +55,11 @@ describe("cron tool result formatting", () => {
 
   test("adds explicit local time fields to cron tool results", async () => {
     const chatId = "runtime-cron-user";
+    const ownerTimezone = "Asia/Tokyo";
+    const settings = {
+      ...DefaultConfigRecord,
+      [EConfigKey.AiInstructionsTimezone]: ownerTimezone,
+    };
     const scheduleResult = await executeToolCall({
       toolCall: createToolCall(
         "schedule-cron",
@@ -68,13 +72,13 @@ describe("cron tool result formatting", () => {
       ),
       chatId,
       allowedToolNames: new Set([SCHEDULE_RECURRING_TOOL, LIST_CRON_JOBS_TOOL]),
-      settings: DefaultConfigRecord,
+      settings,
     });
     const listResult = await executeToolCall({
       toolCall: createToolCall("list-cron", LIST_CRON_JOBS_TOOL, "{}"),
       chatId,
       allowedToolNames: new Set([SCHEDULE_RECURRING_TOOL, LIST_CRON_JOBS_TOOL]),
-      settings: DefaultConfigRecord,
+      settings,
     });
 
     expect(scheduleResult.success).toBe(true);
@@ -99,10 +103,16 @@ describe("cron tool result formatting", () => {
       lastRunAtLocal?: string;
     }>;
 
-    expect(scheduledJob.timezone).toBe(Config.ai.instructions.timezone);
-    expect(scheduledJob.nextRunAtLocal).toBe(formatLocalDateTime(scheduledJob.nextRunAt));
-    expect(scheduledJob.nextRunAtLocalTime).toBe(formatLocalTime(scheduledJob.nextRunAt));
-    expect(scheduledJob.createdAtLocal).toBe(formatLocalDateTime(scheduledJob.createdAt));
+    expect(scheduledJob.timezone).toBe(ownerTimezone);
+    expect(scheduledJob.nextRunAtLocal).toBe(
+      formatLocalDateTime(scheduledJob.nextRunAt, ownerTimezone),
+    );
+    expect(scheduledJob.nextRunAtLocalTime).toBe(
+      formatLocalTime(scheduledJob.nextRunAt, ownerTimezone),
+    );
+    expect(scheduledJob.createdAtLocal).toBe(
+      formatLocalDateTime(scheduledJob.createdAt, ownerTimezone),
+    );
     expect(scheduledJob.lastRunAtLocal).toBeUndefined();
 
     expect(listedJobs).toHaveLength(1);
@@ -112,8 +122,8 @@ describe("cron tool result formatting", () => {
       throw new Error("Expected one listed cron job");
     }
 
-    expect(listedJob.timezone).toBe(Config.ai.instructions.timezone);
-    expect(listedJob.nextRunAtLocal).toBe(formatLocalDateTime(listedJob.nextRunAt));
-    expect(listedJob.nextRunAtLocalTime).toBe(formatLocalTime(listedJob.nextRunAt));
+    expect(listedJob.timezone).toBe(ownerTimezone);
+    expect(listedJob.nextRunAtLocal).toBe(formatLocalDateTime(listedJob.nextRunAt, ownerTimezone));
+    expect(listedJob.nextRunAtLocalTime).toBe(formatLocalTime(listedJob.nextRunAt, ownerTimezone));
   });
 });

@@ -4,7 +4,7 @@ import { getSettingsTool } from "../ai/tools/get-settings/definition";
 import { updateSettingsTool } from "../ai/tools/update-settings/definition";
 import type { TIncommingMessage } from "../message-handler/types";
 import { SettingsService } from "../settings";
-import { DefaultConfigRecord, EConfigKey, type TConfigRecord } from "../settings/schema";
+import { createRuntimeSafeSettings } from "../settings/schema";
 import { getSettingsHandlerInstructions } from "./instructions";
 
 export class SettingsMessageHandler {
@@ -36,40 +36,7 @@ export class SettingsMessageHandler {
 
     const settings = await SettingsService.instance.getAll(message.chatId);
     const instructions = await getSettingsHandlerInstructions(settings);
-    const runtimeSettings: TConfigRecord = {
-      ...settings,
-      [EConfigKey.AiProvider]: DefaultConfigRecord[EConfigKey.AiProvider],
-      [EConfigKey.AiProvidersOllamaModelsToolCheap]:
-        DefaultConfigRecord[EConfigKey.AiProvidersOllamaModelsToolCheap],
-      [EConfigKey.AiProvidersOllamaModelsToolAccurate]:
-        DefaultConfigRecord[EConfigKey.AiProvidersOllamaModelsToolAccurate],
-      [EConfigKey.AiProvidersOllamaModelsGeneral]:
-        DefaultConfigRecord[EConfigKey.AiProvidersOllamaModelsGeneral],
-      [EConfigKey.AiProvidersOllamaModelsChat]:
-        DefaultConfigRecord[EConfigKey.AiProvidersOllamaModelsChat],
-      [EConfigKey.AiProvidersOllamaModelsChatAccurate]:
-        DefaultConfigRecord[EConfigKey.AiProvidersOllamaModelsChatAccurate],
-      [EConfigKey.AiProvidersOpenrouterModelsToolCheap]:
-        DefaultConfigRecord[EConfigKey.AiProvidersOpenrouterModelsToolCheap],
-      [EConfigKey.AiProvidersOpenrouterModelsToolAccurate]:
-        DefaultConfigRecord[EConfigKey.AiProvidersOpenrouterModelsToolAccurate],
-      [EConfigKey.AiProvidersOpenrouterModelsGeneral]:
-        DefaultConfigRecord[EConfigKey.AiProvidersOpenrouterModelsGeneral],
-      [EConfigKey.AiProvidersOpenrouterModelsChat]:
-        DefaultConfigRecord[EConfigKey.AiProvidersOpenrouterModelsChat],
-      [EConfigKey.AiProvidersOpenrouterModelsChatAccurate]:
-        DefaultConfigRecord[EConfigKey.AiProvidersOpenrouterModelsChatAccurate],
-      [EConfigKey.AiProvidersOpencodeGoModelsToolCheap]:
-        DefaultConfigRecord[EConfigKey.AiProvidersOpencodeGoModelsToolCheap],
-      [EConfigKey.AiProvidersOpencodeGoModelsToolAccurate]:
-        DefaultConfigRecord[EConfigKey.AiProvidersOpencodeGoModelsToolAccurate],
-      [EConfigKey.AiProvidersOpencodeGoModelsGeneral]:
-        DefaultConfigRecord[EConfigKey.AiProvidersOpencodeGoModelsGeneral],
-      [EConfigKey.AiProvidersOpencodeGoModelsChat]:
-        DefaultConfigRecord[EConfigKey.AiProvidersOpencodeGoModelsChat],
-      [EConfigKey.AiProvidersOpencodeGoModelsChatAccurate]:
-        DefaultConfigRecord[EConfigKey.AiProvidersOpencodeGoModelsChatAccurate],
-    };
+    const runtimeSettings = createRuntimeSafeSettings(settings);
 
     const history: THistoryItem[] = [{ role: ERole.System, content: instructions.systemPrompt }];
 

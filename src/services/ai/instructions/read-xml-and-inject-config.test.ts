@@ -1,6 +1,14 @@
 import { describe, expect, test } from "bun:test";
+import { mkdirSync } from "node:fs";
 import { Config } from "../../../config";
 import { DefaultConfigRecord, EConfigKey, type TConfigRecord } from "../../settings/schema";
+
+const testTempDir = Bun.env.TMPDIR ?? "tmp";
+mkdirSync(testTempDir, { recursive: true });
+
+function getTempXmlPath(prefix: string): string {
+  return `${testTempDir}/${prefix}-${Date.now()}.xml`;
+}
 
 const mockConfig = {
   ...Config,
@@ -25,7 +33,7 @@ describe("readXmlAndInjectConfig", () => {
   test("injects top-level config values into XML placeholders", async () => {
     const { readXmlAndInjectConfig } = await import("./read-xml-and-inject-config");
 
-    const tempPath = `/tmp/test-inject-${Date.now()}.xml`;
+    const tempPath = getTempXmlPath("test-inject");
     await Bun.write(tempPath, `Hello {{config.ai.instructions.assistantName}}!`);
 
     const result = await readXmlAndInjectConfig(tempPath, mockConfig);
@@ -37,7 +45,7 @@ describe("readXmlAndInjectConfig", () => {
   test("injects nested config values like memoryRetention.high", async () => {
     const { readXmlAndInjectConfig } = await import("./read-xml-and-inject-config");
 
-    const tempPath = `/tmp/test-inject-nested-${Date.now()}.xml`;
+    const tempPath = getTempXmlPath("test-inject-nested");
     await Bun.write(
       tempPath,
       `<retention>{{config.ai.instructions.memoryRetention.high}}</retention>`,
@@ -54,7 +62,7 @@ describe("readXmlAndInjectConfig", () => {
   test("injects multiple different placeholders in one file", async () => {
     const { readXmlAndInjectConfig } = await import("./read-xml-and-inject-config");
 
-    const tempPath = `/tmp/test-inject-multi-${Date.now()}.xml`;
+    const tempPath = getTempXmlPath("test-inject-multi");
     await Bun.write(
       tempPath,
       `Always use the {{config.ai.instructions.timezone}} timezone. Reply in {{config.ai.instructions.language}}. Name: {{config.ai.instructions.assistantName}}.`,
@@ -69,7 +77,7 @@ describe("readXmlAndInjectConfig", () => {
   test("leaves non-config curly braces untouched", async () => {
     const { readXmlAndInjectConfig } = await import("./read-xml-and-inject-config");
 
-    const tempPath = `/tmp/test-inject-plain-${Date.now()}.xml`;
+    const tempPath = getTempXmlPath("test-inject-plain");
     await Bun.write(tempPath, `User id: {user.id}, timezone: {{config.ai.instructions.timezone}}`);
 
     const result = await readXmlAndInjectConfig(tempPath, mockConfig);
@@ -81,7 +89,7 @@ describe("readXmlAndInjectConfig", () => {
   test("throws on missing config path", async () => {
     const { readXmlAndInjectConfig } = await import("./read-xml-and-inject-config");
 
-    const tempPath = `/tmp/test-inject-missing-${Date.now()}.xml`;
+    const tempPath = getTempXmlPath("test-inject-missing");
     await Bun.write(tempPath, `Value: {{config.ai.instructions.nonexistent}}`);
 
     await expect(readXmlAndInjectConfig(tempPath, mockConfig)).rejects.toThrow(
@@ -94,7 +102,7 @@ describe("readXmlAndInjectConfig", () => {
   test("throws on config path that hits a non-object value", async () => {
     const { readXmlAndInjectConfig } = await import("./read-xml-and-inject-config");
 
-    const tempPath = `/tmp/test-inject-nonobj-${Date.now()}.xml`;
+    const tempPath = getTempXmlPath("test-inject-nonobj");
     await Bun.write(tempPath, `Value: {{config.ai.instructions.timezone.foo}}`);
 
     await expect(readXmlAndInjectConfig(tempPath, mockConfig)).rejects.toThrow(
@@ -121,7 +129,7 @@ describe("readXmlAndInjectConfig", () => {
       },
     };
 
-    const tempPath = `/tmp/test-inject-nested-refs-${Date.now()}.xml`;
+    const tempPath = getTempXmlPath("test-inject-nested-refs");
     await Bun.write(tempPath, `<persona>{{config.ai.instructions.persona}}</persona>`);
 
     const result = await readXmlAndInjectConfig(tempPath, nestedConfig);
@@ -157,7 +165,7 @@ describe("readXmlAndInjectConfig", () => {
       [EConfigKey.AiInstructionsLanguage]: "English",
     };
 
-    const tempPath = `/tmp/test-inject-record-${Date.now()}.xml`;
+    const tempPath = getTempXmlPath("test-inject-record");
     await Bun.write(
       tempPath,
       `Name: {{config.ai.instructions.assistantName}}, TZ: {{config.ai.instructions.timezone}}, Lang: {{config.ai.instructions.language}}`,

@@ -24,7 +24,7 @@ export function handleDefineSettingsIntent(
   const parsed = SDefineSettingsIntent.safeParse(argsJson);
 
   if (!parsed.success) {
-    logger.error("handleDefineSettingsIntent: Zod validation failed");
+    logger.error(`handleDefineSettingsIntent: Zod validation failed: ${parsed.error.message}`);
     return undefined;
   }
 

@@ -86,7 +86,7 @@ export async function executeUpdateCronJobTool(
       );
     }
 
-    return createSuccessfulToolResult(toolCall, serializeCronJobForModel(result));
+    return createSuccessfulToolResult(toolCall, serializeCronJobForModel(result, ownerTimezone));
   }
 
   if (parsed.data.pattern !== undefined) {
@@ -115,5 +115,5 @@ export async function executeUpdateCronJobTool(
     );
   }
 
-  return createSuccessfulToolResult(toolCall, serializeCronJobForModel(result));
+  return createSuccessfulToolResult(toolCall, serializeCronJobForModel(result, ownerTimezone));
 }

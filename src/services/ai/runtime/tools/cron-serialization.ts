@@ -1,4 +1,3 @@
-import { Config } from "../../../../config";
 import type { TCronEngineJob } from "../../../../lib/cron-engine";
 
 function formatLocalDateTime(date: Date, timezone: string) {
@@ -17,8 +16,8 @@ function formatLocalTime(date: Date, timezone: string) {
   });
 }
 
-export function serializeCronJobForModel(job: TCronEngineJob) {
-  const timezone = job.timezone ?? Config.ai.instructions.timezone;
+export function serializeCronJobForModel(job: TCronEngineJob, ownerTimezone: string) {
+  const timezone = job.timezone ?? ownerTimezone;
 
   return {
     ...job,
@@ -31,6 +30,6 @@ export function serializeCronJobForModel(job: TCronEngineJob) {
   };
 }
 
-export function serializeCronJobsForModel(jobs: TCronEngineJob[]) {
-  return jobs.map((job) => serializeCronJobForModel(job));
+export function serializeCronJobsForModel(jobs: TCronEngineJob[], ownerTimezone: string) {
+  return jobs.map((job) => serializeCronJobForModel(job, ownerTimezone));
 }

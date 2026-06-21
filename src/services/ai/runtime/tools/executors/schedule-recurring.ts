@@ -51,5 +51,5 @@ export async function executeScheduleRecurringTool(
     );
   }
 
-  return createSuccessfulToolResult(toolCall, serializeCronJobForModel(result));
+  return createSuccessfulToolResult(toolCall, serializeCronJobForModel(result, ownerTimezone));
 }

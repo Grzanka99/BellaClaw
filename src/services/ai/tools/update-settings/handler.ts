@@ -39,7 +39,7 @@ export function handleUpdateSettingsArgs(
   const parsed = SUpdateSettingsArgs.safeParse(argsJson);
 
   if (!parsed.success) {
-    logger.error("handleUpdateSettingsArgs: Zod validation failed");
+    logger.error(`handleUpdateSettingsArgs: Zod validation failed: ${parsed.error.message}`);
     return undefined;
   }
 

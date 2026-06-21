@@ -82,6 +82,35 @@ export const DefaultConfigRecord: TConfigRecord = {
   [EConfigKey.AiProvidersOpencodeGoModelsChatAccurate]: MODEL_OPENCODE_GO_GLM_5_2,
 };
 
+const RuntimeSafeConfigKeys: EConfigKey[] = [
+  EConfigKey.AiProvider,
+  EConfigKey.AiProvidersOllamaModelsToolCheap,
+  EConfigKey.AiProvidersOllamaModelsToolAccurate,
+  EConfigKey.AiProvidersOllamaModelsGeneral,
+  EConfigKey.AiProvidersOllamaModelsChat,
+  EConfigKey.AiProvidersOllamaModelsChatAccurate,
+  EConfigKey.AiProvidersOpenrouterModelsToolCheap,
+  EConfigKey.AiProvidersOpenrouterModelsToolAccurate,
+  EConfigKey.AiProvidersOpenrouterModelsGeneral,
+  EConfigKey.AiProvidersOpenrouterModelsChat,
+  EConfigKey.AiProvidersOpenrouterModelsChatAccurate,
+  EConfigKey.AiProvidersOpencodeGoModelsToolCheap,
+  EConfigKey.AiProvidersOpencodeGoModelsToolAccurate,
+  EConfigKey.AiProvidersOpencodeGoModelsGeneral,
+  EConfigKey.AiProvidersOpencodeGoModelsChat,
+  EConfigKey.AiProvidersOpencodeGoModelsChatAccurate,
+];
+
+export function createRuntimeSafeSettings(settings: TConfigRecord): TConfigRecord {
+  const runtimeSettings: TConfigRecord = { ...settings };
+
+  for (const key of RuntimeSafeConfigKeys) {
+    runtimeSettings[key] = DefaultConfigRecord[key];
+  }
+
+  return runtimeSettings;
+}
+
 const SNonEmptyString = z.string().min(1);
 
 function isValidTimezone(timezone: string): boolean {

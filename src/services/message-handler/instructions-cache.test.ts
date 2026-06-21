@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
+import { mkdirSync } from "node:fs";
 import {
   DEFINE_MESSAGE_IMPORTANCE_TOOL,
   ERole,
@@ -21,6 +22,13 @@ import {
   getMessageHandlerInstructions,
   invalidateMessageHandlerInstructions,
 } from "./instructions";
+
+const testTempDir = Bun.env.TMPDIR ?? "tmp";
+mkdirSync(testTempDir, { recursive: true });
+
+function getTempXmlPath(prefix: string): string {
+  return `${testTempDir}/${prefix}-${Date.now()}.xml`;
+}
 
 type TMessageHandlerInternals = {
   ai: {
@@ -205,7 +213,7 @@ describe("MessageHandler instruction cache", () => {
   });
 
   test("isolates instructions per owner and settings", async () => {
-    const tempPath = `/tmp/test-inject-isolation-${Date.now()}.xml`;
+    const tempPath = getTempXmlPath("test-inject-isolation");
     await Bun.write(
       tempPath,
       `<tool>{{config.ai.instructions.assistantName}} {{config.ai.instructions.timezone}}</tool>`,

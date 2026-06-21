@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { AsyncQueue } from "../../utils/async-queue";
 import { createLogger } from "../../utils/logger";
 import { DatabaseConnector } from "../database";
@@ -50,9 +50,13 @@ export class SettingsService {
 
     for (const [ownerKey, ownerRows] of byOwner) {
       try {
-        const validated = this.validateRows(ownerRows);
+        await this.repairStoredRows(ownerKey, ownerRows);
+
+        const refreshedRows = await this.selectOwnerRows(ownerKey);
+        const validated = this.validateRows(refreshedRows);
 
         if (!this.isComplete(validated)) {
+          this.logger.warning(`Skipping incomplete owner "${ownerKey}" during setup`);
           continue;
         }
 
@@ -99,6 +103,7 @@ export class SettingsService {
     }
 
     await this.upsertRow(ownerKey, key, parsed.data);
+    this.cache.delete(ownerKey);
 
     const record = await this.loadOwnerRecord(ownerKey);
     this.cache.set(ownerKey, record);
@@ -112,7 +117,10 @@ export class SettingsService {
 
   private async loadOwnerRecord(ownerKey: string): Promise<TConfigRecord> {
     const rows = await this.selectOwnerRows(ownerKey);
-    const validated = this.validateRows(rows);
+    await this.repairStoredRows(ownerKey, rows);
+
+    const repairedRows = await this.selectOwnerRows(ownerKey);
+    const validated = this.validateRows(repairedRows);
 
     const missingKeys: EConfigKey[] = [];
 
@@ -141,20 +149,47 @@ export class SettingsService {
 
     for (const row of rows) {
       if (!isConfigKey(row.key)) {
-        throw new Error(`Unknown config key: "${row.key}"`);
+        continue;
       }
 
       const validator = ConfigValidators[row.key];
       const parsed = validator.safeParse(row.value);
 
       if (!parsed.success) {
-        throw new Error(`Invalid value for config key "${row.key}": ${JSON.stringify(row.value)}`);
+        continue;
       }
 
       byKey.set(row.key, parsed.data);
     }
 
     return byKey;
+  }
+
+  private async repairStoredRows(ownerKey: string, rows: TSelectUserConfig[]): Promise<void> {
+    const unknownKeys: string[] = [];
+    const invalidKeys: EConfigKey[] = [];
+
+    for (const row of rows) {
+      if (!isConfigKey(row.key)) {
+        unknownKeys.push(row.key);
+        continue;
+      }
+
+      const validator = ConfigValidators[row.key];
+      const parsed = validator.safeParse(row.value);
+
+      if (!parsed.success) {
+        invalidKeys.push(row.key);
+      }
+    }
+
+    if (unknownKeys.length > 0) {
+      await this.deleteRows(ownerKey, unknownKeys);
+    }
+
+    if (invalidKeys.length > 0) {
+      await this.resetRows(ownerKey, invalidKeys);
+    }
   }
 
   private isComplete(byKey: Map<EConfigKey, string>): boolean {
@@ -210,6 +245,29 @@ export class SettingsService {
         .onConflictDoNothing({
           target: [userConfigsTable.ownerKey, userConfigsTable.key],
         });
+    });
+  }
+
+  private async deleteRows(ownerKey: string, keys: string[]): Promise<void> {
+    await this.queue.enqueue(async () => {
+      for (const key of keys) {
+        await this.db
+          .delete(userConfigsTable)
+          .where(and(eq(userConfigsTable.ownerKey, ownerKey), eq(userConfigsTable.key, key)));
+      }
+    });
+  }
+
+  private async resetRows(ownerKey: string, keys: EConfigKey[]): Promise<void> {
+    const now = Date.now();
+
+    await this.queue.enqueue(async () => {
+      for (const key of keys) {
+        await this.db
+          .update(userConfigsTable)
+          .set({ value: DefaultConfigRecord[key], updatedAt: now })
+          .where(and(eq(userConfigsTable.ownerKey, ownerKey), eq(userConfigsTable.key, key)));
+      }
     });
   }
 

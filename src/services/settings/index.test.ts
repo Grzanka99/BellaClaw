@@ -293,31 +293,54 @@ describe("SettingsService", () => {
   });
 
   describe("invalid stored rows", () => {
-    test("unknown key produces explicit error on read instead of fallback", async () => {
+    test("unknown key is deleted and defaults are seeded on read", async () => {
       const settings = SettingsService.instance;
       const ownerKey = "owner-unknown-key";
 
       await insertOwnerRow(ownerKey, "unknown.key", "whatever");
 
-      await expect(settings.getAll(ownerKey)).rejects.toThrow('Unknown config key: "unknown.key"');
+      const record = await settings.getAll(ownerKey);
+
+      expect(record).toEqual(DefaultConfigRecord);
+
+      const rows = await getOwnerRows(ownerKey);
+
+      expect(rows).toHaveLength(Object.values(EConfigKey).length);
+      expect(rows.find((row) => row.key === "unknown.key")).toBeUndefined();
     });
 
-    test("invalid timezone produces explicit error on read instead of fallback", async () => {
+    test("invalid timezone resets to default on read", async () => {
       const settings = SettingsService.instance;
       const ownerKey = "owner-invalid-tz";
 
       await insertOwnerRow(ownerKey, EConfigKey.AiInstructionsTimezone, "Not/A_Real_Tz");
 
-      await expect(settings.getAll(ownerKey)).rejects.toThrow("Invalid value for config key");
+      const record = await settings.getAll(ownerKey);
+
+      expect(record[EConfigKey.AiInstructionsTimezone]).toBe(
+        DefaultConfigRecord[EConfigKey.AiInstructionsTimezone],
+      );
+
+      const rows = await getOwnerRows(ownerKey);
+      const timezoneRow = rows.find((row) => row.key === EConfigKey.AiInstructionsTimezone);
+
+      expect(timezoneRow?.value).toBe(DefaultConfigRecord[EConfigKey.AiInstructionsTimezone]);
     });
 
-    test("invalid provider produces explicit error on read instead of fallback", async () => {
+    test("invalid provider resets to default on read", async () => {
       const settings = SettingsService.instance;
       const ownerKey = "owner-invalid-provider";
 
       await insertOwnerRow(ownerKey, EConfigKey.AiProvider, "invalid-provider");
 
-      await expect(settings.getAll(ownerKey)).rejects.toThrow("Invalid value for config key");
+      const record = await settings.getAll(ownerKey);
+
+      expect(record[EConfigKey.AiProvider]).toBe(DefaultConfigRecord[EConfigKey.AiProvider]);
+
+      const rows = await getOwnerRows(ownerKey);
+      const providerRow = rows.find((row) => row.key === EConfigKey.AiProvider);
+
+      expect(providerRow?.value).toBe(DefaultConfigRecord[EConfigKey.AiProvider]);
     });
   });
 

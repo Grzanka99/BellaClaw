@@ -132,6 +132,13 @@ export class MessagingAdapter {
       return;
     }
 
+    if (text.trim().length === 0) {
+      this.logger.info(
+        `handleCronFire: job "${ctx.name}" has blank reminder text, skipping delivery`,
+      );
+      return;
+    }
+
     try {
       await transport.sendText(parsedScope.chatId, text);
     } catch (error) {

@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import type { TToolTaskArgs } from "../ai/api";
 import { DEFINE_SETTINGS_INTENT_TOOL } from "../ai/tools/define-settings-intent/definition";
 import { SettingsService } from "../settings";
-import { DefaultConfigRecord } from "../settings/schema";
+import { DefaultConfigRecord, EConfigKey, type TConfigRecord } from "../settings/schema";
 import { SettingsIntentClassifier } from "./index";
 
 type TSettingsServiceStatic = { _instance: unknown };
@@ -129,5 +130,55 @@ describe("SettingsIntentClassifier", () => {
     const result = await classifier.classify("change your timezone to UTC", "discord:user-1");
 
     expect(result).toEqual({ intent: "settings", reason: "change timezone" });
+  });
+
+  test("uses default provider models while preserving user instruction injection", async () => {
+    const storedSettings: TConfigRecord = {
+      ...DefaultConfigRecord,
+      [EConfigKey.AiInstructionsLanguage]: "Klingon",
+      [EConfigKey.AiProvider]: "bad-provider",
+      [EConfigKey.AiProvidersOpencodeGoModelsToolCheap]: "bad-tool-cheap-model",
+    };
+    const capturedArgs: TToolTaskArgs[] = [];
+
+    mockSettingsServiceGetAll(async () => storedSettings);
+
+    Bun.file = mock(() => ({
+      text: async () => "Classify in {{config.ai.instructions.language}}.",
+    })) as unknown as typeof Bun.file;
+
+    const classifier = SettingsIntentClassifier.instance;
+    const internals = classifier as unknown as TSettingsIntentClassifierInternals;
+    internals.ai = {
+      runToolTask: mock(async (args: TToolTaskArgs) => {
+        capturedArgs.push(args);
+        return {
+          assistantResponse: "",
+          toolCalls: [],
+          toolResults: [
+            {
+              toolName: DEFINE_SETTINGS_INTENT_TOOL,
+              success: true,
+              data: { intent: "settings", reason: "change language" },
+            },
+          ],
+        };
+      }),
+    } as never;
+
+    await classifier.classify("speak Klingon", "discord:user-1");
+
+    const args = capturedArgs[0];
+
+    if (args === undefined) {
+      throw new Error("Expected captured runToolTask args");
+    }
+
+    expect(args.settings[EConfigKey.AiProvider]).toBe(DefaultConfigRecord[EConfigKey.AiProvider]);
+    expect(args.settings[EConfigKey.AiProvidersOpencodeGoModelsToolCheap]).toBe(
+      DefaultConfigRecord[EConfigKey.AiProvidersOpencodeGoModelsToolCheap],
+    );
+    expect(args.settings[EConfigKey.AiInstructionsLanguage]).toBe("Klingon");
+    expect(args.history[0]?.content).toContain("Classify in Klingon.");
   });
 });
