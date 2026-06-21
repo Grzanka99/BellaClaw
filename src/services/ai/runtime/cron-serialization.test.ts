@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { Config } from "../../../config";
 import {
   ECronEngineJobStatus,
   ECronEngineJobType,
@@ -38,7 +39,7 @@ function formatLocalDateTime(date: Date, timezone: string) {
 describe("serializeCronJobForModel", () => {
   test("uses stored job timezone for local display fields when present", () => {
     const job = createJob({ timezone: "America/New_York" });
-    const serialized = serializeCronJobForModel(job, "Asia/Tokyo");
+    const serialized = serializeCronJobForModel(job);
 
     expect(serialized.timezone).toBe("America/New_York");
     expect(serialized.nextRunAtLocal).toBe(formatLocalDateTime(job.nextRunAt, "America/New_York"));
@@ -46,12 +47,13 @@ describe("serializeCronJobForModel", () => {
     expect(serialized.lastRunAtLocal).toBeUndefined();
   });
 
-  test("falls back to owner timezone when job has no timezone", () => {
+  test("falls back to global config timezone when job has no timezone", () => {
     const job = createJob({ timezone: undefined });
-    const ownerTimezone = "Asia/Tokyo";
-    const serialized = serializeCronJobForModel(job, ownerTimezone);
+    const serialized = serializeCronJobForModel(job);
 
-    expect(serialized.timezone).toBe(ownerTimezone);
-    expect(serialized.nextRunAtLocal).toBe(formatLocalDateTime(job.nextRunAt, ownerTimezone));
+    expect(serialized.timezone).toBe(Config.ai.instructions.timezone);
+    expect(serialized.nextRunAtLocal).toBe(
+      formatLocalDateTime(job.nextRunAt, Config.ai.instructions.timezone),
+    );
   });
 });

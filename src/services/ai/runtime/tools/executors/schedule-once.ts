@@ -48,5 +48,5 @@ export async function executeScheduleOnceTool(
     );
   }
 
-  return createSuccessfulToolResult(toolCall, serializeCronJobForModel(result, ownerTimezone));
+  return createSuccessfulToolResult(toolCall, serializeCronJobForModel(result));
 }
