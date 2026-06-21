@@ -14,9 +14,6 @@ export const SUpdateSettingsArgs = z
     addressStyle: SNonEmptyString.optional(),
     preferredReplyLength: SNonEmptyString.optional(),
     aiProvider: z.enum(EAiProvider).optional(),
-    ollamaChatModel: SNonEmptyString.optional(),
-    openrouterChatModel: SNonEmptyString.optional(),
-    opencodeGoChatModel: SNonEmptyString.optional(),
   })
   .strict()
   .refine((value) => Object.values(value).some((v) => v !== undefined), {

@@ -119,45 +119,6 @@ function collectUpdates(args: TUpdateSettingsArgs): TFieldUpdate[] {
     updates.push({ field: "aiProvider", key: EConfigKey.AiProvider, value: args.aiProvider });
   }
 
-  if (args.ollamaChatModel !== undefined) {
-    updates.push({
-      field: "ollamaChatModel",
-      key: EConfigKey.AiProvidersOllamaModelsChatAccurate,
-      value: args.ollamaChatModel,
-    });
-    updates.push({
-      field: "ollamaChatModel",
-      key: EConfigKey.AiProvidersOllamaModelsChat,
-      value: args.ollamaChatModel,
-    });
-  }
-
-  if (args.openrouterChatModel !== undefined) {
-    updates.push({
-      field: "openrouterChatModel",
-      key: EConfigKey.AiProvidersOpenrouterModelsChatAccurate,
-      value: args.openrouterChatModel,
-    });
-    updates.push({
-      field: "openrouterChatModel",
-      key: EConfigKey.AiProvidersOpenrouterModelsChat,
-      value: args.openrouterChatModel,
-    });
-  }
-
-  if (args.opencodeGoChatModel !== undefined) {
-    updates.push({
-      field: "opencodeGoChatModel",
-      key: EConfigKey.AiProvidersOpencodeGoModelsChatAccurate,
-      value: args.opencodeGoChatModel,
-    });
-    updates.push({
-      field: "opencodeGoChatModel",
-      key: EConfigKey.AiProvidersOpencodeGoModelsChat,
-      value: args.opencodeGoChatModel,
-    });
-  }
-
   return updates;
 }
 

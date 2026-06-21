@@ -11,7 +11,6 @@ import {
   type TDefineSettingsIntent,
 } from "../ai/tools/define-settings-intent/handler";
 import { SettingsService } from "../settings";
-import { createRuntimeSafeSettings } from "../settings/schema";
 
 export type TSettingsIntent = TDefineSettingsIntent;
 
@@ -46,7 +45,6 @@ export class SettingsIntentClassifier {
     try {
       const settings = await SettingsService.instance.getAll(ownerKey);
       const toolInstructions = await readXmlAndInjectConfig(INSTRUCTIONS_PATH, settings);
-      const runtimeSettings = createRuntimeSafeSettings(settings);
 
       const system: THistoryItem = {
         role: ERole.System,
@@ -65,7 +63,7 @@ export class SettingsIntentClassifier {
         purpose: EModelPurpose.ToolCheap,
         chatId: undefined,
         user: undefined,
-        settings: runtimeSettings,
+        settings,
       });
 
       const toolResult = result.toolResults.find(

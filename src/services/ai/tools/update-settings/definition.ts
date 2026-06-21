@@ -39,21 +39,6 @@ export const updateSettingsTool: ToolDefinitionJson = {
           enum: ["openrouter", "ollama", "opencode-go"],
           description: "Active AI provider. Determines which provider's chat model is used.",
         },
-        ollamaChatModel: {
-          type: "string",
-          description:
-            "Chat model for the ollama provider. Updates both the chat and chatAccurate model keys for ollama, so it affects the next normal assistant turn when aiProvider is ollama.",
-        },
-        openrouterChatModel: {
-          type: "string",
-          description:
-            "Chat model for the openrouter provider. Updates both the chat and chatAccurate model keys for openrouter, so it affects the next normal assistant turn when aiProvider is openrouter.",
-        },
-        opencodeGoChatModel: {
-          type: "string",
-          description:
-            "Chat model for the opencode-go provider. Updates both the chat and chatAccurate model keys for opencode-go, so it affects the next normal assistant turn when aiProvider is opencode-go.",
-        },
       },
     },
   },

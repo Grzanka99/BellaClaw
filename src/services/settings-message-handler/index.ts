@@ -4,7 +4,6 @@ import { getSettingsTool } from "../ai/tools/get-settings/definition";
 import { updateSettingsTool } from "../ai/tools/update-settings/definition";
 import type { TIncommingMessage } from "../message-handler/types";
 import { SettingsService } from "../settings";
-import { createRuntimeSafeSettings } from "../settings/schema";
 import { getSettingsHandlerInstructions } from "./instructions";
 
 export class SettingsMessageHandler {
@@ -36,7 +35,6 @@ export class SettingsMessageHandler {
 
     const settings = await SettingsService.instance.getAll(message.chatId);
     const instructions = await getSettingsHandlerInstructions(settings);
-    const runtimeSettings = createRuntimeSafeSettings(settings);
 
     const history: THistoryItem[] = [{ role: ERole.System, content: instructions.systemPrompt }];
 
@@ -60,7 +58,7 @@ export class SettingsMessageHandler {
       },
       tools,
       chatId: message.chatId,
-      settings: runtimeSettings,
+      settings,
     });
     this.logger.info(
       `handleMessage: AI chat completed (${(performance.now() - chatStart).toFixed(0)}ms)`,
