@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { ChatMessageToolCall } from "@openrouter/sdk/models";
+import { Config } from "../../../config";
 import { ECronEngineJobStatus, ECronEngineJobType } from "../../../lib/cron-engine";
 import { CronSingleton } from "../../cron";
 import { DatabaseConnector } from "../../database";
@@ -45,6 +46,29 @@ async function insertLegacyRecurringJob(name: string, scope: string) {
     reminderPromptData: null,
     reminderFallbackText: "Legacy reminder.",
     nextRunAt: now + 60_000,
+    lastRunAt: null,
+    createdAt: now,
+    status: ECronEngineJobStatus.Active,
+    finishedAt: null,
+    finishedReason: null,
+    timezone: null,
+  });
+}
+
+async function insertLegacyOneTimeJob(name: string, scope: string, fireAt: Date) {
+  const db = DatabaseConnector.instance.database;
+  const now = Date.now();
+
+  await db.insert(cronEngineJobsTable).values({
+    name,
+    scope,
+    group: null,
+    type: ECronEngineJobType.OneTime,
+    pattern: null,
+    reminderText: "Legacy one-time reminder.",
+    reminderPromptData: null,
+    reminderFallbackText: "Legacy one-time reminder.",
+    nextRunAt: fireAt.getTime(),
     lastRunAt: null,
     createdAt: now,
     status: ECronEngineJobStatus.Active,
@@ -147,7 +171,7 @@ describe("update-cron-job tool execution", () => {
     expect(updatedJob?.timezone).toBe("America/New_York");
   });
 
-  test("updates legacy recurring reminder and applies owner timezone", async () => {
+  test("updates legacy recurring reminder and preserves engine timezone fallback", async () => {
     const chatId = "runtime-update-legacy-timezone-user";
     const settings = {
       ...DefaultConfigRecord,
@@ -173,12 +197,52 @@ describe("update-cron-job tool execution", () => {
     expect(updateResult.success).toBe(true);
     expect(updateResult.data).toMatchObject({
       name: "legacy-timezone-reminder",
-      timezone: "Asia/Tokyo",
+      timezone: Config.ai.instructions.timezone,
     });
 
     const updatedJob = await CronSingleton.instance.getJob("legacy-timezone-reminder", chatId);
 
-    expect(updatedJob?.timezone).toBe("Asia/Tokyo");
+    expect(updatedJob?.timezone).toBe(Config.ai.instructions.timezone);
+  });
+
+  test("updates legacy one-time reminder and preserves engine timezone fallback", async () => {
+    const chatId = "runtime-update-legacy-onetime-timezone-user";
+    const fireAt = new Date(Date.now() + 60_000);
+    const settings = {
+      ...DefaultConfigRecord,
+      [EConfigKey.AiInstructionsTimezone]: "Asia/Tokyo",
+    };
+
+    await insertLegacyOneTimeJob("legacy-onetime-timezone-reminder", chatId, fireAt);
+
+    const updateResult = await executeToolCall({
+      toolCall: createToolCall(
+        "update-legacy-onetime-timezone",
+        UPDATE_CRON_JOB_TOOL,
+        JSON.stringify({
+          name: "legacy-onetime-timezone-reminder",
+          reminderText: "Updated legacy one-time reminder.",
+        }),
+      ),
+      chatId,
+      allowedToolNames: new Set([UPDATE_CRON_JOB_TOOL]),
+      settings,
+    });
+
+    expect(updateResult.success).toBe(true);
+    expect(updateResult.data).toMatchObject({
+      name: "legacy-onetime-timezone-reminder",
+      timezone: Config.ai.instructions.timezone,
+      reminderText: "Updated legacy one-time reminder.",
+    });
+
+    const updatedJob = await CronSingleton.instance.getJob(
+      "legacy-onetime-timezone-reminder",
+      chatId,
+    );
+
+    expect(updatedJob?.timezone).toBe(Config.ai.instructions.timezone);
+    expect(updatedJob?.nextRunAt.getTime()).toBe(fireAt.getTime());
   });
 
   test("updates one-time reminder text and preserves fire time", async () => {
