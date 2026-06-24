@@ -24,6 +24,21 @@ function resetMemoryInstance() {
   MemoryWithPrivate._instance = undefined;
 }
 
+function mockMemory() {
+  const MemoryWithPrivate = Memory as unknown as TMemoryStatic;
+  MemoryWithPrivate._instance = {
+    findRecent: mock(async () => ({ success: true as const, data: [] })),
+    save: mock(async () => ({
+      chatId: "",
+      author: ERole.User,
+      importance: "low",
+      message: "",
+      createdAt: new Date(),
+      lastReadAt: new Date(),
+    })),
+  };
+}
+
 function mockSettingsService() {
   const SettingsServiceStatic = SettingsService as unknown as { _instance: unknown };
   SettingsServiceStatic._instance = {
@@ -40,6 +55,7 @@ describe("SettingsMessageHandler", () => {
   beforeEach(() => {
     resetMemoryInstance();
     resetSettingsInstance();
+    mockMemory();
     mockSettingsService();
   });
 

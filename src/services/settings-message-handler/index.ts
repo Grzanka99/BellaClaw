@@ -2,14 +2,19 @@ import { createLogger, type TLogger } from "../../utils/logger";
 import { AiConnector, EModelPurpose, ERole, type THistoryItem } from "../ai/api";
 import { getSettingsTool } from "../ai/tools/get-settings/definition";
 import { updateSettingsTool } from "../ai/tools/update-settings/definition";
+import { Memory } from "../memory";
+import { EMemoryImportance, type TMemory } from "../memory/types";
 import type { TIncommingMessage } from "../message-handler/types";
 import { SettingsService } from "../settings";
 import { getSettingsHandlerInstructions } from "./instructions";
+
+const RECENT_MEMORY_LIMIT = 30;
 
 export class SettingsMessageHandler {
   private static _instances = new Map<string, SettingsMessageHandler>();
   private logger: TLogger;
   private ai = AiConnector.instance;
+  private memory = Memory.instance;
 
   constructor(chatId: string) {
     this.logger = createLogger(`SettingsMessageHandler (cid: ${chatId})`);
@@ -36,7 +41,23 @@ export class SettingsMessageHandler {
     const settings = await SettingsService.instance.getAll(message.chatId);
     const instructions = await getSettingsHandlerInstructions(settings);
 
+    const recent = await this.retrieveMemory(message.chatId);
+
     const history: THistoryItem[] = [{ role: ERole.System, content: instructions.systemPrompt }];
+
+    for (const el of recent.toReversed()) {
+      history.push({
+        role: el.author,
+        content: el.message,
+      });
+    }
+
+    await this.memory.save({
+      chatId: message.chatId,
+      author: ERole.User,
+      importance: EMemoryImportance.Low,
+      message: message.message.content,
+    });
 
     const tools = [
       { definition: getSettingsTool, instructions: instructions.getSettings },
@@ -69,9 +90,32 @@ export class SettingsMessageHandler {
       return "Something went wrong.";
     }
 
+    await this.memory.save({
+      chatId: message.chatId,
+      author: ERole.Assistant,
+      importance: EMemoryImportance.Low,
+      message: aiRes.finalResponse,
+    });
+
     this.logger.info(
       `handleMessage: done (${(performance.now() - handleMessageStart).toFixed(0)}ms)`,
     );
     return aiRes.finalResponse;
+  }
+
+  private async retrieveMemory(chatId: string): Promise<TMemory[]> {
+    const start = performance.now();
+
+    const res = await this.memory.findRecent(chatId, RECENT_MEMORY_LIMIT);
+
+    if (!res.success) {
+      this.logger.error(
+        `retrieveMemory: failed to retrieve last ${RECENT_MEMORY_LIMIT} memories (${(performance.now() - start).toFixed(0)}ms)`,
+      );
+      return [];
+    }
+
+    this.logger.info(`retrieveMemory: done (${(performance.now() - start).toFixed(0)}ms)`);
+    return res.data;
   }
 }
