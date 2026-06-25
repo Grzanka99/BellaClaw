@@ -7,11 +7,16 @@ import {
 } from "../../message-handler/instructions";
 import { SettingsService } from "../../settings";
 import { DefaultConfigRecord, EConfigKey, type TConfigRecord } from "../../settings/schema";
+import { AiConnector } from "../api";
 import { GET_SETTINGS_TOOL } from "../tools/get-settings/definition";
 import { UPDATE_SETTINGS_TOOL } from "../tools/update-settings/definition";
 import { executeToolCall } from "./tool-execution";
 
 type TSettingsServiceStatic = {
+  _instance: unknown;
+};
+
+type TAiConnectorStatic = {
   _instance: unknown;
 };
 
@@ -31,15 +36,29 @@ function resetSettingsInstance() {
   SettingsServiceStatic._instance = undefined;
 }
 
+function resetAiConnectorInstance() {
+  const AiConnectorStatic = AiConnector as unknown as TAiConnectorStatic;
+  AiConnectorStatic._instance = undefined;
+}
+
+function mockAiSettingsVerification(error: string | undefined) {
+  const AiConnectorStatic = AiConnector as unknown as TAiConnectorStatic;
+  AiConnectorStatic._instance = {
+    verifySettings: mock(async () => error),
+  };
+}
+
 describe("settings tools execution", () => {
   beforeEach(async () => {
     resetSettingsInstance();
+    resetAiConnectorInstance();
     await resetUserConfigsTable();
     invalidateMessageHandlerInstructions();
   });
 
   afterEach(() => {
     resetSettingsInstance();
+    resetAiConnectorInstance();
     invalidateMessageHandlerInstructions();
   });
 
@@ -256,6 +275,7 @@ describe("settings tools execution", () => {
 
     test("updates aiProvider and persists to EConfigKey.AiProvider", async () => {
       const chatId = "settings-update-provider";
+      mockAiSettingsVerification(undefined);
 
       const result = await executeToolCall({
         toolCall: createToolCall(
@@ -272,6 +292,28 @@ describe("settings tools execution", () => {
 
       const readBack = await SettingsService.instance.get(chatId, EConfigKey.AiProvider);
       expect(readBack).toBe("openrouter");
+    });
+
+    test("rejects aiProvider when provider verification fails", async () => {
+      const chatId = "settings-update-unavailable-provider";
+      mockAiSettingsVerification("Provider failed for ChatAccurate: unavailable");
+
+      const result = await executeToolCall({
+        toolCall: createToolCall(
+          "update-unavailable-provider",
+          UPDATE_SETTINGS_TOOL,
+          JSON.stringify({ aiProvider: "openrouter" }),
+        ),
+        chatId,
+        allowedToolNames: new Set([UPDATE_SETTINGS_TOOL]),
+        settings: DefaultConfigRecord,
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Provider failed");
+
+      const readBack = await SettingsService.instance.get(chatId, EConfigKey.AiProvider);
+      expect(readBack).toBe(DefaultConfigRecord[EConfigKey.AiProvider]);
     });
 
     test("rejects model update fields", async () => {

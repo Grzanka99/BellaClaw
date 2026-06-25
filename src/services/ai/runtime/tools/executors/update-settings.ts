@@ -3,6 +3,7 @@ import type { TOption } from "../../../../../types";
 import { invalidateMessageHandlerInstructions } from "../../../../message-handler/instructions";
 import { SettingsService } from "../../../../settings";
 import { ConfigValidators, EConfigKey } from "../../../../settings/schema";
+import { AiConnector, EModelPurpose } from "../../../api";
 import {
   SUpdateSettingsArgs,
   type TUpdateSettingsArgs,
@@ -52,10 +53,6 @@ export async function executeUpdateSettingsTool(
 
   const updates = collectUpdates(parsed.data);
 
-  if (updates.length === 0) {
-    return createFailedToolResult(toolCall, "Provide at least one field to update");
-  }
-
   const validationErrors = validateUpdates(updates);
 
   if (validationErrors.length > 0) {
@@ -63,15 +60,34 @@ export async function executeUpdateSettingsTool(
   }
 
   try {
+    const settings = await SettingsService.instance.getAll(resolvedChatId);
+
+    if (updates.some((update) => update.key === EConfigKey.AiProvider)) {
+      const nextSettings = { ...settings };
+
+      for (const update of updates) {
+        nextSettings[update.key] = update.value;
+      }
+
+      const verificationError = await AiConnector.instance.verifySettings(nextSettings, [
+        EModelPurpose.ToolCheap,
+        EModelPurpose.ChatAccurate,
+      ]);
+
+      if (verificationError !== undefined) {
+        return createFailedToolResult(toolCall, verificationError);
+      }
+    }
+
     for (const update of updates) {
       await SettingsService.instance.set(resolvedChatId, update.key, update.value);
     }
 
     invalidateMessageHandlerInstructions(resolvedChatId);
 
-    const settings = await SettingsService.instance.getAll(resolvedChatId);
+    const updatedSettings = await SettingsService.instance.getAll(resolvedChatId);
 
-    return createSuccessfulToolResult(toolCall, { settings });
+    return createSuccessfulToolResult(toolCall, { settings: updatedSettings });
   } catch (error) {
     return createFailedToolResult(toolCall, `update-settings failed: ${normalizeError(error)}`);
   }

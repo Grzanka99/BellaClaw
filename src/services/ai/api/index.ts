@@ -5,6 +5,7 @@ import { OllamaAiProvider } from "../providers/ollama";
 import { OpencodeGoAiProvider } from "../providers/opencode-go";
 import { OpenrouterAiProvider } from "../providers/openrouter";
 import {
+  EAssistantLoopConversationItemKind,
   runAssistantToolLoop,
   runToolTask,
   type TAssistantToolLoopArgs,
@@ -15,7 +16,8 @@ import {
   type TToolTaskArgs,
   type TToolTaskResult,
 } from "../runtime";
-import { EAiProvider } from "../types";
+import { normalizeError } from "../runtime/serialization";
+import { EAiProvider, type EModelPurpose, ERole } from "../types";
 
 export type {
   TAssistantToolActivity,
@@ -112,5 +114,41 @@ export class AiConnector {
       ...args,
       requestAssistantTurn: provider.requestAssistantTurn.bind(provider),
     });
+  }
+
+  public async verifySettings(
+    settings: TConfigRecord,
+    purposes: EModelPurpose[],
+  ): Promise<TOption<string>> {
+    const provider = this.selectProvider(settings);
+
+    for (const purpose of purposes) {
+      try {
+        const result = await provider.requestAssistantTurn({
+          conversation: [
+            {
+              kind: EAssistantLoopConversationItemKind.UserPrompt,
+              prompt: {
+                role: ERole.User,
+                content: [{ type: "text", text: "Reply with ok." }],
+              },
+            },
+          ],
+          history: [{ role: ERole.System, content: "Reply with ok." }],
+          user: undefined,
+          tools: [],
+          purpose,
+          settings,
+        });
+
+        if (result === undefined) {
+          return `Provider returned no response for ${purpose}`;
+        }
+      } catch (error) {
+        return `Provider failed for ${purpose}: ${normalizeError(error)}`;
+      }
+    }
+
+    return undefined;
   }
 }

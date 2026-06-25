@@ -27,7 +27,7 @@ describe("SettingsMessageHandler runtime settings", () => {
     resetSettingsInstance();
   });
 
-  test("passes stored settings through to the runtime", async () => {
+  test("uses stable AI settings while injecting stored instructions", async () => {
     const storedSettings: TConfigRecord = {
       ...DefaultConfigRecord,
       [EConfigKey.AiInstructionsLanguage]: "Klingon",
@@ -70,9 +70,11 @@ describe("SettingsMessageHandler runtime settings", () => {
     }
 
     expect(args.settings[EConfigKey.AiProvider]).toBe(DefaultConfigRecord[EConfigKey.AiProvider]);
-    expect(args.settings[EConfigKey.AiProvidersOpencodeGoModelsChat]).toBe("bad-chat-model");
+    expect(args.settings[EConfigKey.AiProvidersOpencodeGoModelsChat]).toBe(
+      DefaultConfigRecord[EConfigKey.AiProvidersOpencodeGoModelsChat],
+    );
     expect(args.settings[EConfigKey.AiProvidersOpencodeGoModelsChatAccurate]).toBe(
-      "bad-chat-accurate-model",
+      DefaultConfigRecord[EConfigKey.AiProvidersOpencodeGoModelsChatAccurate],
     );
     expect(args.settings[EConfigKey.AiInstructionsLanguage]).toBe("Klingon");
     expect(args.history[0]?.content).toContain("Reply in Klingon.");

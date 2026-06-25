@@ -4,7 +4,7 @@ import { GET_SETTINGS_TOOL } from "../ai/tools/get-settings/definition";
 import { UPDATE_SETTINGS_TOOL } from "../ai/tools/update-settings/definition";
 import { Memory } from "../memory";
 import { SettingsService } from "../settings";
-import { DefaultConfigRecord } from "../settings/schema";
+import { DefaultConfigRecord, EConfigKey, type TConfigRecord } from "../settings/schema";
 import { SettingsMessageHandler } from "./index";
 
 type TSettingsMessageHandlerInternals = {
@@ -39,10 +39,10 @@ function mockMemory() {
   };
 }
 
-function mockSettingsService() {
+function mockSettingsService(settings: TConfigRecord = DefaultConfigRecord) {
   const SettingsServiceStatic = SettingsService as unknown as { _instance: unknown };
   SettingsServiceStatic._instance = {
-    getAll: mock(async () => DefaultConfigRecord),
+    getAll: mock(async () => settings),
   };
 }
 
@@ -182,5 +182,52 @@ describe("SettingsMessageHandler", () => {
     for (const name of NORMAL_TOOL_NAMES) {
       expect(toolNames).not.toContain(name);
     }
+  });
+
+  test("uses stable AI settings for settings recovery", async () => {
+    const capturedArgs: TAssistantToolLoopArgs[] = [];
+    const storedSettings: TConfigRecord = {
+      ...DefaultConfigRecord,
+      [EConfigKey.AiProvider]: "openrouter",
+      [EConfigKey.AiProvidersOpenrouterModelsChatAccurate]: "bad-chat-model",
+      [EConfigKey.AiInstructionsLanguage]: "Klingon",
+    };
+
+    resetSettingsInstance();
+    mockSettingsService(storedSettings);
+
+    const handler = SettingsMessageHandler.getInstance("test-settings-stable-chat-id");
+    const internals = handler as unknown as TSettingsMessageHandlerInternals;
+
+    internals.ai = {
+      runAssistantToolLoop: mock(async (args: TAssistantToolLoopArgs) => {
+        capturedArgs.push(args);
+        return {
+          conversation: [],
+          toolActivity: [],
+          finalResponse: "ok",
+          stopReason: "final-response" as const,
+          iterations: 1,
+        };
+      }),
+    } as never;
+
+    await handler.handleMessage({
+      chatId: "test-settings-stable-chat-id",
+      message: { type: "text", content: "switch provider back" },
+      author: { type: ERole.User, id: "test-user-id", username: "TestUser" },
+    });
+
+    const args = capturedArgs[0];
+
+    if (args === undefined) {
+      throw new Error("Expected captured runAssistantToolLoop args");
+    }
+
+    expect(args.settings[EConfigKey.AiProvider]).toBe(DefaultConfigRecord[EConfigKey.AiProvider]);
+    expect(args.settings[EConfigKey.AiProvidersOpenrouterModelsChatAccurate]).toBe(
+      DefaultConfigRecord[EConfigKey.AiProvidersOpenrouterModelsChatAccurate],
+    );
+    expect(args.settings[EConfigKey.AiInstructionsLanguage]).toBe("Klingon");
   });
 });

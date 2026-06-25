@@ -125,6 +125,35 @@ export const ConfigValidators: { [key in EConfigKey]: z.ZodType<string> } = {
   [EConfigKey.AiProvidersOpencodeGoModelsChatAccurate]: SNonEmptyString,
 };
 
+const AI_MODEL_CONFIG_KEYS: EConfigKey[] = [
+  EConfigKey.AiProvidersOllamaModelsToolCheap,
+  EConfigKey.AiProvidersOllamaModelsToolAccurate,
+  EConfigKey.AiProvidersOllamaModelsGeneral,
+  EConfigKey.AiProvidersOllamaModelsChat,
+  EConfigKey.AiProvidersOllamaModelsChatAccurate,
+  EConfigKey.AiProvidersOpenrouterModelsToolCheap,
+  EConfigKey.AiProvidersOpenrouterModelsToolAccurate,
+  EConfigKey.AiProvidersOpenrouterModelsGeneral,
+  EConfigKey.AiProvidersOpenrouterModelsChat,
+  EConfigKey.AiProvidersOpenrouterModelsChatAccurate,
+  EConfigKey.AiProvidersOpencodeGoModelsToolCheap,
+  EConfigKey.AiProvidersOpencodeGoModelsToolAccurate,
+  EConfigKey.AiProvidersOpencodeGoModelsGeneral,
+  EConfigKey.AiProvidersOpencodeGoModelsChat,
+  EConfigKey.AiProvidersOpencodeGoModelsChatAccurate,
+];
+
+export function createStableAiRuntimeSettings(settings: TConfigRecord): TConfigRecord {
+  const runtimeSettings = { ...settings };
+  runtimeSettings[EConfigKey.AiProvider] = DefaultConfigRecord[EConfigKey.AiProvider];
+
+  for (const key of AI_MODEL_CONFIG_KEYS) {
+    runtimeSettings[key] = DefaultConfigRecord[key];
+  }
+
+  return runtimeSettings;
+}
+
 const KNOWN_CONFIG_KEYS = new Set<string>(Object.values(EConfigKey));
 
 export function isConfigKey(key: string): key is EConfigKey {

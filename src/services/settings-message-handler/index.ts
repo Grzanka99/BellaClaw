@@ -6,6 +6,7 @@ import { Memory } from "../memory";
 import { EMemoryImportance, type TMemory } from "../memory/types";
 import type { TIncommingMessage } from "../message-handler/types";
 import { SettingsService } from "../settings";
+import { createStableAiRuntimeSettings } from "../settings/schema";
 import { getSettingsHandlerInstructions } from "./instructions";
 
 const RECENT_MEMORY_LIMIT = 30;
@@ -39,6 +40,7 @@ export class SettingsMessageHandler {
     this.logger.info("handleMessage: start");
 
     const settings = await SettingsService.instance.getAll(message.chatId);
+    const runtimeSettings = createStableAiRuntimeSettings(settings);
     const instructions = await getSettingsHandlerInstructions(settings);
 
     const recent = await this.retrieveMemory(message.chatId);
@@ -79,7 +81,7 @@ export class SettingsMessageHandler {
       },
       tools,
       chatId: message.chatId,
-      settings,
+      settings: runtimeSettings,
     });
     this.logger.info(
       `handleMessage: AI chat completed (${(performance.now() - chatStart).toFixed(0)}ms)`,
