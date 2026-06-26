@@ -1,5 +1,5 @@
 import { generateReminderText } from "../../handlers/generate-reminder-text";
-import type { TCronEngineJobContext } from "../../lib/cron-engine";
+import type { TCronJobContext } from "../../lib/cron-engine";
 import type { TOption } from "../../types";
 import { createLogger, type TLogger } from "../../utils/logger";
 import { AiConnector } from "../ai/api";
@@ -38,7 +38,7 @@ export class MessagingAdapter {
 
   public async setup() {
     this.ensureCronListener();
-    CronSingleton.instance.setup();
+    await CronSingleton.instance.setup();
   }
 
   public async handleInboundMessage(message: TPlatformMessage) {
@@ -103,7 +103,7 @@ export class MessagingAdapter {
     this.cronListenerRegistered = true;
   }
 
-  private async handleCronFire(ctx: TCronEngineJobContext) {
+  private async handleCronFire(ctx: TCronJobContext) {
     const canonicalChatId = ctx.scope;
     if (canonicalChatId === undefined) {
       this.logger.warning(`handleCronFire: job "${ctx.name}" has no scope, skipping delivery`);

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { TCronEngineJob } from "../../../../lib/cron-engine";
+import type { TCronJob } from "../../../../lib/cron-engine";
 
 export const SScheduleRecurringArgs = z
   .object({
@@ -39,4 +39,4 @@ export const SScheduleRecurringArgs = z
 
 export type TScheduleRecurringArgs = z.infer<typeof SScheduleRecurringArgs>;
 
-export type TScheduleRecurringResult = TCronEngineJob;
+export type TScheduleRecurringResult = TCronJob;

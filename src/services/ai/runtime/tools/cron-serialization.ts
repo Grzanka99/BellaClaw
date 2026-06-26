@@ -1,5 +1,5 @@
 import { Config } from "../../../../config";
-import type { TCronEngineJob } from "../../../../lib/cron-engine";
+import type { TCronJob } from "../../../../lib/cron-engine";
 
 function formatLocalDateTime(date: Date, timezone: string) {
   return date.toLocaleString("sv-SE-u-nu-latn", {
@@ -17,7 +17,7 @@ function formatLocalTime(date: Date, timezone: string) {
   });
 }
 
-export function serializeCronJobForModel(job: TCronEngineJob) {
+export function serializeCronJobForModel(job: TCronJob) {
   const timezone = job.timezone ?? Config.ai.instructions.timezone;
 
   return {
@@ -31,6 +31,6 @@ export function serializeCronJobForModel(job: TCronEngineJob) {
   };
 }
 
-export function serializeCronJobsForModel(jobs: TCronEngineJob[]) {
+export function serializeCronJobsForModel(jobs: TCronJob[]) {
   return jobs.map((job) => serializeCronJobForModel(job));
 }

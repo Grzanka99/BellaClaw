@@ -1,5 +1,5 @@
 import type { ChatMessageToolCall } from "@openrouter/sdk/models";
-import { ECronEngineJobType } from "../../../../../lib/cron-engine";
+import { ECronJobType } from "../../../../../lib/cron-engine";
 import type { TOption } from "../../../../../types";
 import { CronSingleton } from "../../../../cron";
 import {
@@ -32,7 +32,7 @@ export async function executeUpdateCronJobTool(
     return createFailedToolResult(toolCall, parsed.error);
   }
 
-  const existing = await CronSingleton.instance.getJob(parsed.data.name, resolvedChatId);
+  const existing = await CronSingleton.instance.get(parsed.data.name, resolvedChatId);
 
   if (existing === undefined) {
     return createFailedToolResult(toolCall, `No job found with name: ${parsed.data.name}`);
@@ -52,7 +52,7 @@ export async function executeUpdateCronJobTool(
     reminderFallbackText = parsed.data.reminderFallbackText;
   }
 
-  if (existing.type === ECronEngineJobType.Recurring) {
+  if (existing.type === ECronJobType.Recurring) {
     if (parsed.data.fireAt !== undefined) {
       return createFailedToolResult(
         toolCall,
@@ -66,7 +66,7 @@ export async function executeUpdateCronJobTool(
       return createFailedToolResult(toolCall, "Existing recurring reminder has no pattern");
     }
 
-    const result = await CronSingleton.instance.schedule({
+    const result = await CronSingleton.instance.createRecurring({
       name: existing.name,
       scope: resolvedChatId,
       group: parsed.data.group ?? existing.group,
@@ -95,7 +95,7 @@ export async function executeUpdateCronJobTool(
     );
   }
 
-  const result = await CronSingleton.instance.scheduleOnce({
+  const result = await CronSingleton.instance.createOnce({
     name: existing.name,
     scope: resolvedChatId,
     group: parsed.data.group ?? existing.group,

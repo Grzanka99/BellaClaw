@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { ChatMessageToolCall } from "@openrouter/sdk/models";
 import { Config } from "../../../config";
-import { ECronEngineJobStatus, ECronEngineJobType } from "../../../lib/cron-engine";
+import { ECronJobStatus, ECronJobType } from "../../../lib/cron-engine";
 import { CronSingleton } from "../../cron";
 import { DatabaseConnector } from "../../database";
 import { cronEngineJobsTable } from "../../database/schema";
@@ -40,7 +40,7 @@ async function insertLegacyRecurringJob(name: string, scope: string) {
     name,
     scope,
     group: null,
-    type: ECronEngineJobType.Recurring,
+    type: ECronJobType.Recurring,
     pattern: "0 9 * * *",
     reminderText: "Legacy reminder.",
     reminderPromptData: null,
@@ -48,7 +48,7 @@ async function insertLegacyRecurringJob(name: string, scope: string) {
     nextRunAt: now + 60_000,
     lastRunAt: null,
     createdAt: now,
-    status: ECronEngineJobStatus.Active,
+    status: ECronJobStatus.Active,
     finishedAt: null,
     finishedReason: null,
     timezone: null,
@@ -63,7 +63,7 @@ async function insertLegacyOneTimeJob(name: string, scope: string, fireAt: Date)
     name,
     scope,
     group: null,
-    type: ECronEngineJobType.OneTime,
+    type: ECronJobType.OneTime,
     pattern: null,
     reminderText: "Legacy one-time reminder.",
     reminderPromptData: null,
@@ -71,7 +71,7 @@ async function insertLegacyOneTimeJob(name: string, scope: string, fireAt: Date)
     nextRunAt: fireAt.getTime(),
     lastRunAt: null,
     createdAt: now,
-    status: ECronEngineJobStatus.Active,
+    status: ECronJobStatus.Active,
     finishedAt: null,
     finishedReason: null,
     timezone: null,
@@ -126,7 +126,7 @@ describe("update-cron-job tool execution", () => {
       name: "drink-water",
       scope: chatId,
       group: "health",
-      type: ECronEngineJobType.Recurring,
+      type: ECronJobType.Recurring,
       pattern: "0 10 * * *",
       reminderText: "Drink water.",
       reminderFallbackText: "Drink water.",
@@ -136,7 +136,7 @@ describe("update-cron-job tool execution", () => {
   test("updates recurring reminder and preserves existing timezone", async () => {
     const chatId = "runtime-update-recurring-timezone-user";
 
-    const scheduled = await CronSingleton.instance.schedule({
+    const scheduled = await CronSingleton.instance.createRecurring({
       name: "timezone-reminder",
       scope: chatId,
       pattern: "0 9 * * *",
@@ -166,7 +166,7 @@ describe("update-cron-job tool execution", () => {
       timezone: "America/New_York",
     });
 
-    const updatedJob = await CronSingleton.instance.getJob("timezone-reminder", chatId);
+    const updatedJob = await CronSingleton.instance.get("timezone-reminder", chatId);
 
     expect(updatedJob?.timezone).toBe("America/New_York");
   });
@@ -200,7 +200,7 @@ describe("update-cron-job tool execution", () => {
       timezone: Config.ai.instructions.timezone,
     });
 
-    const updatedJob = await CronSingleton.instance.getJob("legacy-timezone-reminder", chatId);
+    const updatedJob = await CronSingleton.instance.get("legacy-timezone-reminder", chatId);
 
     expect(updatedJob?.timezone).toBe(Config.ai.instructions.timezone);
   });
@@ -236,10 +236,7 @@ describe("update-cron-job tool execution", () => {
       reminderText: "Updated legacy one-time reminder.",
     });
 
-    const updatedJob = await CronSingleton.instance.getJob(
-      "legacy-onetime-timezone-reminder",
-      chatId,
-    );
+    const updatedJob = await CronSingleton.instance.get("legacy-onetime-timezone-reminder", chatId);
 
     expect(updatedJob?.timezone).toBe(Config.ai.instructions.timezone);
     expect(updatedJob?.nextRunAt.getTime()).toBe(fireAt.getTime());
@@ -283,7 +280,7 @@ describe("update-cron-job tool execution", () => {
     expect(updateResult.data).toMatchObject({
       name: "stretch-once",
       scope: chatId,
-      type: ECronEngineJobType.OneTime,
+      type: ECronJobType.OneTime,
       pattern: undefined,
       reminderText: "Stand up and stretch.",
       reminderPromptData: undefined,

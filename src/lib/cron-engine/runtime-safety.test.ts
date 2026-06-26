@@ -1,38 +1,38 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { DatabaseConnector } from "../../services/database";
 import { cronEngineJobsTable } from "../../services/database/schema";
 import { resetCronEngineJobsTable } from "../../services/database/test-utils";
-import type { AsyncQueue } from "../../utils/async-queue";
-import { CronEngine } from "./index";
+import { CronScheduler, ECronJobStatus, ECronJobType } from "./index";
 
-type TEngineWithInternals = {
-  queue: AsyncQueue;
-  tick: () => Promise<void>;
+type TSchedulerInternals = {
+  fire: (id: number) => Promise<void>;
 };
 
-async function forceJobDue(engine: CronEngine, name: string, scope: string) {
-  const internals = engine as unknown as TEngineWithInternals;
-  const db = DatabaseConnector.instance.database;
-
-  await internals.queue.enqueue(async () => {
-    await db
-      .update(cronEngineJobsTable)
-      .set({ nextRunAt: Date.now() - 1_000 })
-      .where(and(eq(cronEngineJobsTable.name, name), eq(cronEngineJobsTable.scope, scope)));
-  });
+async function fireJob(scheduler: CronScheduler, id: number) {
+  const internals = scheduler as unknown as TSchedulerInternals;
+  await internals.fire(id);
 }
 
-async function insertDueOneTimeJob(engine: CronEngine, name: string, scope: string) {
-  const internals = engine as unknown as TEngineWithInternals;
+async function forceJobNextRunAt(id: number, nextRunAt: Date) {
   const db = DatabaseConnector.instance.database;
 
-  await internals.queue.enqueue(async () => {
-    await db.insert(cronEngineJobsTable).values({
+  await db
+    .update(cronEngineJobsTable)
+    .set({ nextRunAt: nextRunAt.getTime() })
+    .where(eq(cronEngineJobsTable.id, id));
+}
+
+async function insertDueOneTimeJob(name: string, scope: string) {
+  const db = DatabaseConnector.instance.database;
+
+  const row = await db
+    .insert(cronEngineJobsTable)
+    .values({
       name,
       scope,
       group: null,
-      type: "onetime",
+      type: ECronJobType.OneTime,
       pattern: null,
       reminderText: null,
       reminderPromptData: null,
@@ -40,83 +40,90 @@ async function insertDueOneTimeJob(engine: CronEngine, name: string, scope: stri
       nextRunAt: Date.now() - 1_000,
       lastRunAt: null,
       createdAt: Date.now(),
-    });
-  });
+      status: ECronJobStatus.Active,
+      finishedAt: null,
+      finishedReason: null,
+    })
+    .returning()
+    .get();
+
+  return row.id;
 }
 
-describe("CronEngine runtime safety", () => {
-  let engine: CronEngine;
+describe("CronScheduler runtime safety", () => {
+  let scheduler: CronScheduler;
 
   beforeEach(async () => {
     await resetCronEngineJobsTable();
-    engine = new CronEngine({});
+    scheduler = new CronScheduler({});
   });
 
   afterEach(() => {
-    engine.destroy();
+    scheduler.destroy();
   });
 
-  test("overlapping ticks fire a due job once", async () => {
-    const scheduled = await engine.scheduleOnce({
+  test("overlapping fires complete a one-time job once", async () => {
+    const scheduled = await scheduler.createOnce({
       name: "overlap-job",
       scope: "scope-a",
       fireAt: new Date(Date.now() + 60_000),
     });
-    expect("error" in scheduled).toBe(false);
 
-    await forceJobDue(engine, "overlap-job", "scope-a");
+    if ("error" in scheduled) {
+      throw new Error(String(scheduled.error));
+    }
+    await forceJobNextRunAt(scheduled.id, new Date(Date.now() - 1_000));
 
     const fireEvents: string[] = [];
-    engine.onFire((ctx) => {
+    scheduler.onFire((ctx) => {
       fireEvents.push(ctx.name);
     });
 
-    const internals = engine as unknown as TEngineWithInternals;
-    await Promise.all([internals.tick(), internals.tick()]);
+    await Promise.all([fireJob(scheduler, scheduled.id), fireJob(scheduler, scheduled.id)]);
 
     expect(fireEvents).toEqual(["overlap-job"]);
-    expect(await engine.getJob("overlap-job", "scope-a")).toBeUndefined();
+    expect(await scheduler.get("overlap-job", "scope-a")).toBeUndefined();
   });
 
-  test("parallel engines fire a recurring due occurrence once", async () => {
-    const secondEngine = new CronEngine({});
+  test("parallel schedulers fire a recurring occurrence once", async () => {
+    const secondScheduler = new CronScheduler({});
 
     try {
-      const scheduled = await engine.schedule({
+      const scheduled = await scheduler.createRecurring({
         name: "parallel-recurring",
         scope: "scope-a",
         pattern: "*/5 * * * *",
       });
-      expect("error" in scheduled).toBe(false);
 
-      await forceJobDue(engine, "parallel-recurring", "scope-a");
+      if ("error" in scheduled) {
+        throw new Error(String(scheduled.error));
+      }
+      await forceJobNextRunAt(scheduled.id, new Date(Date.now() - 60_000));
 
       const fireEvents: string[] = [];
-      engine.onFire((ctx) => {
+      scheduler.onFire((ctx) => {
         fireEvents.push(ctx.name);
       });
-      secondEngine.onFire((ctx) => {
+      secondScheduler.onFire((ctx) => {
         fireEvents.push(ctx.name);
       });
 
-      const internals = engine as unknown as TEngineWithInternals;
-      const secondInternals = secondEngine as unknown as TEngineWithInternals;
-      await Promise.all([internals.tick(), secondInternals.tick()]);
+      await Promise.all([fireJob(scheduler, scheduled.id), fireJob(secondScheduler, scheduled.id)]);
 
       expect(fireEvents).toEqual(["parallel-recurring"]);
     } finally {
-      secondEngine.destroy();
+      secondScheduler.destroy();
     }
   });
 
   test("reserved EventEmitter names are rejected when scheduling", async () => {
     for (const name of ["error", "newListener", "removeListener"]) {
-      const recurring = await engine.schedule({
+      const recurring = await scheduler.createRecurring({
         name,
         scope: "scope-a",
         pattern: "*/5 * * * *",
       });
-      const oneTime = await engine.scheduleOnce({
+      const oneTime = await scheduler.createOnce({
         name,
         scope: "scope-a",
         fireAt: new Date(Date.now() + 60_000),
@@ -134,15 +141,14 @@ describe("CronEngine runtime safety", () => {
   });
 
   test("persisted reserved job names still fire generic listeners", async () => {
-    await insertDueOneTimeJob(engine, "error", "scope-a");
+    const id = await insertDueOneTimeJob("error", "scope-a");
 
     const fireEvents: string[] = [];
-    engine.onFire((ctx) => {
+    scheduler.onFire((ctx) => {
       fireEvents.push(ctx.name);
     });
 
-    const internals = engine as unknown as TEngineWithInternals;
-    await internals.tick();
+    await fireJob(scheduler, id);
 
     expect(fireEvents).toEqual(["error"]);
   });

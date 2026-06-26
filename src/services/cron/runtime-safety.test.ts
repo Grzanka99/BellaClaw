@@ -1,17 +1,14 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import type { AsyncQueue } from "../../utils/async-queue";
+import { ECronJobStatus, ECronJobType } from "../../lib/cron-engine";
 import { DatabaseConnector } from "../database";
 import { cronEngineJobsTable } from "../database/schema";
 import { resetCronEngineJobsTable } from "../database/test-utils";
 import { CronSingleton } from "./index";
 
-type TEngineWithInternals = {
-  queue: AsyncQueue;
-  tick: () => Promise<void>;
-};
-
 type TCronSingletonInternals = {
-  engine: TEngineWithInternals;
+  scheduler: {
+    fire: (id: number) => Promise<void>;
+  };
 };
 
 type TCronSingletonStatic = {
@@ -23,16 +20,16 @@ function cleanupCronSingleton() {
   CronSingletonWithInternals._instance?.destroy();
 }
 
-async function insertDueOneTimeJob(cron: CronSingleton, name: string, scope: string) {
-  const internals = cron as unknown as TCronSingletonInternals;
+async function insertDueOneTimeJob(name: string, scope: string) {
   const db = DatabaseConnector.instance.database;
 
-  await internals.engine.queue.enqueue(async () => {
-    await db.insert(cronEngineJobsTable).values({
+  const row = await db
+    .insert(cronEngineJobsTable)
+    .values({
       name,
       scope,
       group: null,
-      type: "onetime",
+      type: ECronJobType.OneTime,
       pattern: null,
       reminderText: null,
       reminderPromptData: null,
@@ -40,8 +37,14 @@ async function insertDueOneTimeJob(cron: CronSingleton, name: string, scope: str
       nextRunAt: Date.now() - 1_000,
       lastRunAt: null,
       createdAt: Date.now(),
-    });
-  });
+      status: ECronJobStatus.Active,
+      finishedAt: null,
+      finishedReason: null,
+    })
+    .returning()
+    .get();
+
+  return row.id;
 }
 
 describe("CronSingleton runtime safety", () => {
@@ -56,7 +59,7 @@ describe("CronSingleton runtime safety", () => {
 
   test("reserved job names still fire generic cron listeners", async () => {
     const cron = CronSingleton.instance;
-    await insertDueOneTimeJob(cron, "error", "scope-a");
+    const id = await insertDueOneTimeJob("error", "scope-a");
 
     const cronEvents: string[] = [];
     cron.onCronEvent((ctx) => {
@@ -64,7 +67,7 @@ describe("CronSingleton runtime safety", () => {
     });
 
     const internals = cron as unknown as TCronSingletonInternals;
-    await internals.engine.tick();
+    await internals.scheduler.fire(id);
 
     expect(cronEvents).toEqual(["error"]);
   });

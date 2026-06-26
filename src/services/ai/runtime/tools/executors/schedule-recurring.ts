@@ -32,7 +32,7 @@ export async function executeScheduleRecurringTool(
     return createFailedToolResult(toolCall, parsed.error);
   }
 
-  const result = await CronSingleton.instance.schedule({
+  const result = await CronSingleton.instance.createRecurring({
     name: parsed.data.name,
     scope: resolvedChatId,
     pattern: parsed.data.pattern,

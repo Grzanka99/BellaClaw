@@ -1,24 +1,20 @@
 import { describe, expect, test } from "bun:test";
 import { Config } from "../../../config";
-import {
-  ECronEngineJobStatus,
-  ECronEngineJobType,
-  type TCronEngineJob,
-} from "../../../lib/cron-engine";
+import { ECronJobStatus, ECronJobType, type TCronJob } from "../../../lib/cron-engine";
 import { serializeCronJobForModel } from "./tools/cron-serialization";
 
-function createJob(overrides: Partial<TCronEngineJob> = {}): TCronEngineJob {
+function createJob(overrides: Partial<TCronJob> = {}): TCronJob {
   return {
     id: 1,
     name: "tz-job",
     scope: undefined,
     group: undefined,
-    type: ECronEngineJobType.Recurring,
+    type: ECronJobType.Recurring,
     pattern: "0 9 * * *",
     nextRunAt: new Date("2026-01-05T08:00:00.000Z"),
     lastRunAt: undefined,
     createdAt: new Date("2026-01-01T08:00:00.000Z"),
-    status: ECronEngineJobStatus.Active,
+    status: ECronJobStatus.Active,
     finishedAt: undefined,
     finishedReason: undefined,
     reminderText: undefined,

@@ -27,7 +27,7 @@ export async function executeListCronJobsTool(
     return createFailedToolResult(toolCall, parsed.error);
   }
 
-  const jobs = await CronSingleton.instance.getAllJobs(resolvedChatId);
+  const jobs = await CronSingleton.instance.list(resolvedChatId);
 
   return createSuccessfulToolResult(toolCall, serializeCronJobsForModel(jobs));
 }

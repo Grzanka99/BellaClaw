@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
-import { ECronEngineJobType, type TCronEngineJobContext } from "../../lib/cron-engine";
+import { ECronJobType, type TCronJobContext } from "../../lib/cron-engine";
 import type { TOption } from "../../types";
 import { ERole } from "../ai/types";
 import { CronSingleton } from "../cron";
@@ -24,7 +24,7 @@ type TMessagingAdapterInternals = {
     classify: typeof SettingsIntentClassifier.prototype.classify;
   };
   transports: Map<EMessagePlatform, TMessageTransport>;
-  handleCronFire: (ctx: TCronEngineJobContext) => Promise<void>;
+  handleCronFire: (ctx: TCronJobContext) => Promise<void>;
 };
 
 type TCronSingletonStatic = {
@@ -79,14 +79,14 @@ function createTransport(platform: EMessagePlatform) {
   return { transport, sendText };
 }
 
-function createCronContext(overrides: Partial<TCronEngineJobContext> = {}): TCronEngineJobContext {
+function createCronContext(overrides: Partial<TCronJobContext> = {}): TCronJobContext {
   const now = new Date("2026-01-01T00:00:00.000Z");
 
   return {
     name: "study-checkin",
     scope: "discord:user-1",
     group: undefined,
-    type: ECronEngineJobType.Recurring,
+    type: ECronJobType.Recurring,
     pattern: "*/30 * * * *",
     nextRunAt: now,
     lastRunAt: undefined,

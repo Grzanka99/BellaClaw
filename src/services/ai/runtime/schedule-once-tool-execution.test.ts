@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { ChatMessageToolCall } from "@openrouter/sdk/models";
-import { ECronEngineJobType } from "../../../lib/cron-engine";
+import { ECronJobType } from "../../../lib/cron-engine";
 import { CronSingleton } from "../../cron";
 import { resetCronEngineJobsTable } from "../../database/test-utils";
 import { DefaultConfigRecord } from "../../settings/schema";
@@ -68,7 +68,7 @@ describe("schedule-once tool execution", () => {
       name: "stretch-once",
       scope: chatId,
       group: "health",
-      type: ECronEngineJobType.OneTime,
+      type: ECronJobType.OneTime,
       pattern: undefined,
       reminderText: "Stretch now.",
       reminderPromptData: undefined,
@@ -79,7 +79,7 @@ describe("schedule-once tool execution", () => {
       {
         name: "stretch-once",
         scope: chatId,
-        type: ECronEngineJobType.OneTime,
+        type: ECronJobType.OneTime,
         pattern: undefined,
       },
     ]);
