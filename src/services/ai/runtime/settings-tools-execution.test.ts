@@ -179,6 +179,35 @@ describe("settings tools execution", () => {
       expect(data.settings[EConfigKey.AiInstructionsAssistantName]).toBe("Bella");
     });
 
+    test("updates platform and persists to EConfigKey.AiInstructionsPlatform", async () => {
+      const chatId = "settings-update-platform";
+
+      const result = await executeToolCall({
+        toolCall: createToolCall(
+          "update-platform",
+          UPDATE_SETTINGS_TOOL,
+          JSON.stringify({ platform: "Signal messages" }),
+        ),
+        chatId,
+        allowedToolNames: new Set([UPDATE_SETTINGS_TOOL]),
+        settings: DefaultConfigRecord,
+      });
+
+      expect(result.success).toBe(true);
+
+      const data = result.data as {
+        settings: TConfigRecord;
+      };
+
+      expect(data.settings[EConfigKey.AiInstructionsPlatform]).toBe("Signal messages");
+
+      const readBack = await SettingsService.instance.get(
+        chatId,
+        EConfigKey.AiInstructionsPlatform,
+      );
+      expect(readBack).toBe("Signal messages");
+    });
+
     test("rejects empty args with at least-one-field requirement", async () => {
       const result = await executeToolCall({
         toolCall: createToolCall("update-empty", UPDATE_SETTINGS_TOOL, "{}"),

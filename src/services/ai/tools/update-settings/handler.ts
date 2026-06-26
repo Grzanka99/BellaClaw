@@ -12,6 +12,7 @@ export const SUpdateSettingsArgs = z
     language: SNonEmptyString.optional(),
     assistantName: SNonEmptyString.optional(),
     addressStyle: SNonEmptyString.optional(),
+    platform: SNonEmptyString.optional(),
     preferredReplyLength: SNonEmptyString.optional(),
     aiProvider: z.enum(EAiProvider).optional(),
   })

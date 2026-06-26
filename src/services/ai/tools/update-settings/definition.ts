@@ -35,6 +35,12 @@ export const updateSettingsTool: ToolDefinitionJson = {
           description:
             "How the assistant should address the user (e.g. 'informal but respectful address (per ty, not pan/pani)').",
         },
+        platform: {
+          type: "string",
+          minLength: 1,
+          description:
+            "Platform context the assistant should reference in its instructions (e.g. Discord direct messages, Signal messages). This does not switch the actual transport.",
+        },
         preferredReplyLength: {
           type: "string",
           minLength: 1,

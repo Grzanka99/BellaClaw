@@ -25,9 +25,9 @@
       <criteria>
         - User wants to read, view, or display current assistant settings/configuration
         - User wants to change, set, update, or modify any of these settings:
-          timezone, language, assistant name, address style, preferred reply length,
+          timezone, language, assistant name, address style, platform, preferred reply length,
           AI provider (openrouter / ollama / opencode-go), or the provider's chat model
-        - User asks what timezone/language/provider/model the assistant is currently using
+        - User asks what timezone/language/platform/provider/model the assistant is currently using
         - User asks how the assistant should address them or refer to itself
         - Examples: "what timezone are you in?", "change my timezone to UTC", "call me Misiu",
           "use openrouter", "what model are you using?", "set your name to Bella",
@@ -56,7 +56,7 @@
     <rule>
       When unsure between settings and normal, prefer `normal` unless the message explicitly
       mentions a configuration concept (timezone, language, provider, model, assistant name,
-      address style, reply length).
+      address style, platform, reply length).
     </rule>
     <rule>Provide a concise reason in English.</rule>
     <rule>The message may be in any language; classify based on semantic meaning, not keywords alone.</rule>

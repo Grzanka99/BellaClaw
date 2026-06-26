@@ -28,6 +28,7 @@ const UPDATE_FIELDS: Array<{
   { field: "language", key: EConfigKey.AiInstructionsLanguage },
   { field: "assistantName", key: EConfigKey.AiInstructionsAssistantName },
   { field: "addressStyle", key: EConfigKey.AiInstructionsAddressStyle },
+  { field: "platform", key: EConfigKey.AiInstructionsPlatform },
   { field: "preferredReplyLength", key: EConfigKey.AiInstructionsPreferredReplyLength },
   { field: "aiProvider", key: EConfigKey.AiProvider },
 ];
