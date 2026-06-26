@@ -4,7 +4,7 @@ import type { TOption } from "../../../../types";
 import { logger } from "../../../../utils/logger";
 import { EAiProvider } from "../../types";
 
-const SNonEmptyString = z.string().min(1);
+const SNonEmptyString = z.string().trim().min(1);
 
 export const SUpdateSettingsArgs = z
   .object({
