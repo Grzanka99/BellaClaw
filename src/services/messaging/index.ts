@@ -67,16 +67,16 @@ export class MessagingAdapter {
 
     let reply: string;
 
-    if (intent !== undefined && intent.intent === "settings") {
+    if (intent === undefined) {
+      this.logger.warning(
+        `handleInboundMessage: settings-intent classifier returned no result; falling back to normal handler for platform ${message.platform}, raw chat ${message.chatId}, canonical chat ${canonicalChatId}, author ${message.author.id}, message type ${message.message.type}, content length ${message.message.content.length}`,
+      );
+      const handler = MessageHandler.getInstance(canonicalChatId);
+      reply = await handler.handleMessage(incomingMessage);
+    } else if (intent.intent === "settings") {
       const handler = SettingsMessageHandler.getInstance(canonicalChatId);
       reply = await handler.handleMessage(incomingMessage);
     } else {
-      if (intent === undefined) {
-        this.logger.warning(
-          `handleInboundMessage: settings-intent classifier returned no result for chat ${canonicalChatId}, routing to normal handler`,
-        );
-      }
-
       const handler = MessageHandler.getInstance(canonicalChatId);
       reply = await handler.handleMessage(incomingMessage);
     }

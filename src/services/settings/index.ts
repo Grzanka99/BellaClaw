@@ -38,7 +38,10 @@ export class SettingsService {
 
     const rows = await this.selectOwnerRows(ownerKey);
     const record = this.createRecord(rows);
-    this.cache.set(ownerKey, record);
+
+    if (rows.length > 0) {
+      this.cache.set(ownerKey, record);
+    }
 
     return { ...record };
   }
@@ -75,7 +78,10 @@ export class SettingsService {
 
     const rows = await this.selectOwnerRows(ownerKey);
     const record = this.createRecord(rows);
-    this.cache.set(ownerKey, record);
+
+    if (rows.length > 0) {
+      this.cache.set(ownerKey, record);
+    }
 
     return { ...record };
   }

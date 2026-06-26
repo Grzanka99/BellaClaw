@@ -12,6 +12,7 @@ export const getSettingsTool: ToolDefinitionJson = {
       type: "object",
       properties: {},
       required: [],
+      additionalProperties: false,
     },
   },
 };

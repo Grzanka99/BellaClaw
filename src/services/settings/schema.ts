@@ -82,7 +82,7 @@ export const DefaultConfigRecord: TConfigRecord = {
   [EConfigKey.AiProvidersOpencodeGoModelsChatAccurate]: MODEL_OPENCODE_GO_GLM_5_2,
 };
 
-const SNonEmptyString = z.string().min(1);
+const SNonEmptyString = z.string().trim().min(1);
 
 function isValidTimezone(timezone: string): boolean {
   try {

@@ -120,7 +120,12 @@ export class AiConnector {
     settings: TConfigRecord,
     purposes: EModelPurpose[],
   ): Promise<TOption<string>> {
-    const provider = this.selectProvider(settings);
+    let provider: TAiProviderInstance;
+    try {
+      provider = this.selectProvider(settings);
+    } catch (error) {
+      return `Provider unavailable: ${normalizeError(error)}`;
+    }
 
     for (const purpose of purposes) {
       try {
