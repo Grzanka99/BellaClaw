@@ -71,12 +71,6 @@ export class CronEngine extends EventEmitter {
 
     const normalizedScope = this.normalizeScope(args.scope);
     const scheduledAt = new Date();
-    let nextRunAt: Date;
-    try {
-      nextRunAt = getNextFireTime(args.pattern, scheduledAt, this.timezone);
-    } catch (error) {
-      return this.createUnschedulablePatternError(args.pattern, error);
-    }
 
     try {
       return await this.queue.enqueue(async () => {
@@ -88,6 +82,22 @@ export class CronEngine extends EventEmitter {
 
         if (existing && args.overwrite !== true) {
           return this.createDuplicateJobError(args.name);
+        }
+
+        const effectiveTimezone = args.timezone ?? existing?.timezone ?? this.timezone;
+        if (effectiveTimezone !== undefined) {
+          try {
+            new Intl.DateTimeFormat(undefined, { timeZone: effectiveTimezone });
+          } catch {
+            return { operation: "schedule", error: `Invalid timezone: ${effectiveTimezone}` };
+          }
+        }
+
+        let nextRunAt: Date;
+        try {
+          nextRunAt = getNextFireTime(args.pattern, scheduledAt, effectiveTimezone);
+        } catch (error) {
+          return this.createUnschedulablePatternError(args.pattern, error);
         }
 
         const rowValues = {
@@ -105,6 +115,7 @@ export class CronEngine extends EventEmitter {
           status: ECronEngineJobStatus.Active,
           finishedAt: null,
           finishedReason: null,
+          timezone: effectiveTimezone ?? null,
         };
 
         if (existing && args.overwrite === true) {
@@ -191,6 +202,16 @@ export class CronEngine extends EventEmitter {
           return this.createDuplicateJobError(args.name);
         }
 
+        const effectiveTimezone = args.timezone ?? existing?.timezone ?? this.timezone;
+
+        if (effectiveTimezone !== undefined) {
+          try {
+            new Intl.DateTimeFormat(undefined, { timeZone: effectiveTimezone });
+          } catch {
+            return { operation: "schedule", error: `Invalid timezone: ${effectiveTimezone}` };
+          }
+        }
+
         const rowValues = {
           name: args.name,
           scope: normalizedScope,
@@ -206,6 +227,7 @@ export class CronEngine extends EventEmitter {
           status: ECronEngineJobStatus.Active,
           finishedAt: null,
           finishedReason: null,
+          timezone: effectiveTimezone ?? null,
         };
 
         if (existing && args.overwrite === true) {
@@ -398,7 +420,8 @@ export class CronEngine extends EventEmitter {
           let claimedJob: TOption<TCronEngineJob>;
 
           if (job.type === ECronEngineJobType.Recurring && job.pattern) {
-            const nextRun = getNextFireTime(job.pattern, new Date(now), this.timezone);
+            const jobTimezone = job.timezone ?? this.timezone;
+            const nextRun = getNextFireTime(job.pattern, new Date(now), jobTimezone);
             const row = await this.queue.enqueue(async () => {
               return this.db
                 .update(cronEngineJobsTable)
@@ -455,6 +478,7 @@ export class CronEngine extends EventEmitter {
             lastRunAt: job.lastRunAt,
             nextRunAt: job.nextRunAt,
             createdAt: job.createdAt,
+            timezone: job.timezone ?? this.timezone,
           };
 
           this.emit(CronEngine.FIRE_EVENT, ctx);

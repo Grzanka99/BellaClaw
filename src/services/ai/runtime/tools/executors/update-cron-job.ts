@@ -75,6 +75,7 @@ export async function executeUpdateCronJobTool(
       reminderPromptData,
       reminderFallbackText,
       overwrite: true,
+      timezone: existing.timezone,
     });
 
     if ("error" in result) {
@@ -103,6 +104,7 @@ export async function executeUpdateCronJobTool(
     reminderPromptData,
     reminderFallbackText,
     overwrite: true,
+    timezone: existing.timezone,
   });
 
   if ("error" in result) {

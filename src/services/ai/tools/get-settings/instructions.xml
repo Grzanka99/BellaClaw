@@ -1,0 +1,51 @@
+<instructions>
+
+  <purpose>
+    Read and display the user's current effective assistant settings.
+    Use this whenever the user asks to view, check, or inspect any configured preference
+    (timezone, language, assistant name, address style, reply length, AI provider, or chat model).
+  </purpose>
+
+  <tool>
+    <name>get-settings</name>
+    <description>
+      Returns the full effective settings record for the current user. Takes no arguments.
+      The owner is resolved automatically from the chat context — never ask the user for an owner key.
+    </description>
+  </tool>
+
+  <usage_rules>
+    <rule>Call this tool when the user asks what is currently configured.</rule>
+    <rule>This tool takes no arguments. Always pass an empty object.</rule>
+    <rule>After receiving the settings, present them to the user in a clear, human-readable way in the user's language.</rule>
+    <rule>Do not invent settings that are not present in the returned record.</rule>
+  </usage_rules>
+
+  <result_fields>
+    The returned record is a flat map of configuration keys to string values, including:
+    - ai.provider — active AI provider (openrouter, ollama, or opencode-go)
+    - ai.instructions.timezone — IANA timezone (e.g. Europe/Warsaw)
+    - ai.instructions.language — conversation language (e.g. Polish)
+    - ai.instructions.assistantName — the assistant's display name
+    - ai.instructions.addressStyle — how the assistant should address the user
+    - ai.instructions.preferredReplyLength — preferred reply length
+    - ai.providers.<provider>.models.chatAccurate — the chat model used for normal assistant turns
+    - ai.providers.<provider>.models.chat — the chat model used for general chat
+    - other provider model-purpose keys (toolCheap, toolAccurate, general)
+  </result_fields>
+
+  <examples>
+    <example>
+      <message>"what timezone are you using?"</message>
+      <action>Call get-settings with an empty object.</action>
+      <response>"You're currently on Europe/Warsaw."</response>
+    </example>
+
+    <example>
+      <message>"what model are you running on?"</message>
+      <action>Call get-settings with an empty object.</action>
+      <response>"Your active provider is opencode-go and the chat model is glm-5.2."</response>
+    </example>
+  </examples>
+
+</instructions>

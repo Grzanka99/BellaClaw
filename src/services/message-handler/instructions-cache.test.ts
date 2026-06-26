@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
+import { mkdirSync } from "node:fs";
 import {
   DEFINE_MESSAGE_IMPORTANCE_TOOL,
   ERole,
@@ -14,8 +15,20 @@ import { SCHEDULE_RECURRING_TOOL } from "../ai/tools/schedule-recurring/definiti
 import { UNSCHEDULE_CRON_JOB_TOOL } from "../ai/tools/unschedule-cron-job/definition";
 import { UPDATE_CRON_JOB_TOOL } from "../ai/tools/update-cron-job/definition";
 import { EMemoryImportance } from "../memory/types";
+import { SettingsService } from "../settings";
+import { DefaultConfigRecord, EConfigKey, type TConfigRecord } from "../settings/schema";
 import { MessageHandler } from "./index";
-import { MessageHandlerInstructions } from "./instructions";
+import {
+  getMessageHandlerInstructions,
+  invalidateMessageHandlerInstructions,
+} from "./instructions";
+
+const testTempDir = Bun.env.TMPDIR ?? "tmp";
+mkdirSync(testTempDir, { recursive: true });
+
+function getTempXmlPath(prefix: string): string {
+  return `${testTempDir}/${prefix}-${Date.now()}.xml`;
+}
 
 type TMessageHandlerInternals = {
   ai: {
@@ -49,6 +62,18 @@ class TestQueue {
   }
 }
 
+function mockSettingsService() {
+  const SettingsServiceStatic = SettingsService as unknown as { _instance: unknown };
+  SettingsServiceStatic._instance = {
+    getAll: mock(async () => DefaultConfigRecord),
+  };
+}
+
+function resetSettingsInstance() {
+  const SettingsServiceStatic = SettingsService as unknown as { _instance: unknown };
+  SettingsServiceStatic._instance = undefined;
+}
+
 describe("MessageHandler instruction cache", () => {
   const originalBunFile = Bun.file;
   let testQueue: TestQueue | undefined;
@@ -61,6 +86,8 @@ describe("MessageHandler instruction cache", () => {
     } finally {
       testQueue = undefined;
       (MessageHandler as unknown as { _instances: Map<string, unknown> })._instances.clear();
+      invalidateMessageHandlerInstructions();
+      resetSettingsInstance();
       Bun.file = originalBunFile;
     }
   });
@@ -83,6 +110,11 @@ describe("MessageHandler instruction cache", () => {
 
       return originalBunFile(...args);
     }) as unknown as typeof Bun.file;
+
+    mockSettingsService();
+
+    const reference = await getMessageHandlerInstructions("test-chat-id", DefaultConfigRecord);
+    instructionReadCount = 0;
 
     const handler = MessageHandler.getInstance("test-chat-id");
     const internals = handler as unknown as TMessageHandlerInternals;
@@ -149,7 +181,7 @@ describe("MessageHandler instruction cache", () => {
 
     expect(runToolTaskArgs).toHaveLength(4);
     for (const args of runToolTaskArgs) {
-      expect(args.history[0]?.content).toBe(MessageHandlerInstructions.defineMessageImportance);
+      expect(args.history[0]?.content).toBe(reference.defineMessageImportance);
     }
 
     expect(runAssistantToolLoopArgs).toHaveLength(2);
@@ -166,17 +198,62 @@ describe("MessageHandler instruction cache", () => {
         WEB_FETCH_TOOL,
       ]);
       expect(args.tools.map((tool) => tool.instructions)).toEqual([
-        MessageHandlerInstructions.searchMemory,
-        MessageHandlerInstructions.listCronJobs,
-        MessageHandlerInstructions.scheduleOnce,
-        MessageHandlerInstructions.scheduleRecurring,
-        MessageHandlerInstructions.unscheduleCronJob,
-        MessageHandlerInstructions.updateCronJob,
-        MessageHandlerInstructions.webSearch,
-        MessageHandlerInstructions.webFetch,
+        reference.searchMemory,
+        reference.listCronJobs,
+        reference.scheduleOnce,
+        reference.scheduleRecurring,
+        reference.unscheduleCronJob,
+        reference.updateCronJob,
+        reference.webSearch,
+        reference.webFetch,
       ]);
     }
 
     expect(instructionReadCount).toBe(0);
+  });
+
+  test("isolates instructions per owner", async () => {
+    const tempPath = getTempXmlPath("test-inject-isolation");
+    await Bun.write(
+      tempPath,
+      `<tool>{{config.ai.instructions.assistantName}} {{config.ai.instructions.timezone}}</tool>`,
+    );
+
+    Bun.file = mock((...args: Parameters<typeof Bun.file>) => {
+      const path = args[0];
+      let filePath: string | undefined;
+
+      if (typeof path === "string") {
+        filePath = path;
+      }
+
+      if (filePath === "instructions.xml" || filePath?.endsWith("/instructions.xml")) {
+        return originalBunFile(tempPath);
+      }
+
+      return originalBunFile(...args);
+    }) as unknown as typeof Bun.file;
+
+    const settingsA: TConfigRecord = {
+      ...DefaultConfigRecord,
+      [EConfigKey.AiInstructionsAssistantName]: "Alpha",
+      [EConfigKey.AiInstructionsTimezone]: "America/New_York",
+    };
+    const settingsB: TConfigRecord = {
+      ...DefaultConfigRecord,
+      [EConfigKey.AiInstructionsAssistantName]: "Beta",
+      [EConfigKey.AiInstructionsTimezone]: "Asia/Tokyo",
+    };
+
+    const instructionsA = await getMessageHandlerInstructions("owner-a", settingsA);
+    const instructionsB = await getMessageHandlerInstructions("owner-b", settingsB);
+
+    expect(instructionsA.defineMessageImportance).toContain("Alpha");
+    expect(instructionsA.defineMessageImportance).toContain("America/New_York");
+    expect(instructionsB.defineMessageImportance).toContain("Beta");
+    expect(instructionsB.defineMessageImportance).toContain("Asia/Tokyo");
+    expect(instructionsA).not.toBe(instructionsB);
+
+    await Bun.file(tempPath).delete();
   });
 });

@@ -82,6 +82,24 @@ describe("CronEngine", () => {
     }
   });
 
+  test("schedule rejects invalid timezone before storing", async () => {
+    const result = await engine.schedule({
+      name: "bad-timezone",
+      scope: "scope-a",
+      pattern: "0 9 * * *",
+      timezone: "Not/A_Timezone",
+    });
+
+    if (!("error" in result)) {
+      throw new Error("Expected invalid timezone to fail");
+    }
+
+    expect(result.error).toBe("Invalid timezone: Not/A_Timezone");
+
+    const job = await engine.getJob("bad-timezone", "scope-a");
+    expect(job).toBeUndefined();
+  });
+
   test("same job name can exist in different scopes", async () => {
     const first = await engine.schedule({
       name: "shared-name",

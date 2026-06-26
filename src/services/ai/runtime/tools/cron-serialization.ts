@@ -18,7 +18,7 @@ function formatLocalTime(date: Date, timezone: string) {
 }
 
 export function serializeCronJobForModel(job: TCronEngineJob) {
-  const timezone = Config.ai.instructions.timezone;
+  const timezone = job.timezone ?? Config.ai.instructions.timezone;
 
   return {
     ...job,

@@ -15,6 +15,7 @@ import { createFailedToolResult, createSuccessfulToolResult } from "../results";
 export async function executeScheduleRecurringTool(
   toolCall: ChatMessageToolCall,
   chatId: TOption<string>,
+  ownerTimezone: string,
 ): Promise<TNormalizedToolResult> {
   const resolvedChatId = requireChatId(toolCall, chatId);
 
@@ -40,6 +41,7 @@ export async function executeScheduleRecurringTool(
     reminderPromptData: parsed.data.reminderPromptData,
     reminderFallbackText: parsed.data.reminderFallbackText,
     overwrite: parsed.data.overwrite,
+    timezone: ownerTimezone,
   });
 
   if ("error" in result) {

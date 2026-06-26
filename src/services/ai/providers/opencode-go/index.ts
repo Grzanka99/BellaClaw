@@ -1,8 +1,8 @@
 import type { ChatMessageToolCall } from "@openrouter/sdk/models";
 import z from "zod";
-import { Config } from "../../../../config";
 import type { TOption } from "../../../../types";
 import { createLogger } from "../../../../utils/logger";
+import { EConfigKey, type TConfigRecord } from "../../../settings/schema";
 import { readXmlAndInjectConfig } from "../../instructions/read-xml-and-inject-config";
 import {
   EAssistantLoopConversationItemKind,
@@ -13,9 +13,6 @@ import {
 import { normalizeError, promptToText, serializeForModel } from "../../runtime/serialization";
 import { EModelPurpose, ERole } from "../../types";
 import { convertToolsForOpencodeGo } from "./converters";
-
-export type TOpencodeGoModel =
-  (typeof Config.ai.providers.opencodeGo.models)[keyof typeof Config.ai.providers.opencodeGo.models];
 
 const OPENCODE_GO_BASE_URL = "https://opencode.ai/zen/go/v1";
 const OPENCODE_API_KEY = Bun.env.OPENCODE_API_KEY ?? "";
@@ -72,8 +69,8 @@ function stringifyToolArguments(argumentsValue: unknown): string {
   return serializeForModel(argumentsValue);
 }
 
-export async function readBaseSystemText(): Promise<string> {
-  return readXmlAndInjectConfig(BASE_SYSTEM_INSTRUCTIONS_PATH, Config);
+export async function readBaseSystemText(settings: TConfigRecord): Promise<string> {
+  return readXmlAndInjectConfig(BASE_SYSTEM_INSTRUCTIONS_PATH, settings);
 }
 
 export function buildOpencodeGoMessages(
@@ -210,30 +207,28 @@ export class OpencodeGoAiProvider {
     return OpencodeGoAiProvider._instance;
   }
 
-  public getModel(purpose: EModelPurpose): TOpencodeGoModel {
-    const { models } = Config.ai.providers.opencodeGo;
-
+  public getModel(purpose: EModelPurpose, settings: TConfigRecord): string {
     switch (purpose) {
       case EModelPurpose.ToolCheap:
-        return models.toolCheap;
+        return settings[EConfigKey.AiProvidersOpencodeGoModelsToolCheap];
       case EModelPurpose.General:
-        return models.general;
+        return settings[EConfigKey.AiProvidersOpencodeGoModelsGeneral];
       case EModelPurpose.ToolAccurate:
-        return models.toolAccurate;
+        return settings[EConfigKey.AiProvidersOpencodeGoModelsToolAccurate];
       case EModelPurpose.Chat:
-        return models.chat;
+        return settings[EConfigKey.AiProvidersOpencodeGoModelsChat];
       case EModelPurpose.ChatAccurate:
-        return models.chatAccurate;
+        return settings[EConfigKey.AiProvidersOpencodeGoModelsChatAccurate];
     }
   }
 
   public async requestAssistantTurn(
     args: TRequestAssistantTurnArgs,
   ): Promise<TOption<TRuntimeAssistantTurn>> {
-    const model = this.getModel(args.purpose);
+    const model = this.getModel(args.purpose, args.settings);
 
     this.logger.info(`requestAssistantTurn: start, model=${model}`);
-    const baseSystemText = await readBaseSystemText();
+    const baseSystemText = await readBaseSystemText(args.settings);
     const messages = buildOpencodeGoMessages(args, baseSystemText);
 
     const res = await opencodeGoChat({

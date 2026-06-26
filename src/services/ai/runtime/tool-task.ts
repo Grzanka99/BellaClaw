@@ -13,6 +13,7 @@ export async function runToolTask(args: TRunToolTaskArgs): Promise<TToolTaskResu
     user: args.user,
     tools: args.tools,
     purpose: args.purpose,
+    settings: args.settings,
   });
 
   if (assistantTurn === undefined) {
@@ -30,6 +31,7 @@ export async function runToolTask(args: TRunToolTaskArgs): Promise<TToolTaskResu
       toolCall,
       chatId: args.chatId,
       allowedToolNames,
+      settings: args.settings,
     });
 
     toolResults.push(toolResult);

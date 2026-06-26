@@ -1,18 +1,23 @@
-import { Config } from "../../../config";
+import type { TOption } from "../../../types";
 import { createLogger } from "../../../utils/logger";
+import { EConfigKey, type TConfigRecord } from "../../settings/schema";
 import { OllamaAiProvider } from "../providers/ollama";
 import { OpencodeGoAiProvider } from "../providers/opencode-go";
 import { OpenrouterAiProvider } from "../providers/openrouter";
 import {
+  EAssistantLoopConversationItemKind,
   runAssistantToolLoop,
   runToolTask,
   type TAssistantToolLoopArgs,
   type TAssistantToolLoopResult,
+  type TRequestAssistantTurnArgs,
+  type TRuntimeAssistantTurn,
   type TRuntimeUser,
   type TToolTaskArgs,
   type TToolTaskResult,
 } from "../runtime";
-import { EAiProvider } from "../types";
+import { normalizeError } from "../runtime/serialization";
+import { EAiProvider, type EModelPurpose, ERole } from "../types";
 
 export type {
   TAssistantToolActivity,
@@ -29,8 +34,17 @@ export {
   defineMessageImportanceTool,
 } from "../tools/define-message-importance/definition";
 export type { TDefineMessageImportance } from "../tools/define-message-importance/handler";
+export {
+  DEFINE_SETTINGS_INTENT_TOOL,
+  defineSettingsIntentTool,
+} from "../tools/define-settings-intent/definition";
+export type { TDefineSettingsIntent } from "../tools/define-settings-intent/handler";
+export { GET_SETTINGS_TOOL, getSettingsTool } from "../tools/get-settings/definition";
+export type { TGetSettingsArgs } from "../tools/get-settings/handler";
 export { SEARCH_MEMORY_TOOL, searchMemoryTool } from "../tools/search-memory/definition";
 export type { TSearchMemory } from "../tools/search-memory/handler";
+export { UPDATE_SETTINGS_TOOL, updateSettingsTool } from "../tools/update-settings/definition";
+export type { TUpdateSettingsArgs } from "../tools/update-settings/handler";
 export { WEB_FETCH_TOOL, webFetchTool } from "../tools/web-fetch/definition";
 export type { TWebFetch } from "../tools/web-fetch/handler";
 export { WEB_SEARCH_TOOL, webSearchTool } from "../tools/web-search/definition";
@@ -39,13 +53,18 @@ export type { THistoryItem, TPrompt } from "../types";
 export { EAiProvider, EModelPurpose, ERole } from "../types";
 export type TAiUser = TRuntimeUser;
 
+type TAiProviderInstance = {
+  requestAssistantTurn: (
+    args: TRequestAssistantTurnArgs,
+  ) => Promise<TOption<TRuntimeAssistantTurn>>;
+};
+
 export class AiConnector {
   private static _instance: AiConnector;
   private logger = createLogger("AI CONNECTOR");
-  private providerName = Config.ai.provider;
 
   private constructor() {
-    this.logger.info(`Using provider: ${this.providerName}`);
+    this.logger.info("AiConnector initialized");
   }
 
   public static get instance(): AiConnector {
@@ -56,8 +75,10 @@ export class AiConnector {
     return AiConnector._instance;
   }
 
-  private get provider() {
-    switch (this.providerName) {
+  private selectProvider(settings: TConfigRecord): TAiProviderInstance {
+    const providerName = settings[EConfigKey.AiProvider];
+
+    switch (providerName) {
       case EAiProvider.Ollama: {
         return OllamaAiProvider.instance;
       }
@@ -68,7 +89,7 @@ export class AiConnector {
         return OpencodeGoAiProvider.instance;
       }
       default: {
-        return OllamaAiProvider.instance;
+        throw new Error(`Unknown AI provider: ${providerName}`);
       }
     }
   }
@@ -76,17 +97,58 @@ export class AiConnector {
   public async runAssistantToolLoop(
     args: TAssistantToolLoopArgs,
   ): Promise<TAssistantToolLoopResult> {
+    if (args.requestAssistantTurn !== undefined) {
+      return runAssistantToolLoop({ ...args, requestAssistantTurn: args.requestAssistantTurn });
+    }
+
+    const provider = this.selectProvider(args.settings);
     return runAssistantToolLoop({
       ...args,
-      requestAssistantTurn:
-        args.requestAssistantTurn ?? this.provider.requestAssistantTurn.bind(this.provider),
+      requestAssistantTurn: provider.requestAssistantTurn.bind(provider),
     });
   }
 
   public async runToolTask(args: TToolTaskArgs): Promise<TToolTaskResult> {
+    const provider = this.selectProvider(args.settings);
     return runToolTask({
       ...args,
-      requestAssistantTurn: this.provider.requestAssistantTurn.bind(this.provider),
+      requestAssistantTurn: provider.requestAssistantTurn.bind(provider),
     });
+  }
+
+  public async verifySettings(
+    settings: TConfigRecord,
+    purposes: EModelPurpose[],
+  ): Promise<TOption<string>> {
+    const provider = this.selectProvider(settings);
+
+    for (const purpose of purposes) {
+      try {
+        const result = await provider.requestAssistantTurn({
+          conversation: [
+            {
+              kind: EAssistantLoopConversationItemKind.UserPrompt,
+              prompt: {
+                role: ERole.User,
+                content: [{ type: "text", text: "Reply with ok." }],
+              },
+            },
+          ],
+          history: [{ role: ERole.System, content: "Reply with ok." }],
+          user: undefined,
+          tools: [],
+          purpose,
+          settings,
+        });
+
+        if (result === undefined) {
+          return `Provider returned no response for ${purpose}`;
+        }
+      } catch (error) {
+        return `Provider failed for ${purpose}: ${normalizeError(error)}`;
+      }
+    }
+
+    return undefined;
   }
 }

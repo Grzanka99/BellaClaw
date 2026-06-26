@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { ChatMessageToolCall, ToolDefinitionJson } from "@openrouter/sdk/models";
+import { DefaultConfigRecord } from "../../../settings/schema";
 import { EAssistantLoopConversationItemKind, type TRequestAssistantTurnArgs } from "../../runtime";
 import { defineMessageImportanceTool } from "../../tools/define-message-importance/definition";
 import { EModelPurpose, ERole, type TToolEntry } from "../../types";
@@ -35,6 +36,7 @@ function createArgs(user: TRequestAssistantTurnArgs["user"]): TRequestAssistantT
     user,
     tools: [createToolEntry(defineMessageImportanceTool)],
     purpose: EModelPurpose.Chat,
+    settings: DefaultConfigRecord,
     conversation: [
       {
         kind: EAssistantLoopConversationItemKind.UserPrompt,

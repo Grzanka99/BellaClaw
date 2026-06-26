@@ -3,6 +3,7 @@ import type { ChatMessageToolCall } from "@openrouter/sdk/models";
 import { ECronEngineJobType } from "../../../lib/cron-engine";
 import { CronSingleton } from "../../cron";
 import { resetCronEngineJobsTable } from "../../database/test-utils";
+import { DefaultConfigRecord } from "../../settings/schema";
 import { LIST_CRON_JOBS_TOOL } from "../tools/list-cron-jobs/definition";
 import { SCHEDULE_ONCE_TOOL } from "../tools/schedule-once/definition";
 import { executeToolCall } from "./tool-execution";
@@ -53,11 +54,13 @@ describe("schedule-once tool execution", () => {
       ),
       chatId,
       allowedToolNames: new Set([SCHEDULE_ONCE_TOOL, LIST_CRON_JOBS_TOOL]),
+      settings: DefaultConfigRecord,
     });
     const listResult = await executeToolCall({
       toolCall: createToolCall("list-cron", LIST_CRON_JOBS_TOOL, "{}"),
       chatId,
       allowedToolNames: new Set([SCHEDULE_ONCE_TOOL, LIST_CRON_JOBS_TOOL]),
+      settings: DefaultConfigRecord,
     });
 
     expect(scheduleResult.success).toBe(true);
@@ -95,6 +98,7 @@ describe("schedule-once tool execution", () => {
       ),
       chatId: "runtime-once-user",
       allowedToolNames: new Set([SCHEDULE_ONCE_TOOL]),
+      settings: DefaultConfigRecord,
     });
 
     expect(result.success).toBe(false);

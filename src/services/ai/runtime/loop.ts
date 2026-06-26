@@ -41,6 +41,7 @@ export async function runAssistantToolLoop(
       user: args.user,
       tools: args.tools,
       purpose: args.purpose,
+      settings: args.settings,
     });
 
     if (assistantTurn === undefined) {
@@ -109,6 +110,7 @@ export async function runAssistantToolLoop(
         toolCall,
         chatId: args.chatId,
         allowedToolNames,
+        settings: args.settings,
       });
 
       toolResults.push(toolResult);
@@ -137,6 +139,7 @@ export async function runAssistantToolLoop(
     user: args.user,
     tools: [],
     purpose: args.purpose,
+    settings: args.settings,
   });
 
   if (finalAssistantTurn !== undefined && finalAssistantTurn.toolCalls.length === 0) {
@@ -177,6 +180,7 @@ export async function runAssistantToolLoop(
       user: args.user,
       tools: [],
       purpose: args.purpose,
+      settings: args.settings,
     });
 
     if (retryFinalAssistantTurn !== undefined && retryFinalAssistantTurn.toolCalls.length === 0) {

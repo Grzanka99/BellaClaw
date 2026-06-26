@@ -113,6 +113,10 @@ export const SCronEngineJob = z
 
         return undefined;
       }),
+    timezone: z
+      .string()
+      .nullable()
+      .transform((value) => value ?? undefined),
   })
   .extend(SReminderContentJobFields.shape);
 
@@ -123,6 +127,7 @@ export const SScheduleRecurringArgs = z
     group: z.string().optional(),
     pattern: z.string(),
     overwrite: z.boolean().optional(),
+    timezone: z.string().optional(),
   })
   .extend(SReminderContentArgsBase.shape)
   .superRefine(validateReminderContentArgs);
@@ -134,6 +139,7 @@ export const SScheduleOnceArgs = z
     group: z.string().optional(),
     fireAt: z.coerce.date(),
     overwrite: z.boolean().optional(),
+    timezone: z.string().optional(),
   })
   .extend(SReminderContentArgsBase.shape)
   .superRefine(validateReminderContentArgs);
@@ -150,6 +156,7 @@ export type TCronEngineJobContext = {
   lastRunAt: TOption<Date>;
   nextRunAt: Date;
   createdAt: Date;
+  timezone: TOption<string>;
 };
 
 export type TCronEngineJob = z.infer<typeof SCronEngineJob>;

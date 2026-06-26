@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { ChatMessageToolCall } from "@openrouter/sdk/models";
+import { DefaultConfigRecord } from "../../settings/schema";
 import { WEB_FETCH_TOOL } from "../tools/web-fetch/definition";
 import { WEB_SEARCH_TOOL } from "../tools/web-search/definition";
 import { executeToolCall } from "./tool-execution";
@@ -73,6 +74,7 @@ describe("web tool execution", () => {
       ),
       chatId: undefined,
       allowedToolNames: new Set([WEB_SEARCH_TOOL]),
+      settings: DefaultConfigRecord,
     });
 
     expect(result).toMatchObject({
@@ -102,6 +104,7 @@ describe("web tool execution", () => {
       ),
       chatId: undefined,
       allowedToolNames: new Set([WEB_FETCH_TOOL]),
+      settings: DefaultConfigRecord,
     });
 
     expect(result).toMatchObject({
@@ -127,6 +130,7 @@ describe("web tool execution", () => {
       ),
       chatId: undefined,
       allowedToolNames: new Set([WEB_SEARCH_TOOL]),
+      settings: DefaultConfigRecord,
     });
     const fetchResult = await executeToolCall({
       toolCall: createToolCall(
@@ -136,6 +140,7 @@ describe("web tool execution", () => {
       ),
       chatId: undefined,
       allowedToolNames: new Set([WEB_FETCH_TOOL]),
+      settings: DefaultConfigRecord,
     });
 
     expect(searchResult.success).toBe(false);

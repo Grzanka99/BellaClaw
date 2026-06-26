@@ -1,20 +1,33 @@
 import type { TConfig } from "../../../config";
+import type { TConfigRecord } from "../../settings/schema";
 
 const PLACEHOLDER_PATTERN = /\{\{config\.([a-zA-Z0-9._]+)\}\}/g;
 const MAX_RESOLUTION_PASSES = 10;
 
-function resolveConfigPath(config: TConfig, path: string): string {
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function resolveConfigPath(config: unknown, path: string): string {
+  if (isPlainRecord(config)) {
+    const direct = config[path];
+
+    if (typeof direct === "string") {
+      return direct;
+    }
+  }
+
   const keys = path.split(".");
   let current: unknown = config;
 
   for (const key of keys) {
-    if (current === null || current === undefined || typeof current !== "object") {
+    if (!isPlainRecord(current)) {
       throw new Error(
         `readXmlAndInjectConfig: cannot resolve "config.${path}" — "${key}" hit a non-object value`,
       );
     }
 
-    current = (current as Record<string, unknown>)[key];
+    current = current[key];
   }
 
   if (current === undefined) {
@@ -24,7 +37,10 @@ function resolveConfigPath(config: TConfig, path: string): string {
   return String(current);
 }
 
-export async function readXmlAndInjectConfig(path: string, config: TConfig): Promise<string> {
+export async function readXmlAndInjectConfig(
+  path: string,
+  config: TConfig | TConfigRecord,
+): Promise<string> {
   const xml = await Bun.file(path).text();
 
   let result = xml;
