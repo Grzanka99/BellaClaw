@@ -182,8 +182,8 @@ describe("CronSingleton", () => {
       reminderText: "Stretch now.",
       reminderPromptData: undefined,
       reminderFallbackText: "Stretch now.",
-      lastRunAt: undefined,
     });
+    expect(ctx.lastRunAt).toBeInstanceOf(Date);
     expect(ctx.nextRunAt).toBeInstanceOf(Date);
     expect(remainingJob).toBeUndefined();
   });
@@ -218,6 +218,10 @@ describe("CronSingleton", () => {
     const ctx = await fired;
     const job = await cron.get("recurring-job", "user-a");
 
+    if (!job) {
+      throw new Error("Expected recurring job after fire");
+    }
+
     expect(ctx).toMatchObject({
       name: "recurring-job",
       scope: "user-a",
@@ -227,7 +231,6 @@ describe("CronSingleton", () => {
       reminderText: undefined,
       reminderPromptData: '{"topic":"posture"}',
       reminderFallbackText: "Posture check.",
-      lastRunAt: undefined,
     });
     expect(job).toMatchObject({
       name: "recurring-job",
@@ -238,10 +241,12 @@ describe("CronSingleton", () => {
       reminderText: undefined,
       reminderPromptData: '{"topic":"posture"}',
       reminderFallbackText: "Posture check.",
-      lastRunAt: expect.any(Date),
     });
-    expect(job?.nextRunAt).toBeInstanceOf(Date);
-    expect((job?.nextRunAt.getTime() ?? 0) > Date.now()).toBe(true);
+    expect(ctx.lastRunAt).toBeInstanceOf(Date);
+    expect(job.nextRunAt).toBeInstanceOf(Date);
+    expect(ctx.lastRunAt?.getTime()).toBe(job.lastRunAt?.getTime());
+    expect(ctx.nextRunAt.getTime()).toBe(job.nextRunAt.getTime());
+    expect(job.nextRunAt.getTime() > Date.now()).toBe(true);
   });
 
   test("generic cron event does not collide with job named cron-event", async () => {

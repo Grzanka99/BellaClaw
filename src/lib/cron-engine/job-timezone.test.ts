@@ -130,7 +130,7 @@ describe("CronScheduler per-job timezone", () => {
 
     expect(job.timezone).toBe("America/New_York");
     expect(formatWall(job.nextRunAt, "America/New_York")).toMatch(/ 09:00:00$/);
-    expect(job.nextRunAt.getTime()).toBeGreaterThan(ctx.nextRunAt.getTime());
+    expect(job.nextRunAt.getTime()).toBe(ctx.nextRunAt.getTime());
   });
 
   test("existing rows with null timezone still fire using scheduler default timezone", async () => {

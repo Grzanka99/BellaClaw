@@ -1,7 +1,6 @@
 import { EventEmitter } from "node:events";
 import { Cron, type CronOptions } from "croner";
 import { and, asc, eq } from "drizzle-orm";
-import { z } from "zod";
 import { DatabaseConnector } from "../../services/database";
 import { cronEngineJobsTable } from "../../services/database/schema";
 import type { TOption } from "../../types";
@@ -50,13 +49,18 @@ export class CronScheduler extends EventEmitter {
         .where(eq(cronEngineJobsTable.status, ECronJobStatus.Active))
         .orderBy(asc(cronEngineJobsTable.nextRunAt));
 
-      const parsed = z.array(SCronJob).safeParse(results);
-      if (!parsed.success) {
-        this.logger.error("Failed to parse jobs from DB during setup");
-        return [];
+      const jobs: TCronJob[] = [];
+      for (const row of results) {
+        const parsed = SCronJob.safeParse(row);
+        if (!parsed.success) {
+          this.logger.error(`Failed to parse job from DB during setup: ${parsed.error.message}`);
+          continue;
+        }
+
+        jobs.push(parsed.data);
       }
 
-      return parsed.data;
+      return jobs;
     });
 
     const now = new Date();
@@ -360,13 +364,18 @@ export class CronScheduler extends EventEmitter {
       }
 
       const rows = await query;
-      const parsed = z.array(SCronJob).safeParse(rows);
-      if (!parsed.success) {
-        this.logger.error("Failed to parse jobs from DB in list");
-        return [];
+      const jobs: TCronJob[] = [];
+      for (const row of rows) {
+        const parsed = SCronJob.safeParse(row);
+        if (!parsed.success) {
+          this.logger.error(`Failed to parse job from DB in list: ${parsed.error.message}`);
+          continue;
+        }
+
+        jobs.push(parsed.data);
       }
 
-      return parsed.data;
+      return jobs;
     });
   }
 
@@ -390,9 +399,13 @@ export class CronScheduler extends EventEmitter {
     try {
       let timer: Cron;
       if (job.type === ECronJobType.Recurring && job.pattern) {
-        timer = new Cron(job.pattern, this.createRecurringCronOptions(job.timezone), () => {
-          void this.fire(job.id);
-        });
+        timer = new Cron(
+          job.pattern,
+          this.createRecurringCronOptions(job.timezone ?? this.timezone),
+          () => {
+            void this.fire(job.id);
+          },
+        );
       } else {
         timer = new Cron(job.nextRunAt, this.createOnceCronOptions(), () => {
           void this.fire(job.id);
@@ -406,7 +419,7 @@ export class CronScheduler extends EventEmitter {
   }
 
   private async startTimerIfActive(job: TCronJob) {
-    const activeJob = await this.queue.enqueue(async () => {
+    await this.queue.enqueue(async () => {
       const row = await this.db
         .select()
         .from(cronEngineJobsTable)
@@ -418,14 +431,13 @@ export class CronScheduler extends EventEmitter {
         )
         .get();
 
-      return this.parseJobRow(row);
+      const activeJob = this.parseJobRow(row);
+      if (activeJob === undefined) {
+        return;
+      }
+
+      this.startTimer(activeJob);
     });
-
-    if (activeJob === undefined) {
-      return;
-    }
-
-    this.startTimer(activeJob);
   }
 
   private stopTimer(id: number) {
@@ -533,11 +545,7 @@ export class CronScheduler extends EventEmitter {
             .returning()
             .get();
 
-          if (!this.parseJobRow(row)) {
-            return undefined;
-          }
-
-          return job;
+          return this.parseJobRow(row);
         }
 
         if (job.type === ECronJobType.OneTime) {
@@ -559,11 +567,7 @@ export class CronScheduler extends EventEmitter {
             .returning()
             .get();
 
-          if (!this.parseJobRow(row)) {
-            return undefined;
-          }
-
-          return job;
+          return this.parseJobRow(row);
         }
 
         return undefined;
