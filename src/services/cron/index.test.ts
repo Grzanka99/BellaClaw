@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
 import { ECronJobType, type TCronJobContext } from "../../lib/cron-engine";
+import type { AsyncQueue } from "../../utils/async-queue";
 import { DatabaseConnector } from "../database";
 import { cronEngineJobsTable } from "../database/schema";
 import { resetCronEngineJobsTable } from "../database/test-utils";
@@ -9,6 +10,7 @@ import { CronSingleton } from "./index";
 type TCronSingletonInternals = {
   scheduler: {
     fire: (id: number) => Promise<void>;
+    queue: AsyncQueue;
   };
 };
 
@@ -21,13 +23,16 @@ function cleanupCronSingleton() {
   CronSingletonWithInternals._instance?.destroy();
 }
 
-async function forceJobNextRunAt(id: number, nextRunAt: Date) {
+async function forceJobNextRunAt(cron: CronSingleton, id: number, nextRunAt: Date) {
+  const internals = cron as unknown as TCronSingletonInternals;
   const db = DatabaseConnector.instance.database;
 
-  await db
-    .update(cronEngineJobsTable)
-    .set({ nextRunAt: nextRunAt.getTime() })
-    .where(eq(cronEngineJobsTable.id, id));
+  await internals.scheduler.queue.enqueue(async () => {
+    await db
+      .update(cronEngineJobsTable)
+      .set({ nextRunAt: nextRunAt.getTime() })
+      .where(eq(cronEngineJobsTable.id, id));
+  });
 }
 
 describe("CronSingleton", () => {
@@ -161,7 +166,7 @@ describe("CronSingleton", () => {
       throw new Error(String(scheduled.error));
     }
     const fireAt = new Date(Date.now() - 1_000);
-    await forceJobNextRunAt(scheduled.id, fireAt);
+    await forceJobNextRunAt(cron, scheduled.id, fireAt);
 
     const fired = new Promise<TCronJobContext>((resolve) => {
       cron.on("one-time-job", (ctx) => {
@@ -207,7 +212,7 @@ describe("CronSingleton", () => {
       throw new Error(String(scheduled.error));
     }
     const fireAt = new Date(Date.now() - 60_000);
-    await forceJobNextRunAt(scheduled.id, fireAt);
+    await forceJobNextRunAt(cron, scheduled.id, fireAt);
 
     const fired = new Promise<TCronJobContext>((resolve) => {
       cron.on("recurring-job", (ctx) => {
@@ -266,7 +271,7 @@ describe("CronSingleton", () => {
     if ("error" in scheduled) {
       throw new Error(String(scheduled.error));
     }
-    await forceJobNextRunAt(scheduled.id, new Date(Date.now() - 60_000));
+    await forceJobNextRunAt(cron, scheduled.id, new Date(Date.now() - 60_000));
 
     const namedEvents: TCronJobContext[] = [];
     const cronEvents: TCronJobContext[] = [];

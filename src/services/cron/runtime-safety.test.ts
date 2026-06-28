@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { ECronJobStatus, ECronJobType } from "../../lib/cron-engine";
+import type { AsyncQueue } from "../../utils/async-queue";
 import { DatabaseConnector } from "../database";
 import { cronEngineJobsTable } from "../database/schema";
 import { resetCronEngineJobsTable } from "../database/test-utils";
@@ -8,6 +9,7 @@ import { CronSingleton } from "./index";
 type TCronSingletonInternals = {
   scheduler: {
     fire: (id: number) => Promise<void>;
+    queue: AsyncQueue;
   };
 };
 
@@ -20,29 +22,32 @@ function cleanupCronSingleton() {
   CronSingletonWithInternals._instance?.destroy();
 }
 
-async function insertDueOneTimeJob(name: string, scope: string) {
+async function insertDueOneTimeJob(cron: CronSingleton, name: string, scope: string) {
+  const internals = cron as unknown as TCronSingletonInternals;
   const db = DatabaseConnector.instance.database;
 
-  const row = await db
-    .insert(cronEngineJobsTable)
-    .values({
-      name,
-      scope,
-      group: null,
-      type: ECronJobType.OneTime,
-      pattern: null,
-      reminderText: null,
-      reminderPromptData: null,
-      reminderFallbackText: null,
-      nextRunAt: Date.now() - 1_000,
-      lastRunAt: null,
-      createdAt: Date.now(),
-      status: ECronJobStatus.Active,
-      finishedAt: null,
-      finishedReason: null,
-    })
-    .returning()
-    .get();
+  const row = await internals.scheduler.queue.enqueue(async () => {
+    return db
+      .insert(cronEngineJobsTable)
+      .values({
+        name,
+        scope,
+        group: null,
+        type: ECronJobType.OneTime,
+        pattern: null,
+        reminderText: null,
+        reminderPromptData: null,
+        reminderFallbackText: null,
+        nextRunAt: Date.now() - 1_000,
+        lastRunAt: null,
+        createdAt: Date.now(),
+        status: ECronJobStatus.Active,
+        finishedAt: null,
+        finishedReason: null,
+      })
+      .returning()
+      .get();
+  });
 
   return row.id;
 }
@@ -59,7 +64,7 @@ describe("CronSingleton runtime safety", () => {
 
   test("reserved job names still fire generic cron listeners", async () => {
     const cron = CronSingleton.instance;
-    const id = await insertDueOneTimeJob("error", "scope-a");
+    const id = await insertDueOneTimeJob(cron, "error", "scope-a");
 
     const cronEvents: string[] = [];
     cron.onCronEvent((ctx) => {

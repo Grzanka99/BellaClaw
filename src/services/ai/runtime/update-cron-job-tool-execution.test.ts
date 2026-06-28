@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { ChatMessageToolCall } from "@openrouter/sdk/models";
 import { Config } from "../../../config";
 import { ECronJobStatus, ECronJobType } from "../../../lib/cron-engine";
+import type { AsyncQueue } from "../../../utils/async-queue";
 import { CronSingleton } from "../../cron";
 import { DatabaseConnector } from "../../database";
 import { cronEngineJobsTable } from "../../database/schema";
@@ -14,6 +15,12 @@ import { executeToolCall } from "./tool-execution";
 
 type TCronSingletonStatic = {
   _instance: CronSingleton | undefined;
+};
+
+type TCronSingletonInternals = {
+  scheduler: {
+    queue: AsyncQueue;
+  };
 };
 
 function cleanupCronSingleton() {
@@ -33,48 +40,54 @@ function createToolCall(id: string, name: string, argumentsText: string): ChatMe
 }
 
 async function insertLegacyRecurringJob(name: string, scope: string) {
+  const internals = CronSingleton.instance as unknown as TCronSingletonInternals;
   const db = DatabaseConnector.instance.database;
   const now = Date.now();
 
-  await db.insert(cronEngineJobsTable).values({
-    name,
-    scope,
-    group: null,
-    type: ECronJobType.Recurring,
-    pattern: "0 9 * * *",
-    reminderText: "Legacy reminder.",
-    reminderPromptData: null,
-    reminderFallbackText: "Legacy reminder.",
-    nextRunAt: now + 60_000,
-    lastRunAt: null,
-    createdAt: now,
-    status: ECronJobStatus.Active,
-    finishedAt: null,
-    finishedReason: null,
-    timezone: null,
+  await internals.scheduler.queue.enqueue(async () => {
+    await db.insert(cronEngineJobsTable).values({
+      name,
+      scope,
+      group: null,
+      type: ECronJobType.Recurring,
+      pattern: "0 9 * * *",
+      reminderText: "Legacy reminder.",
+      reminderPromptData: null,
+      reminderFallbackText: "Legacy reminder.",
+      nextRunAt: now + 60_000,
+      lastRunAt: null,
+      createdAt: now,
+      status: ECronJobStatus.Active,
+      finishedAt: null,
+      finishedReason: null,
+      timezone: null,
+    });
   });
 }
 
 async function insertLegacyOneTimeJob(name: string, scope: string, fireAt: Date) {
+  const internals = CronSingleton.instance as unknown as TCronSingletonInternals;
   const db = DatabaseConnector.instance.database;
   const now = Date.now();
 
-  await db.insert(cronEngineJobsTable).values({
-    name,
-    scope,
-    group: null,
-    type: ECronJobType.OneTime,
-    pattern: null,
-    reminderText: "Legacy one-time reminder.",
-    reminderPromptData: null,
-    reminderFallbackText: "Legacy one-time reminder.",
-    nextRunAt: fireAt.getTime(),
-    lastRunAt: null,
-    createdAt: now,
-    status: ECronJobStatus.Active,
-    finishedAt: null,
-    finishedReason: null,
-    timezone: null,
+  await internals.scheduler.queue.enqueue(async () => {
+    await db.insert(cronEngineJobsTable).values({
+      name,
+      scope,
+      group: null,
+      type: ECronJobType.OneTime,
+      pattern: null,
+      reminderText: "Legacy one-time reminder.",
+      reminderPromptData: null,
+      reminderFallbackText: "Legacy one-time reminder.",
+      nextRunAt: fireAt.getTime(),
+      lastRunAt: null,
+      createdAt: now,
+      status: ECronJobStatus.Active,
+      finishedAt: null,
+      finishedReason: null,
+      timezone: null,
+    });
   });
 }
 
