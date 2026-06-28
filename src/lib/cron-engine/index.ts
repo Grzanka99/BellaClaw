@@ -43,28 +43,8 @@ export class CronScheduler extends EventEmitter {
   }
 
   public async setup(): Promise<void> {
-    const rows = await this.queue.enqueue(async () => {
-      const results = await this.db
-        .select()
-        .from(cronEngineJobsTable)
-        .where(eq(cronEngineJobsTable.status, ECronJobStatus.Active))
-        .orderBy(asc(cronEngineJobsTable.nextRunAt));
-
-      const jobs: TCronJob[] = [];
-      for (const row of results) {
-        const parsed = SCronJob.safeParse(row);
-        if (!parsed.success) {
-          this.logger.error(`Failed to parse job from DB during setup: ${parsed.error.message}`);
-          continue;
-        }
-
-        jobs.push(parsed.data);
-      }
-
-      return jobs;
-    });
-
-    for (const job of rows) {
+    const jobs = await this.list();
+    for (const job of jobs) {
       await this.startTimerIfActive(job);
     }
 
@@ -214,8 +194,7 @@ export class CronScheduler extends EventEmitter {
 
         const effectiveTimezone = args.timezone ?? existing?.timezone ?? this.timezone;
         try {
-          this.validateTimezone(effectiveTimezone);
-          if (!new Cron(args.fireAt).nextRun()) {
+          if (!new Cron(args.fireAt, { timezone: effectiveTimezone }).nextRun()) {
             throw new Error("One-time fireAt cannot be scheduled");
           }
         } catch (error) {
@@ -645,16 +624,6 @@ export class CronScheduler extends EventEmitter {
     }
 
     return options;
-  }
-
-  private validateTimezone(timezone: TOption<string>) {
-    if (timezone !== undefined) {
-      try {
-        new Intl.DateTimeFormat(undefined, { timeZone: timezone });
-      } catch {
-        throw new Error(`Invalid timezone: ${timezone}`);
-      }
-    }
   }
 
   private normalizeScope(scope: TOption<string>) {
