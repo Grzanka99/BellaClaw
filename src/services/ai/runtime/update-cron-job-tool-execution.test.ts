@@ -18,9 +18,7 @@ type TCronSingletonStatic = {
 };
 
 type TCronSingletonInternals = {
-  scheduler: {
-    queue: AsyncQueue;
-  };
+  queue: AsyncQueue;
 };
 
 function cleanupCronSingleton() {
@@ -44,7 +42,7 @@ async function insertLegacyRecurringJob(name: string, scope: string) {
   const db = DatabaseConnector.instance.database;
   const now = Date.now();
 
-  await internals.scheduler.queue.enqueue(async () => {
+  await internals.queue.enqueue(async () => {
     await db.insert(cronEngineJobsTable).values({
       name,
       scope,
@@ -70,7 +68,7 @@ async function insertLegacyOneTimeJob(name: string, scope: string, fireAt: Date)
   const db = DatabaseConnector.instance.database;
   const now = Date.now();
 
-  await internals.scheduler.queue.enqueue(async () => {
+  await internals.queue.enqueue(async () => {
     await db.insert(cronEngineJobsTable).values({
       name,
       scope,

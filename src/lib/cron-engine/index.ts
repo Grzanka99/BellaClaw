@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { Cron, type CronOptions } from "croner";
+import { Cron } from "croner";
 import { and, asc, eq } from "drizzle-orm";
 import { DatabaseConnector } from "../../services/database";
 import { cronEngineJobsTable } from "../../services/database/schema";
@@ -82,7 +82,7 @@ export class CronScheduler extends EventEmitter {
         try {
           nextRunAt = this.getNextRecurringRun(args.pattern, scheduledAt, effectiveTimezone);
         } catch (error) {
-          return this.createInvalidScheduleError(error);
+          return { operation: "create", error } satisfies TCronSchedulerError;
         }
 
         if (!nextRunAt) {
@@ -198,7 +198,7 @@ export class CronScheduler extends EventEmitter {
             throw new Error("One-time fireAt cannot be scheduled");
           }
         } catch (error) {
-          return this.createInvalidScheduleError(error);
+          return { operation: "create", error } satisfies TCronSchedulerError;
         }
 
         const rowValues = {
@@ -379,7 +379,10 @@ export class CronScheduler extends EventEmitter {
       if (job.type === ECronJobType.Recurring && job.pattern) {
         timer = new Cron(
           job.pattern,
-          this.createRecurringCronOptions(job.timezone ?? this.timezone),
+          {
+            mode: "5-part",
+            timezone: job.timezone ?? this.timezone,
+          },
           () => {
             void this.fire(job.id);
           },
@@ -611,19 +614,7 @@ export class CronScheduler extends EventEmitter {
     from: Date,
     timezone: TOption<string>,
   ): TOption<Date> {
-    return new Cron(pattern, this.createRecurringCronOptions(timezone)).nextRun(from) ?? undefined;
-  }
-
-  private createRecurringCronOptions(timezone: TOption<string>): CronOptions {
-    const options: CronOptions = {
-      mode: "5-part",
-    };
-
-    if (timezone !== undefined) {
-      options.timezone = timezone;
-    }
-
-    return options;
+    return new Cron(pattern, { mode: "5-part", timezone }).nextRun(from) ?? undefined;
   }
 
   private normalizeScope(scope: TOption<string>) {
@@ -656,10 +647,6 @@ export class CronScheduler extends EventEmitter {
 
   private createCreatedJobReadbackError(): TCronSchedulerError {
     return { operation: "create", error: "Failed to read back created job" };
-  }
-
-  private createInvalidScheduleError(error: unknown): TCronSchedulerError {
-    return { operation: "create", error };
   }
 
   private createUnschedulablePatternError(pattern: string): TCronSchedulerError {

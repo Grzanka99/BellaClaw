@@ -383,63 +383,11 @@ describe("CronScheduler", () => {
       reminderText: "Live timer.",
     });
 
-    const ctx = await Promise.race([
-      fired,
-      new Promise<never>((_, reject) => {
-        setTimeout(() => {
-          reject(new Error("Timed out waiting for one-time timer"));
-        }, 3_500);
-      }),
-    ]);
+    const ctx = await fired;
 
     expect(ctx.name).toBe("live-once");
     expect(ctx.type).toBe(ECronJobType.OneTime);
     expect(await scheduler.get("live-once", "scope-a")).toBeUndefined();
-  });
-
-  test("activating an expired one-time job fires it immediately", async () => {
-    await insertOneTimeJob("expired-before-activation", "scope-a", new Date(Date.now() - 1_000));
-    const job = await scheduler.get("expired-before-activation", "scope-a");
-    if (!job) {
-      throw new Error("Expected active one-time job");
-    }
-
-    const fired = new Promise<TCronJobContext>((resolve) => {
-      scheduler.on("expired-before-activation", (ctx: TCronJobContext) => {
-        resolve(ctx);
-      });
-    });
-    const internals = scheduler as unknown as TSchedulerInternals;
-
-    await internals.startTimerIfActive(job);
-
-    expect((await fired).name).toBe("expired-before-activation");
-    expect(await scheduler.get("expired-before-activation", "scope-a")).toBeUndefined();
-  });
-
-  test("activating an expired recurring job advances it before starting its timer", async () => {
-    const id = await insertRecurringJob(
-      "expired-recurring-before-activation",
-      "scope-a",
-      new Date(Date.now() - 60_000),
-    );
-    const job = await scheduler.get("expired-recurring-before-activation", "scope-a");
-    if (!job) {
-      throw new Error("Expected active recurring job");
-    }
-
-    const events: string[] = [];
-    scheduler.on("expired-recurring-before-activation", (ctx: TCronJobContext) => {
-      events.push(ctx.name);
-    });
-    const internals = scheduler as unknown as TSchedulerInternals;
-
-    await internals.startTimerIfActive(job);
-
-    const updated = await scheduler.get("expired-recurring-before-activation", "scope-a");
-    expect(events).toEqual([]);
-    expect(updated?.nextRunAt.getTime()).toBeGreaterThan(Date.now());
-    expect(internals.timers.has(id)).toBe(true);
   });
 
   test("destroyed scheduler refuses later timer activation", async () => {

@@ -1,33 +1,13 @@
-import { EventEmitter } from "node:events";
 import { Config } from "../../config";
-import {
-  CronScheduler,
-  isReservedCronJobEventName,
-  type TCreateOnceArgs,
-  type TCreateRecurringArgs,
-  type TCronJob,
-  type TCronJobContext,
-  type TCronSchedulerError,
-} from "../../lib/cron-engine";
+import { CronScheduler, type TCronJobContext } from "../../lib/cron-engine";
 import type { TOption } from "../../types";
 
-export class CronSingleton extends EventEmitter {
-  private static readonly CRON_EVENT = Symbol("cron-event");
+export class CronSingleton extends CronScheduler {
   private static _instance: TOption<CronSingleton>;
-  private scheduler: CronScheduler;
 
   private constructor() {
-    super();
-
-    this.scheduler = new CronScheduler({
+    super({
       timezone: Config.ai.instructions.timezone,
-    });
-
-    this.scheduler.onFire((ctx: TCronJobContext) => {
-      this.emit(CronSingleton.CRON_EVENT, ctx);
-      if (!isReservedCronJobEventName(ctx.name)) {
-        this.emit(ctx.name, ctx);
-      }
     });
   }
 
@@ -39,38 +19,12 @@ export class CronSingleton extends EventEmitter {
     return CronSingleton._instance;
   }
 
-  public async setup() {
-    await this.scheduler.setup();
-  }
-
   public onCronEvent(listener: (ctx: TCronJobContext) => void) {
-    return this.on(CronSingleton.CRON_EVENT, listener);
+    return this.onFire(listener);
   }
 
-  public async createRecurring(
-    args: TCreateRecurringArgs,
-  ): Promise<TCronJob | TCronSchedulerError> {
-    return this.scheduler.createRecurring(args);
-  }
-
-  public async createOnce(args: TCreateOnceArgs): Promise<TCronJob | TCronSchedulerError> {
-    return this.scheduler.createOnce(args);
-  }
-
-  public async cancel(name: string, scope: string): Promise<TCronJob | TCronSchedulerError> {
-    return this.scheduler.cancel(name, scope);
-  }
-
-  public async list(scope: string): Promise<TCronJob[]> {
-    return this.scheduler.list(scope);
-  }
-
-  public async get(name: string, scope: string): Promise<TOption<TCronJob>> {
-    return this.scheduler.get(name, scope);
-  }
-
-  public destroy() {
-    this.scheduler.destroy();
+  public override destroy() {
+    super.destroy();
     CronSingleton._instance = undefined;
   }
 }

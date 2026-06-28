@@ -7,10 +7,8 @@ import { resetCronEngineJobsTable } from "../database/test-utils";
 import { CronSingleton } from "./index";
 
 type TCronSingletonInternals = {
-  scheduler: {
-    fire: (id: number) => Promise<void>;
-    queue: AsyncQueue;
-  };
+  fire: (id: number) => Promise<void>;
+  queue: AsyncQueue;
 };
 
 type TCronSingletonStatic = {
@@ -26,7 +24,7 @@ async function insertDueOneTimeJob(cron: CronSingleton, name: string, scope: str
   const internals = cron as unknown as TCronSingletonInternals;
   const db = DatabaseConnector.instance.database;
 
-  const row = await internals.scheduler.queue.enqueue(async () => {
+  const row = await internals.queue.enqueue(async () => {
     return db
       .insert(cronEngineJobsTable)
       .values({
@@ -72,7 +70,7 @@ describe("CronSingleton runtime safety", () => {
     });
 
     const internals = cron as unknown as TCronSingletonInternals;
-    await internals.scheduler.fire(id);
+    await internals.fire(id);
 
     expect(cronEvents).toEqual(["error"]);
   });

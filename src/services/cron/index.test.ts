@@ -8,10 +8,8 @@ import { resetCronEngineJobsTable } from "../database/test-utils";
 import { CronSingleton } from "./index";
 
 type TCronSingletonInternals = {
-  scheduler: {
-    fire: (id: number) => Promise<void>;
-    queue: AsyncQueue;
-  };
+  fire: (id: number) => Promise<void>;
+  queue: AsyncQueue;
 };
 
 type TCronSingletonStatic = {
@@ -27,7 +25,7 @@ async function forceJobNextRunAt(cron: CronSingleton, id: number, nextRunAt: Dat
   const internals = cron as unknown as TCronSingletonInternals;
   const db = DatabaseConnector.instance.database;
 
-  await internals.scheduler.queue.enqueue(async () => {
+  await internals.queue.enqueue(async () => {
     await db
       .update(cronEngineJobsTable)
       .set({ nextRunAt: nextRunAt.getTime() })
@@ -174,7 +172,7 @@ describe("CronSingleton", () => {
       });
     });
 
-    await internals.scheduler.fire(scheduled.id);
+    await internals.fire(scheduled.id);
 
     const ctx = await fired;
     const remainingJob = await cron.get("one-time-job", "user-a");
@@ -220,7 +218,7 @@ describe("CronSingleton", () => {
       });
     });
 
-    await internals.scheduler.fire(scheduled.id);
+    await internals.fire(scheduled.id);
 
     const ctx = await fired;
     const job = await cron.get("recurring-job", "user-a");
@@ -283,7 +281,7 @@ describe("CronSingleton", () => {
       cronEvents.push(ctx);
     });
 
-    await internals.scheduler.fire(scheduled.id);
+    await internals.fire(scheduled.id);
 
     expect(namedEvents).toHaveLength(1);
     expect(cronEvents).toHaveLength(1);
