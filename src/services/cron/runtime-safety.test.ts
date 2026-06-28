@@ -65,7 +65,7 @@ describe("CronSingleton runtime safety", () => {
     const id = await insertDueOneTimeJob(cron, "error", "scope-a");
 
     const cronEvents: string[] = [];
-    cron.onCronEvent((ctx) => {
+    cron.onFire((ctx) => {
       cronEvents.push(ctx.name);
     });
 

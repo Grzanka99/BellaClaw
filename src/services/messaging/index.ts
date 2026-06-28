@@ -99,7 +99,7 @@ export class MessagingAdapter {
       return;
     }
 
-    CronSingleton.instance.onCronEvent(this.handleCronFire.bind(this));
+    CronSingleton.instance.onFire(this.handleCronFire.bind(this));
     this.cronListenerRegistered = true;
   }
 

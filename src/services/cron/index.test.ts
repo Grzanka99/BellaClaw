@@ -277,7 +277,7 @@ describe("CronSingleton", () => {
     cron.on("cron-event", (ctx) => {
       namedEvents.push(ctx);
     });
-    cron.onCronEvent((ctx) => {
+    cron.onFire((ctx) => {
       cronEvents.push(ctx);
     });
 

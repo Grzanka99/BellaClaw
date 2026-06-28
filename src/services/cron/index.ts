@@ -1,5 +1,5 @@
 import { Config } from "../../config";
-import { CronScheduler, type TCronJobContext } from "../../lib/cron-engine";
+import { CronScheduler } from "../../lib/cron-engine";
 import type { TOption } from "../../types";
 
 export class CronSingleton extends CronScheduler {
@@ -17,10 +17,6 @@ export class CronSingleton extends CronScheduler {
     }
 
     return CronSingleton._instance;
-  }
-
-  public onCronEvent(listener: (ctx: TCronJobContext) => void) {
-    return this.onFire(listener);
   }
 
   public override destroy() {

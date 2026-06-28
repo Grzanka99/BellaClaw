@@ -194,11 +194,12 @@ export class CronScheduler extends EventEmitter {
 
         const effectiveTimezone = args.timezone ?? existing?.timezone ?? this.timezone;
         try {
-          if (!new Cron(args.fireAt, { timezone: effectiveTimezone }).nextRun()) {
-            throw new Error("One-time fireAt cannot be scheduled");
-          }
-        } catch (error) {
-          return { operation: "create", error } satisfies TCronSchedulerError;
+          new Intl.DateTimeFormat(undefined, { timeZone: effectiveTimezone });
+        } catch {
+          return {
+            operation: "create",
+            error: new Error(`Invalid timezone: ${effectiveTimezone}`),
+          } satisfies TCronSchedulerError;
         }
 
         const rowValues = {
@@ -614,7 +615,7 @@ export class CronScheduler extends EventEmitter {
     from: Date,
     timezone: TOption<string>,
   ): TOption<Date> {
-    return new Cron(pattern, { mode: "5-part", timezone }).nextRun(from) ?? undefined;
+    return new Cron(pattern, { paused: true, mode: "5-part", timezone }).nextRun(from) ?? undefined;
   }
 
   private normalizeScope(scope: TOption<string>) {
