@@ -5,9 +5,8 @@ import { SignalSingleton } from "./services/signal";
 async function init(): Promise<void> {
   console.time("init");
 
-  await SignalSingleton.instance.setup();
-  await DiscordSingleton.instance.setup();
-  await MessagingAdapter.instance.setup();
+  void SignalSingleton.instance.setup();
+  await Promise.all([DiscordSingleton.instance.setup(), MessagingAdapter.instance.setup()]);
 
   console.timeEnd("init");
 }

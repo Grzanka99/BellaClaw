@@ -15,6 +15,7 @@ import {
 
 type TSchedulerInternals = {
   fire: (id: number) => Promise<void>;
+  startTimerIfActive: (job: TCronJob) => Promise<void>;
   timers: Map<number, unknown>;
 };
 
@@ -222,12 +223,16 @@ describe("CronScheduler", () => {
     const overdueRunAt = new Date(Date.now() - 10 * 60_000);
     await forceJobNextRunAt(scheduled.id, overdueRunAt);
 
-    const namedEvent = new Promise<Pick<TCronJobContext, "name" | "scope" | "type">>((resolve) => {
+    const namedEvent = new Promise<
+      Pick<TCronJobContext, "name" | "scope" | "type" | "lastRunAt" | "nextRunAt">
+    >((resolve) => {
       scheduler.on("recurring-job", (ctx: TCronJobContext) => {
         resolve({
           name: ctx.name,
           scope: ctx.scope,
           type: ctx.type,
+          lastRunAt: ctx.lastRunAt,
+          nextRunAt: ctx.nextRunAt,
         });
       });
     });
@@ -250,6 +255,8 @@ describe("CronScheduler", () => {
       name: "recurring-job",
       scope: "scope-a",
       type: ECronJobType.Recurring,
+      lastRunAt: undefined,
+      nextRunAt: overdueRunAt,
     });
     expect(firedName).toBe("recurring-job");
     expect(updatedJob?.lastRunAt).toBeInstanceOf(Date);
@@ -388,6 +395,67 @@ describe("CronScheduler", () => {
     expect(ctx.name).toBe("live-once");
     expect(ctx.type).toBe(ECronJobType.OneTime);
     expect(await scheduler.get("live-once", "scope-a")).toBeUndefined();
+  });
+
+  test("activating an expired one-time job fires it immediately", async () => {
+    await insertOneTimeJob("expired-before-activation", "scope-a", new Date(Date.now() - 1_000));
+    const job = await scheduler.get("expired-before-activation", "scope-a");
+    if (!job) {
+      throw new Error("Expected active one-time job");
+    }
+
+    const fired = new Promise<TCronJobContext>((resolve) => {
+      scheduler.on("expired-before-activation", (ctx: TCronJobContext) => {
+        resolve(ctx);
+      });
+    });
+    const internals = scheduler as unknown as TSchedulerInternals;
+
+    await internals.startTimerIfActive(job);
+
+    expect((await fired).name).toBe("expired-before-activation");
+    expect(await scheduler.get("expired-before-activation", "scope-a")).toBeUndefined();
+  });
+
+  test("activating an expired recurring job advances it before starting its timer", async () => {
+    const id = await insertRecurringJob(
+      "expired-recurring-before-activation",
+      "scope-a",
+      new Date(Date.now() - 60_000),
+    );
+    const job = await scheduler.get("expired-recurring-before-activation", "scope-a");
+    if (!job) {
+      throw new Error("Expected active recurring job");
+    }
+
+    const events: string[] = [];
+    scheduler.on("expired-recurring-before-activation", (ctx: TCronJobContext) => {
+      events.push(ctx.name);
+    });
+    const internals = scheduler as unknown as TSchedulerInternals;
+
+    await internals.startTimerIfActive(job);
+
+    const updated = await scheduler.get("expired-recurring-before-activation", "scope-a");
+    expect(events).toEqual([]);
+    expect(updated?.nextRunAt.getTime()).toBeGreaterThan(Date.now());
+    expect(internals.timers.has(id)).toBe(true);
+  });
+
+  test("destroyed scheduler refuses later timer activation", async () => {
+    const job = expectCreated(
+      await scheduler.createOnce({
+        name: "destroyed-activation",
+        scope: "scope-a",
+        fireAt: new Date(Date.now() + 60_000),
+      }),
+    );
+    const internals = scheduler as unknown as TSchedulerInternals;
+
+    scheduler.destroy();
+    await internals.startTimerIfActive(job);
+
+    expect(internals.timers.size).toBe(0);
   });
 
   test("cancel cancels active job and active reads exclude it", async () => {

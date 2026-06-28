@@ -34,6 +34,7 @@ export class CronScheduler extends EventEmitter {
   private logger = createLogger("CRON SCHEDULER");
   private timezone: TOption<string>;
   private timers = new Map<number, Cron>();
+  private destroyed = false;
 
   public constructor(options: TCronSchedulerOptions) {
     super();
@@ -63,18 +64,7 @@ export class CronScheduler extends EventEmitter {
       return jobs;
     });
 
-    const now = new Date();
     for (const job of rows) {
-      if (job.type === ECronJobType.OneTime && job.nextRunAt <= now) {
-        await this.fire(job.id);
-        continue;
-      }
-
-      if (job.type === ECronJobType.Recurring && job.nextRunAt <= now) {
-        await this.skipMissedRecurringRun(job, now);
-        continue;
-      }
-
       await this.startTimerIfActive(job);
     }
 
@@ -93,7 +83,6 @@ export class CronScheduler extends EventEmitter {
     }
 
     const normalizedScope = this.normalizeScope(args.scope);
-    const scheduledAt = new Date();
 
     try {
       const created = await this.queue.enqueue(async () => {
@@ -107,6 +96,7 @@ export class CronScheduler extends EventEmitter {
           return this.createDuplicateJobError(args.name);
         }
 
+        const scheduledAt = new Date();
         const effectiveTimezone = args.timezone ?? existing?.timezone ?? this.timezone;
         let nextRunAt: TOption<Date>;
         try {
@@ -224,7 +214,10 @@ export class CronScheduler extends EventEmitter {
 
         const effectiveTimezone = args.timezone ?? existing?.timezone ?? this.timezone;
         try {
-          this.createPausedOnceCron(args.fireAt, effectiveTimezone);
+          this.validateTimezone(effectiveTimezone);
+          if (!new Cron(args.fireAt).nextRun()) {
+            throw new Error("One-time fireAt cannot be scheduled");
+          }
         } catch (error) {
           return this.createInvalidScheduleError(error);
         }
@@ -386,6 +379,8 @@ export class CronScheduler extends EventEmitter {
   }
 
   public destroy() {
+    this.destroyed = true;
+
     for (const timer of this.timers.values()) {
       timer.stop();
     }
@@ -394,6 +389,10 @@ export class CronScheduler extends EventEmitter {
   }
 
   private startTimer(job: TCronJob) {
+    if (this.destroyed) {
+      return;
+    }
+
     this.stopTimer(job.id);
 
     try {
@@ -407,7 +406,7 @@ export class CronScheduler extends EventEmitter {
           },
         );
       } else {
-        timer = new Cron(job.nextRunAt, this.createOnceCronOptions(), () => {
+        timer = new Cron(job.nextRunAt, () => {
           void this.fire(job.id);
         });
       }
@@ -419,7 +418,7 @@ export class CronScheduler extends EventEmitter {
   }
 
   private async startTimerIfActive(job: TCronJob) {
-    await this.queue.enqueue(async () => {
+    const overdueJob = await this.queue.enqueue(async () => {
       const row = await this.db
         .select()
         .from(cronEngineJobsTable)
@@ -436,8 +435,23 @@ export class CronScheduler extends EventEmitter {
         return;
       }
 
+      if (activeJob.nextRunAt <= new Date()) {
+        return activeJob;
+      }
+
       this.startTimer(activeJob);
     });
+
+    if (!overdueJob) {
+      return;
+    }
+
+    if (overdueJob.type === ECronJobType.Recurring) {
+      await this.skipMissedRecurringRun(overdueJob, new Date());
+      return;
+    }
+
+    await this.fire(overdueJob.id);
   }
 
   private stopTimer(id: number) {
@@ -496,7 +510,7 @@ export class CronScheduler extends EventEmitter {
 
   private async fire(id: number) {
     try {
-      const claimed = await this.queue.enqueue(async () => {
+      const firedJob = await this.queue.enqueue(async () => {
         const current = await this.db
           .select()
           .from(cronEngineJobsTable)
@@ -545,7 +559,11 @@ export class CronScheduler extends EventEmitter {
             .returning()
             .get();
 
-          return this.parseJobRow(row);
+          if (!this.parseJobRow(row)) {
+            return undefined;
+          }
+
+          return job;
         }
 
         if (job.type === ECronJobType.OneTime) {
@@ -567,38 +585,42 @@ export class CronScheduler extends EventEmitter {
             .returning()
             .get();
 
-          return this.parseJobRow(row);
+          if (!this.parseJobRow(row)) {
+            return undefined;
+          }
+
+          return job;
         }
 
         return undefined;
       });
 
-      if (!claimed) {
+      if (!firedJob) {
         return;
       }
 
-      if (claimed.type === ECronJobType.OneTime) {
-        this.stopTimer(claimed.id);
+      if (firedJob.type === ECronJobType.OneTime) {
+        this.stopTimer(firedJob.id);
       }
 
       const ctx: TCronJobContext = {
-        name: claimed.name,
-        scope: claimed.scope,
-        group: claimed.group,
-        type: claimed.type,
-        pattern: claimed.pattern,
-        reminderText: claimed.reminderText,
-        reminderPromptData: claimed.reminderPromptData,
-        reminderFallbackText: claimed.reminderFallbackText,
-        lastRunAt: claimed.lastRunAt,
-        nextRunAt: claimed.nextRunAt,
-        createdAt: claimed.createdAt,
-        timezone: claimed.timezone ?? this.timezone,
+        name: firedJob.name,
+        scope: firedJob.scope,
+        group: firedJob.group,
+        type: firedJob.type,
+        pattern: firedJob.pattern,
+        reminderText: firedJob.reminderText,
+        reminderPromptData: firedJob.reminderPromptData,
+        reminderFallbackText: firedJob.reminderFallbackText,
+        lastRunAt: firedJob.lastRunAt,
+        nextRunAt: firedJob.nextRunAt,
+        createdAt: firedJob.createdAt,
+        timezone: firedJob.timezone ?? this.timezone,
       };
 
       this.emit(CronScheduler.FIRE_EVENT, ctx);
-      if (!isReservedCronJobEventName(claimed.name)) {
-        this.emit(claimed.name, ctx);
+      if (!isReservedCronJobEventName(firedJob.name)) {
+        this.emit(firedJob.name, ctx);
       }
     } catch (error) {
       this.logger.error(`Failed to fire job ${id}: ${String(error)}`);
@@ -610,27 +632,7 @@ export class CronScheduler extends EventEmitter {
     from: Date,
     timezone: TOption<string>,
   ): TOption<Date> {
-    const timer = new Cron(pattern, this.createPausedRecurringCronOptions(timezone), () => {});
-    const nextRunAt = timer.nextRun(from);
-    timer.stop();
-
-    if (nextRunAt) {
-      return nextRunAt;
-    }
-
-    return undefined;
-  }
-
-  private createPausedOnceCron(fireAt: Date, timezone: TOption<string>) {
-    this.validateTimezone(timezone);
-
-    const timer = new Cron(fireAt, this.createPausedOnceCronOptions(), () => {});
-    const nextRunAt = timer.nextRun();
-    timer.stop();
-
-    if (!nextRunAt) {
-      throw new Error("One-time fireAt cannot be scheduled");
-    }
+    return new Cron(pattern, this.createRecurringCronOptions(timezone)).nextRun(from) ?? undefined;
   }
 
   private createRecurringCronOptions(timezone: TOption<string>): CronOptions {
@@ -645,12 +647,6 @@ export class CronScheduler extends EventEmitter {
     return options;
   }
 
-  private createPausedRecurringCronOptions(timezone: TOption<string>): CronOptions {
-    const options = this.createRecurringCronOptions(timezone);
-    options.paused = true;
-    return options;
-  }
-
   private validateTimezone(timezone: TOption<string>) {
     if (timezone !== undefined) {
       try {
@@ -659,16 +655,6 @@ export class CronScheduler extends EventEmitter {
         throw new Error(`Invalid timezone: ${timezone}`);
       }
     }
-  }
-
-  private createOnceCronOptions(): CronOptions {
-    return {};
-  }
-
-  private createPausedOnceCronOptions(): CronOptions {
-    const options = this.createOnceCronOptions();
-    options.paused = true;
-    return options;
   }
 
   private normalizeScope(scope: TOption<string>) {

@@ -176,7 +176,7 @@ export type TCreateRecurringArgs = z.infer<typeof SCreateRecurringArgs>;
 export type TCreateOnceArgs = z.infer<typeof SCreateOnceArgs>;
 
 export type TCronSchedulerError = {
-  operation: "create" | "cancel" | "read" | "setup" | "fire";
+  operation: "create" | "cancel";
   error: unknown;
 };
 

@@ -160,7 +160,8 @@ describe("CronSingleton", () => {
     if ("error" in scheduled) {
       throw new Error(String(scheduled.error));
     }
-    await forceJobNextRunAt(scheduled.id, new Date(Date.now() - 1_000));
+    const fireAt = new Date(Date.now() - 1_000);
+    await forceJobNextRunAt(scheduled.id, fireAt);
 
     const fired = new Promise<TCronJobContext>((resolve) => {
       cron.on("one-time-job", (ctx) => {
@@ -183,8 +184,8 @@ describe("CronSingleton", () => {
       reminderPromptData: undefined,
       reminderFallbackText: "Stretch now.",
     });
-    expect(ctx.lastRunAt).toBeInstanceOf(Date);
-    expect(ctx.nextRunAt).toBeInstanceOf(Date);
+    expect(ctx.lastRunAt).toBeUndefined();
+    expect(ctx.nextRunAt.getTime()).toBe(fireAt.getTime());
     expect(remainingJob).toBeUndefined();
   });
 
@@ -205,7 +206,8 @@ describe("CronSingleton", () => {
     if ("error" in scheduled) {
       throw new Error(String(scheduled.error));
     }
-    await forceJobNextRunAt(scheduled.id, new Date(Date.now() - 60_000));
+    const fireAt = new Date(Date.now() - 60_000);
+    await forceJobNextRunAt(scheduled.id, fireAt);
 
     const fired = new Promise<TCronJobContext>((resolve) => {
       cron.on("recurring-job", (ctx) => {
@@ -242,10 +244,10 @@ describe("CronSingleton", () => {
       reminderPromptData: '{"topic":"posture"}',
       reminderFallbackText: "Posture check.",
     });
-    expect(ctx.lastRunAt).toBeInstanceOf(Date);
+    expect(ctx.lastRunAt).toBeUndefined();
+    expect(ctx.nextRunAt.getTime()).toBe(fireAt.getTime());
+    expect(job.lastRunAt).toBeInstanceOf(Date);
     expect(job.nextRunAt).toBeInstanceOf(Date);
-    expect(ctx.lastRunAt?.getTime()).toBe(job.lastRunAt?.getTime());
-    expect(ctx.nextRunAt.getTime()).toBe(job.nextRunAt.getTime());
     expect(job.nextRunAt.getTime() > Date.now()).toBe(true);
   });
 

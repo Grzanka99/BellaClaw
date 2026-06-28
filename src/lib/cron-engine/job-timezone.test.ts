@@ -107,7 +107,8 @@ describe("CronScheduler per-job timezone", () => {
     if ("error" in result) {
       throw new Error(String(result.error));
     }
-    await forceJobNextRunAt(result.id, new Date(Date.now() - 60_000));
+    const fireAt = new Date(Date.now() - 60_000);
+    await forceJobNextRunAt(result.id, fireAt);
 
     const fired = new Promise<TFiredContext>((resolve) => {
       scheduler.onFire((ctx) => {
@@ -130,7 +131,7 @@ describe("CronScheduler per-job timezone", () => {
 
     expect(job.timezone).toBe("America/New_York");
     expect(formatWall(job.nextRunAt, "America/New_York")).toMatch(/ 09:00:00$/);
-    expect(job.nextRunAt.getTime()).toBe(ctx.nextRunAt.getTime());
+    expect(ctx.nextRunAt.getTime()).toBe(fireAt.getTime());
   });
 
   test("existing rows with null timezone still fire using scheduler default timezone", async () => {
