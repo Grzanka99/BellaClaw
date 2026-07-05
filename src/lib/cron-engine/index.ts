@@ -586,6 +586,8 @@ export class CronScheduler extends EventEmitter {
         this.stopTimer(firedJob.id);
       }
 
+      this.logger.info(`fired job '${firedJob.name}' (id: ${firedJob.id}, type: ${firedJob.type})`);
+
       const ctx: TCronJobContext = {
         name: firedJob.name,
         scope: firedJob.scope,
