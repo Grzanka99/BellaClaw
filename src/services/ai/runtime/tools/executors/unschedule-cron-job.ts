@@ -31,7 +31,7 @@ export async function executeUnscheduleCronJobTool(
     return createFailedToolResult(toolCall, parsed.error);
   }
 
-  const result = await CronSingleton.instance.unschedule(parsed.data.name, resolvedChatId);
+  const result = await CronSingleton.instance.cancel(parsed.data.name, resolvedChatId);
 
   if ("error" in result) {
     return createFailedToolResult(

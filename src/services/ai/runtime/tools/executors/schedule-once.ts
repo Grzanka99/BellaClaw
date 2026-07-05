@@ -29,7 +29,7 @@ export async function executeScheduleOnceTool(
     return createFailedToolResult(toolCall, parsed.error);
   }
 
-  const result = await CronSingleton.instance.scheduleOnce({
+  const result = await CronSingleton.instance.createOnce({
     name: parsed.data.name,
     scope: resolvedChatId,
     fireAt: parsed.data.fireAt,

@@ -1,5 +1,5 @@
 import { Config } from "../config";
-import type { TCronEngineJobContext } from "../lib/cron-engine";
+import type { TCronJobContext } from "../lib/cron-engine";
 import type { AiConnector } from "../services/ai/api";
 import { EModelPurpose, ERole, type THistoryItem, type TPrompt } from "../services/ai/types";
 import { SettingsService } from "../services/settings";
@@ -12,7 +12,7 @@ type TReminderAi = Pick<AiConnector, "runToolTask">;
 const logger = createLogger("REMINDER");
 
 export async function generateReminderText(
-  ctx: TCronEngineJobContext,
+  ctx: TCronJobContext,
   ai: TReminderAi,
 ): Promise<TOption<string>> {
   if (ctx.reminderText !== undefined) {

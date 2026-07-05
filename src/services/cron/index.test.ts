@@ -1,15 +1,15 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { and, eq } from "drizzle-orm";
-import { ECronEngineJobType, type TCronEngineJobContext } from "../../lib/cron-engine";
+import { eq } from "drizzle-orm";
+import { ECronJobType, type TCronJobContext } from "../../lib/cron-engine";
+import type { AsyncQueue } from "../../utils/async-queue";
 import { DatabaseConnector } from "../database";
 import { cronEngineJobsTable } from "../database/schema";
 import { resetCronEngineJobsTable } from "../database/test-utils";
 import { CronSingleton } from "./index";
 
 type TCronSingletonInternals = {
-  engine: {
-    tick: () => Promise<void>;
-  };
+  fire: (id: number) => Promise<void>;
+  queue: AsyncQueue;
 };
 
 type TCronSingletonStatic = {
@@ -21,13 +21,16 @@ function cleanupCronSingleton() {
   CronSingletonWithInternals._instance?.destroy();
 }
 
-async function forceJobDue(name: string, scope: string) {
+async function forceJobNextRunAt(cron: CronSingleton, id: number, nextRunAt: Date) {
+  const internals = cron as unknown as TCronSingletonInternals;
   const db = DatabaseConnector.instance.database;
 
-  await db
-    .update(cronEngineJobsTable)
-    .set({ nextRunAt: Date.now() - 1_000 })
-    .where(and(eq(cronEngineJobsTable.name, name), eq(cronEngineJobsTable.scope, scope)));
+  await internals.queue.enqueue(async () => {
+    await db
+      .update(cronEngineJobsTable)
+      .set({ nextRunAt: nextRunAt.getTime() })
+      .where(eq(cronEngineJobsTable.id, id));
+  });
 }
 
 describe("CronSingleton", () => {
@@ -43,14 +46,14 @@ describe("CronSingleton", () => {
   test("keeps jobs isolated per user and preserves service fields", async () => {
     const cron = CronSingleton.instance;
 
-    const first = await cron.schedule({
+    const first = await cron.createRecurring({
       name: "shared-name",
       scope: "user-a",
       pattern: "0 9 * * *",
       group: "alerts",
       reminderText: "Take medicine.",
     });
-    const second = await cron.schedule({
+    const second = await cron.createRecurring({
       name: "shared-name",
       scope: "user-b",
       pattern: "0 10 * * *",
@@ -59,15 +62,15 @@ describe("CronSingleton", () => {
     expect("error" in first).toBe(false);
     expect("error" in second).toBe(false);
 
-    const userAJob = await cron.getJob("shared-name", "user-a");
-    const userBJob = await cron.getJob("shared-name", "user-b");
-    const userAJobs = await cron.getAllJobs("user-a");
+    const userAJob = await cron.get("shared-name", "user-a");
+    const userBJob = await cron.get("shared-name", "user-b");
+    const userAJobs = await cron.list("user-a");
 
     expect(userAJob).toMatchObject({
       name: "shared-name",
       scope: "user-a",
       group: "alerts",
-      type: ECronEngineJobType.Recurring,
+      type: ECronJobType.Recurring,
       pattern: "0 9 * * *",
       reminderText: "Take medicine.",
       reminderFallbackText: "Take medicine.",
@@ -76,7 +79,7 @@ describe("CronSingleton", () => {
       name: "shared-name",
       scope: "user-b",
       group: undefined,
-      type: ECronEngineJobType.Recurring,
+      type: ECronJobType.Recurring,
       pattern: "0 10 * * *",
       reminderText: undefined,
       reminderPromptData: undefined,
@@ -88,12 +91,12 @@ describe("CronSingleton", () => {
   test("rejects duplicate job names inside same user", async () => {
     const cron = CronSingleton.instance;
 
-    const first = await cron.schedule({
+    const first = await cron.createRecurring({
       name: "duplicate-job",
       scope: "user-a",
       pattern: "0 9 * * *",
     });
-    const duplicate = await cron.schedule({
+    const duplicate = await cron.createRecurring({
       name: "duplicate-job",
       scope: "user-a",
       pattern: "0 10 * * *",
@@ -110,14 +113,14 @@ describe("CronSingleton", () => {
   test("overwrites recurring job with updated fields", async () => {
     const cron = CronSingleton.instance;
 
-    const first = await cron.schedule({
+    const first = await cron.createRecurring({
       name: "overwrite-job",
       scope: "user-a",
       pattern: "0 9 * * *",
       group: "alerts",
       reminderText: "First reminder.",
     });
-    const overwritten = await cron.schedule({
+    const overwritten = await cron.createRecurring({
       name: "overwrite-job",
       scope: "user-a",
       pattern: "0 10 * * *",
@@ -130,14 +133,14 @@ describe("CronSingleton", () => {
     expect("error" in first).toBe(false);
     expect("error" in overwritten).toBe(false);
 
-    const job = await cron.getJob("overwrite-job", "user-a");
+    const job = await cron.get("overwrite-job", "user-a");
 
     expect(job).toMatchObject({
       name: "overwrite-job",
       scope: "user-a",
       pattern: "0 10 * * *",
       group: "reminders",
-      type: ECronEngineJobType.Recurring,
+      type: ECronJobType.Recurring,
       reminderText: undefined,
       reminderPromptData: '{"topic":"hydration"}',
       reminderFallbackText: "Drink water.",
@@ -148,7 +151,7 @@ describe("CronSingleton", () => {
     const cron = CronSingleton.instance;
     const internals = cron as unknown as TCronSingletonInternals;
 
-    const scheduled = await cron.scheduleOnce({
+    const scheduled = await cron.createOnce({
       name: "one-time-job",
       scope: "user-a",
       fireAt: new Date(Date.now() + 60_000),
@@ -157,32 +160,35 @@ describe("CronSingleton", () => {
     });
 
     expect("error" in scheduled).toBe(false);
+    if ("error" in scheduled) {
+      throw new Error(String(scheduled.error));
+    }
+    const fireAt = new Date(Date.now() - 1_000);
+    await forceJobNextRunAt(cron, scheduled.id, fireAt);
 
-    await forceJobDue("one-time-job", "user-a");
-
-    const fired = new Promise<TCronEngineJobContext>((resolve) => {
+    const fired = new Promise<TCronJobContext>((resolve) => {
       cron.on("one-time-job", (ctx) => {
         resolve(ctx);
       });
     });
 
-    await internals.engine.tick();
+    await internals.fire(scheduled.id);
 
     const ctx = await fired;
-    const remainingJob = await cron.getJob("one-time-job", "user-a");
+    const remainingJob = await cron.get("one-time-job", "user-a");
 
     expect(ctx).toMatchObject({
       name: "one-time-job",
       scope: "user-a",
       group: "timers",
-      type: ECronEngineJobType.OneTime,
+      type: ECronJobType.OneTime,
       pattern: undefined,
       reminderText: "Stretch now.",
       reminderPromptData: undefined,
       reminderFallbackText: "Stretch now.",
-      lastRunAt: undefined,
     });
-    expect(ctx.nextRunAt).toBeInstanceOf(Date);
+    expect(ctx.lastRunAt).toBeUndefined();
+    expect(ctx.nextRunAt.getTime()).toBe(fireAt.getTime());
     expect(remainingJob).toBeUndefined();
   });
 
@@ -190,7 +196,7 @@ describe("CronSingleton", () => {
     const cron = CronSingleton.instance;
     const internals = cron as unknown as TCronSingletonInternals;
 
-    const scheduled = await cron.schedule({
+    const scheduled = await cron.createRecurring({
       name: "recurring-job",
       scope: "user-a",
       pattern: "*/5 * * * *",
@@ -200,51 +206,59 @@ describe("CronSingleton", () => {
     });
 
     expect("error" in scheduled).toBe(false);
+    if ("error" in scheduled) {
+      throw new Error(String(scheduled.error));
+    }
+    const fireAt = new Date(Date.now() - 60_000);
+    await forceJobNextRunAt(cron, scheduled.id, fireAt);
 
-    await forceJobDue("recurring-job", "user-a");
-
-    const fired = new Promise<TCronEngineJobContext>((resolve) => {
+    const fired = new Promise<TCronJobContext>((resolve) => {
       cron.on("recurring-job", (ctx) => {
         resolve(ctx);
       });
     });
 
-    await internals.engine.tick();
+    await internals.fire(scheduled.id);
 
     const ctx = await fired;
-    const job = await cron.getJob("recurring-job", "user-a");
+    const job = await cron.get("recurring-job", "user-a");
+
+    if (!job) {
+      throw new Error("Expected recurring job after fire");
+    }
 
     expect(ctx).toMatchObject({
       name: "recurring-job",
       scope: "user-a",
       group: "alerts",
-      type: ECronEngineJobType.Recurring,
+      type: ECronJobType.Recurring,
       pattern: "*/5 * * * *",
       reminderText: undefined,
       reminderPromptData: '{"topic":"posture"}',
       reminderFallbackText: "Posture check.",
-      lastRunAt: undefined,
     });
     expect(job).toMatchObject({
       name: "recurring-job",
       scope: "user-a",
       group: "alerts",
-      type: ECronEngineJobType.Recurring,
+      type: ECronJobType.Recurring,
       pattern: "*/5 * * * *",
       reminderText: undefined,
       reminderPromptData: '{"topic":"posture"}',
       reminderFallbackText: "Posture check.",
-      lastRunAt: expect.any(Date),
     });
-    expect(job?.nextRunAt).toBeInstanceOf(Date);
-    expect((job?.nextRunAt.getTime() ?? 0) > Date.now()).toBe(true);
+    expect(ctx.lastRunAt).toBeUndefined();
+    expect(ctx.nextRunAt.getTime()).toBe(fireAt.getTime());
+    expect(job.lastRunAt).toBeInstanceOf(Date);
+    expect(job.nextRunAt).toBeInstanceOf(Date);
+    expect(job.nextRunAt.getTime() > Date.now()).toBe(true);
   });
 
   test("generic cron event does not collide with job named cron-event", async () => {
     const cron = CronSingleton.instance;
     const internals = cron as unknown as TCronSingletonInternals;
 
-    const scheduled = await cron.schedule({
+    const scheduled = await cron.createRecurring({
       name: "cron-event",
       scope: "user-a",
       pattern: "0 9 * * *",
@@ -252,20 +266,22 @@ describe("CronSingleton", () => {
     });
 
     expect("error" in scheduled).toBe(false);
+    if ("error" in scheduled) {
+      throw new Error(String(scheduled.error));
+    }
+    await forceJobNextRunAt(cron, scheduled.id, new Date(Date.now() - 60_000));
 
-    await forceJobDue("cron-event", "user-a");
-
-    const namedEvents: TCronEngineJobContext[] = [];
-    const cronEvents: TCronEngineJobContext[] = [];
+    const namedEvents: TCronJobContext[] = [];
+    const cronEvents: TCronJobContext[] = [];
 
     cron.on("cron-event", (ctx) => {
       namedEvents.push(ctx);
     });
-    cron.onCronEvent((ctx) => {
+    cron.onFire((ctx) => {
       cronEvents.push(ctx);
     });
 
-    await internals.engine.tick();
+    await internals.fire(scheduled.id);
 
     expect(namedEvents).toHaveLength(1);
     expect(cronEvents).toHaveLength(1);

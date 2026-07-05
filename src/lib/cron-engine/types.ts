@@ -1,18 +1,18 @@
 import { z } from "zod";
 import type { TOption } from "../../types";
 
-export enum ECronEngineJobType {
+export enum ECronJobType {
   Recurring = "recurring",
   OneTime = "onetime",
 }
 
-export enum ECronEngineJobStatus {
+export enum ECronJobStatus {
   Active = "active",
   Completed = "completed",
   Cancelled = "cancelled",
 }
 
-export enum ECronEngineFinishedReason {
+export enum ECronFinishedReason {
   Fired = "fired",
   Unscheduled = "unscheduled",
   Overwritten = "overwritten",
@@ -72,16 +72,22 @@ function validateReminderContentArgs(
   }
 }
 
-export const SCronEngineJob = z
+export const SCronJob = z
   .object({
     id: z.number(),
     name: z.string(),
-    scope: z.string().transform((value) => (value.length > 0 ? value : undefined)),
+    scope: z.string().transform((value) => {
+      if (value.length > 0) {
+        return value;
+      }
+
+      return undefined;
+    }),
     group: z
       .string()
       .nullable()
       .transform((value) => value ?? undefined),
-    type: z.enum(ECronEngineJobType),
+    type: z.enum(ECronJobType),
     pattern: z
       .string()
       .nullable()
@@ -90,9 +96,15 @@ export const SCronEngineJob = z
     lastRunAt: z
       .number()
       .nullable()
-      .transform((value) => (value !== null ? new Date(value) : undefined)),
+      .transform((value) => {
+        if (value !== null) {
+          return new Date(value);
+        }
+
+        return undefined;
+      }),
     createdAt: z.number().transform((value) => new Date(value)),
-    status: z.enum(ECronEngineJobStatus),
+    status: z.enum(ECronJobStatus),
     finishedAt: z
       .number()
       .nullable()
@@ -104,7 +116,7 @@ export const SCronEngineJob = z
         return undefined;
       }),
     finishedReason: z
-      .enum(ECronEngineFinishedReason)
+      .enum(ECronFinishedReason)
       .nullable()
       .transform((value) => {
         if (value !== null) {
@@ -120,7 +132,7 @@ export const SCronEngineJob = z
   })
   .extend(SReminderContentJobFields.shape);
 
-export const SScheduleRecurringArgs = z
+export const SCreateRecurringArgs = z
   .object({
     name: z.string(),
     scope: z.string().optional(),
@@ -132,7 +144,7 @@ export const SScheduleRecurringArgs = z
   .extend(SReminderContentArgsBase.shape)
   .superRefine(validateReminderContentArgs);
 
-export const SScheduleOnceArgs = z
+export const SCreateOnceArgs = z
   .object({
     name: z.string(),
     scope: z.string().optional(),
@@ -144,11 +156,11 @@ export const SScheduleOnceArgs = z
   .extend(SReminderContentArgsBase.shape)
   .superRefine(validateReminderContentArgs);
 
-export type TCronEngineJobContext = {
+export type TCronJobContext = {
   name: string;
   scope: TOption<string>;
   group: TOption<string>;
-  type: ECronEngineJobType;
+  type: ECronJobType;
   pattern: TOption<string>;
   reminderText: TOption<string>;
   reminderPromptData: TOption<string>;
@@ -159,15 +171,15 @@ export type TCronEngineJobContext = {
   timezone: TOption<string>;
 };
 
-export type TCronEngineJob = z.infer<typeof SCronEngineJob>;
-export type TScheduleRecurringArgs = z.infer<typeof SScheduleRecurringArgs>;
-export type TScheduleOnceArgs = z.infer<typeof SScheduleOnceArgs>;
+export type TCronJob = z.infer<typeof SCronJob>;
+export type TCreateRecurringArgs = z.infer<typeof SCreateRecurringArgs>;
+export type TCreateOnceArgs = z.infer<typeof SCreateOnceArgs>;
 
-export type TCronEngineError = {
-  operation: "schedule" | "unschedule" | "read" | "tick";
+export type TCronSchedulerError = {
+  operation: "create" | "cancel";
   error: unknown;
 };
 
-export type TCronEngineOptions = {
+export type TCronSchedulerOptions = {
   timezone?: string;
 };

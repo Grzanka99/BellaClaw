@@ -1,16 +1,16 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
-import { ECronEngineJobType, type TCronEngineJobContext } from "../lib/cron-engine";
+import { ECronJobType, type TCronJobContext } from "../lib/cron-engine";
 import type { TToolTaskArgs, TToolTaskResult } from "../services/ai/api";
 import { SettingsService } from "../services/settings";
 import { DefaultConfigRecord, EConfigKey, type TConfigRecord } from "../services/settings/schema";
 import { generateReminderText } from "./generate-reminder-text";
 
-function createCronContext(overrides: Partial<TCronEngineJobContext> = {}): TCronEngineJobContext {
+function createCronContext(overrides: Partial<TCronJobContext> = {}): TCronJobContext {
   return {
     name: "study-checkin",
     scope: "user-1",
     group: undefined,
-    type: ECronEngineJobType.Recurring,
+    type: ECronJobType.Recurring,
     pattern: "0 9 * * *",
     reminderText: undefined,
     reminderPromptData: '{"topic":"study","tone":"encouraging"}',
