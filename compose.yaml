@@ -9,6 +9,8 @@ services:
       - .env
     environment:
       - SIGNAL_CLI_RPC_URL=http://signal-cli:8080
+    volumes:
+      - bellaclaw-data:/app-data
 
   signal-cli:
     image: docker.io/bbernhard/signal-cli-rest-api:0.100-rootless
@@ -24,4 +26,5 @@ services:
       - signal-cli-data:/home/.local/share/signal-cli
 
 volumes:
+  bellaclaw-data:
   signal-cli-data:

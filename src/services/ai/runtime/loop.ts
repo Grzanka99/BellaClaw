@@ -1,6 +1,9 @@
 import type { TOption } from "../../../types";
+import { AppLogger, EBehaviorLogLevel, type TBehaviorTraceContext } from "../../app-logger";
+import { resolveAiBehaviorFields } from "../../app-logger/ai";
+import { sanitizeErrorMessage } from "../../app-logger/sanitizers";
 import { ERole } from "../types";
-import { buildToolCallBatchSignature } from "./serialization";
+import { buildToolCallBatchSignature, promptToText, serializeForModel } from "./serialization";
 import { executeToolCall } from "./tool-execution";
 import { createFailedToolResult } from "./tools/results";
 import {
@@ -8,7 +11,9 @@ import {
   EAssistantLoopStopReason,
   type TAssistantToolLoopResult,
   type TNormalizedToolResult,
+  type TRequestAssistantTurnArgs,
   type TRunAssistantToolLoopArgs,
+  type TRuntimeAssistantTurn,
   type TRuntimeConversationItem,
 } from "./types";
 
@@ -33,36 +38,41 @@ export async function runAssistantToolLoop(
   const maxIterations = args.maxIterations ?? DEFAULT_MAX_ITERATIONS;
   const allowedToolNames = new Set(args.tools.map((tool) => tool.definition.function.name));
   let lastToolCallBatchSignature: TOption<string>;
+  const completeLoop = (result: TAssistantToolLoopResult): TAssistantToolLoopResult => {
+    logAssistantLoopCompleted(args.trace, result);
+    return result;
+  };
 
   for (let iteration = 1; iteration <= maxIterations; iteration++) {
-    const assistantTurn = await args.requestAssistantTurn({
+    const assistantTurn = await requestAssistantTurnWithLogging(args, {
       conversation,
       history: args.history,
       user: args.user,
       tools: args.tools,
       purpose: args.purpose,
       settings: args.settings,
+      trace: args.trace,
     });
 
     if (assistantTurn === undefined) {
-      return {
+      return completeLoop({
         conversation,
         toolActivity,
         finalResponse: undefined,
         stopReason: EAssistantLoopStopReason.MalformedProviderResponse,
         iterations: iteration,
-      };
+      });
     }
 
     if (assistantTurn.toolCalls.length === 0) {
       if (assistantTurn.response.trim().length === 0) {
-        return {
+        return completeLoop({
           conversation,
           toolActivity,
           finalResponse: undefined,
           stopReason: EAssistantLoopStopReason.EmptyAssistantResponse,
           iterations: iteration,
-        };
+        });
       }
 
       conversation.push({
@@ -70,13 +80,13 @@ export async function runAssistantToolLoop(
         content: assistantTurn.response,
       });
 
-      return {
+      return completeLoop({
         conversation,
         toolActivity,
         finalResponse: assistantTurn.response,
         stopReason: EAssistantLoopStopReason.FinalResponse,
         iterations: iteration,
-      };
+      });
     }
 
     conversation.push({
@@ -92,13 +102,13 @@ export async function runAssistantToolLoop(
       lastToolCallBatchSignature !== undefined &&
       toolCallBatchSignature === lastToolCallBatchSignature
     ) {
-      return {
+      return completeLoop({
         conversation,
         toolActivity,
         finalResponse: undefined,
         stopReason: EAssistantLoopStopReason.RepeatedToolCall,
         iterations: iteration,
-      };
+      });
     }
 
     lastToolCallBatchSignature = toolCallBatchSignature;
@@ -111,6 +121,7 @@ export async function runAssistantToolLoop(
         chatId: args.chatId,
         allowedToolNames,
         settings: args.settings,
+        trace: args.trace,
       });
 
       toolResults.push(toolResult);
@@ -133,13 +144,14 @@ export async function runAssistantToolLoop(
     { role: ERole.System, content: FINAL_RESPONSE_AFTER_TOOL_LIMIT_INSTRUCTION },
   ];
 
-  const finalAssistantTurn = await args.requestAssistantTurn({
+  const finalAssistantTurn = await requestAssistantTurnWithLogging(args, {
     conversation,
     history: finalHistory,
     user: args.user,
     tools: [],
     purpose: args.purpose,
     settings: args.settings,
+    trace: args.trace,
   });
 
   if (finalAssistantTurn !== undefined && finalAssistantTurn.toolCalls.length === 0) {
@@ -149,13 +161,13 @@ export async function runAssistantToolLoop(
         content: finalAssistantTurn.response,
       });
 
-      return {
+      return completeLoop({
         conversation,
         toolActivity,
         finalResponse: finalAssistantTurn.response,
         stopReason: EAssistantLoopStopReason.MaxIterations,
         iterations: maxIterations,
-      };
+      });
     }
   }
 
@@ -174,13 +186,14 @@ export async function runAssistantToolLoop(
       });
     }
 
-    const retryFinalAssistantTurn = await args.requestAssistantTurn({
+    const retryFinalAssistantTurn = await requestAssistantTurnWithLogging(args, {
       conversation,
       history: finalHistory,
       user: args.user,
       tools: [],
       purpose: args.purpose,
       settings: args.settings,
+      trace: args.trace,
     });
 
     if (retryFinalAssistantTurn !== undefined && retryFinalAssistantTurn.toolCalls.length === 0) {
@@ -190,22 +203,178 @@ export async function runAssistantToolLoop(
           content: retryFinalAssistantTurn.response,
         });
 
-        return {
+        return completeLoop({
           conversation,
           toolActivity,
           finalResponse: retryFinalAssistantTurn.response,
           stopReason: EAssistantLoopStopReason.MaxIterations,
           iterations: maxIterations,
-        };
+        });
       }
     }
   }
 
-  return {
+  return completeLoop({
     conversation,
     toolActivity,
     finalResponse: undefined,
     stopReason: EAssistantLoopStopReason.MaxIterations,
     iterations: maxIterations,
+  });
+}
+
+async function requestAssistantTurnWithLogging(
+  args: TRunAssistantToolLoopArgs,
+  requestArgs: TRequestAssistantTurnArgs,
+): Promise<TOption<TRuntimeAssistantTurn>> {
+  if (args.trace === undefined) {
+    return args.requestAssistantTurn(requestArgs);
+  }
+
+  const startedAt = performance.now();
+  const fields = resolveAiBehaviorFields(requestArgs.settings, requestArgs.purpose);
+  const metadata = {
+    historyCount: requestArgs.history.length,
+    toolCount: requestArgs.tools.length,
+    toolNames: requestArgs.tools.map((tool) => tool.definition.function.name),
+    promptChars: countPromptChars(requestArgs),
   };
+
+  AppLogger.instance.record({
+    trace: args.trace,
+    event: "ai.turn.started",
+    component: "ai-runtime",
+    provider: fields?.provider,
+    model: fields?.model,
+    purpose: requestArgs.purpose,
+    summary: `ai turn started purpose=${requestArgs.purpose} tools=${requestArgs.tools.length}`,
+    metadata,
+  });
+
+  try {
+    const assistantTurn = await args.requestAssistantTurn(requestArgs);
+    let success = true;
+    let responseChars = 0;
+    let toolCallCount = 0;
+    let summary = "ai turn completed";
+
+    if (assistantTurn === undefined) {
+      success = false;
+      summary = "ai turn returned no response";
+    } else {
+      responseChars = assistantTurn.response.length;
+      toolCallCount = assistantTurn.toolCalls.length;
+    }
+
+    let level = EBehaviorLogLevel.Info;
+
+    if (!success) {
+      level = EBehaviorLogLevel.Warning;
+    }
+
+    AppLogger.instance.record({
+      trace: args.trace,
+      event: "ai.turn.completed",
+      component: "ai-runtime",
+      level,
+      provider: fields?.provider,
+      model: fields?.model,
+      purpose: requestArgs.purpose,
+      success,
+      durationMs: performance.now() - startedAt,
+      summary,
+      metadata: {
+        responseChars,
+        toolCallCount,
+      },
+    });
+
+    return assistantTurn;
+  } catch (error) {
+    AppLogger.instance.record({
+      trace: args.trace,
+      event: "ai.turn.completed",
+      component: "ai-runtime",
+      level: EBehaviorLogLevel.Error,
+      provider: fields?.provider,
+      model: fields?.model,
+      purpose: requestArgs.purpose,
+      success: false,
+      durationMs: performance.now() - startedAt,
+      summary: "ai turn failed",
+      metadata: {
+        responseChars: 0,
+        toolCallCount: 0,
+      },
+      error: sanitizeErrorMessage(String(error)),
+    });
+    throw error;
+  }
+}
+
+function logAssistantLoopCompleted(
+  trace: TOption<TBehaviorTraceContext>,
+  result: TAssistantToolLoopResult,
+) {
+  if (trace === undefined) {
+    return;
+  }
+
+  let finalResponseChars = 0;
+
+  if (result.finalResponse !== undefined) {
+    finalResponseChars = result.finalResponse.length;
+  }
+
+  AppLogger.instance.record({
+    trace,
+    event: "assistant_loop.completed",
+    component: "ai-runtime",
+    success: result.finalResponse !== undefined,
+    summary: `assistant loop completed stopReason=${result.stopReason}`,
+    metadata: {
+      iterations: result.iterations,
+      stopReason: result.stopReason,
+      toolActivityCount: result.toolActivity.length,
+      finalResponseChars,
+    },
+  });
+}
+
+function countPromptChars(args: TRequestAssistantTurnArgs): number {
+  let total = 0;
+
+  for (const historyItem of args.history) {
+    total += historyItem.content.length;
+  }
+
+  for (const tool of args.tools) {
+    if (tool.instructions !== undefined) {
+      total += tool.instructions.length;
+    }
+  }
+
+  for (const item of args.conversation) {
+    switch (item.kind) {
+      case EAssistantLoopConversationItemKind.UserPrompt: {
+        total += promptToText(item.prompt).length;
+        break;
+      }
+      case EAssistantLoopConversationItemKind.AssistantToolCalls: {
+        total += item.content.length;
+        total += serializeForModel(item.toolCalls).length;
+        break;
+      }
+      case EAssistantLoopConversationItemKind.ToolResult: {
+        total += serializeForModel(item.result).length;
+        break;
+      }
+      case EAssistantLoopConversationItemKind.AssistantReply: {
+        total += item.content.length;
+        break;
+      }
+    }
+  }
+
+  return total;
 }

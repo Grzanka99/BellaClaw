@@ -15,6 +15,10 @@ export const logger = {
   message: (msg: string) => console.log(`${time()} [MESG] ${msg}`),
 };
 
+export function writeJsonLog(value: unknown): void {
+  console.log(JSON.stringify(value));
+}
+
 export type TLogger = {
   info: (msg: string) => void;
   warning: (msg: string) => void;

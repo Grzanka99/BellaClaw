@@ -10,8 +10,11 @@ import {
   SDefineSettingsIntent,
   type TDefineSettingsIntent,
 } from "../ai/tools/define-settings-intent/handler";
+import { AppLogger, EBehaviorLogLevel, type TBehaviorTraceContext } from "../app-logger";
+import { resolveAiBehaviorFields } from "../app-logger/ai";
+import { sanitizeErrorMessage } from "../app-logger/sanitizers";
 import { SettingsService } from "../settings";
-import { createStableAiRuntimeSettings } from "../settings/schema";
+import { createStableAiRuntimeSettings, type TConfigRecord } from "../settings/schema";
 
 export type TSettingsIntent = TDefineSettingsIntent;
 
@@ -39,13 +42,18 @@ export class SettingsIntentClassifier {
     return SettingsIntentClassifier._instance;
   }
 
-  public async classify(message: string, ownerKey: string): Promise<TOption<TSettingsIntent>> {
+  public async classify(
+    message: string,
+    ownerKey: string,
+    trace?: TBehaviorTraceContext,
+  ): Promise<TOption<TSettingsIntent>> {
     const start = performance.now();
     this.logger.info(`classify: start for owner ${ownerKey}`);
+    let runtimeSettings: TOption<TConfigRecord>;
 
     try {
       const settings = await SettingsService.instance.getAll(ownerKey);
-      const runtimeSettings = createStableAiRuntimeSettings(settings);
+      runtimeSettings = createStableAiRuntimeSettings(settings);
       const toolInstructions = await readXmlAndInjectConfig(INSTRUCTIONS_PATH, settings);
 
       const system: THistoryItem = {
@@ -66,6 +74,7 @@ export class SettingsIntentClassifier {
         chatId: undefined,
         user: undefined,
         settings: runtimeSettings,
+        trace,
       });
 
       const toolResult = result.toolResults.find(
@@ -76,6 +85,7 @@ export class SettingsIntentClassifier {
         this.logger.warning(
           `classify: no successful ${DEFINE_SETTINGS_INTENT_TOOL} tool result (${(performance.now() - start).toFixed(0)}ms)`,
         );
+        logSettingsIntentCompleted(trace, runtimeSettings, start, false, undefined, undefined);
         return undefined;
       }
 
@@ -85,18 +95,77 @@ export class SettingsIntentClassifier {
         this.logger.warning(
           `classify: malformed tool result: ${parsed.error.message} (${(performance.now() - start).toFixed(0)}ms)`,
         );
+        logSettingsIntentCompleted(
+          trace,
+          runtimeSettings,
+          start,
+          false,
+          undefined,
+          parsed.error.message,
+        );
         return undefined;
       }
 
       this.logger.info(
         `classify: done — intent=${parsed.data.intent} (${(performance.now() - start).toFixed(0)}ms)`,
       );
+      logSettingsIntentCompleted(
+        trace,
+        runtimeSettings,
+        start,
+        true,
+        parsed.data.intent,
+        undefined,
+      );
       return parsed.data;
     } catch (error) {
       this.logger.error(
         `classify: failed for owner ${ownerKey}: ${String(error)} (${(performance.now() - start).toFixed(0)}ms)`,
       );
+      logSettingsIntentCompleted(trace, runtimeSettings, start, false, undefined, String(error));
       return undefined;
     }
   }
+}
+
+function logSettingsIntentCompleted(
+  trace: TOption<TBehaviorTraceContext>,
+  settings: TOption<TConfigRecord>,
+  start: number,
+  success: boolean,
+  intent: TOption<string>,
+  error: TOption<string>,
+) {
+  if (trace === undefined) {
+    return;
+  }
+
+  let level = EBehaviorLogLevel.Info;
+
+  if (!success) {
+    level = EBehaviorLogLevel.Warning;
+  }
+
+  let fields: TOption<ReturnType<typeof resolveAiBehaviorFields>>;
+
+  if (settings !== undefined) {
+    fields = resolveAiBehaviorFields(settings, EModelPurpose.ToolCheap);
+  }
+
+  AppLogger.instance.record({
+    trace,
+    event: "settings_intent.completed",
+    component: "settings-intent",
+    level,
+    provider: fields?.provider,
+    model: fields?.model,
+    purpose: EModelPurpose.ToolCheap,
+    success,
+    durationMs: performance.now() - start,
+    summary: `settings intent completed intent=${intent ?? "unknown"}`,
+    metadata: {
+      intent: intent ?? "unknown",
+    },
+    error: sanitizeErrorMessage(error),
+  });
 }

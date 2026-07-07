@@ -1,5 +1,6 @@
 import type { ChatMessageToolCall } from "@openrouter/sdk/models";
 import type { TOption } from "../../../types";
+import type { TBehaviorTraceContext } from "../../app-logger";
 import type { TConfigRecord } from "../../settings/schema";
 import type { EModelPurpose, THistoryItem, TPrompt, TToolEntry } from "../types";
 
@@ -80,6 +81,7 @@ export type TRequestAssistantTurnArgs = {
   tools: TToolEntry[];
   purpose: EModelPurpose;
   settings: TConfigRecord;
+  trace?: TBehaviorTraceContext;
 };
 
 export type TRequestAssistantTurn = (
@@ -94,6 +96,7 @@ export type TAssistantToolLoopArgs = {
   purpose: EModelPurpose;
   chatId: TOption<string>;
   settings: TConfigRecord;
+  trace?: TBehaviorTraceContext;
   maxIterations?: number;
   requestAssistantTurn?: TRequestAssistantTurn;
 };
@@ -110,6 +113,7 @@ export type TToolTaskArgs = {
   chatId: TOption<string>;
   user: TOption<TRuntimeUser>;
   settings: TConfigRecord;
+  trace?: TBehaviorTraceContext;
 };
 
 export type TRunToolTaskArgs = TToolTaskArgs & {
