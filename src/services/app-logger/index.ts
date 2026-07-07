@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
-import { createHash } from "node:crypto";
-import { existsSync, mkdirSync } from "node:fs";
+import { createHmac } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import type { TOption } from "../../types";
 import { AsyncQueue } from "../../utils/async-queue";
@@ -25,6 +25,7 @@ type TAppLoggerOptions = {
 
 const APP_DATA_DIR = "/app-data";
 const DEFAULT_LOG_DB_FILE = "bellaclaw-logs.db";
+const MEMORY_LOG_CHATID_HMAC_KEY = crypto.randomUUID();
 const SCHEMA_VERSION = 1;
 
 const SEARCHABLE_METADATA_KEYS = new Set([
@@ -90,6 +91,7 @@ export class AppLogger {
   private initialized = false;
   private dbPath: string;
   private stdout: (event: TBehaviorLogEvent) => void;
+  private persistedChatIdHmacKey: TOption<string>;
 
   public constructor(options: TAppLoggerOptions = {}) {
     this.dbPath = options.dbPath ?? getDefaultLogDbPath();
@@ -110,6 +112,8 @@ export class AppLogger {
 
     if (metadataParse.success) {
       metadata = metadataParse.data;
+    } else {
+      this.logger.error(`record: invalid metadata dropped: ${metadataParse.error.message}`);
     }
 
     const event: TBehaviorLogEvent = {
@@ -118,7 +122,7 @@ export class AppLogger {
       level: input.level ?? EBehaviorLogLevel.Info,
       event: input.event,
       turnId: input.trace.turnId,
-      chatId: maskChatId(input.trace.chatId),
+      chatId: this.maskChatId(input.trace.chatId),
       platform: input.trace.platform ?? null,
       component: input.component,
       provider: input.provider ?? null,
@@ -269,9 +273,7 @@ export class AppLogger {
 
       CREATE VIRTUAL TABLE IF NOT EXISTS app_event_logs_fts USING fts5(
         summary,
-        searchableText,
-        content='app_event_logs',
-        content_rowid='id'
+        searchableText
       );
     `);
 
@@ -279,49 +281,53 @@ export class AppLogger {
   }
 
   private insertEvent(db: Database, event: TBehaviorLogEvent) {
-    const createdAt = Date.parse(event.createdAt);
-    const metadataJson = JSON.stringify(event.metadata);
-    const success = booleanToSqlite(event.success);
+    const insert = db.transaction(() => {
+      const createdAt = Date.parse(event.createdAt);
+      const metadataJson = JSON.stringify(event.metadata);
+      const success = booleanToSqlite(event.success);
 
-    const changes = db
-      .query(
-        `
-        INSERT INTO app_event_logs (
-          createdAt, schemaVersion, level, event, turnId, chatId, platform, component, provider,
-          model, purpose, toolName, success, durationMs, summary, metadataJson, error
+      const changes = db
+        .query(
+          `
+          INSERT INTO app_event_logs (
+            createdAt, schemaVersion, level, event, turnId, chatId, platform, component, provider,
+            model, purpose, toolName, success, durationMs, summary, metadataJson, error
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        .run(
+          createdAt,
+          event.schemaVersion,
+          event.level,
+          event.event,
+          event.turnId,
+          event.chatId,
+          event.platform,
+          event.component,
+          event.provider,
+          event.model,
+          event.purpose,
+          event.toolName,
+          success,
+          event.durationMs,
+          event.summary,
+          metadataJson,
+          event.error,
+        );
+
+      const rowId = normalizeRowId(changes.lastInsertRowid);
+      const searchableText = buildSearchableText(event);
+
+      db.query(
+        `
+        INSERT INTO app_event_logs_fts(rowid, summary, searchableText)
+        VALUES (?, ?, ?)
       `,
-      )
-      .run(
-        createdAt,
-        event.schemaVersion,
-        event.level,
-        event.event,
-        event.turnId,
-        event.chatId,
-        event.platform,
-        event.component,
-        event.provider,
-        event.model,
-        event.purpose,
-        event.toolName,
-        success,
-        event.durationMs,
-        event.summary,
-        metadataJson,
-        event.error,
-      );
+      ).run(rowId, event.summary, searchableText);
+    });
 
-    const rowId = normalizeRowId(changes.lastInsertRowid);
-    const searchableText = buildSearchableText(event);
-
-    db.query(
-      `
-      INSERT INTO app_event_logs_fts(rowid, summary, searchableText)
-      VALUES (?, ?, ?)
-    `,
-    ).run(rowId, event.summary, searchableText);
+    insert();
   }
 
   private parseRows(rows: TStoredBehaviorLogRow[]): TPersistedBehaviorLogEvent[] {
@@ -356,6 +362,46 @@ export class AppLogger {
 
     return events;
   }
+
+  private maskChatId(chatId: TOption<string>): string | null {
+    if (chatId === undefined) {
+      return null;
+    }
+
+    const key = this.getChatIdHmacKey();
+
+    if (key === undefined) {
+      return null;
+    }
+
+    const digest = createHmac("sha256", key).update(chatId).digest("hex");
+    return `sha256:${digest}`;
+  }
+
+  private getChatIdHmacKey(): TOption<string> {
+    const configuredKey = Bun.env.LOG_CHATID_HMAC_KEY?.trim();
+
+    if (configuredKey !== undefined && configuredKey.length > 0) {
+      return configuredKey;
+    }
+
+    if (this.dbPath === ":memory:") {
+      return MEMORY_LOG_CHATID_HMAC_KEY;
+    }
+
+    if (this.persistedChatIdHmacKey !== undefined) {
+      return this.persistedChatIdHmacKey;
+    }
+
+    try {
+      this.ensureDatabaseDirectory();
+      this.persistedChatIdHmacKey = readOrCreateChatIdHmacKey(this.dbPath);
+      return this.persistedChatIdHmacKey;
+    } catch (error) {
+      this.logger.error(`record: failed to load chatId HMAC key: ${String(error)}`);
+      return undefined;
+    }
+  }
 }
 
 function normalizeDurationMs(value: TOption<number>): TOption<number> {
@@ -374,15 +420,6 @@ function normalizeDurationMs(value: TOption<number>): TOption<number> {
   return Math.round(value);
 }
 
-function maskChatId(chatId: TOption<string>): string | null {
-  if (chatId === undefined) {
-    return null;
-  }
-
-  const digest = createHash("sha256").update(chatId).digest("hex");
-  return `sha256:${digest}`;
-}
-
 function booleanToSqlite(value: boolean | null): number | null {
   if (value === null) {
     return null;
@@ -393,6 +430,22 @@ function booleanToSqlite(value: boolean | null): number | null {
   }
 
   return 0;
+}
+
+function readOrCreateChatIdHmacKey(dbPath: string): string {
+  const keyPath = `${dbPath}.chatid-hmac-key`;
+
+  if (existsSync(keyPath)) {
+    const existingKey = readFileSync(keyPath, "utf8").trim();
+
+    if (existingKey.length > 0) {
+      return existingKey;
+    }
+  }
+
+  const key = crypto.randomUUID();
+  writeFileSync(keyPath, `${key}\n`, { mode: 0o600 });
+  return key;
 }
 
 function sqliteToBoolean(value: number | null): TOption<boolean> {
@@ -418,7 +471,7 @@ function rowToEvent(
   return {
     id: row.id,
     createdAtMs: row.createdAt,
-    schemaVersion: SCHEMA_VERSION,
+    schemaVersion: row.schemaVersion,
     createdAt: new Date(row.createdAt).toISOString(),
     level: row.level,
     event: row.event,

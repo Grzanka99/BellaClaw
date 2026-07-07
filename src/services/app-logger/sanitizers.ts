@@ -127,6 +127,18 @@ export function sanitizeToolResult(result: TNormalizedToolResult): TSanitizedLog
   }
 }
 
+export function sanitizeToolResultError(result: TNormalizedToolResult): TOption<string> {
+  if (result.error === undefined) {
+    return undefined;
+  }
+
+  if (CRON_TOOL_NAMES.has(result.toolName)) {
+    return `${result.toolName} failed`;
+  }
+
+  return sanitizeErrorMessage(result.error);
+}
+
 function parseToolArguments(argumentsText: string): unknown {
   try {
     return JSON.parse(argumentsText);

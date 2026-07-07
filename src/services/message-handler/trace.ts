@@ -1,3 +1,4 @@
+import type { TOption } from "../../types";
 import type { TBehaviorTraceContext } from "../app-logger";
 import type { TIncommingMessage } from "./types";
 
@@ -7,6 +8,6 @@ export function attachMessageTrace(message: TIncommingMessage, trace: TBehaviorT
   MessageTraceMap.set(message, trace);
 }
 
-export function getMessageTrace(message: TIncommingMessage) {
+export function getMessageTrace(message: TIncommingMessage): TOption<TBehaviorTraceContext> {
   return MessageTraceMap.get(message);
 }

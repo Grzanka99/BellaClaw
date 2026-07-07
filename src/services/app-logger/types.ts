@@ -100,7 +100,8 @@ export const SStoredBehaviorLogRow = z.object({
 
 export type TStoredBehaviorLogRow = z.infer<typeof SStoredBehaviorLogRow>;
 
-export type TPersistedBehaviorLogEvent = TBehaviorLogEvent & {
+export type TPersistedBehaviorLogEvent = Omit<TBehaviorLogEvent, "schemaVersion"> & {
   id: number;
   createdAtMs: number;
+  schemaVersion: number;
 };

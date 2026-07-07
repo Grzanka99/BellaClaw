@@ -52,6 +52,7 @@ export class MessagingAdapter {
 
   public async handleInboundMessage(message: TPlatformMessage) {
     const canonicalChatId = createCanonicalChatKey(message.platform, message.chatId);
+    const handlerStart = performance.now();
     const trace: TBehaviorTraceContext = {
       turnId: createMessageTurnId(),
       chatId: canonicalChatId,
@@ -65,7 +66,7 @@ export class MessagingAdapter {
       logHandlerCompleted(
         trace,
         "messaging",
-        performance.now(),
+        handlerStart,
         false,
         0,
         "missing transport",
@@ -105,6 +106,7 @@ export class MessagingAdapter {
     }
 
     if (reply.trim().length === 0) {
+      logHandlerCompleted(trace, "messaging", handlerStart, true, 0, "empty reply", undefined);
       return;
     }
 
@@ -125,7 +127,27 @@ export class MessagingAdapter {
         reply.length,
         String(error),
       );
+      logHandlerCompleted(
+        trace,
+        "messaging",
+        handlerStart,
+        false,
+        reply.length,
+        "send failed",
+        String(error),
+      );
+      return;
     }
+
+    logHandlerCompleted(
+      trace,
+      "messaging",
+      handlerStart,
+      true,
+      reply.length,
+      "completed",
+      undefined,
+    );
   }
 
   private ensureCronListener() {
@@ -248,8 +270,9 @@ export class MessagingAdapter {
       return;
     }
 
+    const saveStart = performance.now();
+
     try {
-      const saveStart = performance.now();
       const saveResult = await Memory.instance.save({
         chatId: canonicalChatId,
         author: ERole.Assistant,
@@ -276,7 +299,7 @@ export class MessagingAdapter {
       );
       logMemorySaveCompleted(
         trace,
-        performance.now(),
+        saveStart,
         ERole.Assistant,
         EMemoryImportance.Low,
         text.length,

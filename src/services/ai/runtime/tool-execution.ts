@@ -6,6 +6,7 @@ import {
   sanitizeErrorMessage,
   sanitizeToolCallArguments,
   sanitizeToolResult,
+  sanitizeToolResultError,
 } from "../../app-logger/sanitizers";
 import { EConfigKey, type TConfigRecord } from "../../settings/schema";
 import { DEFINE_MESSAGE_IMPORTANCE_TOOL } from "../tools/define-message-importance/definition";
@@ -150,7 +151,7 @@ function logToolCallCompleted(
   }
 
   const details = sanitizeToolResult(result);
-  const error = sanitizeErrorMessage(result.error);
+  const error = sanitizeToolResultError(result);
   let level = EBehaviorLogLevel.Info;
 
   if (!result.success) {

@@ -85,7 +85,14 @@ export class SettingsIntentClassifier {
         this.logger.warning(
           `classify: no successful ${DEFINE_SETTINGS_INTENT_TOOL} tool result (${(performance.now() - start).toFixed(0)}ms)`,
         );
-        logSettingsIntentCompleted(trace, runtimeSettings, start, false, undefined, undefined);
+        logSettingsIntentCompleted({
+          trace,
+          settings: runtimeSettings,
+          start,
+          success: false,
+          intent: undefined,
+          error: undefined,
+        });
         return undefined;
       }
 
@@ -95,47 +102,56 @@ export class SettingsIntentClassifier {
         this.logger.warning(
           `classify: malformed tool result: ${parsed.error.message} (${(performance.now() - start).toFixed(0)}ms)`,
         );
-        logSettingsIntentCompleted(
+        logSettingsIntentCompleted({
           trace,
-          runtimeSettings,
+          settings: runtimeSettings,
           start,
-          false,
-          undefined,
-          parsed.error.message,
-        );
+          success: false,
+          intent: undefined,
+          error: parsed.error.message,
+        });
         return undefined;
       }
 
       this.logger.info(
         `classify: done — intent=${parsed.data.intent} (${(performance.now() - start).toFixed(0)}ms)`,
       );
-      logSettingsIntentCompleted(
+      logSettingsIntentCompleted({
         trace,
-        runtimeSettings,
+        settings: runtimeSettings,
         start,
-        true,
-        parsed.data.intent,
-        undefined,
-      );
+        success: true,
+        intent: parsed.data.intent,
+        error: undefined,
+      });
       return parsed.data;
     } catch (error) {
       this.logger.error(
         `classify: failed for owner ${ownerKey}: ${String(error)} (${(performance.now() - start).toFixed(0)}ms)`,
       );
-      logSettingsIntentCompleted(trace, runtimeSettings, start, false, undefined, String(error));
+      logSettingsIntentCompleted({
+        trace,
+        settings: runtimeSettings,
+        start,
+        success: false,
+        intent: undefined,
+        error: String(error),
+      });
       return undefined;
     }
   }
 }
 
-function logSettingsIntentCompleted(
-  trace: TOption<TBehaviorTraceContext>,
-  settings: TOption<TConfigRecord>,
-  start: number,
-  success: boolean,
-  intent: TOption<string>,
-  error: TOption<string>,
-) {
+function logSettingsIntentCompleted(args: {
+  trace: TOption<TBehaviorTraceContext>;
+  settings: TOption<TConfigRecord>;
+  start: number;
+  success: boolean;
+  intent: TOption<string>;
+  error: TOption<string>;
+}) {
+  const { trace, settings, start, success, intent, error } = args;
+
   if (trace === undefined) {
     return;
   }

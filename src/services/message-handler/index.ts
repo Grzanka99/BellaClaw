@@ -280,7 +280,7 @@ export class MessageHandler {
           message.message.content.length,
           result,
         );
-        return true;
+        return !isRecord(result) || !("operation" in result);
       }
       case ERole.Assistant: {
         const result = await this.memory.save({
@@ -297,7 +297,7 @@ export class MessageHandler {
           message.message.content.length,
           result,
         );
-        return true;
+        return !isRecord(result) || !("operation" in result);
       }
     }
   }
