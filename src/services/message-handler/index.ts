@@ -62,140 +62,153 @@ export class MessageHandler {
     this.logger.info("handleMessage: start");
     logHandlerStarted(trace, "message-handler");
 
-    const settings = await SettingsService.instance.getAll(message.chatId);
-    const instructions = await getMessageHandlerInstructions(message.chatId, settings);
+    try {
+      const settings = await SettingsService.instance.getAll(message.chatId);
+      const instructions = await getMessageHandlerInstructions(message.chatId, settings);
 
-    const parallelStart = performance.now();
-    const [importance, last30] = await Promise.all([
-      this.defineMessageImportance(
-        message.message.content,
-        message.chatId,
+      const parallelStart = performance.now();
+      const [importance, last30] = await Promise.all([
+        this.defineMessageImportance(
+          message.message.content,
+          message.chatId,
+          settings,
+          trace,
+          ERole.User,
+        ),
+        this.retrieveMemory(message.chatId, trace),
+      ]);
+      this.logger.info(
+        `handleMessage: parallel ops completed (${(performance.now() - parallelStart).toFixed(0)}ms) — importance: ${importance}, recent: ${last30.length}`,
+      );
+
+      this.queue.enqueue(() => this.saveMessageToDatabase(message, importance, trace));
+
+      const history: THistoryItem[] = [];
+
+      for (const el of last30.toReversed()) {
+        history.push({
+          role: el.author,
+          content: el.message,
+        });
+      }
+
+      history.push({
+        role: ERole.System,
+        content: createCurrentTimeContext(settings),
+      });
+
+      const tools = [
+        { definition: searchMemoryTool, instructions: instructions.searchMemory },
+        { definition: listCronJobsTool, instructions: instructions.listCronJobs },
+        { definition: scheduleOnceTool, instructions: instructions.scheduleOnce },
+        {
+          definition: scheduleRecurringTool,
+          instructions: instructions.scheduleRecurring,
+        },
+        {
+          definition: unscheduleCronJobTool,
+          instructions: instructions.unscheduleCronJob,
+        },
+        {
+          definition: updateCronJobTool,
+          instructions: instructions.updateCronJob,
+        },
+        { definition: webSearchTool, instructions: instructions.webSearch },
+        { definition: webFetchTool, instructions: instructions.webFetch },
+      ];
+
+      const chatStart = performance.now();
+      const aiRes = await this.ai.runAssistantToolLoop({
+        prompt: {
+          role: ERole.User,
+          content: [{ type: "text", text: message.message.content }],
+        },
+        history,
+        purpose: EModelPurpose.ChatAccurate,
+        user: {
+          username: message.author.username,
+          id: message.author.id,
+          displayName: message.author.username,
+        },
+        tools,
+        chatId: message.chatId,
         settings,
         trace,
-        ERole.User,
-      ),
-      this.retrieveMemory(message.chatId, trace),
-    ]);
-    this.logger.info(
-      `handleMessage: parallel ops completed (${(performance.now() - parallelStart).toFixed(0)}ms) — importance: ${importance}, recent: ${last30.length}`,
-    );
-
-    this.queue.enqueue(() => this.saveMessageToDatabase(message, importance, trace));
-
-    const history: THistoryItem[] = [];
-
-    for (const el of last30.toReversed()) {
-      history.push({
-        role: el.author,
-        content: el.message,
       });
-    }
+      this.logger.info(
+        `handleMessage: AI chat completed (${(performance.now() - chatStart).toFixed(0)}ms)`,
+      );
 
-    history.push({
-      role: ERole.System,
-      content: createCurrentTimeContext(settings),
-    });
+      if (aiRes.finalResponse === undefined) {
+        this.logger.warning("handleMessage: AI returned no final response");
+        logHandlerCompleted(
+          trace,
+          "message-handler",
+          handleMessageStart,
+          false,
+          "Something went wrong.".length,
+          "missing final response",
+          undefined,
+        );
+        return "Something went wrong.";
+      }
 
-    const tools = [
-      { definition: searchMemoryTool, instructions: instructions.searchMemory },
-      { definition: listCronJobsTool, instructions: instructions.listCronJobs },
-      { definition: scheduleOnceTool, instructions: instructions.scheduleOnce },
-      {
-        definition: scheduleRecurringTool,
-        instructions: instructions.scheduleRecurring,
-      },
-      {
-        definition: unscheduleCronJobTool,
-        instructions: instructions.unscheduleCronJob,
-      },
-      {
-        definition: updateCronJobTool,
-        instructions: instructions.updateCronJob,
-      },
-      { definition: webSearchTool, instructions: instructions.webSearch },
-      { definition: webFetchTool, instructions: instructions.webFetch },
-    ];
+      const finalResponse = aiRes.finalResponse;
 
-    const chatStart = performance.now();
-    const aiRes = await this.ai.runAssistantToolLoop({
-      prompt: {
-        role: ERole.User,
-        content: [{ type: "text", text: message.message.content }],
-      },
-      history,
-      purpose: EModelPurpose.ChatAccurate,
-      user: {
-        username: message.author.username,
-        id: message.author.id,
-        displayName: message.author.username,
-      },
-      tools,
-      chatId: message.chatId,
-      settings,
-      trace,
-    });
-    this.logger.info(
-      `handleMessage: AI chat completed (${(performance.now() - chatStart).toFixed(0)}ms)`,
-    );
+      this.queue.enqueue(async () => {
+        const respImpStart = performance.now();
+        const responseImportance = await this.defineMessageImportance(
+          finalResponse,
+          message.chatId,
+          settings,
+          trace,
+          ERole.Assistant,
+        );
+        this.logger.info(
+          `handleMessage: response importance: ${responseImportance} (${(performance.now() - respImpStart).toFixed(0)}ms)`,
+        );
 
-    if (aiRes.finalResponse === undefined) {
-      this.logger.warning("handleMessage: AI returned no final response");
+        await this.saveMessageToDatabase(
+          {
+            chatId: message.chatId,
+            message: {
+              type: "text",
+              content: finalResponse,
+            },
+            author: {
+              type: ERole.Assistant,
+            },
+          },
+          responseImportance,
+          trace,
+        );
+      });
+
+      this.logger.info(
+        `handleMessage: done (${(performance.now() - handleMessageStart).toFixed(0)}ms)`,
+      );
+      logHandlerCompleted(
+        trace,
+        "message-handler",
+        handleMessageStart,
+        true,
+        finalResponse.length,
+        "completed",
+        undefined,
+      );
+      return finalResponse;
+    } catch (error) {
       logHandlerCompleted(
         trace,
         "message-handler",
         handleMessageStart,
         false,
-        "Something went wrong.".length,
-        "missing final response",
-        undefined,
+        0,
+        "failed",
+        String(error),
       );
-      return "Something went wrong.";
+      throw error;
     }
-
-    const finalResponse = aiRes.finalResponse;
-
-    this.queue.enqueue(async () => {
-      const respImpStart = performance.now();
-      const responseImportance = await this.defineMessageImportance(
-        finalResponse,
-        message.chatId,
-        settings,
-        trace,
-        ERole.Assistant,
-      );
-      this.logger.info(
-        `handleMessage: response importance: ${responseImportance} (${(performance.now() - respImpStart).toFixed(0)}ms)`,
-      );
-
-      await this.saveMessageToDatabase(
-        {
-          chatId: message.chatId,
-          message: {
-            type: "text",
-            content: finalResponse,
-          },
-          author: {
-            type: ERole.Assistant,
-          },
-        },
-        responseImportance,
-        trace,
-      );
-    });
-
-    this.logger.info(
-      `handleMessage: done (${(performance.now() - handleMessageStart).toFixed(0)}ms)`,
-    );
-    logHandlerCompleted(
-      trace,
-      "message-handler",
-      handleMessageStart,
-      true,
-      finalResponse.length,
-      "completed",
-      undefined,
-    );
-    return finalResponse;
   }
 
   private async defineMessageImportance(

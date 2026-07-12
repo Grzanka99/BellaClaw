@@ -1,43 +1,60 @@
-import { AppLogger } from "../src/services/app-logger";
+import { existsSync } from "node:fs";
+import { AppLogger, getDefaultLogDbPath } from "../src/services/app-logger";
 
 const turnId = Bun.argv[2];
 
 if (turnId === undefined || turnId.trim().length === 0) {
   console.error("Usage: bun run logs:turn -- <turnId>");
-  process.exit(1);
+  process.exitCode = 1;
+} else {
+  await printTurn(turnId);
 }
 
-const events = await AppLogger.instance.findByTurnId(turnId);
+async function printTurn(turnId: string) {
+  const dbPath = getDefaultLogDbPath();
 
-if (events.length === 0) {
-  console.log(`No behavior events found for turnId: ${turnId}`);
-  await AppLogger.instance.close();
-  process.exit(0);
-}
-
-for (const event of events) {
-  const parts = [
-    event.createdAt,
-    event.event,
-    event.component ?? "-",
-    event.toolName ?? "-",
-    formatSuccess(event.success),
-    formatDuration(event.durationMs),
-    event.summary ?? "",
-  ];
-
-  console.log(parts.join(" | "));
-
-  if (Object.keys(event.metadata).length > 0) {
-    console.log(`  metadata: ${JSON.stringify(event.metadata)}`);
+  if (dbPath !== ":memory:" && !existsSync(dbPath)) {
+    console.error(`Behavior log database does not exist: ${dbPath}`);
+    process.exitCode = 1;
+    return;
   }
 
-  if (event.error !== null) {
-    console.log(`  error: ${event.error}`);
+  console.log(`Querying behavior log database: ${dbPath}`);
+  const appLogger = new AppLogger({ dbPath });
+
+  try {
+    const events = await appLogger.findByTurnId(turnId);
+
+    if (events.length === 0) {
+      console.log(`No behavior events found for turnId: ${turnId}`);
+      return;
+    }
+
+    for (const event of events) {
+      const parts = [
+        event.createdAt,
+        event.event,
+        event.component ?? "-",
+        event.toolName ?? "-",
+        formatSuccess(event.success),
+        formatDuration(event.durationMs),
+        event.summary ?? "",
+      ];
+
+      console.log(parts.join(" | "));
+
+      if (Object.keys(event.metadata).length > 0) {
+        console.log(`  metadata: ${JSON.stringify(event.metadata)}`);
+      }
+
+      if (event.error !== null) {
+        console.log(`  error: ${event.error}`);
+      }
+    }
+  } finally {
+    await appLogger.close();
   }
 }
-
-await AppLogger.instance.close();
 
 function formatSuccess(success: boolean | null): string {
   if (success === null) {

@@ -45,105 +45,110 @@ export class SettingsMessageHandler {
     this.logger.info("handleMessage: start");
     logHandlerStarted(trace);
 
-    const settings = await SettingsService.instance.getAll(message.chatId);
-    const runtimeSettings = createStableAiRuntimeSettings(settings);
-    const instructions = await getSettingsHandlerInstructions(settings);
+    try {
+      const settings = await SettingsService.instance.getAll(message.chatId);
+      const runtimeSettings = createStableAiRuntimeSettings(settings);
+      const instructions = await getSettingsHandlerInstructions(settings);
 
-    const recent = await this.retrieveMemory(message.chatId, trace);
+      const recent = await this.retrieveMemory(message.chatId, trace);
 
-    const history: THistoryItem[] = [{ role: ERole.System, content: instructions.systemPrompt }];
+      const history: THistoryItem[] = [{ role: ERole.System, content: instructions.systemPrompt }];
 
-    for (const el of recent.toReversed()) {
-      history.push({
-        role: el.author,
-        content: el.message,
+      for (const el of recent.toReversed()) {
+        history.push({
+          role: el.author,
+          content: el.message,
+        });
+      }
+
+      const userSaveStart = performance.now();
+      const userSaveResult = await this.memory.save({
+        chatId: message.chatId,
+        author: ERole.User,
+        importance: EMemoryImportance.Low,
+        message: message.message.content,
       });
-    }
+      logMemorySaveCompleted(
+        trace,
+        userSaveStart,
+        ERole.User,
+        EMemoryImportance.Low,
+        message.message.content.length,
+        userSaveResult,
+      );
 
-    const userSaveStart = performance.now();
-    const userSaveResult = await this.memory.save({
-      chatId: message.chatId,
-      author: ERole.User,
-      importance: EMemoryImportance.Low,
-      message: message.message.content,
-    });
-    logMemorySaveCompleted(
-      trace,
-      userSaveStart,
-      ERole.User,
-      EMemoryImportance.Low,
-      message.message.content.length,
-      userSaveResult,
-    );
+      const tools = [
+        { definition: getSettingsTool, instructions: instructions.getSettings },
+        { definition: updateSettingsTool, instructions: instructions.updateSettings },
+      ];
 
-    const tools = [
-      { definition: getSettingsTool, instructions: instructions.getSettings },
-      { definition: updateSettingsTool, instructions: instructions.updateSettings },
-    ];
+      const chatStart = performance.now();
+      const aiRes = await this.ai.runAssistantToolLoop({
+        prompt: {
+          role: ERole.User,
+          content: [{ type: "text", text: message.message.content }],
+        },
+        history,
+        purpose: EModelPurpose.ChatAccurate,
+        user: {
+          username: message.author.username,
+          id: message.author.id,
+          displayName: message.author.username,
+        },
+        tools,
+        chatId: message.chatId,
+        settings: runtimeSettings,
+        trace,
+      });
+      this.logger.info(
+        `handleMessage: AI chat completed (${(performance.now() - chatStart).toFixed(0)}ms)`,
+      );
 
-    const chatStart = performance.now();
-    const aiRes = await this.ai.runAssistantToolLoop({
-      prompt: {
-        role: ERole.User,
-        content: [{ type: "text", text: message.message.content }],
-      },
-      history,
-      purpose: EModelPurpose.ChatAccurate,
-      user: {
-        username: message.author.username,
-        id: message.author.id,
-        displayName: message.author.username,
-      },
-      tools,
-      chatId: message.chatId,
-      settings: runtimeSettings,
-      trace,
-    });
-    this.logger.info(
-      `handleMessage: AI chat completed (${(performance.now() - chatStart).toFixed(0)}ms)`,
-    );
+      if (aiRes.finalResponse === undefined) {
+        this.logger.warning("handleMessage: AI returned no final response");
+        logHandlerCompleted(
+          trace,
+          handleMessageStart,
+          false,
+          "Something went wrong.".length,
+          "missing final response",
+          undefined,
+        );
+        return "Something went wrong.";
+      }
 
-    if (aiRes.finalResponse === undefined) {
-      this.logger.warning("handleMessage: AI returned no final response");
+      const assistantSaveStart = performance.now();
+      const assistantSaveResult = await this.memory.save({
+        chatId: message.chatId,
+        author: ERole.Assistant,
+        importance: EMemoryImportance.Low,
+        message: aiRes.finalResponse,
+      });
+      logMemorySaveCompleted(
+        trace,
+        assistantSaveStart,
+        ERole.Assistant,
+        EMemoryImportance.Low,
+        aiRes.finalResponse.length,
+        assistantSaveResult,
+      );
+
+      this.logger.info(
+        `handleMessage: done (${(performance.now() - handleMessageStart).toFixed(0)}ms)`,
+      );
       logHandlerCompleted(
         trace,
         handleMessageStart,
-        false,
-        "Something went wrong.".length,
-        "missing final response",
+        true,
+        aiRes.finalResponse.length,
+        "completed",
         undefined,
       );
-      return "Something went wrong.";
+      return aiRes.finalResponse;
+    } catch (error) {
+      logHandlerCompleted(trace, handleMessageStart, false, 0, "failed", String(error));
+      throw error;
     }
-
-    const assistantSaveStart = performance.now();
-    const assistantSaveResult = await this.memory.save({
-      chatId: message.chatId,
-      author: ERole.Assistant,
-      importance: EMemoryImportance.Low,
-      message: aiRes.finalResponse,
-    });
-    logMemorySaveCompleted(
-      trace,
-      assistantSaveStart,
-      ERole.Assistant,
-      EMemoryImportance.Low,
-      aiRes.finalResponse.length,
-      assistantSaveResult,
-    );
-
-    this.logger.info(
-      `handleMessage: done (${(performance.now() - handleMessageStart).toFixed(0)}ms)`,
-    );
-    logHandlerCompleted(
-      trace,
-      handleMessageStart,
-      true,
-      aiRes.finalResponse.length,
-      "completed",
-      undefined,
-    );
-    return aiRes.finalResponse;
   }
 
   private async retrieveMemory(

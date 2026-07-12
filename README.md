@@ -103,11 +103,14 @@ bun run dev
 | `bun install` | Install dependencies |
 | `bun run start` | Start the bot |
 | `bun run dev` | Start with file-watch (auto-restart) |
+| `podman compose exec bellaclaw bun run logs:turn -- <turnId>` | Show behavior events for a turn in the container |
 | `bun test` | Run all tests |
 | `bun test <file>` | Run a single test file |
 | `bunx tsc --noEmit` | Type-check without emitting |
 | `bunx @biomejs/biome check .` | Lint/format check |
 | `bunx @biomejs/biome check . --write` | Lint/format auto-fix |
+
+To query a host-mounted behavior log database, set `BELLACLAW_LOG_DB_PATH` to its path before running `bun run logs:turn -- <turnId>`.
 
 ### Message Flow
 

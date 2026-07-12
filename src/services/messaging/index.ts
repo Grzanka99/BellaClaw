@@ -60,94 +60,106 @@ export class MessagingAdapter {
     };
     logMessageReceived(trace, message);
 
-    const transport = this.transports.get(message.platform);
-    if (transport === undefined) {
-      this.logger.error(`handleInboundMessage: no transport for platform ${message.platform}`);
+    try {
+      const transport = this.transports.get(message.platform);
+      if (transport === undefined) {
+        this.logger.error(`handleInboundMessage: no transport for platform ${message.platform}`);
+        logHandlerCompleted(
+          trace,
+          "messaging",
+          handlerStart,
+          false,
+          0,
+          "missing transport",
+          undefined,
+        );
+        return;
+      }
+
+      const classifier = SettingsIntentClassifier.instance;
+      const intent = await classifier.classify(message.message.content, canonicalChatId, trace);
+
+      const incomingMessage: TIncommingMessage = {
+        chatId: canonicalChatId,
+        author: {
+          type: ERole.User,
+          username: message.author.username,
+          id: message.author.id,
+        },
+        message: message.message,
+      };
+      attachMessageTrace(incomingMessage, trace);
+
+      let reply: string;
+
+      if (intent === undefined) {
+        this.logger.warning(
+          `handleInboundMessage: settings-intent classifier returned no result; falling back to normal handler for platform ${message.platform}, raw chat ${message.chatId}, canonical chat ${canonicalChatId}, author ${message.author.id}, message type ${message.message.type}, content length ${message.message.content.length}`,
+        );
+        const handler = MessageHandler.getInstance(canonicalChatId);
+        reply = await handler.handleMessage(incomingMessage);
+      } else if (intent.intent === "settings") {
+        const handler = SettingsMessageHandler.getInstance(canonicalChatId);
+        reply = await handler.handleMessage(incomingMessage);
+      } else {
+        const handler = MessageHandler.getInstance(canonicalChatId);
+        reply = await handler.handleMessage(incomingMessage);
+      }
+
+      if (reply.trim().length === 0) {
+        logHandlerCompleted(trace, "messaging", handlerStart, true, 0, "empty reply", undefined);
+        return;
+      }
+
+      const sendStart = performance.now();
+
+      try {
+        await transport.sendText(message.chatId, reply);
+        logTransportSendCompleted(
+          trace,
+          sendStart,
+          message.platform,
+          true,
+          reply.length,
+          undefined,
+        );
+      } catch (error) {
+        this.logger.error(
+          `handleInboundMessage: failed to send message to ${message.platform} chat ${message.chatId}: ${String(error)}`,
+        );
+        logTransportSendCompleted(
+          trace,
+          sendStart,
+          message.platform,
+          false,
+          reply.length,
+          String(error),
+        );
+        logHandlerCompleted(
+          trace,
+          "messaging",
+          handlerStart,
+          false,
+          reply.length,
+          "send failed",
+          String(error),
+        );
+        return;
+      }
+
       logHandlerCompleted(
         trace,
         "messaging",
         handlerStart,
-        false,
-        0,
-        "missing transport",
+        true,
+        reply.length,
+        "completed",
         undefined,
       );
-      return;
-    }
-
-    const classifier = SettingsIntentClassifier.instance;
-    const intent = await classifier.classify(message.message.content, canonicalChatId, trace);
-
-    const incomingMessage: TIncommingMessage = {
-      chatId: canonicalChatId,
-      author: {
-        type: ERole.User,
-        username: message.author.username,
-        id: message.author.id,
-      },
-      message: message.message,
-    };
-    attachMessageTrace(incomingMessage, trace);
-
-    let reply: string;
-
-    if (intent === undefined) {
-      this.logger.warning(
-        `handleInboundMessage: settings-intent classifier returned no result; falling back to normal handler for platform ${message.platform}, raw chat ${message.chatId}, canonical chat ${canonicalChatId}, author ${message.author.id}, message type ${message.message.type}, content length ${message.message.content.length}`,
-      );
-      const handler = MessageHandler.getInstance(canonicalChatId);
-      reply = await handler.handleMessage(incomingMessage);
-    } else if (intent.intent === "settings") {
-      const handler = SettingsMessageHandler.getInstance(canonicalChatId);
-      reply = await handler.handleMessage(incomingMessage);
-    } else {
-      const handler = MessageHandler.getInstance(canonicalChatId);
-      reply = await handler.handleMessage(incomingMessage);
-    }
-
-    if (reply.trim().length === 0) {
-      logHandlerCompleted(trace, "messaging", handlerStart, true, 0, "empty reply", undefined);
-      return;
-    }
-
-    const sendStart = performance.now();
-
-    try {
-      await transport.sendText(message.chatId, reply);
-      logTransportSendCompleted(trace, sendStart, message.platform, true, reply.length, undefined);
     } catch (error) {
-      this.logger.error(
-        `handleInboundMessage: failed to send message to ${message.platform} chat ${message.chatId}: ${String(error)}`,
-      );
-      logTransportSendCompleted(
-        trace,
-        sendStart,
-        message.platform,
-        false,
-        reply.length,
-        String(error),
-      );
-      logHandlerCompleted(
-        trace,
-        "messaging",
-        handlerStart,
-        false,
-        reply.length,
-        "send failed",
-        String(error),
-      );
-      return;
+      logHandlerCompleted(trace, "messaging", handlerStart, false, 0, "failed", String(error));
+      throw error;
     }
-
-    logHandlerCompleted(
-      trace,
-      "messaging",
-      handlerStart,
-      true,
-      reply.length,
-      "completed",
-      undefined,
-    );
   }
 
   private ensureCronListener() {
