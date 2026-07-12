@@ -1,6 +1,13 @@
 import type { ChatMessageToolCall } from "@openrouter/sdk/models";
 import type { TOption } from "../../../types";
 import { logger } from "../../../utils/logger";
+import { AppLogger, EBehaviorLogLevel, type TBehaviorTraceContext } from "../../app-logger";
+import {
+  sanitizeErrorMessage,
+  sanitizeToolCallArguments,
+  sanitizeToolResult,
+  sanitizeToolResultError,
+} from "../../app-logger/sanitizers";
 import { EConfigKey, type TConfigRecord } from "../../settings/schema";
 import { DEFINE_MESSAGE_IMPORTANCE_TOOL } from "../tools/define-message-importance/definition";
 import { DEFINE_SETTINGS_INTENT_TOOL } from "../tools/define-settings-intent/definition";
@@ -34,56 +41,159 @@ export async function executeToolCall(args: {
   chatId: TOption<string>;
   allowedToolNames: Set<string>;
   settings: TConfigRecord;
+  trace?: TBehaviorTraceContext;
 }): Promise<TNormalizedToolResult> {
-  const { toolCall, chatId, allowedToolNames, settings } = args;
+  const { toolCall, chatId, allowedToolNames, settings, trace } = args;
   const toolName = toolCall.function.name;
   const ownerTimezone = settings[EConfigKey.AiInstructionsTimezone];
+  const startedAt = performance.now();
+
+  logToolCallStarted(toolCall, trace);
 
   if (!allowedToolNames.has(toolName)) {
-    return createFailedToolResult(toolCall, `Unknown tool requested: ${toolName}`);
+    const result = createFailedToolResult(toolCall, `Unknown tool requested: ${toolName}`);
+    logToolCallCompleted(result, trace, performance.now() - startedAt);
+    return result;
   }
 
   logger.info(`[TOOL CALL] calling: ${toolName}`);
 
-  switch (toolName) {
-    case DEFINE_MESSAGE_IMPORTANCE_TOOL: {
-      return executeDefineMessageImportanceTool(toolCall);
+  try {
+    let result: TNormalizedToolResult;
+
+    switch (toolName) {
+      case DEFINE_MESSAGE_IMPORTANCE_TOOL: {
+        result = await executeDefineMessageImportanceTool(toolCall);
+        break;
+      }
+      case DEFINE_SETTINGS_INTENT_TOOL: {
+        result = await executeDefineSettingsIntentTool(toolCall);
+        break;
+      }
+      case SEARCH_MEMORY_TOOL: {
+        result = await executeSearchMemoryTool(toolCall, chatId);
+        break;
+      }
+      case LIST_CRON_JOBS_TOOL: {
+        result = await executeListCronJobsTool(toolCall, chatId);
+        break;
+      }
+      case SCHEDULE_ONCE_TOOL: {
+        result = await executeScheduleOnceTool(toolCall, chatId, ownerTimezone);
+        break;
+      }
+      case SCHEDULE_RECURRING_TOOL: {
+        result = await executeScheduleRecurringTool(toolCall, chatId, ownerTimezone);
+        break;
+      }
+      case UNSCHEDULE_CRON_JOB_TOOL: {
+        result = await executeUnscheduleCronJobTool(toolCall, chatId);
+        break;
+      }
+      case UPDATE_CRON_JOB_TOOL: {
+        result = await executeUpdateCronJobTool(toolCall, chatId);
+        break;
+      }
+      case WEB_SEARCH_TOOL: {
+        result = await executeWebSearchTool(toolCall);
+        break;
+      }
+      case WEB_FETCH_TOOL: {
+        result = await executeWebFetchTool(toolCall);
+        break;
+      }
+      case GET_SETTINGS_TOOL: {
+        result = await executeGetSettingsTool(toolCall, chatId);
+        break;
+      }
+      case UPDATE_SETTINGS_TOOL: {
+        result = await executeUpdateSettingsTool(toolCall, chatId);
+        break;
+      }
+      default: {
+        result = createFailedToolResult(toolCall, `Unknown tool requested: ${toolName}`);
+        break;
+      }
     }
-    case DEFINE_SETTINGS_INTENT_TOOL: {
-      return executeDefineSettingsIntentTool(toolCall);
-    }
-    case SEARCH_MEMORY_TOOL: {
-      return executeSearchMemoryTool(toolCall, chatId);
-    }
-    case LIST_CRON_JOBS_TOOL: {
-      return executeListCronJobsTool(toolCall, chatId);
-    }
-    case SCHEDULE_ONCE_TOOL: {
-      return executeScheduleOnceTool(toolCall, chatId, ownerTimezone);
-    }
-    case SCHEDULE_RECURRING_TOOL: {
-      return executeScheduleRecurringTool(toolCall, chatId, ownerTimezone);
-    }
-    case UNSCHEDULE_CRON_JOB_TOOL: {
-      return executeUnscheduleCronJobTool(toolCall, chatId);
-    }
-    case UPDATE_CRON_JOB_TOOL: {
-      return executeUpdateCronJobTool(toolCall, chatId);
-    }
-    case WEB_SEARCH_TOOL: {
-      return executeWebSearchTool(toolCall);
-    }
-    case WEB_FETCH_TOOL: {
-      return executeWebFetchTool(toolCall);
-    }
-    case GET_SETTINGS_TOOL: {
-      return executeGetSettingsTool(toolCall, chatId);
-    }
-    case UPDATE_SETTINGS_TOOL: {
-      return executeUpdateSettingsTool(toolCall, chatId);
-    }
-    default: {
-      return createFailedToolResult(toolCall, `Unknown tool requested: ${toolName}`);
-    }
+
+    logToolCallCompleted(result, trace, performance.now() - startedAt);
+    return result;
+  } catch (error) {
+    logToolCallErrored(toolName, trace, performance.now() - startedAt, error);
+    throw error;
   }
+}
+
+function logToolCallStarted(toolCall: ChatMessageToolCall, trace: TOption<TBehaviorTraceContext>) {
+  if (trace === undefined) {
+    return;
+  }
+
+  const details = sanitizeToolCallArguments(toolCall);
+
+  AppLogger.instance.record({
+    trace,
+    event: "tool.call.started",
+    component: "tool-execution",
+    toolName: toolCall.function.name,
+    summary: details.summary,
+    metadata: details.metadata,
+  });
+}
+
+function logToolCallCompleted(
+  result: TNormalizedToolResult,
+  trace: TOption<TBehaviorTraceContext>,
+  durationMs: number,
+) {
+  if (trace === undefined) {
+    return;
+  }
+
+  const details = sanitizeToolResult(result);
+  const error = sanitizeToolResultError(result);
+  let level = EBehaviorLogLevel.Info;
+
+  if (!result.success) {
+    level = EBehaviorLogLevel.Warning;
+  }
+
+  AppLogger.instance.record({
+    trace,
+    event: "tool.call.completed",
+    component: "tool-execution",
+    level,
+    toolName: result.toolName,
+    success: result.success,
+    durationMs,
+    summary: details.summary,
+    metadata: details.metadata,
+    error,
+  });
+}
+
+function logToolCallErrored(
+  toolName: string,
+  trace: TOption<TBehaviorTraceContext>,
+  durationMs: number,
+  error: unknown,
+) {
+  if (trace === undefined) {
+    return;
+  }
+
+  AppLogger.instance.record({
+    trace,
+    event: "tool.call.completed",
+    component: "tool-execution",
+    level: EBehaviorLogLevel.Error,
+    toolName,
+    success: false,
+    durationMs,
+    summary: `${toolName} threw`,
+    metadata: {
+      status: "errored",
+    },
+    error: sanitizeErrorMessage(String(error)),
+  });
 }

@@ -2,6 +2,7 @@ import { Config } from "../config";
 import type { TCronJobContext } from "../lib/cron-engine";
 import type { AiConnector } from "../services/ai/api";
 import { EModelPurpose, ERole, type THistoryItem, type TPrompt } from "../services/ai/types";
+import type { TBehaviorTraceContext } from "../services/app-logger";
 import { SettingsService } from "../services/settings";
 import { DefaultConfigRecord, EConfigKey, type TConfigRecord } from "../services/settings/schema";
 import type { TOption } from "../types";
@@ -14,6 +15,7 @@ const logger = createLogger("REMINDER");
 export async function generateReminderText(
   ctx: TCronJobContext,
   ai: TReminderAi,
+  trace?: TBehaviorTraceContext,
 ): Promise<TOption<string>> {
   if (ctx.reminderText !== undefined) {
     const reminderText = ctx.reminderText.trim();
@@ -87,6 +89,7 @@ export async function generateReminderText(
       chatId: undefined,
       user: undefined,
       settings,
+      trace,
     });
 
     const generatedText = res.assistantResponse.trim();
