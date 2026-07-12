@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import type { TOption } from "../../types";
 import { AppLogger, type TBehaviorLogEvent } from "../app-logger";
 import { Memory } from "../memory";
 import { MessageHandler } from "../message-handler";
@@ -9,11 +10,11 @@ import { MessagingAdapter } from "./index";
 import { EMessagePlatform } from "./types";
 
 type TAppLoggerStatic = {
-  _instance: AppLogger | undefined;
+  _instance: TOption<AppLogger>;
 };
 
 type TMessagingAdapterStatic = {
-  _instance: MessagingAdapter | undefined;
+  _instance: TOption<MessagingAdapter>;
 };
 
 type TSettingsServiceStatic = {
@@ -134,10 +135,12 @@ describe("messaging failure behavior logging", () => {
       ).rejects.toThrow("settings failed");
 
       await appLogger.flush();
-      await expectFailureEvents(
-        intent === "normal" ? "message-handler" : "settings-message-handler",
-        stdoutEvents,
-      );
+
+      if (intent === "normal") {
+        await expectFailureEvents("message-handler", stdoutEvents);
+      } else {
+        await expectFailureEvents("settings-message-handler", stdoutEvents);
+      }
     });
   }
 });

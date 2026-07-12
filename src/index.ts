@@ -48,6 +48,12 @@ async function init(): Promise<void> {
       summary: "Application boot completed",
     });
   } catch (error) {
+    let serializedError = String(error);
+
+    if (error instanceof Error && error.stack !== undefined) {
+      serializedError = error.stack;
+    }
+
     AppLogger.instance.record({
       trace: {
         turnId,
@@ -60,7 +66,7 @@ async function init(): Promise<void> {
       success: false,
       durationMs: performance.now() - start,
       summary: "Application boot failed",
-      error: String(error),
+      error: serializedError,
     });
 
     throw error;
