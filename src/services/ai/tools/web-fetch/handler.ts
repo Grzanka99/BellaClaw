@@ -3,7 +3,6 @@ import type { TFetchWebResult } from "../../../../lib/web";
 
 export const SWebFetchArgs = z.object({
   url: z
-    .string()
     .url()
     .refine((url) => url.startsWith("http://") || url.startsWith("https://"))
     .describe("Public http or https URL to fetch"),

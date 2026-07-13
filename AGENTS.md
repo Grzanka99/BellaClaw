@@ -107,13 +107,13 @@ Each tool lives in its own directory under `src/services/ai/tools/`:
 
 ```
 src/services/ai/tools/<tool-name>/
-  definition.ts    — exports a ToolDefinitionJson (name, description, parameters)
+  definition.ts    — exports a provider-neutral TToolDefinition derived from Zod
   handler.ts       — parses arguments with Zod, returns parsed data
   instructions.xml — detailed instructions for the AI on when/how to use the tool
 ```
 
-- `definition.ts`: Use `@openrouter/sdk/models` `ToolDefinitionJson` type. Parameters use Zod schemas via `S*` prefix naming.
-- `handler.ts`: Parse `toolCall.function.arguments` with `JSON.parse`, then use `SArguments.safeParse()`. Branch on `.success`.
+- `definition.ts`: Use `createToolDefinition()` with an `S*` Zod schema. Parameters are generated from the schema as provider-neutral JSON Schema.
+- `handler.ts`: Treat tool arguments as structured `unknown` data and use the `S*` schema's `safeParse()` directly or through `parseAndValidateToolArgs()`. Never apply `JSON.parse` to tool arguments. Branch on `.success`.
 - `instructions.xml`: XML format with `<purpose>`, `<tool>`, `<usage_rules>`, and `<examples>` sections.
 
 ## Scope Rules
