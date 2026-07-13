@@ -17,7 +17,11 @@ import type { TRequestAssistantTurnArgs } from "./types";
 const ORIGINAL_OPENROUTER_API_KEY = Bun.env.OPENROUTER_API_KEY;
 
 afterEach(() => {
-  Bun.env.OPENROUTER_API_KEY = ORIGINAL_OPENROUTER_API_KEY;
+  if (ORIGINAL_OPENROUTER_API_KEY === undefined) {
+    delete Bun.env.OPENROUTER_API_KEY;
+  } else {
+    Bun.env.OPENROUTER_API_KEY = ORIGINAL_OPENROUTER_API_KEY;
+  }
   aiModels.setProvider(openrouterProvider());
 });
 
