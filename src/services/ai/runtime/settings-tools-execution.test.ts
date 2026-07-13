@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
-import type { ChatMessageToolCall } from "@openrouter/sdk/models";
 import { resetUserConfigsTable } from "../../database/test-utils";
 import {
   getMessageHandlerInstructions,
@@ -8,8 +7,10 @@ import {
 import { SettingsService } from "../../settings";
 import { DefaultConfigRecord, EConfigKey, type TConfigRecord } from "../../settings/schema";
 import { AiConnector } from "../api";
+import { getAiModelIds } from "../providers/registry";
 import { GET_SETTINGS_TOOL } from "../tools/get-settings/definition";
 import { UPDATE_SETTINGS_TOOL } from "../tools/update-settings/definition";
+import { EAiProvider, type EModelPurpose, type TToolCall } from "../types";
 import { executeToolCall } from "./tool-execution";
 
 type TSettingsServiceStatic = {
@@ -20,14 +21,11 @@ type TAiConnectorStatic = {
   _instance: unknown;
 };
 
-function createToolCall(id: string, name: string, argumentsText: string): ChatMessageToolCall {
+function createToolCall(id: string, name: string, toolArguments: unknown): TToolCall {
   return {
     id,
-    type: "function",
-    function: {
-      name,
-      arguments: argumentsText,
-    },
+    name,
+    arguments: toolArguments,
   };
 }
 
@@ -67,7 +65,7 @@ describe("settings tools execution", () => {
       const chatId = "settings-get-owner";
 
       const result = await executeToolCall({
-        toolCall: createToolCall("get-1", GET_SETTINGS_TOOL, "{}"),
+        toolCall: createToolCall("get-1", GET_SETTINGS_TOOL, {}),
         chatId,
         allowedToolNames: new Set([GET_SETTINGS_TOOL]),
         settings: DefaultConfigRecord,
@@ -79,13 +77,23 @@ describe("settings tools execution", () => {
         success: true,
       });
 
-      const data = result.data as { settings: TConfigRecord };
+      const data = result.data as {
+        settings: TConfigRecord;
+        aiRuntime: {
+          provider: EAiProvider;
+          models: Record<EModelPurpose, string>;
+        };
+      };
       expect(data.settings).toEqual(DefaultConfigRecord);
+      expect(data.aiRuntime).toEqual({
+        provider: EAiProvider.OpencodeGo,
+        models: getAiModelIds(EAiProvider.OpencodeGo),
+      });
     });
 
     test("fails when chatId is missing", async () => {
       const result = await executeToolCall({
-        toolCall: createToolCall("get-no-chat", GET_SETTINGS_TOOL, "{}"),
+        toolCall: createToolCall("get-no-chat", GET_SETTINGS_TOOL, {}),
         chatId: undefined,
         allowedToolNames: new Set([GET_SETTINGS_TOOL]),
         settings: DefaultConfigRecord,
@@ -97,7 +105,7 @@ describe("settings tools execution", () => {
 
     test("fails when not in allowedToolNames", async () => {
       const result = await executeToolCall({
-        toolCall: createToolCall("get-disallowed", GET_SETTINGS_TOOL, "{}"),
+        toolCall: createToolCall("get-disallowed", GET_SETTINGS_TOOL, {}),
         chatId: "settings-owner",
         allowedToolNames: new Set(["other-tool"]),
         settings: DefaultConfigRecord,
@@ -109,7 +117,7 @@ describe("settings tools execution", () => {
 
     test("rejects extra arguments via strict schema", async () => {
       const result = await executeToolCall({
-        toolCall: createToolCall("get-extra", GET_SETTINGS_TOOL, JSON.stringify({ foo: "bar" })),
+        toolCall: createToolCall("get-extra", GET_SETTINGS_TOOL, { foo: "bar" }),
         chatId: "settings-owner",
         allowedToolNames: new Set([GET_SETTINGS_TOOL]),
         settings: DefaultConfigRecord,
@@ -125,11 +133,9 @@ describe("settings tools execution", () => {
       const chatId = "settings-update-tz";
 
       const result = await executeToolCall({
-        toolCall: createToolCall(
-          "update-tz",
-          UPDATE_SETTINGS_TOOL,
-          JSON.stringify({ timezone: "America/New_York" }),
-        ),
+        toolCall: createToolCall("update-tz", UPDATE_SETTINGS_TOOL, {
+          timezone: "America/New_York",
+        }),
         chatId,
         allowedToolNames: new Set([UPDATE_SETTINGS_TOOL]),
         settings: DefaultConfigRecord,
@@ -154,15 +160,11 @@ describe("settings tools execution", () => {
       const chatId = "settings-update-multi";
 
       const result = await executeToolCall({
-        toolCall: createToolCall(
-          "update-multi",
-          UPDATE_SETTINGS_TOOL,
-          JSON.stringify({
-            timezone: "Asia/Tokyo",
-            language: "English",
-            assistantName: "Bella",
-          }),
-        ),
+        toolCall: createToolCall("update-multi", UPDATE_SETTINGS_TOOL, {
+          timezone: "Asia/Tokyo",
+          language: "English",
+          assistantName: "Bella",
+        }),
         chatId,
         allowedToolNames: new Set([UPDATE_SETTINGS_TOOL]),
         settings: DefaultConfigRecord,
@@ -183,11 +185,9 @@ describe("settings tools execution", () => {
       const chatId = "settings-update-platform";
 
       const result = await executeToolCall({
-        toolCall: createToolCall(
-          "update-platform",
-          UPDATE_SETTINGS_TOOL,
-          JSON.stringify({ platform: "Signal messages" }),
-        ),
+        toolCall: createToolCall("update-platform", UPDATE_SETTINGS_TOOL, {
+          platform: "Signal messages",
+        }),
         chatId,
         allowedToolNames: new Set([UPDATE_SETTINGS_TOOL]),
         settings: DefaultConfigRecord,
@@ -210,7 +210,7 @@ describe("settings tools execution", () => {
 
     test("rejects empty args with at least-one-field requirement", async () => {
       const result = await executeToolCall({
-        toolCall: createToolCall("update-empty", UPDATE_SETTINGS_TOOL, "{}"),
+        toolCall: createToolCall("update-empty", UPDATE_SETTINGS_TOOL, {}),
         chatId: "settings-update-empty",
         allowedToolNames: new Set([UPDATE_SETTINGS_TOOL]),
         settings: DefaultConfigRecord,
@@ -222,11 +222,10 @@ describe("settings tools execution", () => {
 
     test("rejects unknown extra fields via strict schema", async () => {
       const result = await executeToolCall({
-        toolCall: createToolCall(
-          "update-unknown",
-          UPDATE_SETTINGS_TOOL,
-          JSON.stringify({ timezone: "UTC", bogusKey: "value" }),
-        ),
+        toolCall: createToolCall("update-unknown", UPDATE_SETTINGS_TOOL, {
+          timezone: "UTC",
+          bogusKey: "value",
+        }),
         chatId: "settings-update-unknown",
         allowedToolNames: new Set([UPDATE_SETTINGS_TOOL]),
         settings: DefaultConfigRecord,
@@ -240,11 +239,9 @@ describe("settings tools execution", () => {
       const chatId = "settings-update-invalid-tz";
 
       const result = await executeToolCall({
-        toolCall: createToolCall(
-          "update-bad-tz",
-          UPDATE_SETTINGS_TOOL,
-          JSON.stringify({ timezone: "Not/A_Real_Tz" }),
-        ),
+        toolCall: createToolCall("update-bad-tz", UPDATE_SETTINGS_TOOL, {
+          timezone: "Not/A_Real_Tz",
+        }),
         chatId,
         allowedToolNames: new Set([UPDATE_SETTINGS_TOOL]),
         settings: DefaultConfigRecord,
@@ -262,11 +259,9 @@ describe("settings tools execution", () => {
 
     test("rejects invalid aiProvider without writing", async () => {
       const result = await executeToolCall({
-        toolCall: createToolCall(
-          "update-bad-provider",
-          UPDATE_SETTINGS_TOOL,
-          JSON.stringify({ aiProvider: "invalid-provider" }),
-        ),
+        toolCall: createToolCall("update-bad-provider", UPDATE_SETTINGS_TOOL, {
+          aiProvider: "invalid-provider",
+        }),
         chatId: "settings-update-invalid-provider",
         allowedToolNames: new Set([UPDATE_SETTINGS_TOOL]),
         settings: DefaultConfigRecord,
@@ -279,14 +274,10 @@ describe("settings tools execution", () => {
       const chatId = "settings-update-partial-invalid";
 
       const result = await executeToolCall({
-        toolCall: createToolCall(
-          "update-partial-bad",
-          UPDATE_SETTINGS_TOOL,
-          JSON.stringify({
-            timezone: "Not/A_Real_Tz",
-            language: "English",
-          }),
-        ),
+        toolCall: createToolCall("update-partial-bad", UPDATE_SETTINGS_TOOL, {
+          timezone: "Not/A_Real_Tz",
+          language: "English",
+        }),
         chatId,
         allowedToolNames: new Set([UPDATE_SETTINGS_TOOL]),
         settings: DefaultConfigRecord,
@@ -307,11 +298,9 @@ describe("settings tools execution", () => {
       mockAiSettingsVerification(undefined);
 
       const result = await executeToolCall({
-        toolCall: createToolCall(
-          "update-provider",
-          UPDATE_SETTINGS_TOOL,
-          JSON.stringify({ aiProvider: "openrouter" }),
-        ),
+        toolCall: createToolCall("update-provider", UPDATE_SETTINGS_TOOL, {
+          aiProvider: "openrouter",
+        }),
         chatId,
         allowedToolNames: new Set([UPDATE_SETTINGS_TOOL]),
         settings: DefaultConfigRecord,
@@ -328,11 +317,9 @@ describe("settings tools execution", () => {
       mockAiSettingsVerification("Provider failed for ChatAccurate: unavailable");
 
       const result = await executeToolCall({
-        toolCall: createToolCall(
-          "update-unavailable-provider",
-          UPDATE_SETTINGS_TOOL,
-          JSON.stringify({ aiProvider: "openrouter" }),
-        ),
+        toolCall: createToolCall("update-unavailable-provider", UPDATE_SETTINGS_TOOL, {
+          aiProvider: "openrouter",
+        }),
         chatId,
         allowedToolNames: new Set([UPDATE_SETTINGS_TOOL]),
         settings: DefaultConfigRecord,
@@ -349,11 +336,9 @@ describe("settings tools execution", () => {
       const chatId = "settings-update-model-field";
 
       const result = await executeToolCall({
-        toolCall: createToolCall(
-          "update-model-field",
-          UPDATE_SETTINGS_TOOL,
-          JSON.stringify({ opencodeGoChatModel: "glm-5.2" }),
-        ),
+        toolCall: createToolCall("update-model-field", UPDATE_SETTINGS_TOOL, {
+          opencodeGoChatModel: "glm-5.2",
+        }),
         chatId,
         allowedToolNames: new Set([UPDATE_SETTINGS_TOOL]),
         settings: DefaultConfigRecord,
@@ -365,11 +350,7 @@ describe("settings tools execution", () => {
 
     test("fails when chatId is missing", async () => {
       const result = await executeToolCall({
-        toolCall: createToolCall(
-          "update-no-chat",
-          UPDATE_SETTINGS_TOOL,
-          JSON.stringify({ timezone: "UTC" }),
-        ),
+        toolCall: createToolCall("update-no-chat", UPDATE_SETTINGS_TOOL, { timezone: "UTC" }),
         chatId: undefined,
         allowedToolNames: new Set([UPDATE_SETTINGS_TOOL]),
         settings: DefaultConfigRecord,
@@ -381,11 +362,7 @@ describe("settings tools execution", () => {
 
     test("fails when not in allowedToolNames", async () => {
       const result = await executeToolCall({
-        toolCall: createToolCall(
-          "update-disallowed",
-          UPDATE_SETTINGS_TOOL,
-          JSON.stringify({ timezone: "UTC" }),
-        ),
+        toolCall: createToolCall("update-disallowed", UPDATE_SETTINGS_TOOL, { timezone: "UTC" }),
         chatId: "settings-owner",
         allowedToolNames: new Set(["other-tool"]),
         settings: DefaultConfigRecord,
@@ -422,11 +399,9 @@ describe("settings tools execution", () => {
         expect(readsAfterPrime).toBeGreaterThan(0);
 
         const result = await executeToolCall({
-          toolCall: createToolCall(
-            "update-invalidate",
-            UPDATE_SETTINGS_TOOL,
-            JSON.stringify({ assistantName: "Bella" }),
-          ),
+          toolCall: createToolCall("update-invalidate", UPDATE_SETTINGS_TOOL, {
+            assistantName: "Bella",
+          }),
           chatId,
           allowedToolNames: new Set([UPDATE_SETTINGS_TOOL]),
           settings: DefaultConfigRecord,

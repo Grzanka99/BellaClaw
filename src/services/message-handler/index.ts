@@ -92,11 +92,6 @@ export class MessageHandler {
         });
       }
 
-      history.push({
-        role: ERole.System,
-        content: createCurrentTimeContext(settings),
-      });
-
       const tools = [
         { definition: searchMemoryTool, instructions: instructions.searchMemory },
         { definition: listCronJobsTool, instructions: instructions.listCronJobs },
@@ -130,6 +125,7 @@ export class MessageHandler {
           id: message.author.id,
           displayName: message.author.username,
         },
+        currentTimeContext: createCurrentTimeContext(settings),
         tools,
         chatId: message.chatId,
         settings,

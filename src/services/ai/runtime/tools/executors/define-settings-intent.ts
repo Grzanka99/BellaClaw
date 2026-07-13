@@ -1,14 +1,14 @@
-import type { ChatMessageToolCall } from "@openrouter/sdk/models";
 import {
   SDefineSettingsIntent,
   type TDefineSettingsIntent,
 } from "../../../tools/define-settings-intent/handler";
+import type { TToolCall } from "../../../types";
 import type { TNormalizedToolResult } from "../../types";
 import { parseAndValidateToolArgs } from "../args";
 import { createFailedToolResult, createSuccessfulToolResult } from "../results";
 
 export async function executeDefineSettingsIntentTool(
-  toolCall: ChatMessageToolCall,
+  toolCall: TToolCall,
 ): Promise<TNormalizedToolResult> {
   const parsed = parseAndValidateToolArgs<TDefineSettingsIntent>(toolCall, SDefineSettingsIntent);
 

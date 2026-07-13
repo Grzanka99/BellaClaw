@@ -1,18 +1,10 @@
-import type { ToolDefinitionJson } from "@openrouter/sdk/models";
+import { createToolDefinition } from "../definition";
+import { SGetSettingsArgs } from "./handler";
 
 export const GET_SETTINGS_TOOL = "get-settings" as const;
 
-export const getSettingsTool: ToolDefinitionJson = {
-  type: "function",
-  function: {
-    name: GET_SETTINGS_TOOL,
-    description:
-      "Reads and returns the current effective assistant settings for the user. Takes no arguments; the owner is determined automatically from the chat. Use this when the user asks what timezone, language, platform, AI provider, chat model, assistant name, address style, or reply length is currently configured.",
-    parameters: {
-      type: "object",
-      properties: {},
-      required: [],
-      additionalProperties: false,
-    },
-  },
-};
+export const getSettingsTool = createToolDefinition(
+  GET_SETTINGS_TOOL,
+  "Reads the user's effective assistant settings and computed AI runtime provider/model mapping. Takes no arguments; the owner is determined automatically from the chat.",
+  SGetSettingsArgs,
+);

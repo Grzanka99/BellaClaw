@@ -4,22 +4,13 @@ export type {
   TAssistantToolActivity,
   TAssistantToolLoopArgs,
   TAssistantToolLoopResult,
-  TLoopAssistantReplyItem,
-  TLoopAssistantToolCallsItem,
-  TLoopToolResultItem,
-  TLoopUserPromptItem,
   TNormalizedToolResult,
   TRequestAssistantTurn,
   TRequestAssistantTurnArgs,
   TRunAssistantToolLoopArgs,
   TRunToolTaskArgs,
-  TRuntimeAssistantTurn,
-  TRuntimeConversationItem,
   TRuntimeUser,
   TToolTaskArgs,
   TToolTaskResult,
 } from "./types";
-export {
-  EAssistantLoopConversationItemKind,
-  EAssistantLoopStopReason,
-} from "./types";
+export { EAssistantLoopStopReason } from "./types";

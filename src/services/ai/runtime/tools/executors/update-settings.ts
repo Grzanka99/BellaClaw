@@ -1,4 +1,3 @@
-import type { ChatMessageToolCall } from "@openrouter/sdk/models";
 import type { TOption } from "../../../../../types";
 import { invalidateMessageHandlerInstructions } from "../../../../message-handler/instructions";
 import { SettingsService } from "../../../../settings";
@@ -8,11 +7,15 @@ import {
   SUpdateSettingsArgs,
   type TUpdateSettingsArgs,
 } from "../../../tools/update-settings/handler";
-import { normalizeError } from "../../serialization";
+import type { TToolCall } from "../../../types";
 import type { TNormalizedToolResult } from "../../types";
 import { parseAndValidateToolArgs } from "../args";
 import { requireChatId } from "../context";
-import { createFailedToolResult, createSuccessfulToolResult } from "../results";
+import {
+  createFailedToolResult,
+  createInternalToolFailure,
+  createSuccessfulToolResult,
+} from "../results";
 
 type TFieldUpdate = {
   field: keyof TUpdateSettingsArgs;
@@ -34,16 +37,13 @@ const UPDATE_FIELDS: Array<{
 ];
 
 export async function executeUpdateSettingsTool(
-  toolCall: ChatMessageToolCall,
+  toolCall: TToolCall,
   chatId: TOption<string>,
 ): Promise<TNormalizedToolResult> {
   const resolvedChatId = requireChatId(toolCall, chatId);
 
   if (resolvedChatId === undefined) {
-    return createFailedToolResult(
-      toolCall,
-      `chatId is required for tool: ${toolCall.function.name}`,
-    );
+    return createFailedToolResult(toolCall, `chatId is required for tool: ${toolCall.name}`);
   }
 
   const parsed = parseAndValidateToolArgs<TUpdateSettingsArgs>(toolCall, SUpdateSettingsArgs);
@@ -90,7 +90,7 @@ export async function executeUpdateSettingsTool(
 
     return createSuccessfulToolResult(toolCall, { settings: updatedSettings });
   } catch (error) {
-    return createFailedToolResult(toolCall, `update-settings failed: ${normalizeError(error)}`);
+    return createInternalToolFailure(toolCall, "update settings", error);
   }
 }
 

@@ -3,13 +3,29 @@ import type { TCronJob } from "../../../../lib/cron-engine";
 
 export const SScheduleRecurringArgs = z
   .object({
-    name: z.string(),
-    pattern: z.string(),
-    group: z.string().optional(),
-    reminderText: z.string().optional(),
-    reminderPromptData: z.string().optional(),
-    reminderFallbackText: z.string().optional(),
-    overwrite: z.boolean().optional(),
+    name: z.string().describe("Unique recurring job name used to reference, update, or cancel it"),
+    pattern: z
+      .string()
+      .describe("Standard 5-field cron expression: minute hour day-of-month month day-of-week"),
+    group: z.string().describe("Optional group label stored with the cron job").optional(),
+    reminderText: z
+      .string()
+      .describe("Plain reminder text for a direct, non-generated reminder")
+      .optional(),
+    reminderPromptData: z
+      .string()
+      .describe(
+        "Structured prompt data serialized as JSON for a reminder generated later by the model",
+      )
+      .optional(),
+    reminderFallbackText: z
+      .string()
+      .describe("Fallback text required when reminderPromptData is provided")
+      .optional(),
+    overwrite: z
+      .boolean()
+      .describe("Replace an existing recurring job with the same name; defaults to false")
+      .optional(),
   })
   .superRefine((value, ctx) => {
     if (value.reminderText === undefined && value.reminderPromptData === undefined) {

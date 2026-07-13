@@ -22,6 +22,7 @@ Ships with a default "Bellatrix" persona -- a darkly elegant assistant that resp
 | `OPENROUTER_API_KEY` | No | OpenRouter API key, required only when using the OpenRouter provider |
 | `TAVILY_API_KEY` | No | Tavily API key, required for web search |
 | `OLLAMA_BASE_URL` | No | Ollama base URL (defaults to `http://localhost:11434`) |
+| `BELLACLAW_AI_CREDENTIALS_PATH` | No | Pi credential-store path. Compose sets this to `/app-data/pi-auth.json`; host development defaults to `.secrets/pi-auth.json` |
 | `SIGNAL_ENABLED` | No | Set to `true` after Signal is linked and verified; keep `false` by default |
 | `SIGNAL_PHONE_NUMBER` | No | Signal phone number used by `signal-cli-rest-api` when Signal is enabled |
 | `SIGNAL_CLI_RPC_URL` | No | Signal API URL. Compose sets this to `http://signal-cli:8080`; use `http://127.0.0.1:8080` only when running BellaClaw on the host |
@@ -50,6 +51,30 @@ podman compose up -d --build
 ```
 
 The container restarts automatically.
+
+#### OpenAI Codex Subscription With Podman
+
+To use the `openai-codex` provider, copy an authenticated Codex `auth.json` to:
+
+```text
+.secrets/auth.json
+```
+
+Then initialize or update the server through the package scripts:
+
+```bash
+bun run server:init
+# or
+bun run server:update
+```
+
+The script imports the credential once into `/app-data/pi-auth.json` in the persistent
+`bellaclaw-data` volume. It never overwrites an existing destination because Pi may have refreshed
+and rotated its tokens there. Delete `/app-data/pi-auth.json` from the volume only when you
+intentionally want to import `.secrets/auth.json` again.
+
+Credential seeding does not change the active provider. After startup, ask BellaClaw to switch the
+AI provider to `openai-codex`.
 
 ### Signal Setup With Podman
 
@@ -96,6 +121,10 @@ Use `SIGNAL_CLI_RPC_URL=http://127.0.0.1:8080` for this non-compose setup. The c
 bun run dev
 ```
 
+When `.secrets/auth.json` exists, dev mode imports it once into
+`.secrets/pi-auth.json`. Pi updates that local file when OAuth tokens rotate. Existing local
+credentials are preserved on later starts.
+
 ## Commands
 
 | Command | Description |
@@ -103,6 +132,9 @@ bun run dev
 | `bun install` | Install dependencies |
 | `bun run start` | Start the bot |
 | `bun run dev` | Start with file-watch (auto-restart) |
+| `bun run auth:seed-local` | Seed local Pi credentials from `.secrets/auth.json` when absent |
+| `bun run server:init` | Build, seed optional OpenAI auth, and start the Podman services |
+| `bun run server:update` | Rebuild, preserve existing auth, and recreate the Podman services |
 | `podman compose exec bellaclaw bun run logs:turn -- <turnId>` | Show behavior events for a turn in the container |
 | `bun test` | Run all tests |
 | `bun test <file>` | Run a single test file |

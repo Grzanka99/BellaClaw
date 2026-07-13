@@ -1,22 +1,10 @@
-import type { ToolDefinitionJson } from "@openrouter/sdk/models";
+import { createToolDefinition } from "../definition";
+import { SUnscheduleCronJobArgs } from "./handler";
 
 export const UNSCHEDULE_CRON_JOB_TOOL = "unschedule-cron-job" as const;
 
-export const unscheduleCronJobTool: ToolDefinitionJson = {
-  type: "function",
-  function: {
-    name: UNSCHEDULE_CRON_JOB_TOOL,
-    description:
-      "Cancel a previously scheduled cron job by name. Use this to deactivate one-time reminders, recurring reminders, or periodic tasks that are no longer needed.",
-    parameters: {
-      type: "object",
-      properties: {
-        name: {
-          type: "string",
-          description: "The unique name of the one-time or recurring cron job to cancel.",
-        },
-      },
-      required: ["name"],
-    },
-  },
-};
+export const unscheduleCronJobTool = createToolDefinition(
+  UNSCHEDULE_CRON_JOB_TOOL,
+  "Cancel a previously scheduled one-time or recurring cron job by name.",
+  SUnscheduleCronJobArgs,
+);

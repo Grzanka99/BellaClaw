@@ -1,21 +1,19 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import type { ChatMessageToolCall } from "@openrouter/sdk/models";
 import { DefaultConfigRecord } from "../../settings/schema";
 import { WEB_FETCH_TOOL } from "../tools/web-fetch/definition";
 import { WEB_SEARCH_TOOL } from "../tools/web-search/definition";
+import type { TToolCall } from "../types";
+import { createToolResultMessage } from "./serialization";
 import { executeToolCall } from "./tool-execution";
 
 const originalFetch = globalThis.fetch;
 const originalTavilyApiKey = Bun.env.TAVILY_API_KEY;
 
-function createToolCall(id: string, name: string, argumentsText: string): ChatMessageToolCall {
+function createToolCall(id: string, name: string, toolArguments: unknown): TToolCall {
   return {
     id,
-    type: "function",
-    function: {
-      name,
-      arguments: argumentsText,
-    },
+    name,
+    arguments: toolArguments,
   };
 }
 
@@ -67,11 +65,7 @@ describe("web tool execution", () => {
 
   test("executes web-search", async () => {
     const result = await executeToolCall({
-      toolCall: createToolCall(
-        "search-call",
-        WEB_SEARCH_TOOL,
-        JSON.stringify({ query: "example", maxResults: 1 }),
-      ),
+      toolCall: createToolCall("search-call", WEB_SEARCH_TOOL, { query: "example", maxResults: 1 }),
       chatId: undefined,
       allowedToolNames: new Set([WEB_SEARCH_TOOL]),
       settings: DefaultConfigRecord,
@@ -97,11 +91,10 @@ describe("web tool execution", () => {
 
   test("executes web-fetch", async () => {
     const result = await executeToolCall({
-      toolCall: createToolCall(
-        "fetch-call",
-        WEB_FETCH_TOOL,
-        JSON.stringify({ url: "https://example.com/page", format: "text" }),
-      ),
+      toolCall: createToolCall("fetch-call", WEB_FETCH_TOOL, {
+        url: "https://example.com/page",
+        format: "text",
+      }),
       chatId: undefined,
       allowedToolNames: new Set([WEB_FETCH_TOOL]),
       settings: DefaultConfigRecord,
@@ -123,21 +116,13 @@ describe("web tool execution", () => {
 
   test("handles validation failures", async () => {
     const searchResult = await executeToolCall({
-      toolCall: createToolCall(
-        "bad-search",
-        WEB_SEARCH_TOOL,
-        JSON.stringify({ query: "", maxResults: 1 }),
-      ),
+      toolCall: createToolCall("bad-search", WEB_SEARCH_TOOL, { query: "", maxResults: 1 }),
       chatId: undefined,
       allowedToolNames: new Set([WEB_SEARCH_TOOL]),
       settings: DefaultConfigRecord,
     });
     const fetchResult = await executeToolCall({
-      toolCall: createToolCall(
-        "bad-fetch",
-        WEB_FETCH_TOOL,
-        JSON.stringify({ url: "ftp://example.com/file" }),
-      ),
+      toolCall: createToolCall("bad-fetch", WEB_FETCH_TOOL, { url: "ftp://example.com/file" }),
       chatId: undefined,
       allowedToolNames: new Set([WEB_FETCH_TOOL]),
       settings: DefaultConfigRecord,
@@ -147,5 +132,28 @@ describe("web tool execution", () => {
     expect(searchResult.error).toContain("Arguments validation failed");
     expect(fetchResult.success).toBe(false);
     expect(fetchResult.error).toContain("Arguments validation failed");
+  });
+
+  test("does not expose raw internal failures in provider-facing tool results", async () => {
+    globalThis.fetch = (async () => {
+      throw new Error(
+        '400: {"metadata":{"raw":"private response body","reasoning":"private reasoning"}}',
+      );
+    }) as unknown as typeof fetch;
+
+    const result = await executeToolCall({
+      toolCall: createToolCall("private-failure", WEB_FETCH_TOOL, {
+        url: "https://example.com/private",
+      }),
+      chatId: undefined,
+      allowedToolNames: new Set([WEB_FETCH_TOOL]),
+      settings: DefaultConfigRecord,
+    });
+    const providerMessage = createToolResultMessage(result);
+    const serialized = JSON.stringify(providerMessage);
+
+    expect(result.error).toBe("web-fetch failed during request");
+    expect(serialized).not.toContain("private response body");
+    expect(serialized).not.toContain("private reasoning");
   });
 });

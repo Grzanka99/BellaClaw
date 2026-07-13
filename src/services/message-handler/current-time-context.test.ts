@@ -54,8 +54,8 @@ describe("MessageHandler current time context", () => {
     resetSettingsInstance();
   });
 
-  test("passes current time context into assistant tool loop history", async () => {
-    const capturedHistory: Array<{ role: ERole; content: string }> = [];
+  test("passes current time context into assistant tool loop", async () => {
+    let capturedCurrentTimeContext: string | undefined;
     const handler = MessageHandler.getInstance("test-chat-id");
     const internals = handler as unknown as TAiConnectorInternals;
 
@@ -77,18 +77,16 @@ describe("MessageHandler current time context", () => {
         toolCalls: [],
         toolResults: [],
       })),
-      runAssistantToolLoop: mock(
-        async (args: { history: Array<{ role: ERole; content: string }> }) => {
-          capturedHistory.push(...args.history);
-          return {
-            conversation: [],
-            toolActivity: [],
-            finalResponse: "test response",
-            stopReason: "final-response" as const,
-            iterations: 1,
-          };
-        },
-      ),
+      runAssistantToolLoop: mock(async (args: { currentTimeContext?: string }) => {
+        capturedCurrentTimeContext = args.currentTimeContext;
+        return {
+          conversation: [],
+          toolActivity: [],
+          finalResponse: "test response",
+          stopReason: "final-response" as const,
+          iterations: 1,
+        };
+      }),
     } as never;
 
     await handler.handleMessage({
@@ -97,15 +95,10 @@ describe("MessageHandler current time context", () => {
       author: { type: ERole.User, id: "test-user-id", username: "TestUser" },
     });
 
-    const currentTimeContext = capturedHistory.find((item) =>
-      item.content.startsWith("Current time context:"),
-    );
-
-    expect(currentTimeContext).toBeDefined();
-    expect(currentTimeContext?.role).toBe(ERole.System);
-    expect(currentTimeContext?.content).toContain("UTC:");
-    expect(currentTimeContext?.content).toContain(`Timezone: ${OWNER_TIMEZONE}`);
-    expect(currentTimeContext?.content).toContain("Local:");
-    expect(currentTimeContext?.content).toContain("Weekday:");
+    expect(capturedCurrentTimeContext).toStartWith("Current time context:");
+    expect(capturedCurrentTimeContext).toContain("UTC:");
+    expect(capturedCurrentTimeContext).toContain(`Timezone: ${OWNER_TIMEZONE}`);
+    expect(capturedCurrentTimeContext).toContain("Local:");
+    expect(capturedCurrentTimeContext).toContain("Weekday:");
   });
 });

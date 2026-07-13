@@ -1,6 +1,5 @@
-import type { ToolDefinitionJson } from "@openrouter/sdk/models";
-
 export enum EAiProvider {
+  OpenaiCodex = "openai-codex",
   Openrouter = "openrouter",
   Ollama = "ollama",
   OpencodeGo = "opencode-go",
@@ -26,8 +25,20 @@ export type TPrompt = {
 };
 
 export type TToolEntry = {
-  definition: ToolDefinitionJson;
+  definition: TToolDefinition;
   instructions?: string;
+};
+
+export type TToolCall = {
+  id: string;
+  name: string;
+  arguments: unknown;
+};
+
+export type TToolDefinition = {
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;
 };
 
 export enum EModelPurpose {

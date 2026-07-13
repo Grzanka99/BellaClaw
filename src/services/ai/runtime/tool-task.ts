@@ -1,58 +1,64 @@
-import type { TOption } from "../../../types";
+import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { AppLogger, EBehaviorLogLevel } from "../../app-logger";
 import { resolveAiBehaviorFields } from "../../app-logger/ai";
 import { sanitizeErrorMessage } from "../../app-logger/sanitizers";
-import { promptToText } from "./serialization";
+import {
+  countConversationChars,
+  extractAssistantText,
+  extractAssistantToolCalls,
+  promptToUserMessage,
+} from "./serialization";
 import { executeToolCall } from "./tool-execution";
 import type {
+  TNormalizedToolResult,
   TRequestAssistantTurnArgs,
   TRunToolTaskArgs,
-  TRuntimeAssistantTurn,
-  TRuntimeConversationItem,
   TToolTaskResult,
 } from "./types";
-import { EAssistantLoopConversationItemKind, type TNormalizedToolResult } from "./types";
 
 export async function runToolTask(args: TRunToolTaskArgs): Promise<TToolTaskResult> {
-  const conversation: TRuntimeConversationItem[] = [
-    { kind: EAssistantLoopConversationItemKind.UserPrompt, prompt: args.prompt },
-  ];
-  const allowedToolNames = new Set(args.tools.map((tool) => tool.definition.function.name));
-  const assistantTurn = await requestAssistantTurnWithLogging(args, {
+  const conversation = [promptToUserMessage(args.prompt)];
+  const allowedToolNames = new Set(args.tools.map((tool) => tool.definition.name));
+  const assistantMessage = await requestAssistantTurnWithLogging(args, {
     conversation,
     history: args.history,
     user: args.user,
+    currentTimeContext: undefined,
     tools: args.tools,
     purpose: args.purpose,
     settings: args.settings,
     trace: args.trace,
   });
 
-  if (assistantTurn === undefined) {
-    return {
-      assistantResponse: "",
-      toolCalls: [],
-      toolResults: [],
-    };
+  if (assistantMessage.stopReason === "error") {
+    throwAssistantError(assistantMessage);
   }
 
+  let assistantResponse = extractAssistantText(assistantMessage);
+  const toolCalls = extractAssistantToolCalls(assistantMessage);
   const toolResults: TNormalizedToolResult[] = [];
 
-  for (const toolCall of assistantTurn.toolCalls) {
-    const toolResult = await executeToolCall({
-      toolCall,
-      chatId: args.chatId,
-      allowedToolNames,
-      settings: args.settings,
-      trace: args.trace,
-    });
+  if (assistantMessage.stopReason === "aborted") {
+    assistantResponse = "";
+  }
 
-    toolResults.push(toolResult);
+  if (assistantMessage.stopReason === "toolUse") {
+    for (const toolCall of toolCalls) {
+      const toolResult = await executeToolCall({
+        toolCall,
+        chatId: args.chatId,
+        allowedToolNames,
+        settings: args.settings,
+        trace: args.trace,
+      });
+
+      toolResults.push(toolResult);
+    }
   }
 
   return {
-    assistantResponse: assistantTurn.response,
-    toolCalls: assistantTurn.toolCalls,
+    assistantResponse,
+    toolCalls,
     toolResults,
   };
 }
@@ -60,7 +66,7 @@ export async function runToolTask(args: TRunToolTaskArgs): Promise<TToolTaskResu
 async function requestAssistantTurnWithLogging(
   args: TRunToolTaskArgs,
   requestArgs: TRequestAssistantTurnArgs,
-): Promise<TOption<TRuntimeAssistantTurn>> {
+): Promise<AssistantMessage> {
   if (args.trace === undefined) {
     return args.requestAssistantTurn(requestArgs);
   }
@@ -79,26 +85,30 @@ async function requestAssistantTurnWithLogging(
     metadata: {
       historyCount: requestArgs.history.length,
       toolCount: requestArgs.tools.length,
-      toolNames: requestArgs.tools.map((tool) => tool.definition.function.name),
+      toolNames: requestArgs.tools.map((tool) => tool.definition.name),
       promptChars: countPromptChars(requestArgs),
     },
   });
 
   try {
-    const assistantTurn = await args.requestAssistantTurn(requestArgs);
+    const assistantMessage = await args.requestAssistantTurn(requestArgs);
+    const assistantResponse = extractAssistantText(assistantMessage);
+    const toolCalls = extractAssistantToolCalls(assistantMessage);
     let success = true;
-    let responseChars = 0;
-    let toolCallCount = 0;
     let level = EBehaviorLogLevel.Info;
-    let summary = "ai tool task completed";
 
-    if (assistantTurn === undefined) {
+    if (assistantMessage.stopReason === "aborted") {
       success = false;
       level = EBehaviorLogLevel.Warning;
-      summary = "ai tool task returned no response";
-    } else {
-      responseChars = assistantTurn.response.length;
-      toolCallCount = assistantTurn.toolCalls.length;
+    }
+
+    if (assistantMessage.stopReason === "error") {
+      success = false;
+      level = EBehaviorLogLevel.Error;
+    }
+
+    if (assistantMessage.stopReason === "length") {
+      level = EBehaviorLogLevel.Warning;
     }
 
     AppLogger.instance.record({
@@ -111,14 +121,23 @@ async function requestAssistantTurnWithLogging(
       purpose: requestArgs.purpose,
       success,
       durationMs: performance.now() - startedAt,
-      summary,
+      summary: `ai tool task completed stopReason=${assistantMessage.stopReason}`,
       metadata: {
-        responseChars,
-        toolCallCount,
+        responseChars: assistantResponse.length,
+        toolCallCount: toolCalls.length,
+        inputTokens: assistantMessage.usage.input,
+        outputTokens: assistantMessage.usage.output,
+        cacheReadTokens: assistantMessage.usage.cacheRead,
+        cacheWriteTokens: assistantMessage.usage.cacheWrite,
+        totalTokens: assistantMessage.usage.totalTokens,
+        totalCost: assistantMessage.usage.cost.total,
+        actualModel: assistantMessage.responseModel ?? assistantMessage.model,
+        piStopReason: assistantMessage.stopReason,
       },
+      error: sanitizeErrorMessage(assistantMessage.errorMessage),
     });
 
-    return assistantTurn;
+    return assistantMessage;
   } catch (error) {
     AppLogger.instance.record({
       trace: args.trace,
@@ -141,8 +160,18 @@ async function requestAssistantTurnWithLogging(
   }
 }
 
+function throwAssistantError(assistantMessage: AssistantMessage): never {
+  const sanitizedError = sanitizeErrorMessage(assistantMessage.errorMessage);
+
+  if (sanitizedError !== undefined && sanitizedError.length > 0) {
+    throw new Error(sanitizedError);
+  }
+
+  throw new Error("AI provider request failed");
+}
+
 function countPromptChars(args: TRequestAssistantTurnArgs): number {
-  let total = 0;
+  let total = countConversationChars(args.conversation);
 
   for (const historyItem of args.history) {
     total += historyItem.content.length;
@@ -151,12 +180,6 @@ function countPromptChars(args: TRequestAssistantTurnArgs): number {
   for (const tool of args.tools) {
     if (tool.instructions !== undefined) {
       total += tool.instructions.length;
-    }
-  }
-
-  for (const item of args.conversation) {
-    if (item.kind === EAssistantLoopConversationItemKind.UserPrompt) {
-      total += promptToText(item.prompt).length;
     }
   }
 

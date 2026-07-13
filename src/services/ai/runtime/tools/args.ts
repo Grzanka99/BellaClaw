@@ -1,27 +1,15 @@
-import type { ChatMessageToolCall } from "@openrouter/sdk/models";
 import type { ZodType } from "zod";
-import { normalizeError } from "../serialization";
+import type { TToolCall } from "../../types";
 
 export type TToolValidationResult<T> =
   | { success: true; data: T }
   | { success: false; error: string };
 
 export function parseAndValidateToolArgs<T>(
-  toolCall: ChatMessageToolCall,
+  toolCall: TToolCall,
   schema: ZodType<T>,
 ): TToolValidationResult<T> {
-  let argsJson: unknown;
-
-  try {
-    argsJson = JSON.parse(toolCall.function.arguments);
-  } catch (error) {
-    return {
-      success: false,
-      error: `Invalid JSON arguments: ${normalizeError(error)}`,
-    };
-  }
-
-  const parsed = schema.safeParse(argsJson);
+  const parsed = schema.safeParse(toolCall.arguments);
 
   if (!parsed.success) {
     return {

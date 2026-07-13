@@ -137,7 +137,6 @@ describe("SettingsIntentClassifier", () => {
       ...DefaultConfigRecord,
       [EConfigKey.AiInstructionsLanguage]: "Klingon",
       [EConfigKey.AiProvider]: "bad-provider",
-      [EConfigKey.AiProvidersOpencodeGoModelsToolCheap]: "bad-tool-cheap-model",
     };
     const capturedArgs: TToolTaskArgs[] = [];
 
@@ -175,9 +174,6 @@ describe("SettingsIntentClassifier", () => {
     }
 
     expect(args.settings[EConfigKey.AiProvider]).toBe(DefaultConfigRecord[EConfigKey.AiProvider]);
-    expect(args.settings[EConfigKey.AiProvidersOpencodeGoModelsToolCheap]).toBe(
-      DefaultConfigRecord[EConfigKey.AiProvidersOpencodeGoModelsToolCheap],
-    );
     expect(args.settings[EConfigKey.AiInstructionsLanguage]).toBe("Klingon");
     expect(args.history[0]?.content).toContain("Classify in Klingon.");
   });
