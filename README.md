@@ -73,6 +73,9 @@ The script imports the credential once into `/app-data/pi-auth.json` in the pers
 and rotated its tokens there. Delete `/app-data/pi-auth.json` from the volume only when you
 intentionally want to import `.secrets/auth.json` again.
 
+Credential seeding does not change the active provider. After startup, ask BellaClaw to switch the
+AI provider to `openai-codex`.
+
 ### Signal Setup With Podman
 
 Signal support uses `bbernhard/signal-cli-rest-api` as a linked secondary device. Linking is an operator/deployment step; BellaClaw does not link during startup. The Signal API is published on `127.0.0.1:8080` only so you can open the linking pages from the host browser without exposing the API publicly.
