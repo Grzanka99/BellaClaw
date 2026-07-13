@@ -1,10 +1,21 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, open, rename, rm } from "node:fs/promises";
-import { dirname } from "node:path";
+import { dirname, resolve } from "node:path";
 import type { Credential, CredentialStore } from "@earendil-works/pi-ai";
 import { z } from "zod";
 
-export const AI_CREDENTIALS_PATH = "/app-data/pi-auth.json";
+export const LOCAL_AI_CREDENTIALS_PATH = resolve(
+  import.meta.dir,
+  "../../../../.secrets/pi-auth.json",
+);
+let defaultAiCredentialsPath = LOCAL_AI_CREDENTIALS_PATH;
+const configuredAiCredentialsPath = Bun.env.BELLACLAW_AI_CREDENTIALS_PATH?.trim();
+
+if (configuredAiCredentialsPath !== undefined && configuredAiCredentialsPath.length > 0) {
+  defaultAiCredentialsPath = resolve(configuredAiCredentialsPath);
+}
+
+export const AI_CREDENTIALS_PATH = defaultAiCredentialsPath;
 
 const SApiKeyCredential = z.looseObject({
   type: z.literal("api_key"),

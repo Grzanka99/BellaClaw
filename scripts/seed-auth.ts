@@ -2,7 +2,10 @@ import { randomUUID } from "node:crypto";
 import { link, open, rm } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { z } from "zod";
-import { AI_CREDENTIALS_PATH } from "../src/services/ai/auth/file-credential-store";
+import {
+  AI_CREDENTIALS_PATH,
+  LOCAL_AI_CREDENTIALS_PATH,
+} from "../src/services/ai/auth/file-credential-store";
 
 const SOURCE_PATH = resolve(import.meta.dir, "../.secrets/auth.json");
 const OPENAI_CODEX_PROVIDER_ID = "openai-codex";
@@ -105,6 +108,18 @@ async function runOnHost(): Promise<void> {
 
   if (!(await sourceFile.exists())) {
     console.log(`Auth seed not found, skipping: ${SOURCE_PATH}`);
+    return;
+  }
+
+  if (Bun.argv.includes("--local")) {
+    const seeded = await seedAuthFile(await sourceFile.json(), LOCAL_AI_CREDENTIALS_PATH);
+
+    if (seeded) {
+      console.log(`Seeded local AI credentials: ${LOCAL_AI_CREDENTIALS_PATH}`);
+      return;
+    }
+
+    console.log(`Local AI credentials already exist, preserving: ${LOCAL_AI_CREDENTIALS_PATH}`);
     return;
   }
 
