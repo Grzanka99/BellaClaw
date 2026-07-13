@@ -6,9 +6,11 @@ import {
   type Provider,
   type ThinkingLevel,
 } from "@earendil-works/pi-ai";
+import { openaiCodexProvider } from "@earendil-works/pi-ai/providers/openai-codex";
 import { opencodeGoProvider } from "@earendil-works/pi-ai/providers/opencode-go";
 import { openrouterProvider } from "@earendil-works/pi-ai/providers/openrouter";
 import type { TOption } from "../../../types";
+import { FileCredentialStore } from "../auth/file-credential-store";
 import { EAiProvider, EModelPurpose } from "../types";
 import { ollamaProvider } from "./ollama";
 
@@ -24,6 +26,17 @@ type TAiProviderRegistration = {
 };
 
 const AI_PROVIDER_REGISTRY: Record<EAiProvider, TAiProviderRegistration> = {
+  [EAiProvider.OpenaiCodex]: {
+    createProvider: openaiCodexProvider,
+    modelByPurpose: {
+      [EModelPurpose.ToolCheap]: { model: "gpt-5.6-luna", effort: "low" },
+      [EModelPurpose.ToolAccurate]: { model: "gpt-5.6-luna", effort: "max" },
+      [EModelPurpose.General]: { model: "gpt-5.6-luna", effort: "high" },
+      [EModelPurpose.Chat]: { model: "gpt-5.6-luna", effort: "max" },
+      [EModelPurpose.ChatAccurate]: { model: "gpt-5.6-luna", effort: "max" },
+    },
+    getApiKey: () => undefined,
+  },
   [EAiProvider.Openrouter]: {
     createProvider: openrouterProvider,
     modelByPurpose: {
@@ -81,7 +94,7 @@ const AI_PROVIDER_REGISTRY: Record<EAiProvider, TAiProviderRegistration> = {
   },
 };
 
-export const aiModels = createModels();
+export const aiModels = createModels({ credentials: new FileCredentialStore() });
 
 for (const providerId of Object.values(EAiProvider)) {
   const registration = AI_PROVIDER_REGISTRY[providerId];

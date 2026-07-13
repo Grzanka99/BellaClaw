@@ -23,7 +23,7 @@ export const SUpdateSettingsArgs = z
     ).optional(),
     aiProvider: z
       .enum(EAiProvider)
-      .describe("Active AI provider: openrouter, ollama, or opencode-go")
+      .describe("Active AI provider: openai-codex, openrouter, ollama, or opencode-go")
       .optional(),
   })
   .strict()

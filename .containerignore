@@ -8,6 +8,8 @@ out
 tmp
 plans
 *.db
+*.log
 .env
 .env.*
+.secrets
 README.md

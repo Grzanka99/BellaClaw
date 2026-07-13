@@ -139,6 +139,7 @@ describe("AI tool definitions", () => {
     expect(readProperty(webSearchTool, "timeRange").enum).toEqual(["day", "week", "month", "year"]);
     expect(readProperty(webFetchTool, "format").enum).toEqual(["markdown", "text", "html"]);
     expect(readProperty(updateSettingsTool, "aiProvider").enum).toEqual([
+      "openai-codex",
       "openrouter",
       "ollama",
       "opencode-go",

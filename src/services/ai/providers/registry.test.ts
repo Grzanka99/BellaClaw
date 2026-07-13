@@ -32,6 +32,13 @@ describe("AI provider registry", () => {
   });
 
   test("keeps the existing purpose mappings", () => {
+    expect(getAiModelIds(EAiProvider.OpenaiCodex)).toEqual({
+      [EModelPurpose.ToolCheap]: "gpt-5.6-luna",
+      [EModelPurpose.ToolAccurate]: "gpt-5.6-luna",
+      [EModelPurpose.General]: "gpt-5.6-luna",
+      [EModelPurpose.Chat]: "gpt-5.6-luna",
+      [EModelPurpose.ChatAccurate]: "gpt-5.6-luna",
+    });
     expect(getAiModelIds(EAiProvider.Openrouter)).toEqual({
       [EModelPurpose.ToolCheap]: "openai/gpt-5.4-nano",
       [EModelPurpose.ToolAccurate]: "google/gemini-3-flash-preview",
@@ -56,6 +63,16 @@ describe("AI provider registry", () => {
   });
 
   test("pairs each model purpose with its reasoning effort", () => {
+    expect(getAiModelConfig(EAiProvider.OpenaiCodex, EModelPurpose.ToolCheap).effort).toBe("low");
+    expect(getAiModelConfig(EAiProvider.OpenaiCodex, EModelPurpose.ToolAccurate).effort).toBe(
+      "max",
+    );
+    expect(getAiModelConfig(EAiProvider.OpenaiCodex, EModelPurpose.General).effort).toBe("high");
+    expect(getAiModelConfig(EAiProvider.OpenaiCodex, EModelPurpose.Chat).effort).toBe("max");
+    expect(getAiModelConfig(EAiProvider.OpenaiCodex, EModelPurpose.ChatAccurate).effort).toBe(
+      "max",
+    );
+
     expect(getAiModelConfig(EAiProvider.Openrouter, EModelPurpose.ToolCheap).effort).toBe("low");
     expect(getAiModelConfig(EAiProvider.Openrouter, EModelPurpose.ToolAccurate).effort).toBe(
       "high",
@@ -89,6 +106,7 @@ describe("AI provider registry", () => {
 
     expect(getAiApiKey(EAiProvider.Openrouter)).toBe("openrouter-test-key");
     expect(getAiApiKey(EAiProvider.OpencodeGo)).toBe("opencode-test-key");
+    expect(getAiApiKey(EAiProvider.OpenaiCodex)).toBeUndefined();
     expect(getAiApiKey(EAiProvider.Ollama)).toBeUndefined();
 
     Bun.env.OPENROUTER_API_KEY = undefined;

@@ -51,6 +51,27 @@ podman compose up -d --build
 
 The container restarts automatically.
 
+#### OpenAI Codex Subscription With Podman
+
+To use the `openai-codex` provider, copy an authenticated Codex `auth.json` to:
+
+```text
+.secrets/auth.json
+```
+
+Then initialize or update the server through the package scripts:
+
+```bash
+bun run server:init
+# or
+bun run server:update
+```
+
+The script imports the credential once into `/app-data/pi-auth.json` in the persistent
+`bellaclaw-data` volume. It never overwrites an existing destination because Pi may have refreshed
+and rotated its tokens there. Delete `/app-data/pi-auth.json` from the volume only when you
+intentionally want to import `.secrets/auth.json` again.
+
 ### Signal Setup With Podman
 
 Signal support uses `bbernhard/signal-cli-rest-api` as a linked secondary device. Linking is an operator/deployment step; BellaClaw does not link during startup. The Signal API is published on `127.0.0.1:8080` only so you can open the linking pages from the host browser without exposing the API publicly.
@@ -103,6 +124,8 @@ bun run dev
 | `bun install` | Install dependencies |
 | `bun run start` | Start the bot |
 | `bun run dev` | Start with file-watch (auto-restart) |
+| `bun run server:init` | Build, seed optional OpenAI auth, and start the Podman services |
+| `bun run server:update` | Rebuild, preserve existing auth, and recreate the Podman services |
 | `podman compose exec bellaclaw bun run logs:turn -- <turnId>` | Show behavior events for a turn in the container |
 | `bun test` | Run all tests |
 | `bun test <file>` | Run a single test file |

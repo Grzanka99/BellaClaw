@@ -1,4 +1,5 @@
 export enum EAiProvider {
+  OpenaiCodex = "openai-codex",
   Openrouter = "openrouter",
   Ollama = "ollama",
   OpencodeGo = "opencode-go",
