@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import type { ChatMessageToolCall } from "@openrouter/sdk/models";
 import { CronSingleton } from "../../cron";
 import { resetCronEngineJobsTable } from "../../database/test-utils";
 import { DefaultConfigRecord, EConfigKey } from "../../settings/schema";
 import { LIST_CRON_JOBS_TOOL } from "../tools/list-cron-jobs/definition";
 import { SCHEDULE_RECURRING_TOOL } from "../tools/schedule-recurring/definition";
+import type { TToolCall } from "../types";
 import { executeToolCall } from "./tool-execution";
 
 type TCronSingletonStatic = {
@@ -16,14 +16,11 @@ function cleanupCronSingleton() {
   CronSingletonWithInternals._instance?.destroy();
 }
 
-function createToolCall(id: string, name: string, argumentsText: string): ChatMessageToolCall {
+function createToolCall(id: string, name: string, toolArguments: unknown): TToolCall {
   return {
     id,
-    type: "function",
-    function: {
-      name,
-      arguments: argumentsText,
-    },
+    name,
+    arguments: toolArguments,
   };
 }
 
@@ -61,21 +58,17 @@ describe("cron tool result formatting", () => {
       [EConfigKey.AiInstructionsTimezone]: ownerTimezone,
     };
     const scheduleResult = await executeToolCall({
-      toolCall: createToolCall(
-        "schedule-cron",
-        SCHEDULE_RECURRING_TOOL,
-        JSON.stringify({
-          name: "drink-water",
-          pattern: "*/5 * * * *",
-          reminderText: "Drink water.",
-        }),
-      ),
+      toolCall: createToolCall("schedule-cron", SCHEDULE_RECURRING_TOOL, {
+        name: "drink-water",
+        pattern: "*/5 * * * *",
+        reminderText: "Drink water.",
+      }),
       chatId,
       allowedToolNames: new Set([SCHEDULE_RECURRING_TOOL, LIST_CRON_JOBS_TOOL]),
       settings,
     });
     const listResult = await executeToolCall({
-      toolCall: createToolCall("list-cron", LIST_CRON_JOBS_TOOL, "{}"),
+      toolCall: createToolCall("list-cron", LIST_CRON_JOBS_TOOL, {}),
       chatId,
       allowedToolNames: new Set([SCHEDULE_RECURRING_TOOL, LIST_CRON_JOBS_TOOL]),
       settings,

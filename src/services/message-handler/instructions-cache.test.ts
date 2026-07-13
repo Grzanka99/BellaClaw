@@ -187,7 +187,7 @@ describe("MessageHandler instruction cache", () => {
     expect(runAssistantToolLoopArgs).toHaveLength(2);
     for (const args of runAssistantToolLoopArgs) {
       expect(args.tools).toHaveLength(8);
-      expect(args.tools.map((tool) => tool.definition.function.name)).toEqual([
+      expect(args.tools.map((tool) => tool.definition.name)).toEqual([
         SEARCH_MEMORY_TOOL,
         LIST_CRON_JOBS_TOOL,
         SCHEDULE_ONCE_TOOL,

@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import type { ChatMessageToolCall } from "@openrouter/sdk/models";
 import { Config } from "../../../config";
 import { ECronJobStatus, ECronJobType } from "../../../lib/cron-engine";
 import type { AsyncQueue } from "../../../utils/async-queue";
@@ -11,6 +10,7 @@ import { DefaultConfigRecord, EConfigKey } from "../../settings/schema";
 import { SCHEDULE_ONCE_TOOL } from "../tools/schedule-once/definition";
 import { SCHEDULE_RECURRING_TOOL } from "../tools/schedule-recurring/definition";
 import { UPDATE_CRON_JOB_TOOL } from "../tools/update-cron-job/definition";
+import type { TToolCall } from "../types";
 import { executeToolCall } from "./tool-execution";
 
 type TCronSingletonStatic = {
@@ -26,14 +26,11 @@ function cleanupCronSingleton() {
   CronSingletonWithInternals._instance?.destroy();
 }
 
-function createToolCall(id: string, name: string, argumentsText: string): ChatMessageToolCall {
+function createToolCall(id: string, name: string, toolArguments: unknown): TToolCall {
   return {
     id,
-    type: "function",
-    function: {
-      name,
-      arguments: argumentsText,
-    },
+    name,
+    arguments: toolArguments,
   };
 }
 
@@ -103,30 +100,22 @@ describe("update-cron-job tool execution", () => {
     const chatId = "runtime-update-recurring-user";
 
     await executeToolCall({
-      toolCall: createToolCall(
-        "schedule-cron",
-        SCHEDULE_RECURRING_TOOL,
-        JSON.stringify({
-          name: "drink-water",
-          pattern: "0 9 * * *",
-          group: "health",
-          reminderText: "Drink water.",
-        }),
-      ),
+      toolCall: createToolCall("schedule-cron", SCHEDULE_RECURRING_TOOL, {
+        name: "drink-water",
+        pattern: "0 9 * * *",
+        group: "health",
+        reminderText: "Drink water.",
+      }),
       chatId,
       allowedToolNames: new Set([SCHEDULE_RECURRING_TOOL, UPDATE_CRON_JOB_TOOL]),
       settings: DefaultConfigRecord,
     });
 
     const updateResult = await executeToolCall({
-      toolCall: createToolCall(
-        "update-cron",
-        UPDATE_CRON_JOB_TOOL,
-        JSON.stringify({
-          name: "drink-water",
-          pattern: "0 10 * * *",
-        }),
-      ),
+      toolCall: createToolCall("update-cron", UPDATE_CRON_JOB_TOOL, {
+        name: "drink-water",
+        pattern: "0 10 * * *",
+      }),
       chatId,
       allowedToolNames: new Set([SCHEDULE_RECURRING_TOOL, UPDATE_CRON_JOB_TOOL]),
       settings: DefaultConfigRecord,
@@ -158,14 +147,10 @@ describe("update-cron-job tool execution", () => {
     expect("error" in scheduled).toBe(false);
 
     const updateResult = await executeToolCall({
-      toolCall: createToolCall(
-        "update-cron-timezone",
-        UPDATE_CRON_JOB_TOOL,
-        JSON.stringify({
-          name: "timezone-reminder",
-          pattern: "0 10 * * *",
-        }),
-      ),
+      toolCall: createToolCall("update-cron-timezone", UPDATE_CRON_JOB_TOOL, {
+        name: "timezone-reminder",
+        pattern: "0 10 * * *",
+      }),
       chatId,
       allowedToolNames: new Set([UPDATE_CRON_JOB_TOOL]),
       settings: DefaultConfigRecord,
@@ -192,14 +177,10 @@ describe("update-cron-job tool execution", () => {
     await insertLegacyRecurringJob("legacy-timezone-reminder", chatId);
 
     const updateResult = await executeToolCall({
-      toolCall: createToolCall(
-        "update-legacy-timezone",
-        UPDATE_CRON_JOB_TOOL,
-        JSON.stringify({
-          name: "legacy-timezone-reminder",
-          pattern: "0 10 * * *",
-        }),
-      ),
+      toolCall: createToolCall("update-legacy-timezone", UPDATE_CRON_JOB_TOOL, {
+        name: "legacy-timezone-reminder",
+        pattern: "0 10 * * *",
+      }),
       chatId,
       allowedToolNames: new Set([UPDATE_CRON_JOB_TOOL]),
       settings,
@@ -227,14 +208,10 @@ describe("update-cron-job tool execution", () => {
     await insertLegacyOneTimeJob("legacy-onetime-timezone-reminder", chatId, fireAt);
 
     const updateResult = await executeToolCall({
-      toolCall: createToolCall(
-        "update-legacy-onetime-timezone",
-        UPDATE_CRON_JOB_TOOL,
-        JSON.stringify({
-          name: "legacy-onetime-timezone-reminder",
-          reminderText: "Updated legacy one-time reminder.",
-        }),
-      ),
+      toolCall: createToolCall("update-legacy-onetime-timezone", UPDATE_CRON_JOB_TOOL, {
+        name: "legacy-onetime-timezone-reminder",
+        reminderText: "Updated legacy one-time reminder.",
+      }),
       chatId,
       allowedToolNames: new Set([UPDATE_CRON_JOB_TOOL]),
       settings,
@@ -258,30 +235,22 @@ describe("update-cron-job tool execution", () => {
     const fireAt = new Date(Date.now() + 60_000).toISOString();
 
     await executeToolCall({
-      toolCall: createToolCall(
-        "schedule-once",
-        SCHEDULE_ONCE_TOOL,
-        JSON.stringify({
-          name: "stretch-once",
-          fireAt,
-          reminderPromptData: '{"topic":"stretching"}',
-          reminderFallbackText: "Stretch now.",
-        }),
-      ),
+      toolCall: createToolCall("schedule-once", SCHEDULE_ONCE_TOOL, {
+        name: "stretch-once",
+        fireAt,
+        reminderPromptData: '{"topic":"stretching"}',
+        reminderFallbackText: "Stretch now.",
+      }),
       chatId,
       allowedToolNames: new Set([SCHEDULE_ONCE_TOOL, UPDATE_CRON_JOB_TOOL]),
       settings: DefaultConfigRecord,
     });
 
     const updateResult = await executeToolCall({
-      toolCall: createToolCall(
-        "update-once",
-        UPDATE_CRON_JOB_TOOL,
-        JSON.stringify({
-          name: "stretch-once",
-          reminderText: "Stand up and stretch.",
-        }),
-      ),
+      toolCall: createToolCall("update-once", UPDATE_CRON_JOB_TOOL, {
+        name: "stretch-once",
+        reminderText: "Stand up and stretch.",
+      }),
       chatId,
       allowedToolNames: new Set([SCHEDULE_ONCE_TOOL, UPDATE_CRON_JOB_TOOL]),
       settings: DefaultConfigRecord,
@@ -303,29 +272,21 @@ describe("update-cron-job tool execution", () => {
     const chatId = "runtime-update-invalid-user";
 
     await executeToolCall({
-      toolCall: createToolCall(
-        "schedule-cron",
-        SCHEDULE_RECURRING_TOOL,
-        JSON.stringify({
-          name: "drink-water",
-          pattern: "0 9 * * *",
-          reminderText: "Drink water.",
-        }),
-      ),
+      toolCall: createToolCall("schedule-cron", SCHEDULE_RECURRING_TOOL, {
+        name: "drink-water",
+        pattern: "0 9 * * *",
+        reminderText: "Drink water.",
+      }),
       chatId,
       allowedToolNames: new Set([SCHEDULE_RECURRING_TOOL, UPDATE_CRON_JOB_TOOL]),
       settings: DefaultConfigRecord,
     });
 
     const updateResult = await executeToolCall({
-      toolCall: createToolCall(
-        "update-cron",
-        UPDATE_CRON_JOB_TOOL,
-        JSON.stringify({
-          name: "drink-water",
-          fireAt: new Date(Date.now() + 60_000).toISOString(),
-        }),
-      ),
+      toolCall: createToolCall("update-cron", UPDATE_CRON_JOB_TOOL, {
+        name: "drink-water",
+        fireAt: new Date(Date.now() + 60_000).toISOString(),
+      }),
       chatId,
       allowedToolNames: new Set([SCHEDULE_RECURRING_TOOL, UPDATE_CRON_JOB_TOOL]),
       settings: DefaultConfigRecord,

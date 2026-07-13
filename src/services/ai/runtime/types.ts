@@ -1,15 +1,8 @@
-import type { ChatMessageToolCall } from "@openrouter/sdk/models";
+import type { AssistantMessage, Message } from "@earendil-works/pi-ai";
 import type { TOption } from "../../../types";
 import type { TBehaviorTraceContext } from "../../app-logger";
 import type { TConfigRecord } from "../../settings/schema";
-import type { EModelPurpose, THistoryItem, TPrompt, TToolEntry } from "../types";
-
-export enum EAssistantLoopConversationItemKind {
-  UserPrompt = "user-prompt",
-  AssistantToolCalls = "assistant-tool-calls",
-  ToolResult = "tool-result",
-  AssistantReply = "assistant-reply",
-}
+import type { EModelPurpose, THistoryItem, TPrompt, TToolCall, TToolEntry } from "../types";
 
 export enum EAssistantLoopStopReason {
   FinalResponse = "final-response",
@@ -17,24 +10,14 @@ export enum EAssistantLoopStopReason {
   MaxIterations = "max-iterations",
   RepeatedToolCall = "repeated-tool-call",
   MalformedProviderResponse = "malformed-provider-response",
+  Aborted = "aborted",
+  OutputLimit = "output-limit",
 }
 
 export type TRuntimeUser = {
   username: string;
   id: string;
   displayName: string;
-};
-
-export type TLoopUserPromptItem = {
-  kind: EAssistantLoopConversationItemKind.UserPrompt;
-  prompt: TPrompt;
-};
-
-export type TLoopAssistantToolCallsItem = {
-  kind: EAssistantLoopConversationItemKind.AssistantToolCalls;
-  content: string;
-  toolCalls: ChatMessageToolCall[];
-  reasoningContent?: string;
 };
 
 export type TNormalizedToolResult = {
@@ -45,53 +28,31 @@ export type TNormalizedToolResult = {
   error: TOption<string>;
 };
 
-export type TLoopToolResultItem = {
-  kind: EAssistantLoopConversationItemKind.ToolResult;
-  result: TNormalizedToolResult;
-};
-
-export type TLoopAssistantReplyItem = {
-  kind: EAssistantLoopConversationItemKind.AssistantReply;
-  content: string;
-};
-
-export type TRuntimeConversationItem =
-  | TLoopUserPromptItem
-  | TLoopAssistantToolCallsItem
-  | TLoopToolResultItem
-  | TLoopAssistantReplyItem;
-
-export type TRuntimeAssistantTurn = {
-  response: string;
-  toolCalls: ChatMessageToolCall[];
-  reasoningContent?: string;
-};
-
 export type TAssistantToolActivity = {
   iteration: number;
   assistantResponse: string;
-  toolCalls: ChatMessageToolCall[];
+  toolCalls: TToolCall[];
   toolResults: TNormalizedToolResult[];
 };
 
 export type TRequestAssistantTurnArgs = {
-  conversation: TRuntimeConversationItem[];
+  conversation: Message[];
   history: THistoryItem[];
   user: TOption<TRuntimeUser>;
+  currentTimeContext: TOption<string>;
   tools: TToolEntry[];
   purpose: EModelPurpose;
   settings: TConfigRecord;
   trace?: TBehaviorTraceContext;
 };
 
-export type TRequestAssistantTurn = (
-  args: TRequestAssistantTurnArgs,
-) => Promise<TOption<TRuntimeAssistantTurn>>;
+export type TRequestAssistantTurn = (args: TRequestAssistantTurnArgs) => Promise<AssistantMessage>;
 
 export type TAssistantToolLoopArgs = {
   prompt: TPrompt;
   history: THistoryItem[];
   user: TRuntimeUser;
+  currentTimeContext?: string;
   tools: TToolEntry[];
   purpose: EModelPurpose;
   chatId: TOption<string>;
@@ -121,7 +82,7 @@ export type TRunToolTaskArgs = TToolTaskArgs & {
 };
 
 export type TAssistantToolLoopResult = {
-  conversation: TRuntimeConversationItem[];
+  conversation: Message[];
   toolActivity: TAssistantToolActivity[];
   finalResponse: TOption<string>;
   stopReason: EAssistantLoopStopReason;
@@ -130,6 +91,6 @@ export type TAssistantToolLoopResult = {
 
 export type TToolTaskResult = {
   assistantResponse: string;
-  toolCalls: ChatMessageToolCall[];
+  toolCalls: TToolCall[];
   toolResults: TNormalizedToolResult[];
 };

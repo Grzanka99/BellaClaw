@@ -1,4 +1,3 @@
-import type { ChatMessageToolCall } from "@openrouter/sdk/models";
 import { ECronJobType } from "../../../../../lib/cron-engine";
 import type { TOption } from "../../../../../types";
 import { CronSingleton } from "../../../../cron";
@@ -6,24 +5,25 @@ import {
   SUpdateCronJobArgs,
   type TUpdateCronJobArgs,
 } from "../../../tools/update-cron-job/handler";
-import { normalizeError } from "../../serialization";
+import type { TToolCall } from "../../../types";
 import type { TNormalizedToolResult } from "../../types";
 import { parseAndValidateToolArgs } from "../args";
 import { requireChatId } from "../context";
 import { serializeCronJobForModel } from "../cron-serialization";
-import { createFailedToolResult, createSuccessfulToolResult } from "../results";
+import {
+  createFailedToolResult,
+  createInternalToolFailure,
+  createSuccessfulToolResult,
+} from "../results";
 
 export async function executeUpdateCronJobTool(
-  toolCall: ChatMessageToolCall,
+  toolCall: TToolCall,
   chatId: TOption<string>,
 ): Promise<TNormalizedToolResult> {
   const resolvedChatId = requireChatId(toolCall, chatId);
 
   if (resolvedChatId === undefined) {
-    return createFailedToolResult(
-      toolCall,
-      `chatId is required for tool: ${toolCall.function.name}`,
-    );
+    return createFailedToolResult(toolCall, `chatId is required for tool: ${toolCall.name}`);
   }
 
   const parsed = parseAndValidateToolArgs<TUpdateCronJobArgs>(toolCall, SUpdateCronJobArgs);
@@ -79,10 +79,7 @@ export async function executeUpdateCronJobTool(
     });
 
     if ("error" in result) {
-      return createFailedToolResult(
-        toolCall,
-        `update-cron-job failed during ${result.operation}: ${normalizeError(result.error)}`,
-      );
+      return createInternalToolFailure(toolCall, result.operation, result.error);
     }
 
     return createSuccessfulToolResult(toolCall, serializeCronJobForModel(result));
@@ -108,10 +105,7 @@ export async function executeUpdateCronJobTool(
   });
 
   if ("error" in result) {
-    return createFailedToolResult(
-      toolCall,
-      `update-cron-job failed during ${result.operation}: ${normalizeError(result.error)}`,
-    );
+    return createInternalToolFailure(toolCall, result.operation, result.error);
   }
 
   return createSuccessfulToolResult(toolCall, serializeCronJobForModel(result));

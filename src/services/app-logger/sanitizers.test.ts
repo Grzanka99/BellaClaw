@@ -1,31 +1,25 @@
 import { describe, expect, test } from "bun:test";
-import type { ChatMessageToolCall } from "@openrouter/sdk/models";
+import type { TToolCall } from "../ai/types";
 import { sanitizeToolCallArguments, sanitizeToolResult } from "./sanitizers";
 
-function createToolCall(name: string, argumentsText: string): ChatMessageToolCall {
+function createToolCall(name: string, toolArguments: unknown): TToolCall {
   return {
     id: "tool-call-1",
-    type: "function",
-    function: {
-      name,
-      arguments: argumentsText,
-    },
+    name,
+    arguments: toolArguments,
   };
 }
 
 describe("app logger sanitizers", () => {
   test("summarizes cron arguments without reminder text", () => {
     const details = sanitizeToolCallArguments(
-      createToolCall(
-        "schedule-recurring",
-        JSON.stringify({
-          name: "hydration",
-          pattern: "0 9 * * *",
-          reminderText: "private reminder body",
-          reminderPromptData: "private prompt payload",
-          reminderFallbackText: "private fallback text",
-        }),
-      ),
+      createToolCall("schedule-recurring", {
+        name: "hydration",
+        pattern: "0 9 * * *",
+        reminderText: "private reminder body",
+        reminderPromptData: "private prompt payload",
+        reminderFallbackText: "private fallback text",
+      }),
     );
     const serialized = JSON.stringify(details);
 

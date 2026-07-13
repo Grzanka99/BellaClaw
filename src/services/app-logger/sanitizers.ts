@@ -1,6 +1,6 @@
-import type { ChatMessageToolCall } from "@openrouter/sdk/models";
 import type { TOption } from "../../types";
 import type { TNormalizedToolResult } from "../ai/runtime";
+import type { TToolCall } from "../ai/types";
 import type { TBehaviorMetadata } from "./types";
 
 type TSanitizedLogDetails = {
@@ -22,7 +22,29 @@ export function sanitizeErrorMessage(error: TOption<string>): TOption<string> {
     return undefined;
   }
 
-  const normalized = error.replace(/\s+/g, " ").trim();
+  let redacted = error;
+  const secrets = [Bun.env.OPENROUTER_API_KEY, Bun.env.OPENCODE_API_KEY];
+
+  for (const secret of secrets) {
+    if (secret === undefined || secret.length === 0) {
+      continue;
+    }
+
+    redacted = redacted.replaceAll(secret, "[REDACTED]");
+  }
+
+  const normalized = redacted.replace(/\s+/g, " ").trim();
+  const directHttpStatus = normalized.match(/^([1-5]\d{2})(?:\b|:)/);
+
+  if (directHttpStatus !== null) {
+    return `Provider error status=${directHttpStatus[1]}`;
+  }
+
+  const namedHttpStatus = normalized.match(/^[^:]{1,80}\(([1-5]\d{2})\):/);
+
+  if (namedHttpStatus !== null) {
+    return `Provider error status=${namedHttpStatus[1]}`;
+  }
 
   if (normalized.length <= ERROR_MAX_CHARS) {
     return normalized;
@@ -31,16 +53,16 @@ export function sanitizeErrorMessage(error: TOption<string>): TOption<string> {
   return `${normalized.slice(0, ERROR_MAX_CHARS)}...`;
 }
 
-export function sanitizeToolCallArguments(toolCall: ChatMessageToolCall): TSanitizedLogDetails {
-  const toolName = toolCall.function.name;
-  const args = parseToolArguments(toolCall.function.arguments);
+export function sanitizeToolCallArguments(toolCall: TToolCall): TSanitizedLogDetails {
+  const toolName = toolCall.name;
+  const args = toolCall.arguments;
 
   if (!isRecord(args)) {
     return {
-      summary: `${toolName} args invalidJson argumentsChars=${toolCall.function.arguments.length}`,
+      summary: `${toolName} args invalid`,
       metadata: {
         argumentsValid: false,
-        argumentsChars: toolCall.function.arguments.length,
+        argumentsKind: describeDataKind(args),
       },
     };
   }
@@ -137,14 +159,6 @@ export function sanitizeToolResultError(result: TNormalizedToolResult): TOption<
   }
 
   return sanitizeErrorMessage(result.error);
-}
-
-function parseToolArguments(argumentsText: string): unknown {
-  try {
-    return JSON.parse(argumentsText);
-  } catch {
-    return undefined;
-  }
 }
 
 function sanitizeCronToolArguments(

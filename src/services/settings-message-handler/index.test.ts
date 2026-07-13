@@ -99,7 +99,7 @@ describe("SettingsMessageHandler", () => {
       throw new Error("Expected captured runAssistantToolLoop args");
     }
 
-    const toolNames = args.tools.map((tool) => tool.definition.function.name);
+    const toolNames = args.tools.map((tool) => tool.definition.name);
 
     expect(toolNames).toHaveLength(2);
     expect(toolNames).toContain(GET_SETTINGS_TOOL);
@@ -164,7 +164,7 @@ describe("SettingsMessageHandler", () => {
       author: { type: ERole.User, id: "test-user-id", username: "TestUser" },
     });
 
-    const toolNames = capturedArgs[0]?.tools.map((tool) => tool.definition.function.name) ?? [];
+    const toolNames = capturedArgs[0]?.tools.map((tool) => tool.definition.name) ?? [];
 
     const NORMAL_TOOL_NAMES = [
       "search-memory",
@@ -189,7 +189,6 @@ describe("SettingsMessageHandler", () => {
     const storedSettings: TConfigRecord = {
       ...DefaultConfigRecord,
       [EConfigKey.AiProvider]: "openrouter",
-      [EConfigKey.AiProvidersOpenrouterModelsChatAccurate]: "bad-chat-model",
       [EConfigKey.AiInstructionsLanguage]: "Klingon",
     };
 
@@ -225,9 +224,6 @@ describe("SettingsMessageHandler", () => {
     }
 
     expect(args.settings[EConfigKey.AiProvider]).toBe(DefaultConfigRecord[EConfigKey.AiProvider]);
-    expect(args.settings[EConfigKey.AiProvidersOpenrouterModelsChatAccurate]).toBe(
-      DefaultConfigRecord[EConfigKey.AiProvidersOpenrouterModelsChatAccurate],
-    );
     expect(args.settings[EConfigKey.AiInstructionsLanguage]).toBe("Klingon");
   });
 });

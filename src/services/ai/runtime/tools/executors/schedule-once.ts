@@ -1,26 +1,26 @@
-import type { ChatMessageToolCall } from "@openrouter/sdk/models";
 import type { TOption } from "../../../../../types";
 import { CronSingleton } from "../../../../cron";
 import { SScheduleOnceArgs, type TScheduleOnceArgs } from "../../../tools/schedule-once/handler";
-import { normalizeError } from "../../serialization";
+import type { TToolCall } from "../../../types";
 import type { TNormalizedToolResult } from "../../types";
 import { parseAndValidateToolArgs } from "../args";
 import { requireChatId } from "../context";
 import { serializeCronJobForModel } from "../cron-serialization";
-import { createFailedToolResult, createSuccessfulToolResult } from "../results";
+import {
+  createFailedToolResult,
+  createInternalToolFailure,
+  createSuccessfulToolResult,
+} from "../results";
 
 export async function executeScheduleOnceTool(
-  toolCall: ChatMessageToolCall,
+  toolCall: TToolCall,
   chatId: TOption<string>,
   ownerTimezone: string,
 ): Promise<TNormalizedToolResult> {
   const resolvedChatId = requireChatId(toolCall, chatId);
 
   if (resolvedChatId === undefined) {
-    return createFailedToolResult(
-      toolCall,
-      `chatId is required for tool: ${toolCall.function.name}`,
-    );
+    return createFailedToolResult(toolCall, `chatId is required for tool: ${toolCall.name}`);
   }
 
   const parsed = parseAndValidateToolArgs<TScheduleOnceArgs>(toolCall, SScheduleOnceArgs);
@@ -42,10 +42,11 @@ export async function executeScheduleOnceTool(
   });
 
   if ("error" in result) {
-    return createFailedToolResult(
-      toolCall,
-      `schedule-once failed during ${result.operation}: ${normalizeError(result.error)}`,
-    );
+    if (result.error === "fireAt must be in the future") {
+      return createFailedToolResult(toolCall, result.error);
+    }
+
+    return createInternalToolFailure(toolCall, result.operation, result.error);
   }
 
   return createSuccessfulToolResult(toolCall, serializeCronJobForModel(result));

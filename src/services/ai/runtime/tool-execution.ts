@@ -1,4 +1,3 @@
-import type { ChatMessageToolCall } from "@openrouter/sdk/models";
 import type { TOption } from "../../../types";
 import { logger } from "../../../utils/logger";
 import { AppLogger, EBehaviorLogLevel, type TBehaviorTraceContext } from "../../app-logger";
@@ -21,6 +20,7 @@ import { UPDATE_CRON_JOB_TOOL } from "../tools/update-cron-job/definition";
 import { UPDATE_SETTINGS_TOOL } from "../tools/update-settings/definition";
 import { WEB_FETCH_TOOL } from "../tools/web-fetch/definition";
 import { WEB_SEARCH_TOOL } from "../tools/web-search/definition";
+import type { TToolCall } from "../types";
 import { executeDefineMessageImportanceTool } from "./tools/executors/define-message-importance";
 import { executeDefineSettingsIntentTool } from "./tools/executors/define-settings-intent";
 import { executeGetSettingsTool } from "./tools/executors/get-settings";
@@ -37,14 +37,14 @@ import { createFailedToolResult } from "./tools/results";
 import type { TNormalizedToolResult } from "./types";
 
 export async function executeToolCall(args: {
-  toolCall: ChatMessageToolCall;
+  toolCall: TToolCall;
   chatId: TOption<string>;
   allowedToolNames: Set<string>;
   settings: TConfigRecord;
   trace?: TBehaviorTraceContext;
 }): Promise<TNormalizedToolResult> {
   const { toolCall, chatId, allowedToolNames, settings, trace } = args;
-  const toolName = toolCall.function.name;
+  const toolName = toolCall.name;
   const ownerTimezone = settings[EConfigKey.AiInstructionsTimezone];
   const startedAt = performance.now();
 
@@ -124,7 +124,7 @@ export async function executeToolCall(args: {
   }
 }
 
-function logToolCallStarted(toolCall: ChatMessageToolCall, trace: TOption<TBehaviorTraceContext>) {
+function logToolCallStarted(toolCall: TToolCall, trace: TOption<TBehaviorTraceContext>) {
   if (trace === undefined) {
     return;
   }
@@ -135,7 +135,7 @@ function logToolCallStarted(toolCall: ChatMessageToolCall, trace: TOption<TBehav
     trace,
     event: "tool.call.started",
     component: "tool-execution",
-    toolName: toolCall.function.name,
+    toolName: toolCall.name,
     summary: details.summary,
     metadata: details.metadata,
   });

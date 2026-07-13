@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import type { ChatMessageToolCall } from "@openrouter/sdk/models";
 import { CronSingleton } from "../../cron";
 import { resetCronEngineJobsTable } from "../../database/test-utils";
 import { DefaultConfigRecord } from "../../settings/schema";
 import { DEFINE_MESSAGE_IMPORTANCE_TOOL } from "../tools/define-message-importance/definition";
 import { LIST_CRON_JOBS_TOOL } from "../tools/list-cron-jobs/definition";
 import { SCHEDULE_RECURRING_TOOL } from "../tools/schedule-recurring/definition";
+import type { TToolCall } from "../types";
 import { executeToolCall } from "./tool-execution";
 
 type TCronSingletonStatic = {
@@ -17,14 +17,11 @@ function cleanupCronSingleton() {
   CronSingletonWithInternals._instance?.destroy();
 }
 
-function createToolCall(id: string, name: string, argumentsText: string): ChatMessageToolCall {
+function createToolCall(id: string, name: string, toolArguments: unknown): TToolCall {
   return {
     id,
-    type: "function",
-    function: {
-      name,
-      arguments: argumentsText,
-    },
+    name,
+    arguments: toolArguments,
   };
 }
 
@@ -39,11 +36,10 @@ describe("executeToolCall", () => {
   });
 
   test("returns parsed data for local validation-only tools", async () => {
-    const toolCall = createToolCall(
-      "importance-call",
-      DEFINE_MESSAGE_IMPORTANCE_TOOL,
-      JSON.stringify({ importance: "high", reasoning: "contains durable context" }),
-    );
+    const toolCall = createToolCall("importance-call", DEFINE_MESSAGE_IMPORTANCE_TOOL, {
+      importance: "high",
+      reasoning: "contains durable context",
+    });
 
     const result = await executeToolCall({
       toolCall,
@@ -61,26 +57,26 @@ describe("executeToolCall", () => {
     });
   });
 
-  test("normalizes invalid JSON and unknown tool failures", async () => {
-    const invalidJson = await executeToolCall({
-      toolCall: createToolCall("bad-json", DEFINE_MESSAGE_IMPORTANCE_TOOL, "{"),
+  test("normalizes invalid arguments and unknown tool failures", async () => {
+    const invalidArguments = await executeToolCall({
+      toolCall: createToolCall("bad-arguments", DEFINE_MESSAGE_IMPORTANCE_TOOL, "invalid"),
       chatId: undefined,
       allowedToolNames: new Set([DEFINE_MESSAGE_IMPORTANCE_TOOL]),
       settings: DefaultConfigRecord,
     });
     const unknownTool = await executeToolCall({
-      toolCall: createToolCall("unknown", "unknown-tool", "{}"),
+      toolCall: createToolCall("unknown", "unknown-tool", {}),
       chatId: undefined,
       allowedToolNames: new Set([DEFINE_MESSAGE_IMPORTANCE_TOOL]),
       settings: DefaultConfigRecord,
     });
 
-    expect(invalidJson).toMatchObject({
-      toolCallId: "bad-json",
+    expect(invalidArguments).toMatchObject({
+      toolCallId: "bad-arguments",
       toolName: DEFINE_MESSAGE_IMPORTANCE_TOOL,
       success: false,
     });
-    expect(invalidJson.error).toContain("Invalid JSON arguments");
+    expect(invalidArguments.error).toContain("Arguments validation failed");
     expect(unknownTool).toEqual({
       toolCallId: "unknown",
       toolName: "unknown-tool",
@@ -92,7 +88,7 @@ describe("executeToolCall", () => {
 
   test("requires chatId for cron tools", async () => {
     const result = await executeToolCall({
-      toolCall: createToolCall("list-cron", LIST_CRON_JOBS_TOOL, "{}"),
+      toolCall: createToolCall("list-cron", LIST_CRON_JOBS_TOOL, {}),
       chatId: undefined,
       allowedToolNames: new Set([LIST_CRON_JOBS_TOOL]),
       settings: DefaultConfigRecord,
@@ -110,23 +106,19 @@ describe("executeToolCall", () => {
   test("runs real cron schedule and list tool handlers", async () => {
     const chatId = "runtime-cron-user";
     const scheduleResult = await executeToolCall({
-      toolCall: createToolCall(
-        "schedule-cron",
-        SCHEDULE_RECURRING_TOOL,
-        JSON.stringify({
-          name: "drink-water",
-          pattern: "0 9 * * *",
-          group: "health",
-          reminderPromptData: '{"topic":"hydration"}',
-          reminderFallbackText: "Drink water.",
-        }),
-      ),
+      toolCall: createToolCall("schedule-cron", SCHEDULE_RECURRING_TOOL, {
+        name: "drink-water",
+        pattern: "0 9 * * *",
+        group: "health",
+        reminderPromptData: '{"topic":"hydration"}',
+        reminderFallbackText: "Drink water.",
+      }),
       chatId,
       allowedToolNames: new Set([SCHEDULE_RECURRING_TOOL, LIST_CRON_JOBS_TOOL]),
       settings: DefaultConfigRecord,
     });
     const listResult = await executeToolCall({
-      toolCall: createToolCall("list-cron", LIST_CRON_JOBS_TOOL, "{}"),
+      toolCall: createToolCall("list-cron", LIST_CRON_JOBS_TOOL, {}),
       chatId,
       allowedToolNames: new Set([SCHEDULE_RECURRING_TOOL, LIST_CRON_JOBS_TOOL]),
       settings: DefaultConfigRecord,
@@ -158,15 +150,11 @@ describe("executeToolCall", () => {
 
   test("rejects generated reminder args without fallback text", async () => {
     const result = await executeToolCall({
-      toolCall: createToolCall(
-        "schedule-cron-invalid",
-        SCHEDULE_RECURRING_TOOL,
-        JSON.stringify({
-          name: "drink-water",
-          pattern: "0 9 * * *",
-          reminderPromptData: '{"topic":"hydration"}',
-        }),
-      ),
+      toolCall: createToolCall("schedule-cron-invalid", SCHEDULE_RECURRING_TOOL, {
+        name: "drink-water",
+        pattern: "0 9 * * *",
+        reminderPromptData: '{"topic":"hydration"}',
+      }),
       chatId: "runtime-cron-user",
       allowedToolNames: new Set([SCHEDULE_RECURRING_TOOL]),
       settings: DefaultConfigRecord,

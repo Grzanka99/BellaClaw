@@ -25,7 +25,7 @@
     Prefer the following order of filters, but you do not need to use a previous filter
     to use the next one:
     1. searchString - partial text match on message content
-    2. timeRange - filter by creation date range (start and end in ISO 8601 format)
+    2. timeRange - filter by creation date range (start and end in ISO 8601 format with explicit Z or numeric timezone offsets)
     3. limit - cap the number of results
     4. importance - filter by one or more importance levels (low, medium, high)
   </filter_priority>
@@ -34,6 +34,7 @@
     <rule>Only call this tool when the user explicitly asks about past information or when recalling context is essential</rule>
     <rule>Use searchString to narrow results when the user references a specific topic</rule>
     <rule>Use timeRange when the user mentions a specific time period</rule>
+    <rule>Always include an explicit Z or numeric timezone offset in timeRange start and end values</rule>
     <rule>Use limit to avoid overwhelming context with too many results (prefer 5-10)</rule>
     <rule>Use importance to prioritize high-value memories when the query is broad</rule>
     <rule>When no filters are needed, simply return an empty array or do not call the tool</rule>

@@ -1,21 +1,4 @@
 import { z } from "zod";
-import {
-  MODEL_OLLAMA_GLM_5,
-  MODEL_OLLAMA_MINIMAX_M2_7,
-  MODEL_OLLAMA_NEMOTRON_3_SUPER,
-} from "../ai/providers/ollama/models";
-import {
-  MODEL_OPENCODE_GO_DEEPSEEK_V4_FLASH,
-  MODEL_OPENCODE_GO_DEEPSEEK_V4_PRO,
-  MODEL_OPENCODE_GO_GLM_5_2,
-} from "../ai/providers/opencode-go/models";
-import {
-  MODEL_OPENROUTER_FREE,
-  MODEL_OPENROUTER_GEMINI_3_1_PRO_PREVIEW,
-  MODEL_OPENROUTER_GEMINI_3_FLASH_PREVIEW,
-  MODEL_OPENROUTER_GPT_5_4_MINI,
-  MODEL_OPENROUTER_GPT_5_4_NANO,
-} from "../ai/providers/openrouter/models";
 import { EAiProvider } from "../ai/types";
 
 export enum EConfigKey {
@@ -31,21 +14,6 @@ export enum EConfigKey {
   AiInstructionsMemoryRetentionLow = "ai.instructions.memoryRetention.low",
   AiInstructionsMemoryRetentionMedium = "ai.instructions.memoryRetention.medium",
   AiInstructionsMemoryRetentionHigh = "ai.instructions.memoryRetention.high",
-  AiProvidersOllamaModelsToolCheap = "ai.providers.ollama.models.toolCheap",
-  AiProvidersOllamaModelsToolAccurate = "ai.providers.ollama.models.toolAccurate",
-  AiProvidersOllamaModelsGeneral = "ai.providers.ollama.models.general",
-  AiProvidersOllamaModelsChat = "ai.providers.ollama.models.chat",
-  AiProvidersOllamaModelsChatAccurate = "ai.providers.ollama.models.chatAccurate",
-  AiProvidersOpenrouterModelsToolCheap = "ai.providers.openrouter.models.toolCheap",
-  AiProvidersOpenrouterModelsToolAccurate = "ai.providers.openrouter.models.toolAccurate",
-  AiProvidersOpenrouterModelsGeneral = "ai.providers.openrouter.models.general",
-  AiProvidersOpenrouterModelsChat = "ai.providers.openrouter.models.chat",
-  AiProvidersOpenrouterModelsChatAccurate = "ai.providers.openrouter.models.chatAccurate",
-  AiProvidersOpencodeGoModelsToolCheap = "ai.providers.opencodeGo.models.toolCheap",
-  AiProvidersOpencodeGoModelsToolAccurate = "ai.providers.opencodeGo.models.toolAccurate",
-  AiProvidersOpencodeGoModelsGeneral = "ai.providers.opencodeGo.models.general",
-  AiProvidersOpencodeGoModelsChat = "ai.providers.opencodeGo.models.chat",
-  AiProvidersOpencodeGoModelsChatAccurate = "ai.providers.opencodeGo.models.chatAccurate",
 }
 
 export type TConfigRecord = { [key in EConfigKey]: string };
@@ -65,21 +33,6 @@ export const DefaultConfigRecord: TConfigRecord = {
   [EConfigKey.AiInstructionsMemoryRetentionMedium]: "Keep for several weeks, review periodically",
   [EConfigKey.AiInstructionsMemoryRetentionHigh]:
     "Keep indefinitely, reference in future conversations",
-  [EConfigKey.AiProvidersOllamaModelsToolCheap]: MODEL_OLLAMA_NEMOTRON_3_SUPER,
-  [EConfigKey.AiProvidersOllamaModelsToolAccurate]: MODEL_OLLAMA_MINIMAX_M2_7,
-  [EConfigKey.AiProvidersOllamaModelsGeneral]: MODEL_OLLAMA_GLM_5,
-  [EConfigKey.AiProvidersOllamaModelsChat]: MODEL_OLLAMA_MINIMAX_M2_7,
-  [EConfigKey.AiProvidersOllamaModelsChatAccurate]: MODEL_OLLAMA_MINIMAX_M2_7,
-  [EConfigKey.AiProvidersOpenrouterModelsToolCheap]: MODEL_OPENROUTER_GPT_5_4_NANO,
-  [EConfigKey.AiProvidersOpenrouterModelsToolAccurate]: MODEL_OPENROUTER_GEMINI_3_FLASH_PREVIEW,
-  [EConfigKey.AiProvidersOpenrouterModelsGeneral]: MODEL_OPENROUTER_FREE,
-  [EConfigKey.AiProvidersOpenrouterModelsChat]: MODEL_OPENROUTER_GPT_5_4_MINI,
-  [EConfigKey.AiProvidersOpenrouterModelsChatAccurate]: MODEL_OPENROUTER_GEMINI_3_1_PRO_PREVIEW,
-  [EConfigKey.AiProvidersOpencodeGoModelsToolCheap]: MODEL_OPENCODE_GO_DEEPSEEK_V4_FLASH,
-  [EConfigKey.AiProvidersOpencodeGoModelsToolAccurate]: MODEL_OPENCODE_GO_GLM_5_2,
-  [EConfigKey.AiProvidersOpencodeGoModelsGeneral]: MODEL_OPENCODE_GO_DEEPSEEK_V4_PRO,
-  [EConfigKey.AiProvidersOpencodeGoModelsChat]: MODEL_OPENCODE_GO_GLM_5_2,
-  [EConfigKey.AiProvidersOpencodeGoModelsChatAccurate]: MODEL_OPENCODE_GO_GLM_5_2,
 };
 
 const SNonEmptyString = z.string().trim().min(1);
@@ -108,48 +61,11 @@ export const ConfigValidators: { [key in EConfigKey]: z.ZodType<string> } = {
   [EConfigKey.AiInstructionsMemoryRetentionLow]: SNonEmptyString,
   [EConfigKey.AiInstructionsMemoryRetentionMedium]: SNonEmptyString,
   [EConfigKey.AiInstructionsMemoryRetentionHigh]: SNonEmptyString,
-  [EConfigKey.AiProvidersOllamaModelsToolCheap]: SNonEmptyString,
-  [EConfigKey.AiProvidersOllamaModelsToolAccurate]: SNonEmptyString,
-  [EConfigKey.AiProvidersOllamaModelsGeneral]: SNonEmptyString,
-  [EConfigKey.AiProvidersOllamaModelsChat]: SNonEmptyString,
-  [EConfigKey.AiProvidersOllamaModelsChatAccurate]: SNonEmptyString,
-  [EConfigKey.AiProvidersOpenrouterModelsToolCheap]: SNonEmptyString,
-  [EConfigKey.AiProvidersOpenrouterModelsToolAccurate]: SNonEmptyString,
-  [EConfigKey.AiProvidersOpenrouterModelsGeneral]: SNonEmptyString,
-  [EConfigKey.AiProvidersOpenrouterModelsChat]: SNonEmptyString,
-  [EConfigKey.AiProvidersOpenrouterModelsChatAccurate]: SNonEmptyString,
-  [EConfigKey.AiProvidersOpencodeGoModelsToolCheap]: SNonEmptyString,
-  [EConfigKey.AiProvidersOpencodeGoModelsToolAccurate]: SNonEmptyString,
-  [EConfigKey.AiProvidersOpencodeGoModelsGeneral]: SNonEmptyString,
-  [EConfigKey.AiProvidersOpencodeGoModelsChat]: SNonEmptyString,
-  [EConfigKey.AiProvidersOpencodeGoModelsChatAccurate]: SNonEmptyString,
 };
-
-const AI_MODEL_CONFIG_KEYS: EConfigKey[] = [
-  EConfigKey.AiProvidersOllamaModelsToolCheap,
-  EConfigKey.AiProvidersOllamaModelsToolAccurate,
-  EConfigKey.AiProvidersOllamaModelsGeneral,
-  EConfigKey.AiProvidersOllamaModelsChat,
-  EConfigKey.AiProvidersOllamaModelsChatAccurate,
-  EConfigKey.AiProvidersOpenrouterModelsToolCheap,
-  EConfigKey.AiProvidersOpenrouterModelsToolAccurate,
-  EConfigKey.AiProvidersOpenrouterModelsGeneral,
-  EConfigKey.AiProvidersOpenrouterModelsChat,
-  EConfigKey.AiProvidersOpenrouterModelsChatAccurate,
-  EConfigKey.AiProvidersOpencodeGoModelsToolCheap,
-  EConfigKey.AiProvidersOpencodeGoModelsToolAccurate,
-  EConfigKey.AiProvidersOpencodeGoModelsGeneral,
-  EConfigKey.AiProvidersOpencodeGoModelsChat,
-  EConfigKey.AiProvidersOpencodeGoModelsChatAccurate,
-];
 
 export function createStableAiRuntimeSettings(settings: TConfigRecord): TConfigRecord {
   const runtimeSettings = { ...settings };
   runtimeSettings[EConfigKey.AiProvider] = DefaultConfigRecord[EConfigKey.AiProvider];
-
-  for (const key of AI_MODEL_CONFIG_KEYS) {
-    runtimeSettings[key] = DefaultConfigRecord[key];
-  }
 
   return runtimeSettings;
 }

@@ -1,16 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import type { ChatMessageToolCall } from "@openrouter/sdk/models";
 import { z } from "zod";
+import type { TToolCall } from "../../types";
 import { parseAndValidateToolArgs } from "./args";
 
-function createToolCall(argumentsText: string): ChatMessageToolCall {
+function createToolCall(toolArguments: unknown): TToolCall {
   return {
     id: "tool-call",
-    type: "function",
-    function: {
-      name: "test-tool",
-      arguments: argumentsText,
-    },
+    name: "test-tool",
+    arguments: toolArguments,
   };
 }
 
@@ -20,10 +17,7 @@ describe("parseAndValidateToolArgs", () => {
   });
 
   test("returns parsed data for valid arguments", () => {
-    const result = parseAndValidateToolArgs(
-      createToolCall(JSON.stringify({ name: "job" })),
-      schema,
-    );
+    const result = parseAndValidateToolArgs(createToolCall({ name: "job" }), schema);
 
     expect(result).toEqual({
       success: true,
@@ -31,17 +25,17 @@ describe("parseAndValidateToolArgs", () => {
     });
   });
 
-  test("returns error for invalid JSON", () => {
-    const result = parseAndValidateToolArgs(createToolCall("{"), schema);
+  test("returns error for an invalid argument type", () => {
+    const result = parseAndValidateToolArgs(createToolCall("invalid"), schema);
 
     expect(result.success).toBe(false);
     if (!result.success) {
-      expect(result.error).toContain("Invalid JSON arguments");
+      expect(result.error).toContain("Arguments validation failed");
     }
   });
 
   test("returns error for invalid arguments", () => {
-    const result = parseAndValidateToolArgs(createToolCall(JSON.stringify({ name: 123 })), schema);
+    const result = parseAndValidateToolArgs(createToolCall({ name: 123 }), schema);
 
     expect(result.success).toBe(false);
     if (!result.success) {

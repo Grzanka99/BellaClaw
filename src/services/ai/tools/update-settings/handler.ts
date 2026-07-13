@@ -1,4 +1,3 @@
-import type { ChatMessageToolCall } from "@openrouter/sdk/models";
 import { z } from "zod";
 import type { TOption } from "../../../../types";
 import { logger } from "../../../../utils/logger";
@@ -8,33 +7,35 @@ const SNonEmptyString = z.string().trim().min(1);
 
 export const SUpdateSettingsArgs = z
   .object({
-    timezone: SNonEmptyString.optional(),
-    language: SNonEmptyString.optional(),
-    assistantName: SNonEmptyString.optional(),
-    addressStyle: SNonEmptyString.optional(),
-    platform: SNonEmptyString.optional(),
-    preferredReplyLength: SNonEmptyString.optional(),
-    aiProvider: z.enum(EAiProvider).optional(),
+    timezone: SNonEmptyString.describe(
+      "Valid IANA timezone, such as Europe/Warsaw, America/New_York, or UTC",
+    ).optional(),
+    language: SNonEmptyString.describe(
+      "Conversation language for assistant replies, such as Polish or English",
+    ).optional(),
+    assistantName: SNonEmptyString.describe("The assistant's display name").optional(),
+    addressStyle: SNonEmptyString.describe("How the assistant should address the user").optional(),
+    platform: SNonEmptyString.describe(
+      "Platform context used in instructions; this does not switch the actual transport",
+    ).optional(),
+    preferredReplyLength: SNonEmptyString.describe(
+      "Preferred reply length, such as 1-3 sentences, short, or detailed",
+    ).optional(),
+    aiProvider: z
+      .enum(EAiProvider)
+      .describe("Active AI provider: openrouter, ollama, or opencode-go")
+      .optional(),
   })
   .strict()
   .refine((value) => Object.values(value).some((v) => v !== undefined), {
     message: "Provide at least one field to update",
-  });
+  })
+  .meta({ minProperties: 1 });
 
 export type TUpdateSettingsArgs = z.infer<typeof SUpdateSettingsArgs>;
 
-export function handleUpdateSettingsArgs(
-  toolCall: ChatMessageToolCall,
-): TOption<TUpdateSettingsArgs> {
-  let argsJson: unknown;
-  try {
-    argsJson = JSON.parse(toolCall.function.arguments);
-  } catch (error) {
-    logger.error(`Failed to parse update-settings arguments: ${String(error)}`);
-    return undefined;
-  }
-
-  const parsed = SUpdateSettingsArgs.safeParse(argsJson);
+export function handleUpdateSettingsArgs(args: unknown): TOption<TUpdateSettingsArgs> {
+  const parsed = SUpdateSettingsArgs.safeParse(args);
 
   if (!parsed.success) {
     logger.error(`handleUpdateSettingsArgs: Zod validation failed: ${parsed.error.message}`);

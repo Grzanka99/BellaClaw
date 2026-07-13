@@ -1,14 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import type { ChatMessageToolCall } from "@openrouter/sdk/models";
+import type { TToolCall } from "../../types";
 import { createFailedToolResult, createSuccessfulToolResult } from "./results";
 
-const toolCall: ChatMessageToolCall = {
+const toolCall: TToolCall = {
   id: "tool-call",
-  type: "function",
-  function: {
-    name: "test-tool",
-    arguments: "{}",
-  },
+  name: "test-tool",
+  arguments: {},
 };
 
 describe("tool result helpers", () => {

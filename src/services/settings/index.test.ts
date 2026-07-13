@@ -212,11 +212,12 @@ describe("SettingsService", () => {
   });
 
   describe("invalid stored rows", () => {
-    test("unknown key is ignored on read", async () => {
+    test("removed model key is ignored and preserved on read", async () => {
       const settings = SettingsService.instance;
       const ownerKey = "owner-unknown-key";
+      const removedModelKey = "ai.providers.openrouter.models.chatAccurate";
 
-      await insertOwnerRow(ownerKey, "unknown.key", "whatever");
+      await insertOwnerRow(ownerKey, removedModelKey, "old-model");
 
       const record = await settings.getAll(ownerKey);
 
@@ -225,7 +226,7 @@ describe("SettingsService", () => {
       const rows = await getOwnerRows(ownerKey);
 
       expect(rows).toHaveLength(1);
-      expect(rows.find((row) => row.key === "unknown.key")?.value).toBe("whatever");
+      expect(rows.find((row) => row.key === removedModelKey)?.value).toBe("old-model");
     });
 
     test("invalid timezone is ignored on read", async () => {

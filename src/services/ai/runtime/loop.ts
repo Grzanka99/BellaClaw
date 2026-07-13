@@ -1,20 +1,25 @@
+import type { AssistantMessage, Message } from "@earendil-works/pi-ai";
 import type { TOption } from "../../../types";
 import { AppLogger, EBehaviorLogLevel, type TBehaviorTraceContext } from "../../app-logger";
 import { resolveAiBehaviorFields } from "../../app-logger/ai";
 import { sanitizeErrorMessage } from "../../app-logger/sanitizers";
-import { ERole } from "../types";
-import { buildToolCallBatchSignature, promptToText, serializeForModel } from "./serialization";
+import { ERole, type THistoryItem, type TToolCall } from "../types";
+import {
+  buildToolCallBatchSignature,
+  countConversationChars,
+  createToolResultMessage,
+  extractAssistantText,
+  extractAssistantToolCalls,
+  promptToUserMessage,
+} from "./serialization";
 import { executeToolCall } from "./tool-execution";
 import { createFailedToolResult } from "./tools/results";
 import {
-  EAssistantLoopConversationItemKind,
   EAssistantLoopStopReason,
   type TAssistantToolLoopResult,
   type TNormalizedToolResult,
   type TRequestAssistantTurnArgs,
   type TRunAssistantToolLoopArgs,
-  type TRuntimeAssistantTurn,
-  type TRuntimeConversationItem,
 } from "./types";
 
 const DEFAULT_MAX_ITERATIONS = 4;
@@ -30,14 +35,12 @@ const TOOL_LIMIT_REACHED_ERROR =
 export async function runAssistantToolLoop(
   args: TRunAssistantToolLoopArgs,
 ): Promise<TAssistantToolLoopResult> {
-  const conversation: TRuntimeConversationItem[] = [
-    { kind: EAssistantLoopConversationItemKind.UserPrompt, prompt: args.prompt },
-  ];
-
+  const conversation: Message[] = [promptToUserMessage(args.prompt)];
   const toolActivity: TAssistantToolLoopResult["toolActivity"] = [];
   const maxIterations = args.maxIterations ?? DEFAULT_MAX_ITERATIONS;
-  const allowedToolNames = new Set(args.tools.map((tool) => tool.definition.function.name));
+  const allowedToolNames = new Set(args.tools.map((tool) => tool.definition.name));
   let lastToolCallBatchSignature: TOption<string>;
+
   const completeLoop = (result: TAssistantToolLoopResult): TAssistantToolLoopResult => {
     logAssistantLoopCompleted(args.trace, result);
     return result;
@@ -45,28 +48,54 @@ export async function runAssistantToolLoop(
 
   try {
     for (let iteration = 1; iteration <= maxIterations; iteration++) {
-      const assistantTurn = await requestAssistantTurnWithLogging(args, {
+      const assistantMessage = await requestAssistantTurnWithLogging(args, {
         conversation,
         history: args.history,
         user: args.user,
+        currentTimeContext: args.currentTimeContext,
         tools: args.tools,
         purpose: args.purpose,
         settings: args.settings,
         trace: args.trace,
       });
 
-      if (assistantTurn === undefined) {
+      conversation.push(assistantMessage);
+
+      if (assistantMessage.stopReason === "error") {
+        throwAssistantError(assistantMessage);
+      }
+
+      if (assistantMessage.stopReason === "aborted") {
         return completeLoop({
           conversation,
           toolActivity,
           finalResponse: undefined,
-          stopReason: EAssistantLoopStopReason.MalformedProviderResponse,
+          stopReason: EAssistantLoopStopReason.Aborted,
           iterations: iteration,
         });
       }
 
-      if (assistantTurn.toolCalls.length === 0) {
-        if (assistantTurn.response.trim().length === 0) {
+      const assistantResponse = extractAssistantText(assistantMessage);
+      const toolCalls = extractAssistantToolCalls(assistantMessage);
+
+      if (assistantMessage.stopReason === "length") {
+        let finalResponse: TOption<string>;
+
+        if (assistantResponse.trim().length > 0) {
+          finalResponse = assistantResponse;
+        }
+
+        return completeLoop({
+          conversation,
+          toolActivity,
+          finalResponse,
+          stopReason: EAssistantLoopStopReason.OutputLimit,
+          iterations: iteration,
+        });
+      }
+
+      if (assistantMessage.stopReason === "stop") {
+        if (assistantResponse.trim().length === 0) {
           return completeLoop({
             conversation,
             toolActivity,
@@ -76,28 +105,26 @@ export async function runAssistantToolLoop(
           });
         }
 
-        conversation.push({
-          kind: EAssistantLoopConversationItemKind.AssistantReply,
-          content: assistantTurn.response,
-        });
-
         return completeLoop({
           conversation,
           toolActivity,
-          finalResponse: assistantTurn.response,
+          finalResponse: assistantResponse,
           stopReason: EAssistantLoopStopReason.FinalResponse,
           iterations: iteration,
         });
       }
 
-      conversation.push({
-        kind: EAssistantLoopConversationItemKind.AssistantToolCalls,
-        content: assistantTurn.response,
-        toolCalls: assistantTurn.toolCalls,
-        reasoningContent: assistantTurn.reasoningContent,
-      });
+      if (toolCalls.length === 0) {
+        return completeLoop({
+          conversation,
+          toolActivity,
+          finalResponse: undefined,
+          stopReason: EAssistantLoopStopReason.MalformedProviderResponse,
+          iterations: iteration,
+        });
+      }
 
-      const toolCallBatchSignature = buildToolCallBatchSignature(assistantTurn.toolCalls);
+      const toolCallBatchSignature = buildToolCallBatchSignature(toolCalls);
 
       if (
         lastToolCallBatchSignature !== undefined &&
@@ -116,7 +143,7 @@ export async function runAssistantToolLoop(
 
       const toolResults: TNormalizedToolResult[] = [];
 
-      for (const toolCall of assistantTurn.toolCalls) {
+      for (const toolCall of toolCalls) {
         const toolResult = await executeToolCall({
           toolCall,
           chatId: args.chatId,
@@ -126,94 +153,76 @@ export async function runAssistantToolLoop(
         });
 
         toolResults.push(toolResult);
-        conversation.push({
-          kind: EAssistantLoopConversationItemKind.ToolResult,
-          result: toolResult,
-        });
+        conversation.push(createToolResultMessage(toolResult));
       }
 
       toolActivity.push({
         iteration,
-        assistantResponse: assistantTurn.response,
-        toolCalls: assistantTurn.toolCalls,
+        assistantResponse,
+        toolCalls,
         toolResults,
       });
     }
 
-    const finalHistory = [
+    const finalHistory: THistoryItem[] = [
       ...args.history,
       { role: ERole.System, content: FINAL_RESPONSE_AFTER_TOOL_LIMIT_INSTRUCTION },
     ];
 
-    const finalAssistantTurn = await requestAssistantTurnWithLogging(args, {
+    const finalAssistantMessage = await requestAssistantTurnWithLogging(args, {
       conversation,
       history: finalHistory,
       user: args.user,
+      currentTimeContext: args.currentTimeContext,
       tools: [],
       purpose: args.purpose,
       settings: args.settings,
       trace: args.trace,
     });
 
-    if (finalAssistantTurn !== undefined && finalAssistantTurn.toolCalls.length === 0) {
-      if (finalAssistantTurn.response.trim().length > 0) {
-        conversation.push({
-          kind: EAssistantLoopConversationItemKind.AssistantReply,
-          content: finalAssistantTurn.response,
-        });
+    conversation.push(finalAssistantMessage);
 
-        return completeLoop({
-          conversation,
-          toolActivity,
-          finalResponse: finalAssistantTurn.response,
-          stopReason: EAssistantLoopStopReason.MaxIterations,
-          iterations: maxIterations,
-        });
-      }
+    const finalResult = completeForcedFinalMessage({
+      assistantMessage: finalAssistantMessage,
+      conversation,
+      toolActivity,
+      iterations: maxIterations,
+      completeLoop,
+    });
+
+    if (finalResult !== undefined) {
+      return finalResult;
     }
 
-    if (finalAssistantTurn !== undefined && finalAssistantTurn.toolCalls.length > 0) {
-      conversation.push({
-        kind: EAssistantLoopConversationItemKind.AssistantToolCalls,
-        content: finalAssistantTurn.response,
-        toolCalls: finalAssistantTurn.toolCalls,
-        reasoningContent: finalAssistantTurn.reasoningContent,
-      });
+    const finalToolCalls = extractAssistantToolCalls(finalAssistantMessage);
+    appendRejectedToolResults(conversation, finalToolCalls);
 
-      for (const toolCall of finalAssistantTurn.toolCalls) {
-        conversation.push({
-          kind: EAssistantLoopConversationItemKind.ToolResult,
-          result: createFailedToolResult(toolCall, TOOL_LIMIT_REACHED_ERROR),
-        });
-      }
+    const retryFinalAssistantMessage = await requestAssistantTurnWithLogging(args, {
+      conversation,
+      history: finalHistory,
+      user: args.user,
+      currentTimeContext: args.currentTimeContext,
+      tools: [],
+      purpose: args.purpose,
+      settings: args.settings,
+      trace: args.trace,
+    });
 
-      const retryFinalAssistantTurn = await requestAssistantTurnWithLogging(args, {
-        conversation,
-        history: finalHistory,
-        user: args.user,
-        tools: [],
-        purpose: args.purpose,
-        settings: args.settings,
-        trace: args.trace,
-      });
+    conversation.push(retryFinalAssistantMessage);
 
-      if (retryFinalAssistantTurn !== undefined && retryFinalAssistantTurn.toolCalls.length === 0) {
-        if (retryFinalAssistantTurn.response.trim().length > 0) {
-          conversation.push({
-            kind: EAssistantLoopConversationItemKind.AssistantReply,
-            content: retryFinalAssistantTurn.response,
-          });
+    const retryResult = completeForcedFinalMessage({
+      assistantMessage: retryFinalAssistantMessage,
+      conversation,
+      toolActivity,
+      iterations: maxIterations,
+      completeLoop,
+    });
 
-          return completeLoop({
-            conversation,
-            toolActivity,
-            finalResponse: retryFinalAssistantTurn.response,
-            stopReason: EAssistantLoopStopReason.MaxIterations,
-            iterations: maxIterations,
-          });
-        }
-      }
+    if (retryResult !== undefined) {
+      return retryResult;
     }
+
+    appendRejectedToolResults(conversation, extractAssistantToolCalls(retryFinalAssistantMessage));
 
     return completeLoop({
       conversation,
@@ -228,10 +237,97 @@ export async function runAssistantToolLoop(
   }
 }
 
+function completeForcedFinalMessage(args: {
+  assistantMessage: AssistantMessage;
+  conversation: Message[];
+  toolActivity: TAssistantToolLoopResult["toolActivity"];
+  iterations: number;
+  completeLoop: (result: TAssistantToolLoopResult) => TAssistantToolLoopResult;
+}): TOption<TAssistantToolLoopResult> {
+  if (args.assistantMessage.stopReason === "error") {
+    throwAssistantError(args.assistantMessage);
+  }
+
+  if (args.assistantMessage.stopReason === "aborted") {
+    return args.completeLoop({
+      conversation: args.conversation,
+      toolActivity: args.toolActivity,
+      finalResponse: undefined,
+      stopReason: EAssistantLoopStopReason.Aborted,
+      iterations: args.iterations,
+    });
+  }
+
+  const assistantResponse = extractAssistantText(args.assistantMessage);
+
+  if (args.assistantMessage.stopReason === "length") {
+    let finalResponse: TOption<string>;
+
+    if (assistantResponse.trim().length > 0) {
+      finalResponse = assistantResponse;
+    }
+
+    return args.completeLoop({
+      conversation: args.conversation,
+      toolActivity: args.toolActivity,
+      finalResponse,
+      stopReason: EAssistantLoopStopReason.OutputLimit,
+      iterations: args.iterations,
+    });
+  }
+
+  if (args.assistantMessage.stopReason === "stop") {
+    const toolCalls = extractAssistantToolCalls(args.assistantMessage);
+
+    if (toolCalls.length > 0) {
+      return undefined;
+    }
+
+    if (assistantResponse.trim().length > 0) {
+      return args.completeLoop({
+        conversation: args.conversation,
+        toolActivity: args.toolActivity,
+        finalResponse: assistantResponse,
+        stopReason: EAssistantLoopStopReason.MaxIterations,
+        iterations: args.iterations,
+      });
+    }
+
+    return args.completeLoop({
+      conversation: args.conversation,
+      toolActivity: args.toolActivity,
+      finalResponse: undefined,
+      stopReason: EAssistantLoopStopReason.MaxIterations,
+      iterations: args.iterations,
+    });
+  }
+
+  const toolCalls = extractAssistantToolCalls(args.assistantMessage);
+
+  if (toolCalls.length === 0) {
+    return args.completeLoop({
+      conversation: args.conversation,
+      toolActivity: args.toolActivity,
+      finalResponse: undefined,
+      stopReason: EAssistantLoopStopReason.MalformedProviderResponse,
+      iterations: args.iterations,
+    });
+  }
+
+  return undefined;
+}
+
+function appendRejectedToolResults(conversation: Message[], toolCalls: TToolCall[]) {
+  for (const toolCall of toolCalls) {
+    const result = createFailedToolResult(toolCall, TOOL_LIMIT_REACHED_ERROR);
+    conversation.push(createToolResultMessage(result));
+  }
+}
+
 async function requestAssistantTurnWithLogging(
   args: TRunAssistantToolLoopArgs,
   requestArgs: TRequestAssistantTurnArgs,
-): Promise<TOption<TRuntimeAssistantTurn>> {
+): Promise<AssistantMessage> {
   if (args.trace === undefined) {
     return args.requestAssistantTurn(requestArgs);
   }
@@ -241,7 +337,7 @@ async function requestAssistantTurnWithLogging(
   const metadata = {
     historyCount: requestArgs.history.length,
     toolCount: requestArgs.tools.length,
-    toolNames: requestArgs.tools.map((tool) => tool.definition.function.name),
+    toolNames: requestArgs.tools.map((tool) => tool.definition.name),
     promptChars: countPromptChars(requestArgs),
   };
 
@@ -257,23 +353,23 @@ async function requestAssistantTurnWithLogging(
   });
 
   try {
-    const assistantTurn = await args.requestAssistantTurn(requestArgs);
+    const assistantMessage = await args.requestAssistantTurn(requestArgs);
+    const assistantResponse = extractAssistantText(assistantMessage);
+    const toolCalls = extractAssistantToolCalls(assistantMessage);
     let success = true;
-    let responseChars = 0;
-    let toolCallCount = 0;
-    let summary = "ai turn completed";
-
-    if (assistantTurn === undefined) {
-      success = false;
-      summary = "ai turn returned no response";
-    } else {
-      responseChars = assistantTurn.response.length;
-      toolCallCount = assistantTurn.toolCalls.length;
-    }
-
     let level = EBehaviorLogLevel.Info;
 
-    if (!success) {
+    if (assistantMessage.stopReason === "aborted") {
+      success = false;
+      level = EBehaviorLogLevel.Warning;
+    }
+
+    if (assistantMessage.stopReason === "error") {
+      success = false;
+      level = EBehaviorLogLevel.Error;
+    }
+
+    if (assistantMessage.stopReason === "length") {
       level = EBehaviorLogLevel.Warning;
     }
 
@@ -287,14 +383,16 @@ async function requestAssistantTurnWithLogging(
       purpose: requestArgs.purpose,
       success,
       durationMs: performance.now() - startedAt,
-      summary,
-      metadata: {
-        responseChars,
-        toolCallCount,
-      },
+      summary: `ai turn completed stopReason=${assistantMessage.stopReason}`,
+      metadata: createAssistantCompletionMetadata(
+        assistantMessage,
+        assistantResponse.length,
+        toolCalls.length,
+      ),
+      error: sanitizeErrorMessage(assistantMessage.errorMessage),
     });
 
-    return assistantTurn;
+    return assistantMessage;
   } catch (error) {
     AppLogger.instance.record({
       trace: args.trace,
@@ -315,6 +413,35 @@ async function requestAssistantTurnWithLogging(
     });
     throw error;
   }
+}
+
+function createAssistantCompletionMetadata(
+  assistantMessage: AssistantMessage,
+  responseChars: number,
+  toolCallCount: number,
+) {
+  return {
+    responseChars,
+    toolCallCount,
+    inputTokens: assistantMessage.usage.input,
+    outputTokens: assistantMessage.usage.output,
+    cacheReadTokens: assistantMessage.usage.cacheRead,
+    cacheWriteTokens: assistantMessage.usage.cacheWrite,
+    totalTokens: assistantMessage.usage.totalTokens,
+    totalCost: assistantMessage.usage.cost.total,
+    actualModel: assistantMessage.responseModel ?? assistantMessage.model,
+    piStopReason: assistantMessage.stopReason,
+  };
+}
+
+function throwAssistantError(assistantMessage: AssistantMessage): never {
+  const sanitizedError = sanitizeErrorMessage(assistantMessage.errorMessage);
+
+  if (sanitizedError !== undefined && sanitizedError.length > 0) {
+    throw new Error(sanitizedError);
+  }
+
+  throw new Error("AI provider request failed");
 }
 
 function logAssistantLoopCompleted(
@@ -368,37 +495,19 @@ function logAssistantLoopFailed(trace: TOption<TBehaviorTraceContext>, error: un
 }
 
 function countPromptChars(args: TRequestAssistantTurnArgs): number {
-  let total = 0;
+  let total = countConversationChars(args.conversation);
 
   for (const historyItem of args.history) {
     total += historyItem.content.length;
   }
 
+  if (args.currentTimeContext !== undefined) {
+    total += args.currentTimeContext.length;
+  }
+
   for (const tool of args.tools) {
     if (tool.instructions !== undefined) {
       total += tool.instructions.length;
-    }
-  }
-
-  for (const item of args.conversation) {
-    switch (item.kind) {
-      case EAssistantLoopConversationItemKind.UserPrompt: {
-        total += promptToText(item.prompt).length;
-        break;
-      }
-      case EAssistantLoopConversationItemKind.AssistantToolCalls: {
-        total += item.content.length;
-        total += serializeForModel(item.toolCalls).length;
-        break;
-      }
-      case EAssistantLoopConversationItemKind.ToolResult: {
-        total += serializeForModel(item.result).length;
-        break;
-      }
-      case EAssistantLoopConversationItemKind.AssistantReply: {
-        total += item.content.length;
-        break;
-      }
     }
   }
 

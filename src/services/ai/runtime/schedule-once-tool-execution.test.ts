@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import type { ChatMessageToolCall } from "@openrouter/sdk/models";
 import { ECronJobType } from "../../../lib/cron-engine";
 import { CronSingleton } from "../../cron";
 import { resetCronEngineJobsTable } from "../../database/test-utils";
 import { DefaultConfigRecord } from "../../settings/schema";
 import { LIST_CRON_JOBS_TOOL } from "../tools/list-cron-jobs/definition";
 import { SCHEDULE_ONCE_TOOL } from "../tools/schedule-once/definition";
+import type { TToolCall } from "../types";
 import { executeToolCall } from "./tool-execution";
 
 type TCronSingletonStatic = {
@@ -17,14 +17,11 @@ function cleanupCronSingleton() {
   CronSingletonWithInternals._instance?.destroy();
 }
 
-function createToolCall(id: string, name: string, argumentsText: string): ChatMessageToolCall {
+function createToolCall(id: string, name: string, toolArguments: unknown): TToolCall {
   return {
     id,
-    type: "function",
-    function: {
-      name,
-      arguments: argumentsText,
-    },
+    name,
+    arguments: toolArguments,
   };
 }
 
@@ -42,22 +39,18 @@ describe("schedule-once tool execution", () => {
     const chatId = "runtime-once-user";
     const fireAt = new Date(Date.now() + 60_000).toISOString();
     const scheduleResult = await executeToolCall({
-      toolCall: createToolCall(
-        "schedule-once",
-        SCHEDULE_ONCE_TOOL,
-        JSON.stringify({
-          name: "stretch-once",
-          fireAt,
-          group: "health",
-          reminderText: "Stretch now.",
-        }),
-      ),
+      toolCall: createToolCall("schedule-once", SCHEDULE_ONCE_TOOL, {
+        name: "stretch-once",
+        fireAt,
+        group: "health",
+        reminderText: "Stretch now.",
+      }),
       chatId,
       allowedToolNames: new Set([SCHEDULE_ONCE_TOOL, LIST_CRON_JOBS_TOOL]),
       settings: DefaultConfigRecord,
     });
     const listResult = await executeToolCall({
-      toolCall: createToolCall("list-cron", LIST_CRON_JOBS_TOOL, "{}"),
+      toolCall: createToolCall("list-cron", LIST_CRON_JOBS_TOOL, {}),
       chatId,
       allowedToolNames: new Set([SCHEDULE_ONCE_TOOL, LIST_CRON_JOBS_TOOL]),
       settings: DefaultConfigRecord,
@@ -87,15 +80,11 @@ describe("schedule-once tool execution", () => {
 
   test("rejects past one-time reminders", async () => {
     const result = await executeToolCall({
-      toolCall: createToolCall(
-        "schedule-once-past",
-        SCHEDULE_ONCE_TOOL,
-        JSON.stringify({
-          name: "past-once",
-          fireAt: new Date(Date.now() - 60_000).toISOString(),
-          reminderText: "Too late.",
-        }),
-      ),
+      toolCall: createToolCall("schedule-once-past", SCHEDULE_ONCE_TOOL, {
+        name: "past-once",
+        fireAt: new Date(Date.now() - 60_000).toISOString(),
+        reminderText: "Too late.",
+      }),
       chatId: "runtime-once-user",
       allowedToolNames: new Set([SCHEDULE_ONCE_TOOL]),
       settings: DefaultConfigRecord,

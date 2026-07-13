@@ -24,8 +24,8 @@
   },
   "type": "module",
   "dependencies": {
+    "@earendil-works/pi-ai": "0.80.6",
     "@libsql/client": "^0.17.3",
-    "@openrouter/sdk": "^0.5.1",
     "croner": "^10.0.1",
     "discord.js": "^14.25.1",
     "drizzle-orm": "^0.45.2",

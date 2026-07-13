@@ -1,7 +1,7 @@
 <instructions>
 
   <purpose>
-    Read and display the user's current effective assistant settings.
+    Read and display the user's current effective assistant settings and computed AI runtime.
     Use this whenever the user asks to view, check, or inspect any configured preference
     (timezone, language, assistant name, address style, platform, reply length, AI provider, or chat model).
   </purpose>
@@ -9,7 +9,7 @@
   <tool>
     <name>get-settings</name>
     <description>
-      Returns the full effective settings record for the current user. Takes no arguments.
+      Returns the full effective settings record and computed provider/model-purpose mapping for the current user. Takes no arguments.
       The owner is resolved automatically from the chat context — never ask the user for an owner key.
     </description>
   </tool>
@@ -22,17 +22,12 @@
   </usage_rules>
 
   <result_fields>
-    The returned record is a flat map of configuration keys to string values, including:
-    - ai.provider — active AI provider (openrouter, ollama, or opencode-go)
-    - ai.instructions.timezone — IANA timezone (e.g. Europe/Warsaw)
-    - ai.instructions.language — conversation language (e.g. Polish)
-    - ai.instructions.assistantName — the assistant's display name
-    - ai.instructions.addressStyle — how the assistant should address the user
-    - ai.instructions.platform — platform context used in assistant instructions
-    - ai.instructions.preferredReplyLength — preferred reply length
-    - ai.providers.<provider>.models.chatAccurate — the chat model used for normal assistant turns
-    - ai.providers.<provider>.models.chat — the chat model used for general chat
-    - other provider model-purpose keys (toolCheap, toolAccurate, general)
+    The result contains two objects:
+    - settings — the effective flat settings map, including ai.provider and ai.instructions.* preferences
+    - aiRuntime.provider — the active provider resolved from settings
+    - aiRuntime.models — the computed code-registry model IDs for ToolCheap, ToolAccurate, General, Chat, and ChatAccurate
+
+    Model IDs are computed runtime values. They are not stored settings and cannot be edited through settings tools.
   </result_fields>
 
   <examples>

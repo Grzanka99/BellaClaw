@@ -1,23 +1,19 @@
 import type { TOption } from "../../../types";
 import { createLogger } from "../../../utils/logger";
-import { EConfigKey, type TConfigRecord } from "../../settings/schema";
-import { OllamaAiProvider } from "../providers/ollama";
-import { OpencodeGoAiProvider } from "../providers/opencode-go";
-import { OpenrouterAiProvider } from "../providers/openrouter";
+import { sanitizeErrorMessage } from "../../app-logger/sanitizers";
+import type { TConfigRecord } from "../../settings/schema";
 import {
-  EAssistantLoopConversationItemKind,
   runAssistantToolLoop,
   runToolTask,
   type TAssistantToolLoopArgs,
   type TAssistantToolLoopResult,
-  type TRequestAssistantTurnArgs,
-  type TRuntimeAssistantTurn,
   type TRuntimeUser,
   type TToolTaskArgs,
   type TToolTaskResult,
 } from "../runtime";
-import { normalizeError } from "../runtime/serialization";
-import { EAiProvider, type EModelPurpose, ERole } from "../types";
+import { requestAssistantTurn } from "../runtime/pi-ai";
+import { extractAssistantText, normalizeError } from "../runtime/serialization";
+import { type EModelPurpose, ERole } from "../types";
 
 export type {
   TAssistantToolActivity,
@@ -53,12 +49,6 @@ export type { THistoryItem, TPrompt } from "../types";
 export { EAiProvider, EModelPurpose, ERole } from "../types";
 export type TAiUser = TRuntimeUser;
 
-type TAiProviderInstance = {
-  requestAssistantTurn: (
-    args: TRequestAssistantTurnArgs,
-  ) => Promise<TOption<TRuntimeAssistantTurn>>;
-};
-
 export class AiConnector {
   private static _instance: AiConnector;
   private logger = createLogger("AI CONNECTOR");
@@ -75,25 +65,6 @@ export class AiConnector {
     return AiConnector._instance;
   }
 
-  private selectProvider(settings: TConfigRecord): TAiProviderInstance {
-    const providerName = settings[EConfigKey.AiProvider];
-
-    switch (providerName) {
-      case EAiProvider.Ollama: {
-        return OllamaAiProvider.instance;
-      }
-      case EAiProvider.Openrouter: {
-        return OpenrouterAiProvider.instance;
-      }
-      case EAiProvider.OpencodeGo: {
-        return OpencodeGoAiProvider.instance;
-      }
-      default: {
-        throw new Error(`Unknown AI provider: ${providerName}`);
-      }
-    }
-  }
-
   public async runAssistantToolLoop(
     args: TAssistantToolLoopArgs,
   ): Promise<TAssistantToolLoopResult> {
@@ -101,18 +72,16 @@ export class AiConnector {
       return runAssistantToolLoop({ ...args, requestAssistantTurn: args.requestAssistantTurn });
     }
 
-    const provider = this.selectProvider(args.settings);
     return runAssistantToolLoop({
       ...args,
-      requestAssistantTurn: provider.requestAssistantTurn.bind(provider),
+      requestAssistantTurn,
     });
   }
 
   public async runToolTask(args: TToolTaskArgs): Promise<TToolTaskResult> {
-    const provider = this.selectProvider(args.settings);
     return runToolTask({
       ...args,
-      requestAssistantTurn: provider.requestAssistantTurn.bind(provider),
+      requestAssistantTurn,
     });
   }
 
@@ -120,37 +89,46 @@ export class AiConnector {
     settings: TConfigRecord,
     purposes: EModelPurpose[],
   ): Promise<TOption<string>> {
-    let provider: TAiProviderInstance;
-    try {
-      provider = this.selectProvider(settings);
-    } catch (error) {
-      return `Provider unavailable: ${normalizeError(error)}`;
-    }
-
     for (const purpose of purposes) {
       try {
-        const result = await provider.requestAssistantTurn({
+        const result = await requestAssistantTurn({
           conversation: [
             {
-              kind: EAssistantLoopConversationItemKind.UserPrompt,
-              prompt: {
-                role: ERole.User,
-                content: [{ type: "text", text: "Reply with ok." }],
-              },
+              role: "user",
+              content: "Reply with ok.",
+              timestamp: Date.now(),
             },
           ],
           history: [{ role: ERole.System, content: "Reply with ok." }],
           user: undefined,
+          currentTimeContext: undefined,
           tools: [],
           purpose,
           settings,
         });
 
-        if (result === undefined) {
+        if (result.stopReason === "error" || result.stopReason === "aborted") {
+          let reason: string = result.stopReason;
+          const sanitizedError = sanitizeErrorMessage(result.errorMessage);
+
+          if (sanitizedError !== undefined) {
+            reason = sanitizedError;
+          }
+
+          return `Provider failed for ${purpose}: ${reason}`;
+        }
+
+        if (extractAssistantText(result).trim().length === 0) {
           return `Provider returned no response for ${purpose}`;
         }
       } catch (error) {
-        return `Provider failed for ${purpose}: ${normalizeError(error)}`;
+        const sanitizedError = sanitizeErrorMessage(normalizeError(error));
+
+        if (sanitizedError === undefined) {
+          return `Provider failed for ${purpose}`;
+        }
+
+        return `Provider failed for ${purpose}: ${sanitizedError}`;
       }
     }
 

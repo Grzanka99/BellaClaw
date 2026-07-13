@@ -1,28 +1,28 @@
-import type { ChatMessageToolCall } from "@openrouter/sdk/models";
 import type { TOption } from "../../../../../types";
 import { CronSingleton } from "../../../../cron";
 import {
   SUnscheduleCronJobArgs,
   type TUnscheduleCronJobArgs,
 } from "../../../tools/unschedule-cron-job/handler";
-import { normalizeError } from "../../serialization";
+import type { TToolCall } from "../../../types";
 import type { TNormalizedToolResult } from "../../types";
 import { parseAndValidateToolArgs } from "../args";
 import { requireChatId } from "../context";
 import { serializeCronJobForModel } from "../cron-serialization";
-import { createFailedToolResult, createSuccessfulToolResult } from "../results";
+import {
+  createFailedToolResult,
+  createInternalToolFailure,
+  createSuccessfulToolResult,
+} from "../results";
 
 export async function executeUnscheduleCronJobTool(
-  toolCall: ChatMessageToolCall,
+  toolCall: TToolCall,
   chatId: TOption<string>,
 ): Promise<TNormalizedToolResult> {
   const resolvedChatId = requireChatId(toolCall, chatId);
 
   if (resolvedChatId === undefined) {
-    return createFailedToolResult(
-      toolCall,
-      `chatId is required for tool: ${toolCall.function.name}`,
-    );
+    return createFailedToolResult(toolCall, `chatId is required for tool: ${toolCall.name}`);
   }
 
   const parsed = parseAndValidateToolArgs<TUnscheduleCronJobArgs>(toolCall, SUnscheduleCronJobArgs);
@@ -34,10 +34,7 @@ export async function executeUnscheduleCronJobTool(
   const result = await CronSingleton.instance.cancel(parsed.data.name, resolvedChatId);
 
   if ("error" in result) {
-    return createFailedToolResult(
-      toolCall,
-      `unschedule-cron-job failed during ${result.operation}: ${normalizeError(result.error)}`,
-    );
+    return createInternalToolFailure(toolCall, result.operation, result.error);
   }
 
   return createSuccessfulToolResult(toolCall, serializeCronJobForModel(result));

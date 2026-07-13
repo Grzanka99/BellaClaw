@@ -18,7 +18,7 @@
     <rule>Use the current time context from the conversation to resolve relative times like "in 2 minutes", "tomorrow", or "tonight"</rule>
     <rule>Use the configured timezone when interpreting relative or local times: {{config.ai.instructions.timezone}}</rule>
     <rule>For relative requests, compute fireAt from the provided current local time, not from memory or guessed time</rule>
-    <rule>Convert the final scheduled time to an ISO 8601 timestamp for fireAt</rule>
+    <rule>Convert the final scheduled time to an ISO 8601 timestamp with an explicit Z or numeric timezone offset for fireAt</rule>
     <rule>If the user's requested date or time is ambiguous, ask a clarifying question before calling this tool</rule>
     <rule>Never schedule a fireAt in the past</rule>
   </datetime_rules>

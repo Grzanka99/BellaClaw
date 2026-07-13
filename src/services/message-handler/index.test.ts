@@ -107,8 +107,8 @@ describe("MessageHandler", () => {
       author: { type: ERole.User, id: "test-user-id", username: "TestUser" },
     });
 
-    const toolNames = (capturedTools as Array<{ definition: { function: { name: string } } }>).map(
-      (t) => t.definition.function.name,
+    const toolNames = (capturedTools as Array<{ definition: { name: string } }>).map(
+      (t) => t.definition.name,
     );
 
     for (const name of EXPECTED_CRON_TOOL_NAMES) {

@@ -1,14 +1,15 @@
-import type { ChatMessageToolCall } from "@openrouter/sdk/models";
 import { searchWeb } from "../../../../../lib/web";
 import { SWebSearchArgs, type TWebSearchArgs } from "../../../tools/web-search/handler";
-import { normalizeError } from "../../serialization";
+import type { TToolCall } from "../../../types";
 import type { TNormalizedToolResult } from "../../types";
 import { parseAndValidateToolArgs } from "../args";
-import { createFailedToolResult, createSuccessfulToolResult } from "../results";
+import {
+  createFailedToolResult,
+  createInternalToolFailure,
+  createSuccessfulToolResult,
+} from "../results";
 
-export async function executeWebSearchTool(
-  toolCall: ChatMessageToolCall,
-): Promise<TNormalizedToolResult> {
+export async function executeWebSearchTool(toolCall: TToolCall): Promise<TNormalizedToolResult> {
   const parsed = parseAndValidateToolArgs<TWebSearchArgs>(toolCall, SWebSearchArgs);
 
   if (!parsed.success) {
@@ -23,6 +24,6 @@ export async function executeWebSearchTool(
       results,
     });
   } catch (error) {
-    return createFailedToolResult(toolCall, normalizeError(error));
+    return createInternalToolFailure(toolCall, "request", error);
   }
 }

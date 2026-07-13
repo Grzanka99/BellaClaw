@@ -20,6 +20,7 @@
     <rule>Always confirm the exact schedule or content change with the user before calling this tool</rule>
     <rule>Use pattern only for existing recurring reminders</rule>
     <rule>Use fireAt only for existing one-time reminders</rule>
+    <rule>Provide fireAt as an ISO 8601 timestamp with an explicit Z or numeric timezone offset</rule>
     <rule>Never set fireAt in the past</rule>
     <rule>When changing generated reminder content, provide reminderPromptData and reminderFallbackText together</rule>
     <rule>When changing direct reminder content, provide reminderText only</rule>

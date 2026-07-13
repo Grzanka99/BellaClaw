@@ -1,28 +1,19 @@
 import { describe, expect, test } from "bun:test";
-import type { ChatMessageToolCall } from "@openrouter/sdk/models";
-import { ERole, type TPrompt } from "../types";
+import { fauxAssistantMessage, fauxText, fauxThinking, fauxToolCall } from "@earendil-works/pi-ai";
+import { ERole, type TPrompt, type TToolCall } from "../types";
 import {
   buildToolCallBatchSignature,
-  extractTextContent,
+  createToolResultMessage,
+  extractAssistantText,
+  extractAssistantToolCalls,
   normalizeError,
-  parseArgumentsForOllama,
   promptToText,
+  promptToUserMessage,
   serializeForModel,
 } from "./serialization";
 
-function createToolCall(id: string, name: string, argumentsText: string): ChatMessageToolCall {
-  return {
-    id,
-    type: "function",
-    function: {
-      name,
-      arguments: argumentsText,
-    },
-  };
-}
-
 describe("runtime serialization", () => {
-  test("converts prompt and provider content into text", () => {
+  test("converts prompts and extracts only assistant text blocks", () => {
     const prompt: TPrompt = {
       role: ERole.User,
       content: [
@@ -30,16 +21,81 @@ describe("runtime serialization", () => {
         { type: "text", text: "second" },
       ],
     };
+    const assistantMessage = fauxAssistantMessage([
+      fauxThinking("private thinking"),
+      fauxText("first"),
+      fauxToolCall("ignored-tool", { value: 1 }, { id: "ignored-call" }),
+      fauxText("second"),
+    ]);
 
     expect(promptToText(prompt)).toBe("first\nsecond");
-    expect(extractTextContent("plain response")).toBe("plain response");
-    expect(
-      extractTextContent([
-        { type: "text", text: "first" },
-        { type: "image", text: "ignored" },
-        { type: "text", text: "second" },
-      ]),
-    ).toBe("first\nsecond");
+    expect(promptToUserMessage(prompt)).toMatchObject({
+      role: "user",
+      content: prompt.content,
+    });
+    expect(extractAssistantText(assistantMessage)).toBe("first\nsecond");
+  });
+
+  test("preserves structured tool arguments and builds canonical batch signatures", () => {
+    const firstCall: TToolCall = {
+      id: "call-1",
+      name: "tool-a",
+      arguments: {
+        z: [3, { b: 2, a: 1 }],
+        a: true,
+      },
+    };
+    const firstBatch: TToolCall[] = [
+      firstCall,
+      { id: "call-2", name: "tool-b", arguments: { value: null } },
+    ];
+    const reorderedBatch: TToolCall[] = [
+      {
+        id: "different-id",
+        name: "tool-a",
+        arguments: {
+          a: true,
+          z: [3, { a: 1, b: 2 }],
+        },
+      },
+      { id: "another-id", name: "tool-b", arguments: { value: null } },
+    ];
+    const assistantMessage = fauxAssistantMessage(
+      fauxToolCall("tool-a", { z: [3, { b: 2, a: 1 }], a: true }, { id: "call-1" }),
+      { stopReason: "toolUse" },
+    );
+
+    expect(extractAssistantToolCalls(assistantMessage)).toEqual([firstCall]);
+    expect(buildToolCallBatchSignature(firstBatch)).toBe(
+      buildToolCallBatchSignature(reorderedBatch),
+    );
+    expect(buildToolCallBatchSignature(firstBatch)).not.toBe(
+      buildToolCallBatchSignature(reorderedBatch.toReversed()),
+    );
+  });
+
+  test("converts normalized results into Pi tool-result messages", () => {
+    const normalizedResult = {
+      toolCallId: "call-1",
+      toolName: "tool-a",
+      success: false,
+      data: undefined,
+      error: "failed safely",
+    };
+
+    const message = createToolResultMessage(normalizedResult);
+
+    expect(message).toMatchObject({
+      role: "toolResult",
+      toolCallId: "call-1",
+      toolName: "tool-a",
+      details: normalizedResult,
+      isError: true,
+    });
+    expect(message.content[0]).toMatchObject({ type: "text" });
+    expect(message.content[0]?.type === "text" && message.content[0].text).toContain(
+      '"success": false',
+    );
   });
 
   test("serializes model payloads and normalizes errors", () => {
@@ -49,19 +105,5 @@ describe("runtime serialization", () => {
     expect(serializeForModel(undefined)).toBe("undefined");
     expect(normalizeError(new Error("broken"))).toBe("broken");
     expect(normalizeError({ reason: "bad" })).toContain("bad");
-  });
-
-  test("prepares Ollama arguments and repeated-call signatures", () => {
-    const firstCall = createToolCall("call-1", "tool-a", '{"value":1}');
-    const secondCall = createToolCall("call-2", "tool-b", "not-json");
-
-    expect(parseArgumentsForOllama(firstCall.function.arguments)).toEqual({ value: 1 });
-    expect(parseArgumentsForOllama(secondCall.function.arguments)).toEqual({
-      rawArguments: "not-json",
-    });
-    expect(parseArgumentsForOllama("[]")).toEqual({ rawArguments: "[]" });
-    expect(buildToolCallBatchSignature([firstCall, secondCall])).toBe(
-      'tool-a:{"value":1}\ntool-b:not-json',
-    );
   });
 });

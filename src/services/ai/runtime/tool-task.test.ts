@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import type { ChatMessageToolCall, ToolDefinitionJson } from "@openrouter/sdk/models";
+import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai";
 import { DefaultConfigRecord } from "../../settings/schema";
 import { defineMessageImportanceTool } from "../tools/define-message-importance/definition";
-import { EModelPurpose, ERole, type TPrompt, type TToolEntry } from "../types";
+import { EModelPurpose, ERole, type TPrompt } from "../types";
 import { runToolTask } from "./tool-task";
 import type { TRunToolTaskArgs } from "./types";
 
@@ -13,26 +13,11 @@ function createPrompt(text: string): TPrompt {
   };
 }
 
-function createToolEntry(definition: ToolDefinitionJson): TToolEntry {
-  return { definition };
-}
-
-function createToolCall(id: string, name: string, argumentsText: string): ChatMessageToolCall {
-  return {
-    id,
-    type: "function",
-    function: {
-      name,
-      arguments: argumentsText,
-    },
-  };
-}
-
 function createArgs(overrides: Partial<TRunToolTaskArgs>): TRunToolTaskArgs {
   return {
     prompt: createPrompt("Classify this message."),
     history: [],
-    tools: [createToolEntry(defineMessageImportanceTool)],
+    tools: [{ definition: defineMessageImportanceTool }],
     purpose: EModelPurpose.ToolCheap,
     chatId: undefined,
     user: {
@@ -41,40 +26,44 @@ function createArgs(overrides: Partial<TRunToolTaskArgs>): TRunToolTaskArgs {
       displayName: "Misiaczek",
     },
     settings: DefaultConfigRecord,
-    requestAssistantTurn: async () => ({ response: "", toolCalls: [] }),
+    requestAssistantTurn: async () => fauxAssistantMessage(""),
     ...overrides,
   };
 }
 
 describe("runToolTask", () => {
-  test("returns normalized tool results for a valid tool call", async () => {
+  test("makes one request and returns normalized tool results", async () => {
+    let requestCount = 0;
+
     const result = await runToolTask(
       createArgs({
-        requestAssistantTurn: async () => ({
-          response: "I will classify it.",
-          toolCalls: [
-            createToolCall(
-              "importance-call",
-              "define-message-importance",
-              JSON.stringify({ importance: "high", reasoning: "contains stable preference" }),
-            ),
-          ],
-        }),
+        requestAssistantTurn: async () => {
+          requestCount += 1;
+          return fauxAssistantMessage(
+            [
+              fauxText("I will classify it."),
+              fauxToolCall(
+                "define-message-importance",
+                { importance: "high", reasoning: "contains stable preference" },
+                { id: "importance-call" },
+              ),
+            ],
+            { stopReason: "toolUse" },
+          );
+        },
       }),
     );
 
+    expect(requestCount).toBe(1);
     expect(result).toEqual({
       assistantResponse: "I will classify it.",
       toolCalls: [
         {
           id: "importance-call",
-          type: "function",
-          function: {
-            name: "define-message-importance",
-            arguments: JSON.stringify({
-              importance: "high",
-              reasoning: "contains stable preference",
-            }),
+          name: "define-message-importance",
+          arguments: {
+            importance: "high",
+            reasoning: "contains stable preference",
           },
         },
       ],
@@ -90,24 +79,79 @@ describe("runToolTask", () => {
     });
   });
 
-  test("returns normalized failures for invalid JSON tool arguments", async () => {
+  test("returns normalized failures for invalid structured tool arguments", async () => {
     const result = await runToolTask(
       createArgs({
-        requestAssistantTurn: async () => ({
-          response: "Trying tool call.",
-          toolCalls: [createToolCall("bad-json", "define-message-importance", "{")],
-        }),
+        requestAssistantTurn: async () => {
+          return fauxAssistantMessage(
+            fauxToolCall(
+              "define-message-importance",
+              { importance: 42, reasoning: "wrong type" },
+              { id: "invalid-arguments" },
+            ),
+            { stopReason: "toolUse" },
+          );
+        },
       }),
     );
 
-    expect(result.assistantResponse).toBe("Trying tool call.");
     expect(result.toolResults).toHaveLength(1);
     expect(result.toolResults[0]).toMatchObject({
-      toolCallId: "bad-json",
+      toolCallId: "invalid-arguments",
       toolName: "define-message-importance",
       success: false,
     });
-    expect(result.toolResults[0]?.error).toContain("Invalid JSON arguments");
+    expect(result.toolResults[0]?.error).toContain("Arguments validation failed");
+  });
+
+  test("never executes calls from length or stop responses", async () => {
+    for (const stopReason of ["length", "stop"] as const) {
+      const result = await runToolTask(
+        createArgs({
+          requestAssistantTurn: async () => {
+            return fauxAssistantMessage(
+              [
+                fauxText("Partial text."),
+                fauxToolCall(
+                  "define-message-importance",
+                  { importance: "high", reasoning: "must not execute" },
+                  { id: `ignored-${stopReason}` },
+                ),
+              ],
+              { stopReason },
+            );
+          },
+        }),
+      );
+
+      expect(result.assistantResponse).toBe("Partial text.");
+      expect(result.toolCalls).toHaveLength(1);
+      expect(result.toolResults).toEqual([]);
+    }
+  });
+
+  test("returns no partial response or results after abort", async () => {
+    const result = await runToolTask(
+      createArgs({
+        requestAssistantTurn: async () => {
+          return fauxAssistantMessage(
+            [
+              fauxText("Unsafe partial text."),
+              fauxToolCall(
+                "define-message-importance",
+                { importance: "high", reasoning: "must not execute" },
+                { id: "aborted-call" },
+              ),
+            ],
+            { stopReason: "aborted", errorMessage: "request aborted" },
+          );
+        },
+      }),
+    );
+
+    expect(result.assistantResponse).toBe("");
+    expect(result.toolCalls).toHaveLength(1);
+    expect(result.toolResults).toEqual([]);
   });
 
   test("works when user is undefined", async () => {
@@ -118,11 +162,7 @@ describe("runToolTask", () => {
         user: undefined,
         requestAssistantTurn: async (args) => {
           receivedUser = args.user;
-
-          return {
-            response: "No user context needed.",
-            toolCalls: [],
-          };
+          return fauxAssistantMessage("No user context needed.");
         },
       }),
     );
