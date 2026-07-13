@@ -9,7 +9,7 @@ import type {
 import { z } from "zod";
 import { EConfigKey } from "../../settings/schema";
 import { readXmlAndInjectConfig } from "../instructions/read-xml-and-inject-config";
-import { aiModels, getAiApiKey, getAiModel } from "../providers/registry";
+import { aiModels, getAiApiKey, getAiModelConfig } from "../providers/registry";
 import { EAiProvider, ERole } from "../types";
 import type { TRequestAssistantTurnArgs } from "./types";
 
@@ -94,15 +94,16 @@ export async function requestAssistantTurn(
   }
 
   const provider = parsedProvider.data;
-  const model = getAiModel(provider, args.purpose);
+  const modelConfig = getAiModelConfig(provider, args.purpose);
+  const model = modelConfig.model;
   const baseSystemText = await readXmlAndInjectConfig(BASE_SYSTEM_INSTRUCTIONS_PATH, args.settings);
   const context = buildPiContext(args, model, baseSystemText);
   const options: SimpleStreamOptions = {
     apiKey: getAiApiKey(provider),
   };
 
-  if (model.reasoning) {
-    options.reasoning = "low";
+  if (modelConfig.effort !== undefined) {
+    options.reasoning = modelConfig.effort;
   }
 
   if (args.trace !== undefined) {

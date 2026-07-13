@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { hasApi } from "@earendil-works/pi-ai";
 import { EAiProvider, EModelPurpose } from "../types";
-import { aiModels, getAiApiKey, getAiModel, getAiModelIds } from "./registry";
+import { aiModels, getAiApiKey, getAiModel, getAiModelConfig, getAiModelIds } from "./registry";
 
 const ORIGINAL_OPENROUTER_API_KEY = Bun.env.OPENROUTER_API_KEY;
 const ORIGINAL_OPENCODE_API_KEY = Bun.env.OPENCODE_API_KEY;
@@ -53,6 +53,34 @@ describe("AI provider registry", () => {
       [EModelPurpose.Chat]: "minimax-m2.7:cloud",
       [EModelPurpose.ChatAccurate]: "minimax-m2.7:cloud",
     });
+  });
+
+  test("pairs each model purpose with its reasoning effort", () => {
+    expect(getAiModelConfig(EAiProvider.Openrouter, EModelPurpose.ToolCheap).effort).toBe("low");
+    expect(getAiModelConfig(EAiProvider.Openrouter, EModelPurpose.ToolAccurate).effort).toBe(
+      "high",
+    );
+    expect(getAiModelConfig(EAiProvider.Openrouter, EModelPurpose.General).effort).toBe("medium");
+    expect(getAiModelConfig(EAiProvider.Openrouter, EModelPurpose.Chat).effort).toBe("medium");
+    expect(getAiModelConfig(EAiProvider.Openrouter, EModelPurpose.ChatAccurate).effort).toBe(
+      "medium",
+    );
+
+    expect(
+      getAiModelConfig(EAiProvider.OpencodeGo, EModelPurpose.ToolCheap).effort,
+    ).toBeUndefined();
+    expect(getAiModelConfig(EAiProvider.OpencodeGo, EModelPurpose.ToolAccurate).effort).toBe(
+      "high",
+    );
+    expect(getAiModelConfig(EAiProvider.OpencodeGo, EModelPurpose.General).effort).toBeUndefined();
+    expect(getAiModelConfig(EAiProvider.OpencodeGo, EModelPurpose.Chat).effort).toBeUndefined();
+    expect(
+      getAiModelConfig(EAiProvider.OpencodeGo, EModelPurpose.ChatAccurate).effort,
+    ).toBeUndefined();
+
+    for (const purpose of Object.values(EModelPurpose)) {
+      expect(getAiModelConfig(EAiProvider.Ollama, purpose).effort).toBeUndefined();
+    }
   });
 
   test("reads required API keys from Bun.env and rejects missing keys", () => {

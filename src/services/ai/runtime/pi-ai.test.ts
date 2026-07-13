@@ -138,7 +138,7 @@ describe("Pi AI request boundary", () => {
     );
 
     expect(capturedApiKey).toBe("test-openrouter-key");
-    expect(capturedReasoning).toBe("low");
+    expect(capturedReasoning).toBe("medium");
     expect(capturedSessionId).toBe("turn-1");
     expect(capturedSystemPrompt).toContain("lookup instructions");
     expect(result.stopReason).toBe("toolUse");

@@ -1,13 +1,25 @@
-import { type Api, createModels, type Model, type Provider } from "@earendil-works/pi-ai";
+import {
+  type Api,
+  createModels,
+  getSupportedThinkingLevels,
+  type Model,
+  type Provider,
+  type ThinkingLevel,
+} from "@earendil-works/pi-ai";
 import { opencodeGoProvider } from "@earendil-works/pi-ai/providers/opencode-go";
 import { openrouterProvider } from "@earendil-works/pi-ai/providers/openrouter";
 import type { TOption } from "../../../types";
 import { EAiProvider, EModelPurpose } from "../types";
 import { ollamaProvider } from "./ollama";
 
+type TAiModelPurposeRegistration = {
+  model: string;
+  effort?: ThinkingLevel;
+};
+
 type TAiProviderRegistration = {
   createProvider: () => Provider;
-  modelByPurpose: Record<EModelPurpose, string>;
+  modelByPurpose: Record<EModelPurpose, TAiModelPurposeRegistration>;
   getApiKey: () => TOption<string>;
 };
 
@@ -15,11 +27,17 @@ const AI_PROVIDER_REGISTRY: Record<EAiProvider, TAiProviderRegistration> = {
   [EAiProvider.Openrouter]: {
     createProvider: openrouterProvider,
     modelByPurpose: {
-      [EModelPurpose.ToolCheap]: "openai/gpt-5.4-nano",
-      [EModelPurpose.ToolAccurate]: "google/gemini-3-flash-preview",
-      [EModelPurpose.General]: "openrouter/free",
-      [EModelPurpose.Chat]: "openai/gpt-5.4-mini",
-      [EModelPurpose.ChatAccurate]: "google/gemini-3.1-pro-preview",
+      [EModelPurpose.ToolCheap]: { model: "openai/gpt-5.4-nano", effort: "low" },
+      [EModelPurpose.ToolAccurate]: {
+        model: "google/gemini-3-flash-preview",
+        effort: "high",
+      },
+      [EModelPurpose.General]: { model: "openrouter/free", effort: "medium" },
+      [EModelPurpose.Chat]: { model: "openai/gpt-5.4-mini", effort: "medium" },
+      [EModelPurpose.ChatAccurate]: {
+        model: "google/gemini-3.1-pro-preview",
+        effort: "medium",
+      },
     },
     getApiKey: () => {
       const apiKey = Bun.env.OPENROUTER_API_KEY;
@@ -34,22 +52,22 @@ const AI_PROVIDER_REGISTRY: Record<EAiProvider, TAiProviderRegistration> = {
   [EAiProvider.Ollama]: {
     createProvider: ollamaProvider,
     modelByPurpose: {
-      [EModelPurpose.ToolCheap]: "nemotron-3-super:cloud",
-      [EModelPurpose.ToolAccurate]: "minimax-m2.7:cloud",
-      [EModelPurpose.General]: "glm-5:cloud",
-      [EModelPurpose.Chat]: "minimax-m2.7:cloud",
-      [EModelPurpose.ChatAccurate]: "minimax-m2.7:cloud",
+      [EModelPurpose.ToolCheap]: { model: "nemotron-3-super:cloud" },
+      [EModelPurpose.ToolAccurate]: { model: "minimax-m2.7:cloud" },
+      [EModelPurpose.General]: { model: "glm-5:cloud" },
+      [EModelPurpose.Chat]: { model: "minimax-m2.7:cloud" },
+      [EModelPurpose.ChatAccurate]: { model: "minimax-m2.7:cloud" },
     },
     getApiKey: () => undefined,
   },
   [EAiProvider.OpencodeGo]: {
     createProvider: opencodeGoProvider,
     modelByPurpose: {
-      [EModelPurpose.ToolCheap]: "deepseek-v4-flash",
-      [EModelPurpose.ToolAccurate]: "glm-5.2",
-      [EModelPurpose.General]: "deepseek-v4-pro",
-      [EModelPurpose.Chat]: "glm-5.2",
-      [EModelPurpose.ChatAccurate]: "glm-5.2",
+      [EModelPurpose.ToolCheap]: { model: "deepseek-v4-flash" },
+      [EModelPurpose.ToolAccurate]: { model: "glm-5.2", effort: "high" },
+      [EModelPurpose.General]: { model: "deepseek-v4-pro" },
+      [EModelPurpose.Chat]: { model: "glm-5.2" },
+      [EModelPurpose.ChatAccurate]: { model: "glm-5.2" },
     },
     getApiKey: () => {
       const apiKey = Bun.env.OPENCODE_API_KEY;
@@ -70,7 +88,7 @@ for (const providerId of Object.values(EAiProvider)) {
   aiModels.setProvider(registration.createProvider());
 
   for (const purpose of Object.values(EModelPurpose)) {
-    const modelId = registration.modelByPurpose[purpose];
+    const modelId = registration.modelByPurpose[purpose].model;
     const model = aiModels.getModel(providerId, modelId);
 
     if (model === undefined) {
@@ -78,24 +96,44 @@ for (const providerId of Object.values(EAiProvider)) {
         `AI registry model not found: provider=${providerId}, purpose=${purpose}, model=${modelId}`,
       );
     }
+
+    const effort = registration.modelByPurpose[purpose].effort;
+
+    if (effort !== undefined && !getSupportedThinkingLevels(model).includes(effort)) {
+      throw new Error(
+        `AI registry effort not supported: provider=${providerId}, purpose=${purpose}, model=${modelId}, effort=${effort}`,
+      );
+    }
   }
 }
 
 export function getAiModel(provider: EAiProvider, purpose: EModelPurpose): Model<Api> {
-  const modelId = AI_PROVIDER_REGISTRY[provider].modelByPurpose[purpose];
-  const model = aiModels.getModel(provider, modelId);
+  return getAiModelConfig(provider, purpose).model;
+}
+
+export function getAiModelConfig(provider: EAiProvider, purpose: EModelPurpose) {
+  const registration = AI_PROVIDER_REGISTRY[provider].modelByPurpose[purpose];
+  const model = aiModels.getModel(provider, registration.model);
 
   if (model === undefined) {
     throw new Error(
-      `AI registry model not found: provider=${provider}, purpose=${purpose}, model=${modelId}`,
+      `AI registry model not found: provider=${provider}, purpose=${purpose}, model=${registration.model}`,
     );
   }
 
-  return model;
+  return { model, effort: registration.effort };
 }
 
 export function getAiModelIds(provider: EAiProvider): Readonly<Record<EModelPurpose, string>> {
-  return { ...AI_PROVIDER_REGISTRY[provider].modelByPurpose };
+  const modelByPurpose = AI_PROVIDER_REGISTRY[provider].modelByPurpose;
+
+  return {
+    [EModelPurpose.ToolCheap]: modelByPurpose[EModelPurpose.ToolCheap].model,
+    [EModelPurpose.ToolAccurate]: modelByPurpose[EModelPurpose.ToolAccurate].model,
+    [EModelPurpose.General]: modelByPurpose[EModelPurpose.General].model,
+    [EModelPurpose.Chat]: modelByPurpose[EModelPurpose.Chat].model,
+    [EModelPurpose.ChatAccurate]: modelByPurpose[EModelPurpose.ChatAccurate].model,
+  };
 }
 
 export function getAiApiKey(provider: EAiProvider): TOption<string> {
