@@ -23,6 +23,8 @@ export const cronEngineJobsTable = sqliteTable(
     reminderText: text("reminderText"),
     reminderPromptData: text("reminderPromptData"),
     reminderFallbackText: text("reminderFallbackText"),
+    taskPrompt: text("taskPrompt"),
+    taskFallbackText: text("taskFallbackText"),
     nextRunAt: integer("nextRunAt").notNull(),
     lastRunAt: integer("lastRunAt"),
     createdAt: integer("createdAt").notNull(),

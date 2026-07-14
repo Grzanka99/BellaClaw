@@ -20,6 +20,8 @@ function createJob(overrides: Partial<TCronJob> = {}): TCronJob {
     reminderText: undefined,
     reminderPromptData: undefined,
     reminderFallbackText: undefined,
+    taskPrompt: undefined,
+    taskFallbackText: undefined,
     timezone: undefined,
     ...overrides,
   };
@@ -51,5 +53,21 @@ describe("serializeCronJobForModel", () => {
     expect(serialized.nextRunAtLocal).toBe(
       formatLocalDateTime(job.nextRunAt, Config.ai.instructions.timezone),
     );
+  });
+
+  test("redacts stored content and identifies scheduled tasks", () => {
+    const serialized = serializeCronJobForModel(
+      createJob({
+        reminderText: "Private reminder.",
+        taskPrompt: "Private task prompt.",
+        taskFallbackText: "Private task fallback.",
+      }),
+    );
+
+    expect(serialized.contentMode).toBe("scheduled-task");
+    expect(serialized.taskPromptChars).toBe(20);
+    expect(serialized.taskFallbackTextChars).toBe(22);
+    expect(serialized).not.toHaveProperty("taskPrompt");
+    expect(serialized).not.toHaveProperty("taskFallbackText");
   });
 });

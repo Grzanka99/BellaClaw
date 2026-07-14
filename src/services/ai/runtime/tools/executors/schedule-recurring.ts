@@ -40,6 +40,8 @@ export async function executeScheduleRecurringTool(
     reminderText: parsed.data.reminderText,
     reminderPromptData: parsed.data.reminderPromptData,
     reminderFallbackText: parsed.data.reminderFallbackText,
+    taskPrompt: parsed.data.taskPrompt,
+    taskFallbackText: parsed.data.taskFallbackText,
     overwrite: parsed.data.overwrite,
     timezone: ownerTimezone,
   });

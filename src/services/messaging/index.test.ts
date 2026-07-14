@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { ECronJobType, type TCronJobContext } from "../../lib/cron-engine";
 import type { TOption } from "../../types";
+import { EAssistantLoopStopReason } from "../ai/api";
 import { ERole } from "../ai/types";
 import { CronSingleton } from "../cron";
 import { Memory } from "../memory";
@@ -18,7 +19,8 @@ type TMessagingAdapterStatic = {
 
 type TMessagingAdapterInternals = {
   ai: {
-    runToolTask: typeof import("../ai/api").AiConnector.prototype.runToolTask;
+    runToolTask?: typeof import("../ai/api").AiConnector.prototype.runToolTask;
+    runAssistantToolLoop?: typeof import("../ai/api").AiConnector.prototype.runAssistantToolLoop;
   };
   classifier: {
     classify: typeof SettingsIntentClassifier.prototype.classify;
@@ -93,6 +95,8 @@ function createCronContext(overrides: Partial<TCronJobContext> = {}): TCronJobCo
     reminderText: undefined,
     reminderPromptData: undefined,
     reminderFallbackText: "Fallback reminder.",
+    taskPrompt: undefined,
+    taskFallbackText: undefined,
     createdAt: now,
     timezone: undefined,
     ...overrides,
@@ -306,6 +310,174 @@ describe("MessagingAdapter", () => {
       importance: EMemoryImportance.Low,
       message: "[CRON REMINDER study-checkin]: Reminder text.",
     });
+  });
+
+  test("delivers scheduled task output and records task memory", async () => {
+    const adapter = MessagingAdapter.instance as unknown as TMessagingAdapterInternals;
+    const sendTextMock = mock(async (_chatId: string, _text: string) => {});
+    const saveMock = mockMemoryInstance();
+    const runAssistantToolLoopMock = mock(async () => ({
+      conversation: [],
+      toolActivity: [],
+      finalResponse: "Fresh task result.",
+      stopReason: EAssistantLoopStopReason.FinalResponse,
+      iterations: 1,
+    }));
+
+    adapter.transports.set(EMessagePlatform.Discord, {
+      platform: EMessagePlatform.Discord,
+      sendText: sendTextMock,
+    });
+    adapter.ai = {
+      runAssistantToolLoop: runAssistantToolLoopMock,
+    };
+
+    await adapter.handleCronFire(
+      createCronContext({
+        reminderFallbackText: undefined,
+        taskPrompt: "Find fresh information.",
+        taskFallbackText: "Task unavailable.",
+      }),
+    );
+
+    expect(runAssistantToolLoopMock).toHaveBeenCalledTimes(1);
+    expect(sendTextMock).toHaveBeenCalledWith("user-1", "Fresh task result.");
+    expect(saveMock).toHaveBeenCalledWith({
+      chatId: "discord:user-1",
+      author: ERole.Assistant,
+      importance: EMemoryImportance.Low,
+      message: "[CRON TASK study-checkin]: Fresh task result.",
+    });
+  });
+
+  test("delivers and records the task fallback for an unusable result", async () => {
+    const adapter = MessagingAdapter.instance as unknown as TMessagingAdapterInternals;
+    const sendTextMock = mock(async (_chatId: string, _text: string) => {});
+    const saveMock = mockMemoryInstance();
+    adapter.transports.set(EMessagePlatform.Discord, {
+      platform: EMessagePlatform.Discord,
+      sendText: sendTextMock,
+    });
+    adapter.ai = {
+      runAssistantToolLoop: mock(async () => ({
+        conversation: [],
+        toolActivity: [],
+        finalResponse: "Partial output",
+        stopReason: EAssistantLoopStopReason.OutputLimit,
+        iterations: 1,
+      })),
+    };
+
+    await adapter.handleCronFire(
+      createCronContext({
+        reminderFallbackText: undefined,
+        taskPrompt: "Find fresh information.",
+        taskFallbackText: "Task unavailable.",
+      }),
+    );
+
+    expect(sendTextMock).toHaveBeenCalledWith("user-1", "Task unavailable.");
+    expect(saveMock).toHaveBeenCalledWith({
+      chatId: "discord:user-1",
+      author: ERole.Assistant,
+      importance: EMemoryImportance.Low,
+      message: "[CRON TASK study-checkin]: Task unavailable.",
+    });
+  });
+
+  test("skips overlapping runs of the same scoped task", async () => {
+    const adapter = MessagingAdapter.instance as unknown as TMessagingAdapterInternals;
+    const sendTextMock = mock(async (_chatId: string, _text: string) => {});
+    let release: () => void = () => {};
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const runAssistantToolLoopMock = mock(async () => {
+      await pending;
+      return {
+        conversation: [],
+        toolActivity: [],
+        finalResponse: "Fresh task result.",
+        stopReason: EAssistantLoopStopReason.FinalResponse,
+        iterations: 1,
+      };
+    });
+    mockMemoryInstance();
+    adapter.transports.set(EMessagePlatform.Discord, {
+      platform: EMessagePlatform.Discord,
+      sendText: sendTextMock,
+    });
+    adapter.ai = { runAssistantToolLoop: runAssistantToolLoopMock };
+    const context = createCronContext({
+      reminderFallbackText: undefined,
+      taskPrompt: "Find fresh information.",
+      taskFallbackText: "Task unavailable.",
+    });
+
+    const first = adapter.handleCronFire(context);
+    await Promise.resolve();
+    await adapter.handleCronFire(context);
+    release();
+    await first;
+
+    expect(runAssistantToolLoopMock).toHaveBeenCalledTimes(1);
+    expect(sendTextMock).toHaveBeenCalledTimes(1);
+  });
+
+  test("releases the task overlap guard after a failed run", async () => {
+    const adapter = MessagingAdapter.instance as unknown as TMessagingAdapterInternals;
+    const sendTextMock = mock(async (_chatId: string, _text: string) => {});
+    const runAssistantToolLoopMock = mock(async () => {
+      throw new Error("provider failed");
+    });
+    mockMemoryInstance();
+    adapter.transports.set(EMessagePlatform.Discord, {
+      platform: EMessagePlatform.Discord,
+      sendText: sendTextMock,
+    });
+    adapter.ai = { runAssistantToolLoop: runAssistantToolLoopMock };
+    const context = createCronContext({
+      reminderFallbackText: undefined,
+      taskPrompt: "Find fresh information.",
+      taskFallbackText: "Task unavailable.",
+    });
+
+    await adapter.handleCronFire(context);
+    await adapter.handleCronFire(context);
+
+    expect(runAssistantToolLoopMock).toHaveBeenCalledTimes(2);
+    expect(sendTextMock).toHaveBeenCalledTimes(2);
+  });
+
+  test("does not remember task text when delivery fails", async () => {
+    const adapter = MessagingAdapter.instance as unknown as TMessagingAdapterInternals;
+    const sendTextMock = mock(async () => {
+      throw new Error("send failed");
+    });
+    const saveMock = mockMemoryInstance();
+    adapter.transports.set(EMessagePlatform.Discord, {
+      platform: EMessagePlatform.Discord,
+      sendText: sendTextMock,
+    });
+    adapter.ai = {
+      runAssistantToolLoop: mock(async () => ({
+        conversation: [],
+        toolActivity: [],
+        finalResponse: "Fresh task result.",
+        stopReason: EAssistantLoopStopReason.FinalResponse,
+        iterations: 1,
+      })),
+    };
+
+    await adapter.handleCronFire(
+      createCronContext({
+        reminderFallbackText: undefined,
+        taskPrompt: "Find fresh information.",
+        taskFallbackText: "Task unavailable.",
+      }),
+    );
+
+    expect(saveMock).toHaveBeenCalledTimes(0);
   });
 
   test("skips blank cron reminder text", async () => {

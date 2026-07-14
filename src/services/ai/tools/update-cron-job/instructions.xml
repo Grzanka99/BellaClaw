@@ -1,7 +1,7 @@
 <instructions>
 
   <purpose>
-    Update existing scheduled reminders created by schedule-once or schedule-recurring.
+    Update existing scheduled reminders or autonomous tasks created by schedule-once or schedule-recurring.
     Use this tool when the user wants to change the time, recurrence, group, or reminder content
     of a reminder that already exists.
   </purpose>
@@ -24,6 +24,8 @@
     <rule>Never set fireAt in the past</rule>
     <rule>When changing generated reminder content, provide reminderPromptData and reminderFallbackText together</rule>
     <rule>When changing direct reminder content, provide reminderText only</rule>
+    <rule>When changing autonomous task content, provide taskPrompt and taskFallbackText together</rule>
+    <rule>A supplied content mode replaces and clears the previous content mode</rule>
     <rule>Omit fields that should stay unchanged</rule>
     <rule>Inform the user of the updated next fire time after successfully updating</rule>
   </usage_rules>

@@ -11,7 +11,7 @@
     <description>
       Creates a recurring cron job identified by a unique name that fires at intervals
       defined by a 5-field cron expression. Also stores either direct reminder text or
-      LLM regeneration data with a fallback message. Returns the scheduled job details
+      wording-only regeneration data, or an autonomous web task with fallback text. Returns the scheduled job details
       including the next fire time.
     </description>
   </tool>
@@ -28,16 +28,28 @@
   </cron_patterns>
 
   <usage_rules>
-    <rule>Always confirm the schedule with the user before calling this tool</rule>
+    <rule>Always confirm the schedule and the reminder or autonomous objective with the user before calling this tool</rule>
     <rule>Choose clear, descriptive names for jobs so they can be easily referenced later</rule>
     <rule>If a job with the same name already exists, set overwrite to true only if the user explicitly agrees to replace it</rule>
     <rule>Validate that the cron pattern matches the user's intended schedule before calling</rule>
-    <rule>Always provide reminderText for direct reminders, or reminderPromptData plus reminderFallbackText for generated reminders</rule>
+    <rule>Provide exactly one mode: reminderText; reminderPromptData plus reminderFallbackText; or taskPrompt plus taskFallbackText</rule>
+    <rule>Use taskPrompt when firing-time web search or fetch is required; use reminderPromptData only for fresh wording that needs no tools</rule>
     <rule>Pass reminderPromptData as a serialized JSON string, not as a nested object</rule>
     <rule>Inform the user of the next fire time after successfully scheduling</rule>
   </usage_rules>
 
   <examples>
+    <example>
+      <context>User says: "Every morning at 8, send me a briefing on the latest AI news"</context>
+      <toolCall>
+        <name>daily-ai-news</name>
+        <pattern>0 8 * * *</pattern>
+        <taskPrompt>Find the most important AI news published since the previous morning. Summarize it with direct source links.</taskPrompt>
+        <taskFallbackText>I could not prepare today's AI news briefing.</taskFallbackText>
+      </toolCall>
+      <reasoning>The answer depends on fresh web information at firing time, so use scheduled-task mode.</reasoning>
+    </example>
+
     <example>
       <context>User says: "Przypominaj mi o paddu co poniedziałek o 9 rano"</context>
       <toolCall>

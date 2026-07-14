@@ -23,24 +23,38 @@ export const SScheduleOnceArgs = z
       .string()
       .describe("Fallback text required when reminderPromptData is provided")
       .optional(),
+    taskPrompt: z
+      .string()
+      .describe("Autonomous objective to complete with fresh web information when the job fires")
+      .optional(),
+    taskFallbackText: z
+      .string()
+      .describe("Fallback text required when taskPrompt is provided")
+      .optional(),
     overwrite: z
       .boolean()
       .describe("Replace an existing one-time job with the same name; defaults to false")
       .optional(),
   })
   .superRefine((value, ctx) => {
-    if (value.reminderText === undefined && value.reminderPromptData === undefined) {
+    const contentModeCount = [
+      value.reminderText,
+      value.reminderPromptData,
+      value.taskPrompt,
+    ].filter((field) => field !== undefined).length;
+
+    if (contentModeCount === 0) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "Provide reminderText or reminderPromptData",
+        message: "Provide reminderText, reminderPromptData, or taskPrompt",
         path: ["reminderText"],
       });
     }
 
-    if (value.reminderText !== undefined && value.reminderPromptData !== undefined) {
+    if (contentModeCount > 1) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "Provide either reminderText or reminderPromptData, not both",
+        message: "Provide only one of reminderText, reminderPromptData, or taskPrompt",
         path: ["reminderText"],
       });
     }
@@ -50,6 +64,34 @@ export const SScheduleOnceArgs = z
         code: z.ZodIssueCode.custom,
         message: "reminderFallbackText is required when reminderPromptData is set",
         path: ["reminderFallbackText"],
+      });
+    }
+
+    if (
+      value.reminderFallbackText !== undefined &&
+      value.reminderText === undefined &&
+      value.reminderPromptData === undefined
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "reminderFallbackText requires reminderText or reminderPromptData",
+        path: ["reminderFallbackText"],
+      });
+    }
+
+    if (value.taskPrompt !== undefined && value.taskFallbackText === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "taskFallbackText is required when taskPrompt is set",
+        path: ["taskFallbackText"],
+      });
+    }
+
+    if (value.taskFallbackText !== undefined && value.taskPrompt === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "taskFallbackText requires taskPrompt",
+        path: ["taskFallbackText"],
       });
     }
   });

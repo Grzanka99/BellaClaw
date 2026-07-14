@@ -19,6 +19,8 @@ describe("app logger sanitizers", () => {
         reminderText: "private reminder body",
         reminderPromptData: "private prompt payload",
         reminderFallbackText: "private fallback text",
+        taskPrompt: "private task objective",
+        taskFallbackText: "private task fallback",
       }),
     );
     const serialized = JSON.stringify(details);
@@ -30,6 +32,9 @@ describe("app logger sanitizers", () => {
     expect(serialized).not.toContain("private reminder body");
     expect(serialized).not.toContain("private prompt payload");
     expect(serialized).not.toContain("private fallback text");
+    expect(serialized).toContain("taskPromptChars");
+    expect(serialized).not.toContain("private task objective");
+    expect(serialized).not.toContain("private task fallback");
   });
 
   test("summarizes cron results without returned reminder content", () => {
@@ -47,6 +52,8 @@ describe("app logger sanitizers", () => {
         reminderText: "private reminder body",
         reminderPromptData: "private prompt payload",
         reminderFallbackText: "private fallback text",
+        taskPrompt: "private task objective",
+        taskFallbackText: "private task fallback",
       },
       error: undefined,
     });
@@ -59,6 +66,9 @@ describe("app logger sanitizers", () => {
     expect(serialized).not.toContain("private reminder body");
     expect(serialized).not.toContain("private prompt payload");
     expect(serialized).not.toContain("private fallback text");
+    expect(serialized).toContain('"contentMode":"task"');
+    expect(serialized).not.toContain("private task objective");
+    expect(serialized).not.toContain("private task fallback");
   });
 
   test("summarizes web tools without full queries, URLs, or fetched content", () => {

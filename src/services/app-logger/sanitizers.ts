@@ -177,6 +177,8 @@ function sanitizeCronToolArguments(
   const reminderText = readString(args, "reminderText");
   const reminderPromptData = readString(args, "reminderPromptData");
   const reminderFallbackText = readString(args, "reminderFallbackText");
+  const taskPrompt = readString(args, "taskPrompt");
+  const taskFallbackText = readString(args, "taskFallbackText");
 
   if (name !== undefined) {
     metadata.jobNameChars = name.length;
@@ -204,6 +206,8 @@ function sanitizeCronToolArguments(
   addLength(metadata, "reminderTextChars", reminderText);
   addLength(metadata, "reminderPromptDataChars", reminderPromptData);
   addLength(metadata, "reminderFallbackTextChars", reminderFallbackText);
+  addLength(metadata, "taskPromptChars", taskPrompt);
+  addLength(metadata, "taskFallbackTextChars", taskFallbackText);
 
   return { summary: parts.join(" "), metadata };
 }
@@ -418,6 +422,8 @@ function buildCronJobMetadata(job: Record<string, unknown>): TBehaviorMetadata {
   const reminderText = readString(job, "reminderText");
   const reminderPromptData = readString(job, "reminderPromptData");
   const reminderFallbackText = readString(job, "reminderFallbackText");
+  const taskPrompt = readString(job, "taskPrompt");
+  const taskFallbackText = readString(job, "taskFallbackText");
 
   if (name !== undefined) {
     metadata.jobNameChars = name.length;
@@ -446,6 +452,16 @@ function buildCronJobMetadata(job: Record<string, unknown>): TBehaviorMetadata {
   addLength(metadata, "reminderTextChars", reminderText);
   addLength(metadata, "reminderPromptDataChars", reminderPromptData);
   addLength(metadata, "reminderFallbackTextChars", reminderFallbackText);
+
+  if (taskPrompt !== undefined) {
+    metadata.contentMode = "task";
+  } else if (reminderPromptData !== undefined) {
+    metadata.contentMode = "generated-reminder";
+  } else if (reminderText !== undefined) {
+    metadata.contentMode = "direct-reminder";
+  }
+  addLength(metadata, "taskPromptChars", taskPrompt);
+  addLength(metadata, "taskFallbackTextChars", taskFallbackText);
 
   return metadata;
 }

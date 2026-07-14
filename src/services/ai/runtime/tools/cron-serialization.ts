@@ -19,9 +19,22 @@ function formatLocalTime(date: Date, timezone: string) {
 
 export function serializeCronJobForModel(job: TCronJob) {
   const timezone = job.timezone ?? Config.ai.instructions.timezone;
+  const { taskPrompt, taskFallbackText, ...jobData } = job;
+  let contentMode = "none";
+
+  if (taskPrompt !== undefined) {
+    contentMode = "scheduled-task";
+  } else if (job.reminderPromptData !== undefined) {
+    contentMode = "generated-reminder";
+  } else if (job.reminderText !== undefined) {
+    contentMode = "direct-reminder";
+  }
 
   return {
-    ...job,
+    ...jobData,
+    contentMode,
+    taskPromptChars: taskPrompt?.length ?? 0,
+    taskFallbackTextChars: taskFallbackText?.length ?? 0,
     timezone,
     nextRunAtLocal: formatLocalDateTime(job.nextRunAt, timezone),
     nextRunAtLocalTime: formatLocalTime(job.nextRunAt, timezone),
