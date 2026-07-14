@@ -77,10 +77,10 @@ const AI_PROVIDER_REGISTRY: Record<EAiProvider, TAiProviderRegistration> = {
     createProvider: opencodeGoProvider,
     modelByPurpose: {
       [EModelPurpose.ToolCheap]: { model: "deepseek-v4-flash" },
-      [EModelPurpose.ToolAccurate]: { model: "glm-5.2", effort: "high" },
+      [EModelPurpose.ToolAccurate]: { model: "deepseek-v4-pro", effort: "high" },
       [EModelPurpose.General]: { model: "deepseek-v4-pro" },
-      [EModelPurpose.Chat]: { model: "glm-5.2" },
-      [EModelPurpose.ChatAccurate]: { model: "glm-5.2" },
+      [EModelPurpose.Chat]: { model: "deepseek-v4-pro", effort: "high" },
+      [EModelPurpose.ChatAccurate]: { model: "deepseek-v4-pro", effort: "high" },
     },
     getApiKey: () => {
       const apiKey = Bun.env.OPENCODE_API_KEY;
