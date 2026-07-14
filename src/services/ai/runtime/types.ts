@@ -1,6 +1,7 @@
 import type { AssistantMessage, Message } from "@earendil-works/pi-ai";
 import type { TOption } from "../../../types";
 import type { TBehaviorTraceContext } from "../../app-logger";
+import type { EMessagePlatform } from "../../messaging/types";
 import type { TConfigRecord } from "../../settings/schema";
 import type { EModelPurpose, THistoryItem, TPrompt, TToolCall, TToolEntry } from "../types";
 
@@ -43,6 +44,7 @@ export type TRequestAssistantTurnArgs = {
   tools: TToolEntry[];
   purpose: EModelPurpose;
   settings: TConfigRecord;
+  platform?: EMessagePlatform;
   trace?: TBehaviorTraceContext;
 };
 
@@ -57,6 +59,7 @@ export type TAssistantToolLoopArgs = {
   purpose: EModelPurpose;
   chatId: TOption<string>;
   settings: TConfigRecord;
+  platform?: EMessagePlatform;
   trace?: TBehaviorTraceContext;
   maxIterations?: number;
   requestAssistantTurn?: TRequestAssistantTurn;
@@ -74,6 +77,7 @@ export type TToolTaskArgs = {
   chatId: TOption<string>;
   user: TOption<TRuntimeUser>;
   settings: TConfigRecord;
+  platform?: EMessagePlatform;
   trace?: TBehaviorTraceContext;
 };
 

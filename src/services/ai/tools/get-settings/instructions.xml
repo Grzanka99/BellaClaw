@@ -3,7 +3,7 @@
   <purpose>
     Read and display the user's current effective assistant settings and computed AI runtime.
     Use this whenever the user asks to view, check, or inspect any configured preference
-    (timezone, language, assistant name, address style, platform, reply length, AI provider, or chat model).
+    (timezone, language, assistant name, address style, reply length, AI provider, or chat model).
   </purpose>
 
   <tool>

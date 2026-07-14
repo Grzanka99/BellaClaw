@@ -158,6 +158,7 @@ describe("SignalClient", () => {
         message: "hello",
         number: "+100",
         recipients: ["+200"],
+        text_mode: "styled",
       }),
     });
   });

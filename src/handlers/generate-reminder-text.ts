@@ -3,6 +3,8 @@ import type { TCronJobContext } from "../lib/cron-engine";
 import type { AiConnector } from "../services/ai/api";
 import { EModelPurpose, ERole, type THistoryItem, type TPrompt } from "../services/ai/types";
 import type { TBehaviorTraceContext } from "../services/app-logger";
+import { parseCanonicalChatKey } from "../services/messaging/chat-key";
+import type { EMessagePlatform } from "../services/messaging/types";
 import { SettingsService } from "../services/settings";
 import { DefaultConfigRecord, EConfigKey, type TConfigRecord } from "../services/settings/schema";
 import type { TOption } from "../types";
@@ -36,8 +38,14 @@ export async function generateReminderText(
 
   let timezone: TOption<string> = ctx.timezone;
   let settings: TConfigRecord = DefaultConfigRecord;
+  let platform: TOption<EMessagePlatform>;
 
   if (ctx.scope !== undefined) {
+    const parsedScope = parseCanonicalChatKey(ctx.scope);
+    if (parsedScope !== undefined) {
+      platform = parsedScope.platform;
+    }
+
     try {
       const loaded = await SettingsService.instance.getAll(ctx.scope);
       settings = loaded;
@@ -89,6 +97,7 @@ export async function generateReminderText(
       chatId: undefined,
       user: undefined,
       settings,
+      platform,
       trace,
     });
 

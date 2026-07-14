@@ -7,6 +7,7 @@ import type {
   SimpleStreamOptions,
 } from "@earendil-works/pi-ai";
 import { z } from "zod";
+import { EMessagePlatform } from "../../messaging/types";
 import { EConfigKey } from "../../settings/schema";
 import { readXmlAndInjectConfig } from "../instructions/read-xml-and-inject-config";
 import { aiModels, getAiApiKey, getAiModelConfig } from "../providers/registry";
@@ -67,6 +68,14 @@ export function buildPiContext(
 
   if (args.currentTimeContext !== undefined) {
     systemParts.push(args.currentTimeContext);
+  }
+
+  if (args.platform === EMessagePlatform.Signal) {
+    systemParts.push(
+      "You are replying through Signal. Use only Signal styled-text syntax: *italic*, **bold**, `monospace`, ~strikethrough~, and ||spoiler||. Use bold for short labels and conclusions, italic for light emphasis, monospace for commands, paths, IDs, and code, strikethrough only for superseded text, and spoilers only when concealment is needed. Use short paragraphs and simple lists. Never use headings, tables, blockquotes, embeds, or Discord mentions.",
+    );
+  } else if (args.platform === EMessagePlatform.Discord) {
+    systemParts.push("You are replying through Discord direct messages.");
   }
 
   for (const tool of args.tools) {

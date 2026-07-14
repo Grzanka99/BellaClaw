@@ -181,31 +181,18 @@ describe("settings tools execution", () => {
       expect(data.settings[EConfigKey.AiInstructionsAssistantName]).toBe("Bella");
     });
 
-    test("updates platform and persists to EConfigKey.AiInstructionsPlatform", async () => {
-      const chatId = "settings-update-platform";
-
+    test("rejects platform because transport is selected at runtime", async () => {
       const result = await executeToolCall({
         toolCall: createToolCall("update-platform", UPDATE_SETTINGS_TOOL, {
           platform: "Signal messages",
         }),
-        chatId,
+        chatId: "settings-update-platform",
         allowedToolNames: new Set([UPDATE_SETTINGS_TOOL]),
         settings: DefaultConfigRecord,
       });
 
-      expect(result.success).toBe(true);
-
-      const data = result.data as {
-        settings: TConfigRecord;
-      };
-
-      expect(data.settings[EConfigKey.AiInstructionsPlatform]).toBe("Signal messages");
-
-      const readBack = await SettingsService.instance.get(
-        chatId,
-        EConfigKey.AiInstructionsPlatform,
-      );
-      expect(readBack).toBe("Signal messages");
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Unrecognized key");
     });
 
     test("rejects empty args with at least-one-field requirement", async () => {

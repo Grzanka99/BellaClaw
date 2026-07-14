@@ -97,13 +97,13 @@ export class MessagingAdapter {
           `handleInboundMessage: settings-intent classifier returned no result; falling back to normal handler for platform ${message.platform}, raw chat ${message.chatId}, canonical chat ${canonicalChatId}, author ${message.author.id}, message type ${message.message.type}, content length ${message.message.content.length}`,
         );
         const handler = MessageHandler.getInstance(canonicalChatId);
-        reply = await handler.handleMessage(incomingMessage);
+        reply = await handler.handleMessage(incomingMessage, message.platform);
       } else if (intent.intent === "settings") {
         const handler = SettingsMessageHandler.getInstance(canonicalChatId);
-        reply = await handler.handleMessage(incomingMessage);
+        reply = await handler.handleMessage(incomingMessage, message.platform);
       } else {
         const handler = MessageHandler.getInstance(canonicalChatId);
-        reply = await handler.handleMessage(incomingMessage);
+        reply = await handler.handleMessage(incomingMessage, message.platform);
       }
 
       if (reply.trim().length === 0) {

@@ -15,9 +15,6 @@ export const SUpdateSettingsArgs = z
     ).optional(),
     assistantName: SNonEmptyString.describe("The assistant's display name").optional(),
     addressStyle: SNonEmptyString.describe("How the assistant should address the user").optional(),
-    platform: SNonEmptyString.describe(
-      "Platform context used in instructions; this does not switch the actual transport",
-    ).optional(),
     preferredReplyLength: SNonEmptyString.describe(
       "Preferred reply length, such as 1-3 sentences, short, or detailed",
     ).optional(),

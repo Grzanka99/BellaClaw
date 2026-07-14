@@ -24,6 +24,7 @@ import { resolveAiBehaviorFields } from "../app-logger/ai";
 import { sanitizeErrorMessage } from "../app-logger/sanitizers";
 import { Memory } from "../memory";
 import { EMemoryImportance, type TMemory } from "../memory/types";
+import type { EMessagePlatform } from "../messaging/types";
 import { SettingsService } from "../settings";
 import { EConfigKey, type TConfigRecord } from "../settings/schema";
 import { getMessageHandlerInstructions } from "./instructions";
@@ -56,7 +57,10 @@ export class MessageHandler {
     return newInstance;
   }
 
-  public async handleMessage(message: TIncommingMessage): Promise<string> {
+  public async handleMessage(
+    message: TIncommingMessage,
+    platform?: EMessagePlatform,
+  ): Promise<string> {
     const trace = getMessageTrace(message);
     const handleMessageStart = performance.now();
     this.logger.info("handleMessage: start");
@@ -129,6 +133,7 @@ export class MessageHandler {
         tools,
         chatId: message.chatId,
         settings,
+        platform,
         trace,
       });
       this.logger.info(
