@@ -28,7 +28,7 @@
   </cron_patterns>
 
   <usage_rules>
-    <rule>Always confirm the schedule and the reminder or autonomous objective with the user before calling this tool</rule>
+    <rule>After this tool succeeds, confirm the schedule and the reminder or autonomous objective with the user</rule>
     <rule>Choose clear, descriptive names for jobs so they can be easily referenced later</rule>
     <rule>If a job with the same name already exists, set overwrite to true only if the user explicitly agrees to replace it</rule>
     <rule>Validate that the cron pattern matches the user's intended schedule before calling</rule>
