@@ -265,6 +265,36 @@ describe("CronScheduler", () => {
     expect(updatedJob?.reminderFallbackText).toBe("Drink water.");
   });
 
+  test("persists and emits scheduled task content", async () => {
+    const scheduled = expectCreated(
+      await scheduler.createRecurring({
+        name: "daily-news",
+        scope: "scope-a",
+        pattern: "0 8 * * *",
+        taskPrompt: "Find today's important news with source links.",
+        taskFallbackText: "No briefing is available.",
+      }),
+    );
+    await forceJobNextRunAt(scheduled.id, new Date(Date.now() - 1_000));
+
+    const fired = new Promise<TCronJobContext>((resolve) => {
+      scheduler.on("daily-news", (ctx: TCronJobContext) => {
+        resolve(ctx);
+      });
+    });
+
+    await fireJob(scheduler, scheduled.id);
+
+    const listed = await scheduler.get("daily-news", "scope-a");
+    const context = await fired;
+
+    expect(listed?.taskPrompt).toBe("Find today's important news with source links.");
+    expect(listed?.taskFallbackText).toBe("No briefing is available.");
+    expect(listed?.reminderText).toBeUndefined();
+    expect(context.taskPrompt).toBe("Find today's important news with source links.");
+    expect(context.taskFallbackText).toBe("No briefing is available.");
+  });
+
   test("generic fire event does not collide with job named fire", async () => {
     const scheduled = expectCreated(
       await scheduler.createRecurring({

@@ -4,6 +4,8 @@ import { createLogger, type TLogger } from "../../utils/logger";
 import { MessagingAdapter } from "../messaging";
 import { EMessagePlatform, type TMessageTransport } from "../messaging/types";
 
+const DISCORD_MESSAGE_MAX_LENGTH = 2_000;
+
 export class DiscordSingleton implements TMessageTransport {
   private static _instance: DiscordSingleton;
   private logger: TLogger = createLogger("DISCORD");
@@ -69,7 +71,21 @@ export class DiscordSingleton implements TMessageTransport {
 
   public async sendText(chatId: string, text: string): Promise<void> {
     const user = await this.client.users.fetch(chatId);
-    await user.send(text);
+
+    let remainingText = text;
+
+    while (remainingText.length > DISCORD_MESSAGE_MAX_LENGTH) {
+      let chunkEnd = remainingText.lastIndexOf("\n", DISCORD_MESSAGE_MAX_LENGTH - 1) + 1;
+
+      if (chunkEnd <= 1) {
+        chunkEnd = DISCORD_MESSAGE_MAX_LENGTH;
+      }
+
+      await user.send(remainingText.slice(0, chunkEnd));
+      remainingText = remainingText.slice(chunkEnd);
+    }
+
+    await user.send(remainingText);
   }
 
   public setup(): Promise<void> {

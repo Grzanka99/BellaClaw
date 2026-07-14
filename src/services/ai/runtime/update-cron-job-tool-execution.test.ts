@@ -268,6 +268,74 @@ describe("update-cron-job tool execution", () => {
     });
   });
 
+  test("switches content modes without preserving stale fields", async () => {
+    const chatId = "runtime-update-task-user";
+
+    await executeToolCall({
+      toolCall: createToolCall("schedule-cron", SCHEDULE_RECURRING_TOOL, {
+        name: "daily-news",
+        pattern: "0 8 * * *",
+        reminderText: "Old reminder.",
+      }),
+      chatId,
+      allowedToolNames: new Set([SCHEDULE_RECURRING_TOOL, UPDATE_CRON_JOB_TOOL]),
+      settings: DefaultConfigRecord,
+    });
+
+    const taskResult = await executeToolCall({
+      toolCall: createToolCall("update-to-task", UPDATE_CRON_JOB_TOOL, {
+        name: "daily-news",
+        taskPrompt: "Find today's important news with source links.",
+        taskFallbackText: "No briefing is available.",
+      }),
+      chatId,
+      allowedToolNames: new Set([UPDATE_CRON_JOB_TOOL]),
+      settings: DefaultConfigRecord,
+    });
+
+    expect(taskResult.success).toBe(true);
+    expect(taskResult.data).toMatchObject({
+      contentMode: "scheduled-task",
+      taskPrompt: "Find today's important news with source links.",
+      taskFallbackText: "No briefing is available.",
+    });
+
+    const taskJob = await CronSingleton.instance.get("daily-news", chatId);
+
+    expect(taskJob).toMatchObject({
+      reminderText: undefined,
+      reminderPromptData: undefined,
+      reminderFallbackText: undefined,
+      taskPrompt: "Find today's important news with source links.",
+      taskFallbackText: "No briefing is available.",
+    });
+
+    const directResult = await executeToolCall({
+      toolCall: createToolCall("update-to-direct", UPDATE_CRON_JOB_TOOL, {
+        name: "daily-news",
+        reminderText: "Check the news.",
+      }),
+      chatId,
+      allowedToolNames: new Set([UPDATE_CRON_JOB_TOOL]),
+      settings: DefaultConfigRecord,
+    });
+
+    expect(directResult.success).toBe(true);
+    expect(directResult.data).toMatchObject({
+      contentMode: "direct-reminder",
+    });
+
+    const directJob = await CronSingleton.instance.get("daily-news", chatId);
+
+    expect(directJob).toMatchObject({
+      reminderText: "Check the news.",
+      reminderPromptData: undefined,
+      reminderFallbackText: "Check the news.",
+      taskPrompt: undefined,
+      taskFallbackText: undefined,
+    });
+  });
+
   test("rejects one-time schedule fields for recurring reminders", async () => {
     const chatId = "runtime-update-invalid-user";
 

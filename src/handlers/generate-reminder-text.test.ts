@@ -1,10 +1,16 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { ECronJobType, type TCronJobContext } from "../lib/cron-engine";
-import type { TToolTaskArgs, TToolTaskResult } from "../services/ai/api";
+import {
+  EAssistantLoopStopReason,
+  type TAssistantToolLoopArgs,
+  type TAssistantToolLoopResult,
+  type TToolTaskArgs,
+  type TToolTaskResult,
+} from "../services/ai/api";
 import { EMessagePlatform } from "../services/messaging/types";
 import { SettingsService } from "../services/settings";
 import { DefaultConfigRecord, EConfigKey, type TConfigRecord } from "../services/settings/schema";
-import { generateReminderText } from "./generate-reminder-text";
+import { generateReminderText, generateScheduledTaskText } from "./generate-reminder-text";
 
 function createCronContext(overrides: Partial<TCronJobContext> = {}): TCronJobContext {
   return {
@@ -16,6 +22,8 @@ function createCronContext(overrides: Partial<TCronJobContext> = {}): TCronJobCo
     reminderText: undefined,
     reminderPromptData: '{"topic":"study","tone":"encouraging"}',
     reminderFallbackText: "Fallback reminder.",
+    taskPrompt: undefined,
+    taskFallbackText: undefined,
     lastRunAt: undefined,
     nextRunAt: new Date("2026-01-05T08:00:00.000Z"),
     createdAt: new Date("2026-01-01T08:00:00.000Z"),
@@ -145,5 +153,164 @@ describe("generateReminderText", () => {
     await generateReminderText(createCronContext({ scope: "signal:+100" }), ai);
 
     expect(capturedArgs[0]?.platform).toBe(EMessagePlatform.Signal);
+  });
+});
+
+describe("generateScheduledTaskText", () => {
+  beforeEach(() => {
+    resetSettingsInstance();
+  });
+
+  afterEach(() => {
+    resetSettingsInstance();
+  });
+
+  test("runs a bounded web-only loop without a user or conversation history", async () => {
+    mockSettingsAll(DefaultConfigRecord);
+    const capturedArgs: TAssistantToolLoopArgs[] = [];
+    const ai = {
+      runAssistantToolLoop: mock(
+        async (args: TAssistantToolLoopArgs): Promise<TAssistantToolLoopResult> => {
+          capturedArgs.push(args);
+          return {
+            conversation: [],
+            toolActivity: [],
+            finalResponse: "Fresh briefing with sources.",
+            stopReason: EAssistantLoopStopReason.FinalResponse,
+            iterations: 2,
+          };
+        },
+      ),
+    };
+
+    const result = await generateScheduledTaskText(
+      createCronContext({
+        scope: "discord:user-1",
+        reminderPromptData: undefined,
+        reminderFallbackText: undefined,
+        taskPrompt: "Prepare a daily briefing.",
+        taskFallbackText: "Briefing unavailable.",
+      }),
+      ai,
+    );
+    const args = capturedArgs[0];
+
+    expect(result.text).toBe("Fresh briefing with sources.");
+    expect(args?.user).toBeUndefined();
+    expect(args?.history).toHaveLength(1);
+    expect(args?.chatId).toBe("discord:user-1");
+    expect(args?.maxIterations).toBe(4);
+    expect(args?.tools.map((tool) => tool.definition.name)).toEqual(["web-search", "web-fetch"]);
+  });
+
+  test("uses the fallback for output-limited task output", async () => {
+    const ai = {
+      runAssistantToolLoop: mock(async (): Promise<TAssistantToolLoopResult> => {
+        return {
+          conversation: [],
+          toolActivity: [],
+          finalResponse: "Truncated response",
+          stopReason: EAssistantLoopStopReason.OutputLimit,
+          iterations: 1,
+        };
+      }),
+    };
+
+    const result = await generateScheduledTaskText(
+      createCronContext({
+        reminderPromptData: undefined,
+        reminderFallbackText: undefined,
+        taskPrompt: "Prepare a daily briefing.",
+        taskFallbackText: "Briefing unavailable.",
+      }),
+      ai,
+    );
+
+    expect(result.text).toBe("Briefing unavailable.");
+    expect(result.stopReason).toBe(EAssistantLoopStopReason.OutputLimit);
+  });
+
+  test("uses fallback for all other unusable loop outcomes", async () => {
+    const cases: Array<{
+      stopReason: EAssistantLoopStopReason;
+      finalResponse: string | undefined;
+    }> = [
+      { stopReason: EAssistantLoopStopReason.EmptyAssistantResponse, finalResponse: undefined },
+      { stopReason: EAssistantLoopStopReason.Aborted, finalResponse: undefined },
+      { stopReason: EAssistantLoopStopReason.MalformedProviderResponse, finalResponse: undefined },
+      { stopReason: EAssistantLoopStopReason.RepeatedToolCall, finalResponse: undefined },
+      { stopReason: EAssistantLoopStopReason.MaxIterations, finalResponse: undefined },
+      { stopReason: EAssistantLoopStopReason.FinalResponse, finalResponse: "   " },
+    ];
+
+    for (const testCase of cases) {
+      const ai = {
+        runAssistantToolLoop: mock(async (): Promise<TAssistantToolLoopResult> => {
+          return {
+            conversation: [],
+            toolActivity: [],
+            finalResponse: testCase.finalResponse,
+            stopReason: testCase.stopReason,
+            iterations: 1,
+          };
+        }),
+      };
+      const result = await generateScheduledTaskText(
+        createCronContext({
+          reminderPromptData: undefined,
+          reminderFallbackText: undefined,
+          taskPrompt: "Prepare a daily briefing.",
+          taskFallbackText: "Briefing unavailable.",
+        }),
+        ai,
+      );
+
+      expect(result.text).toBe("Briefing unavailable.");
+    }
+  });
+
+  test("uses fallback when the task loop throws", async () => {
+    const ai = {
+      runAssistantToolLoop: mock(async () => {
+        throw new Error("provider failed");
+      }),
+    };
+    const result = await generateScheduledTaskText(
+      createCronContext({
+        reminderPromptData: undefined,
+        reminderFallbackText: undefined,
+        taskPrompt: "Prepare a daily briefing.",
+        taskFallbackText: "Briefing unavailable.",
+      }),
+      ai,
+    );
+
+    expect(result.text).toBe("Briefing unavailable.");
+    expect(result.stopReason).toBeUndefined();
+  });
+
+  test("accepts a nonblank forced-final response", async () => {
+    const ai = {
+      runAssistantToolLoop: mock(async (): Promise<TAssistantToolLoopResult> => {
+        return {
+          conversation: [],
+          toolActivity: [],
+          finalResponse: "Forced final briefing.",
+          stopReason: EAssistantLoopStopReason.MaxIterations,
+          iterations: 4,
+        };
+      }),
+    };
+    const result = await generateScheduledTaskText(
+      createCronContext({
+        reminderPromptData: undefined,
+        reminderFallbackText: undefined,
+        taskPrompt: "Prepare a daily briefing.",
+        taskFallbackText: "Briefing unavailable.",
+      }),
+      ai,
+    );
+
+    expect(result.text).toBe("Forced final briefing.");
   });
 });

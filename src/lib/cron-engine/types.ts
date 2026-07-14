@@ -31,22 +31,36 @@ const SReminderContentJobFields = z.object({
     .string()
     .nullable()
     .transform((value) => value ?? undefined),
+  taskPrompt: z
+    .string()
+    .nullable()
+    .transform((value) => value ?? undefined),
+  taskFallbackText: z
+    .string()
+    .nullable()
+    .transform((value) => value ?? undefined),
 });
 
 const SReminderContentArgsBase = z.object({
   reminderText: z.string().optional(),
   reminderPromptData: z.string().optional(),
   reminderFallbackText: z.string().optional(),
+  taskPrompt: z.string().optional(),
+  taskFallbackText: z.string().optional(),
 });
 
 function validateReminderContentArgs(
   value: z.infer<typeof SReminderContentArgsBase>,
   ctx: z.RefinementCtx,
 ) {
-  if (value.reminderText !== undefined && value.reminderPromptData !== undefined) {
+  const contentModeCount = [value.reminderText, value.reminderPromptData, value.taskPrompt].filter(
+    (field) => field !== undefined,
+  ).length;
+
+  if (contentModeCount > 1) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
-      message: "Provide either reminderText or reminderPromptData, not both",
+      message: "Provide only one of reminderText, reminderPromptData, or taskPrompt",
       path: ["reminderText"],
     });
   }
@@ -68,6 +82,22 @@ function validateReminderContentArgs(
       code: z.ZodIssueCode.custom,
       message: "reminderFallbackText requires reminderText or reminderPromptData",
       path: ["reminderFallbackText"],
+    });
+  }
+
+  if (value.taskPrompt !== undefined && value.taskFallbackText === undefined) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "taskFallbackText is required when taskPrompt is set",
+      path: ["taskFallbackText"],
+    });
+  }
+
+  if (value.taskFallbackText !== undefined && value.taskPrompt === undefined) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "taskFallbackText requires taskPrompt",
+      path: ["taskFallbackText"],
     });
   }
 }
@@ -130,7 +160,8 @@ export const SCronJob = z
       .nullable()
       .transform((value) => value ?? undefined),
   })
-  .extend(SReminderContentJobFields.shape);
+  .extend(SReminderContentJobFields.shape)
+  .superRefine(validateReminderContentArgs);
 
 export const SCreateRecurringArgs = z
   .object({
@@ -165,6 +196,8 @@ export type TCronJobContext = {
   reminderText: TOption<string>;
   reminderPromptData: TOption<string>;
   reminderFallbackText: TOption<string>;
+  taskPrompt: TOption<string>;
+  taskFallbackText: TOption<string>;
   lastRunAt: TOption<Date>;
   nextRunAt: Date;
   createdAt: Date;

@@ -217,6 +217,50 @@ describe("AI tool definitions", () => {
     ).toBe(false);
   });
 
+  test("validates the three cron content modes", () => {
+    const scheduleBase = {
+      name: "daily-news",
+      pattern: "0 8 * * *",
+    };
+
+    expect(
+      SScheduleRecurringArgs.safeParse({
+        ...scheduleBase,
+        taskPrompt: "Find today's important news with sources.",
+        taskFallbackText: "No briefing is available.",
+      }).success,
+    ).toBe(true);
+    expect(SScheduleRecurringArgs.safeParse(scheduleBase).success).toBe(false);
+    expect(
+      SScheduleRecurringArgs.safeParse({
+        ...scheduleBase,
+        reminderText: "Hello",
+        taskPrompt: "Find news",
+        taskFallbackText: "No news",
+      }).success,
+    ).toBe(false);
+    expect(
+      SScheduleRecurringArgs.safeParse({
+        ...scheduleBase,
+        taskPrompt: "Find news",
+      }).success,
+    ).toBe(false);
+    expect(
+      SScheduleRecurringArgs.safeParse({
+        ...scheduleBase,
+        reminderText: "Hello",
+        taskFallbackText: "No news",
+      }).success,
+    ).toBe(false);
+    expect(
+      SUpdateCronJobArgs.safeParse({
+        name: "daily-news",
+        taskPrompt: "Find news",
+        taskFallbackText: "No news",
+      }).success,
+    ).toBe(true);
+  });
+
   test("keeps reminder conditional rules in local Zod validation", () => {
     expect(
       SScheduleOnceArgs.safeParse({

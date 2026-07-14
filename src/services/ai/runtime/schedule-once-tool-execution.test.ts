@@ -93,4 +93,41 @@ describe("schedule-once tool execution", () => {
     expect(result.success).toBe(false);
     expect(result.error).toContain("fireAt must be in the future");
   });
+
+  test("schedules and lists one-time autonomous tasks", async () => {
+    const chatId = "runtime-once-task-user";
+    const fireAt = new Date(Date.now() + 60_000).toISOString();
+    const scheduleResult = await executeToolCall({
+      toolCall: createToolCall("schedule-once-task", SCHEDULE_ONCE_TOOL, {
+        name: "news-once",
+        fireAt,
+        taskPrompt: "Find today's most important news with source links.",
+        taskFallbackText: "No briefing is available.",
+      }),
+      chatId,
+      allowedToolNames: new Set([SCHEDULE_ONCE_TOOL, LIST_CRON_JOBS_TOOL]),
+      settings: DefaultConfigRecord,
+    });
+    const listResult = await executeToolCall({
+      toolCall: createToolCall("list-cron-task", LIST_CRON_JOBS_TOOL, {}),
+      chatId,
+      allowedToolNames: new Set([LIST_CRON_JOBS_TOOL]),
+      settings: DefaultConfigRecord,
+    });
+
+    expect(scheduleResult.success).toBe(true);
+    expect(scheduleResult.data).toMatchObject({
+      type: ECronJobType.OneTime,
+      contentMode: "scheduled-task",
+      taskPrompt: "Find today's most important news with source links.",
+      taskFallbackText: "No briefing is available.",
+    });
+    expect(listResult.data).toMatchObject([
+      {
+        name: "news-once",
+        contentMode: "scheduled-task",
+        taskPrompt: "Find today's most important news with source links.",
+      },
+    ]);
+  });
 });

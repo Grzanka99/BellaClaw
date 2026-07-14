@@ -41,15 +41,27 @@ export async function executeUpdateCronJobTool(
   let reminderText: TOption<string> = existing.reminderText;
   let reminderPromptData: TOption<string> = existing.reminderPromptData;
   let reminderFallbackText: TOption<string> = existing.reminderFallbackText;
+  let taskPrompt: TOption<string> = existing.taskPrompt;
+  let taskFallbackText: TOption<string> = existing.taskFallbackText;
 
   if (parsed.data.reminderText !== undefined) {
     reminderText = parsed.data.reminderText;
     reminderPromptData = undefined;
     reminderFallbackText = undefined;
+    taskPrompt = undefined;
+    taskFallbackText = undefined;
   } else if (parsed.data.reminderPromptData !== undefined) {
     reminderText = undefined;
     reminderPromptData = parsed.data.reminderPromptData;
     reminderFallbackText = parsed.data.reminderFallbackText;
+    taskPrompt = undefined;
+    taskFallbackText = undefined;
+  } else if (parsed.data.taskPrompt !== undefined) {
+    reminderText = undefined;
+    reminderPromptData = undefined;
+    reminderFallbackText = undefined;
+    taskPrompt = parsed.data.taskPrompt;
+    taskFallbackText = parsed.data.taskFallbackText;
   }
 
   if (existing.type === ECronJobType.Recurring) {
@@ -74,6 +86,8 @@ export async function executeUpdateCronJobTool(
       reminderText,
       reminderPromptData,
       reminderFallbackText,
+      taskPrompt,
+      taskFallbackText,
       overwrite: true,
       timezone: existing.timezone,
     });
@@ -100,6 +114,8 @@ export async function executeUpdateCronJobTool(
     reminderText,
     reminderPromptData,
     reminderFallbackText,
+    taskPrompt,
+    taskFallbackText,
     overwrite: true,
     timezone: existing.timezone,
   });

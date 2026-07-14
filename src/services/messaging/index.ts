@@ -1,4 +1,8 @@
-import { generateReminderText } from "../../handlers/generate-reminder-text";
+import {
+  generateReminderText,
+  generateScheduledTaskText,
+  type TScheduledTaskResult,
+} from "../../handlers/generate-reminder-text";
 import type { TCronJobContext } from "../../lib/cron-engine";
 import type { TOption } from "../../types";
 import { createLogger, type TLogger } from "../../utils/logger";
@@ -29,6 +33,7 @@ export class MessagingAdapter {
   private transports = new Map<EMessagePlatform, TMessageTransport>();
   private ai = AiConnector.instance;
   private cronListenerRegistered = false;
+  private runningCronTaskKeys = new Set<string>();
 
   private constructor() {}
 
@@ -215,7 +220,71 @@ export class MessagingAdapter {
       return;
     }
 
-    const text = await generateReminderText(ctx, this.ai, trace);
+    if (ctx.taskPrompt !== undefined) {
+      const taskKey = JSON.stringify([canonicalChatId, ctx.name]);
+
+      if (this.runningCronTaskKeys.has(taskKey)) {
+        this.logger.warning(`handleCronFire: task "${ctx.name}" is already running, skipping`);
+        logHandlerCompleted(
+          trace,
+          "cron-fire",
+          handlerStart,
+          true,
+          0,
+          "task overlap skipped",
+          undefined,
+        );
+        return;
+      }
+
+      this.runningCronTaskKeys.add(taskKey);
+
+      try {
+        await this.handleCronDelivery(
+          ctx,
+          canonicalChatId,
+          parsedScope,
+          transport,
+          trace,
+          handlerStart,
+        );
+      } finally {
+        this.runningCronTaskKeys.delete(taskKey);
+      }
+
+      return;
+    }
+
+    await this.handleCronDelivery(
+      ctx,
+      canonicalChatId,
+      parsedScope,
+      transport,
+      trace,
+      handlerStart,
+    );
+  }
+
+  private async handleCronDelivery(
+    ctx: TCronJobContext,
+    canonicalChatId: string,
+    parsedScope: { platform: EMessagePlatform; chatId: string },
+    transport: TMessageTransport,
+    trace: TBehaviorTraceContext,
+    handlerStart: number,
+  ) {
+    let text: TOption<string>;
+    let memoryPrefix = "CRON REMINDER";
+
+    if (ctx.taskPrompt !== undefined) {
+      const taskResult = await generateScheduledTaskText(ctx, this.ai, trace);
+      text = taskResult.text;
+      memoryPrefix = "CRON TASK";
+      logCronTaskCompleted(trace, taskResult);
+    } else {
+      text = await generateReminderText(ctx, this.ai, trace);
+    }
+
     if (text === undefined) {
       this.logger.info(`handleCronFire: job "${ctx.name}" has no reminder text, skipping delivery`);
       logHandlerCompleted(
@@ -289,7 +358,7 @@ export class MessagingAdapter {
         chatId: canonicalChatId,
         author: ERole.Assistant,
         importance: EMemoryImportance.Low,
-        message: `[CRON REMINDER ${ctx.name}]: ${text}`,
+        message: `[${memoryPrefix} ${ctx.name}]: ${text}`,
       });
       logMemorySaveCompleted(
         trace,
@@ -387,6 +456,24 @@ function logHandlerCompleted(
       replyChars,
     },
     error: sanitizeErrorMessage(error),
+  });
+}
+
+function logCronTaskCompleted(trace: TBehaviorTraceContext, result: TScheduledTaskResult) {
+  AppLogger.instance.record({
+    trace,
+    event: "cron.task.completed",
+    component: "messaging",
+    success: result.text !== undefined && result.text.trim().length > 0,
+    durationMs: result.durationMs,
+    summary: "scheduled task completed",
+    metadata: {
+      mode: "task",
+      iterations: result.iterations,
+      toolCallCount: result.toolCallCount,
+      stopReason: result.stopReason ?? "threw",
+      deliveredTextChars: result.text?.length ?? 0,
+    },
   });
 }
 

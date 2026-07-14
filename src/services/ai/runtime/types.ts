@@ -53,7 +53,7 @@ export type TRequestAssistantTurn = (args: TRequestAssistantTurnArgs) => Promise
 export type TAssistantToolLoopArgs = {
   prompt: TPrompt;
   history: THistoryItem[];
-  user: TRuntimeUser;
+  user?: TRuntimeUser;
   currentTimeContext?: string;
   tools: TToolEntry[];
   purpose: EModelPurpose;
