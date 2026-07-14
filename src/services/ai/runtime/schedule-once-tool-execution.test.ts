@@ -119,13 +119,14 @@ describe("schedule-once tool execution", () => {
     expect(scheduleResult.data).toMatchObject({
       type: ECronJobType.OneTime,
       contentMode: "scheduled-task",
+      taskPrompt: "Find today's most important news with source links.",
+      taskFallbackText: "No briefing is available.",
     });
-    expect(scheduleResult.data).not.toHaveProperty("taskPrompt");
-    expect(scheduleResult.data).not.toHaveProperty("taskFallbackText");
     expect(listResult.data).toMatchObject([
       {
         name: "news-once",
         contentMode: "scheduled-task",
+        taskPrompt: "Find today's most important news with source links.",
       },
     ]);
   });

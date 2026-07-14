@@ -27,6 +27,38 @@ export type TScheduledTaskResult = {
 
 const logger = createLogger("REMINDER");
 
+async function resolveCronScopeContext(ctx: TCronJobContext, logPrefix: string) {
+  let timezone: TOption<string> = ctx.timezone;
+  let settings: TConfigRecord = DefaultConfigRecord;
+  let platform: TOption<EMessagePlatform>;
+
+  if (ctx.scope !== undefined) {
+    const parsedScope = parseCanonicalChatKey(ctx.scope);
+    if (parsedScope !== undefined) {
+      platform = parsedScope.platform;
+    }
+
+    try {
+      const loaded = await SettingsService.instance.getAll(ctx.scope);
+      settings = loaded;
+
+      if (timezone === undefined) {
+        timezone = loaded[EConfigKey.AiInstructionsTimezone];
+      }
+    } catch (error) {
+      logger.warning(
+        `${logPrefix}: failed to load settings for scope "${ctx.scope}": ${String(error)}`,
+      );
+    }
+  }
+
+  if (timezone === undefined) {
+    timezone = Config.ai.instructions.timezone;
+  }
+
+  return { settings, timezone, platform };
+}
+
 export async function generateReminderText(
   ctx: TCronJobContext,
   ai: TReminderAi,
@@ -49,33 +81,10 @@ export async function generateReminderText(
     return ctx.reminderFallbackText;
   }
 
-  let timezone: TOption<string> = ctx.timezone;
-  let settings: TConfigRecord = DefaultConfigRecord;
-  let platform: TOption<EMessagePlatform>;
-
-  if (ctx.scope !== undefined) {
-    const parsedScope = parseCanonicalChatKey(ctx.scope);
-    if (parsedScope !== undefined) {
-      platform = parsedScope.platform;
-    }
-
-    try {
-      const loaded = await SettingsService.instance.getAll(ctx.scope);
-      settings = loaded;
-
-      if (timezone === undefined) {
-        timezone = loaded[EConfigKey.AiInstructionsTimezone];
-      }
-    } catch (error) {
-      logger.warning(
-        `generateReminderText: failed to load settings for scope "${ctx.scope}": ${String(error)}`,
-      );
-    }
-  }
-
-  if (timezone === undefined) {
-    timezone = Config.ai.instructions.timezone;
-  }
+  const { settings, timezone, platform } = await resolveCronScopeContext(
+    ctx,
+    "generateReminderText",
+  );
 
   const history: THistoryItem[] = [
     {
@@ -144,33 +153,10 @@ export async function generateScheduledTaskText(
     };
   }
 
-  let timezone: TOption<string> = ctx.timezone;
-  let settings: TConfigRecord = DefaultConfigRecord;
-  let platform: TOption<EMessagePlatform>;
-
-  if (ctx.scope !== undefined) {
-    const parsedScope = parseCanonicalChatKey(ctx.scope);
-    if (parsedScope !== undefined) {
-      platform = parsedScope.platform;
-    }
-
-    try {
-      const loaded = await SettingsService.instance.getAll(ctx.scope);
-      settings = loaded;
-
-      if (timezone === undefined) {
-        timezone = loaded[EConfigKey.AiInstructionsTimezone];
-      }
-    } catch (error) {
-      logger.warning(
-        `generateScheduledTaskText: failed to load settings for scope "${ctx.scope}": ${String(error)}`,
-      );
-    }
-  }
-
-  if (timezone === undefined) {
-    timezone = Config.ai.instructions.timezone;
-  }
+  const { settings, timezone, platform } = await resolveCronScopeContext(
+    ctx,
+    "generateScheduledTaskText",
+  );
 
   try {
     const [taskInstructions, webSearchInstructions, webFetchInstructions] = await Promise.all([

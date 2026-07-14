@@ -296,9 +296,19 @@ describe("update-cron-job tool execution", () => {
     expect(taskResult.success).toBe(true);
     expect(taskResult.data).toMatchObject({
       contentMode: "scheduled-task",
+      taskPrompt: "Find today's important news with source links.",
+      taskFallbackText: "No briefing is available.",
     });
-    expect(taskResult.data).not.toHaveProperty("taskPrompt");
-    expect(taskResult.data).not.toHaveProperty("taskFallbackText");
+
+    const taskJob = await CronSingleton.instance.get("daily-news", chatId);
+
+    expect(taskJob).toMatchObject({
+      reminderText: undefined,
+      reminderPromptData: undefined,
+      reminderFallbackText: undefined,
+      taskPrompt: "Find today's important news with source links.",
+      taskFallbackText: "No briefing is available.",
+    });
 
     const directResult = await executeToolCall({
       toolCall: createToolCall("update-to-direct", UPDATE_CRON_JOB_TOOL, {
@@ -314,7 +324,16 @@ describe("update-cron-job tool execution", () => {
     expect(directResult.data).toMatchObject({
       contentMode: "direct-reminder",
     });
-    expect(directResult.data).not.toHaveProperty("taskPrompt");
+
+    const directJob = await CronSingleton.instance.get("daily-news", chatId);
+
+    expect(directJob).toMatchObject({
+      reminderText: "Check the news.",
+      reminderPromptData: undefined,
+      reminderFallbackText: "Check the news.",
+      taskPrompt: undefined,
+      taskFallbackText: undefined,
+    });
   });
 
   test("rejects one-time schedule fields for recurring reminders", async () => {

@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { ECronJobStatus, ECronJobType } from "../../lib/cron-engine";
+import { serializeCronJobForModel } from "../ai/runtime/tools/cron-serialization";
 import type { TToolCall } from "../ai/types";
 import { sanitizeToolCallArguments, sanitizeToolResult } from "./sanitizers";
 
@@ -42,19 +44,26 @@ describe("app logger sanitizers", () => {
       toolCallId: "tool-call-1",
       toolName: "schedule-recurring",
       success: true,
-      data: {
+      data: serializeCronJobForModel({
+        id: 1,
         name: "hydration",
-        type: "recurring",
+        scope: "discord:user-1",
+        group: undefined,
+        type: ECronJobType.Recurring,
         pattern: "0 9 * * *",
-        status: "active",
+        status: ECronJobStatus.Active,
         nextRunAt: new Date("2026-07-12T10:00:00.000Z"),
+        lastRunAt: undefined,
+        createdAt: new Date("2026-07-01T10:00:00.000Z"),
+        finishedAt: undefined,
+        finishedReason: undefined,
         timezone: "Europe/Warsaw",
-        reminderText: "private reminder body",
-        reminderPromptData: "private prompt payload",
-        reminderFallbackText: "private fallback text",
+        reminderText: undefined,
+        reminderPromptData: undefined,
+        reminderFallbackText: undefined,
         taskPrompt: "private task objective",
         taskFallbackText: "private task fallback",
-      },
+      }),
       error: undefined,
     });
     const serialized = JSON.stringify(details);
@@ -63,10 +72,9 @@ describe("app logger sanitizers", () => {
     expect(serialized).toContain("0 9 * * *");
     expect(serialized).toContain("2026-07-12T10:00:00.000Z");
     expect(serialized).not.toContain("hydration");
-    expect(serialized).not.toContain("private reminder body");
-    expect(serialized).not.toContain("private prompt payload");
-    expect(serialized).not.toContain("private fallback text");
     expect(serialized).toContain('"contentMode":"task"');
+    expect(serialized).toContain('"taskPromptChars":22');
+    expect(serialized).toContain('"taskFallbackTextChars":21');
     expect(serialized).not.toContain("private task objective");
     expect(serialized).not.toContain("private task fallback");
   });
