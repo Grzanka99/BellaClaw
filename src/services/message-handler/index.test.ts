@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import type { TOption } from "../../types";
 import { GET_SETTINGS_TOOL } from "../ai/tools/get-settings/definition";
 import { LIST_CRON_JOBS_TOOL } from "../ai/tools/list-cron-jobs/definition";
 import { SCHEDULE_ONCE_TOOL } from "../ai/tools/schedule-once/definition";
@@ -68,7 +69,7 @@ describe("MessageHandler", () => {
 
   test("handleMessage passes cron tools into runAssistantToolLoop", async () => {
     const capturedTools: Array<unknown> = [];
-    const capturedPlatforms: Array<EMessagePlatform | undefined> = [];
+    const capturedPlatforms: Array<TOption<EMessagePlatform>> = [];
 
     const handler = MessageHandler.getInstance("test-chat-id");
     const internals = handler as unknown as TAiConnectorInternals;
