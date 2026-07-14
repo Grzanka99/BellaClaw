@@ -48,10 +48,10 @@ describe("AI provider registry", () => {
     });
     expect(getAiModelIds(EAiProvider.OpencodeGo)).toEqual({
       [EModelPurpose.ToolCheap]: "deepseek-v4-flash",
-      [EModelPurpose.ToolAccurate]: "glm-5.2",
+      [EModelPurpose.ToolAccurate]: "deepseek-v4-pro",
       [EModelPurpose.General]: "deepseek-v4-pro",
-      [EModelPurpose.Chat]: "glm-5.2",
-      [EModelPurpose.ChatAccurate]: "glm-5.2",
+      [EModelPurpose.Chat]: "deepseek-v4-pro",
+      [EModelPurpose.ChatAccurate]: "deepseek-v4-pro",
     });
     expect(getAiModelIds(EAiProvider.Ollama)).toEqual({
       [EModelPurpose.ToolCheap]: "nemotron-3-super:cloud",
@@ -90,10 +90,10 @@ describe("AI provider registry", () => {
       "high",
     );
     expect(getAiModelConfig(EAiProvider.OpencodeGo, EModelPurpose.General).effort).toBeUndefined();
-    expect(getAiModelConfig(EAiProvider.OpencodeGo, EModelPurpose.Chat).effort).toBeUndefined();
-    expect(
-      getAiModelConfig(EAiProvider.OpencodeGo, EModelPurpose.ChatAccurate).effort,
-    ).toBeUndefined();
+    expect(getAiModelConfig(EAiProvider.OpencodeGo, EModelPurpose.Chat).effort).toBe("high");
+    expect(getAiModelConfig(EAiProvider.OpencodeGo, EModelPurpose.ChatAccurate).effort).toBe(
+      "high",
+    );
 
     for (const purpose of Object.values(EModelPurpose)) {
       expect(getAiModelConfig(EAiProvider.Ollama, purpose).effort).toBeUndefined();
