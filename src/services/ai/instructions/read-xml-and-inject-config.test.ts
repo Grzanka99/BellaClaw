@@ -122,9 +122,8 @@ describe("readXmlAndInjectConfig", () => {
         instructions: {
           ...mockConfig.ai.instructions,
           assistantName: "Nyx",
-          platform: "Discord DMs",
           preferredReplyLength: "1-3 sentences",
-          persona: `You are {{config.ai.instructions.assistantName}}, communicating via {{config.ai.instructions.platform}}. Prefer {{config.ai.instructions.preferredReplyLength}}.`,
+          persona: `You are {{config.ai.instructions.assistantName}}. Prefer {{config.ai.instructions.preferredReplyLength}}.`,
         },
       },
     };
@@ -133,9 +132,7 @@ describe("readXmlAndInjectConfig", () => {
     await Bun.write(tempPath, `<persona>{{config.ai.instructions.persona}}</persona>`);
 
     const result = await readXmlAndInjectConfig(tempPath, nestedConfig);
-    expect(result).toBe(
-      "<persona>You are Nyx, communicating via Discord DMs. Prefer 1-3 sentences.</persona>",
-    );
+    expect(result).toBe("<persona>You are Nyx. Prefer 1-3 sentences.</persona>");
 
     await Bun.file(tempPath).delete();
   });

@@ -11,7 +11,7 @@
     <name>update-settings</name>
     <description>
       Updates one or more of: timezone, language, assistantName, addressStyle,
-      platform, preferredReplyLength, aiProvider. At least one field must be provided. There is no
+      preferredReplyLength, aiProvider. At least one field must be provided. There is no
       arbitrary key/value field — only the listed fields are accepted.
     </description>
   </tool>
@@ -21,7 +21,6 @@
     - language — conversation language for replies (e.g. Polish, English).
     - assistantName — the assistant's display name.
     - addressStyle — how the assistant should address the user.
-    - platform — platform context used in assistant instructions (e.g. Discord direct messages, Signal messages). Does not switch the actual transport.
     - preferredReplyLength — preferred reply length (e.g. "1-3 sentences").
     - aiProvider — one of: openrouter, ollama, opencode-go.
   </field_mapping>

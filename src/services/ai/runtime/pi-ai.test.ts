@@ -8,6 +8,7 @@ import {
   type Message,
 } from "@earendil-works/pi-ai";
 import { openrouterProvider } from "@earendil-works/pi-ai/providers/openrouter";
+import { EMessagePlatform } from "../../messaging/types";
 import { DefaultConfigRecord, EConfigKey } from "../../settings/schema";
 import { aiModels, getAiModel } from "../providers/registry";
 import { EAiProvider, EModelPurpose, ERole } from "../types";
@@ -96,6 +97,20 @@ describe("Pi AI request boundary", () => {
     ).toBe(false);
     expect(context.messages[3]).toBe(canonicalAssistant);
     expect(context.tools).toEqual(args.tools.map((tool) => tool.definition));
+  });
+
+  test("adds Signal formatting instructions for Signal replies", () => {
+    const args = createRequestArgs([{ role: "user", content: "current user", timestamp: 1 }]);
+    args.platform = EMessagePlatform.Signal;
+    const model = getAiModel(EAiProvider.Openrouter, EModelPurpose.Chat);
+
+    const context = buildPiContext(args, model, "base system");
+
+    expect(context.systemPrompt).toContain("You are replying through Signal.");
+    expect(context.systemPrompt).toContain("**bold**");
+    expect(context.systemPrompt).toContain(
+      "Never use headings, tables, blockquotes, embeds, or Discord mentions.",
+    );
   });
 
   test("passes explicit auth and trace session metadata and returns the full Pi message", async () => {

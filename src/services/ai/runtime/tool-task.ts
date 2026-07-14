@@ -27,6 +27,7 @@ export async function runToolTask(args: TRunToolTaskArgs): Promise<TToolTaskResu
     tools: args.tools,
     purpose: args.purpose,
     settings: args.settings,
+    platform: args.platform,
     trace: args.trace,
   });
 

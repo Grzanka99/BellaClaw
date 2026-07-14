@@ -136,6 +136,7 @@ export class SignalClient {
           message: text,
           number: this.phoneNumber,
           recipients: [recipient],
+          text_mode: "styled",
         }),
       });
     } catch (error) {

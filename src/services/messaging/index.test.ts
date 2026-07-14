@@ -201,18 +201,21 @@ describe("MessagingAdapter", () => {
       },
     });
 
-    expect(handleMessageMock).toHaveBeenCalledWith({
-      chatId: "discord:user-1",
-      author: {
-        type: ERole.User,
-        id: "user-1",
-        username: "TestUser",
+    expect(handleMessageMock).toHaveBeenCalledWith(
+      {
+        chatId: "discord:user-1",
+        author: {
+          type: ERole.User,
+          id: "user-1",
+          username: "TestUser",
+        },
+        message: {
+          type: "text",
+          content: "hello",
+        },
       },
-      message: {
-        type: "text",
-        content: "hello",
-      },
-    });
+      EMessagePlatform.Discord,
+    );
     expect(sendTextMock).toHaveBeenCalledWith("user-1", "test response");
   });
 

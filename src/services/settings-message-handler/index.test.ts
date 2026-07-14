@@ -3,6 +3,7 @@ import { EModelPurpose, ERole, type TAssistantToolLoopArgs } from "../ai/api";
 import { GET_SETTINGS_TOOL } from "../ai/tools/get-settings/definition";
 import { UPDATE_SETTINGS_TOOL } from "../ai/tools/update-settings/definition";
 import { Memory } from "../memory";
+import { EMessagePlatform } from "../messaging/types";
 import { SettingsService } from "../settings";
 import { DefaultConfigRecord, EConfigKey, type TConfigRecord } from "../settings/schema";
 import { SettingsMessageHandler } from "./index";
@@ -86,11 +87,14 @@ describe("SettingsMessageHandler", () => {
       }),
     } as never;
 
-    const reply = await handler.handleMessage({
-      chatId: "test-settings-chat-id",
-      message: { type: "text", content: "change your timezone to UTC" },
-      author: { type: ERole.User, id: "test-user-id", username: "TestUser" },
-    });
+    const reply = await handler.handleMessage(
+      {
+        chatId: "test-settings-chat-id",
+        message: { type: "text", content: "change your timezone to UTC" },
+        author: { type: ERole.User, id: "test-user-id", username: "TestUser" },
+      },
+      EMessagePlatform.Signal,
+    );
 
     expect(capturedArgs).toHaveLength(1);
     const args = capturedArgs[0];
@@ -111,6 +115,7 @@ describe("SettingsMessageHandler", () => {
 
     expect(args.purpose).toBe(EModelPurpose.ChatAccurate);
     expect(args.chatId).toBe("test-settings-chat-id");
+    expect(args.platform).toBe(EMessagePlatform.Signal);
     expect(args.history[0]?.role).toBe(ERole.System);
 
     expect(reply).toBe("Done — timezone is now UTC.");

@@ -56,6 +56,7 @@ export async function runAssistantToolLoop(
         tools: args.tools,
         purpose: args.purpose,
         settings: args.settings,
+        platform: args.platform,
         trace: args.trace,
       });
 

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { ECronJobType, type TCronJobContext } from "../lib/cron-engine";
 import type { TToolTaskArgs, TToolTaskResult } from "../services/ai/api";
+import { EMessagePlatform } from "../services/messaging/types";
 import { SettingsService } from "../services/settings";
 import { DefaultConfigRecord, EConfigKey, type TConfigRecord } from "../services/settings/schema";
 import { generateReminderText } from "./generate-reminder-text";
@@ -135,5 +136,14 @@ describe("generateReminderText", () => {
     expect(capturedArgs).toHaveLength(1);
     expect(capturedArgs[0]?.settings).toBe(ownerSettings);
     expect(capturedArgs[0]?.settings[EConfigKey.AiProvider]).toBe("openrouter");
+  });
+
+  test("uses the reminder scope platform for generated text", async () => {
+    mockSettingsAll(DefaultConfigRecord);
+    const { ai, capturedArgs } = createAi();
+
+    await generateReminderText(createCronContext({ scope: "signal:+100" }), ai);
+
+    expect(capturedArgs[0]?.platform).toBe(EMessagePlatform.Signal);
   });
 });

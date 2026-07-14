@@ -8,6 +8,7 @@ import { UPDATE_CRON_JOB_TOOL } from "../ai/tools/update-cron-job/definition";
 import { UPDATE_SETTINGS_TOOL } from "../ai/tools/update-settings/definition";
 import { ERole } from "../ai/types";
 import { Memory } from "../memory";
+import { EMessagePlatform } from "../messaging/types";
 import { SettingsService } from "../settings";
 import { DefaultConfigRecord } from "../settings/schema";
 import { MessageHandler } from "./index";
@@ -67,6 +68,7 @@ describe("MessageHandler", () => {
 
   test("handleMessage passes cron tools into runAssistantToolLoop", async () => {
     const capturedTools: Array<unknown> = [];
+    const capturedPlatforms: Array<EMessagePlatform | undefined> = [];
 
     const handler = MessageHandler.getInstance("test-chat-id");
     const internals = handler as unknown as TAiConnectorInternals;
@@ -89,23 +91,29 @@ describe("MessageHandler", () => {
         toolCalls: [],
         toolResults: [],
       })),
-      runAssistantToolLoop: mock(async (args: { tools: Array<unknown> }) => {
-        capturedTools.push(...(args.tools ?? []));
-        return {
-          conversation: [],
-          toolActivity: [],
-          finalResponse: "test response",
-          stopReason: "final-response" as const,
-          iterations: 1,
-        };
-      }),
+      runAssistantToolLoop: mock(
+        async (args: { tools: Array<unknown>; platform?: EMessagePlatform }) => {
+          capturedTools.push(...(args.tools ?? []));
+          capturedPlatforms.push(args.platform);
+          return {
+            conversation: [],
+            toolActivity: [],
+            finalResponse: "test response",
+            stopReason: "final-response" as const,
+            iterations: 1,
+          };
+        },
+      ),
     } as never;
 
-    await handler.handleMessage({
-      chatId: "test-chat-id",
-      message: { type: "text", content: "hello" },
-      author: { type: ERole.User, id: "test-user-id", username: "TestUser" },
-    });
+    await handler.handleMessage(
+      {
+        chatId: "test-chat-id",
+        message: { type: "text", content: "hello" },
+        author: { type: ERole.User, id: "test-user-id", username: "TestUser" },
+      },
+      EMessagePlatform.Signal,
+    );
 
     const toolNames = (capturedTools as Array<{ definition: { name: string } }>).map(
       (t) => t.definition.name,
@@ -118,6 +126,8 @@ describe("MessageHandler", () => {
     for (const name of EXCLUDED_SETTINGS_TOOL_NAMES) {
       expect(toolNames).not.toContain(name);
     }
+
+    expect(capturedPlatforms).toContain(EMessagePlatform.Signal);
 
     expect(internals.memory.save).toHaveBeenCalledWith({
       chatId: "test-chat-id",

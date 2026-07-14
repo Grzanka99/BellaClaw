@@ -9,6 +9,7 @@ import { Memory } from "../memory";
 import { EMemoryImportance, type TMemory } from "../memory/types";
 import { getMessageTrace } from "../message-handler/trace";
 import type { TIncommingMessage } from "../message-handler/types";
+import type { EMessagePlatform } from "../messaging/types";
 import { SettingsService } from "../settings";
 import { createStableAiRuntimeSettings } from "../settings/schema";
 import { getSettingsHandlerInstructions } from "./instructions";
@@ -39,7 +40,10 @@ export class SettingsMessageHandler {
     return newInstance;
   }
 
-  public async handleMessage(message: TIncommingMessage): Promise<string> {
+  public async handleMessage(
+    message: TIncommingMessage,
+    platform?: EMessagePlatform,
+  ): Promise<string> {
     const trace = getMessageTrace(message);
     const handleMessageStart = performance.now();
     this.logger.info("handleMessage: start");
@@ -98,6 +102,7 @@ export class SettingsMessageHandler {
         tools,
         chatId: message.chatId,
         settings: runtimeSettings,
+        platform,
         trace,
       });
       this.logger.info(
