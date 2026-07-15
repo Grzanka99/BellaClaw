@@ -7,7 +7,6 @@ import {
   extractAssistantText,
   extractAssistantToolCalls,
   normalizeError,
-  promptToText,
   promptToUserMessage,
   serializeForModel,
 } from "./serialization";
@@ -28,7 +27,6 @@ describe("runtime serialization", () => {
       fauxText("second"),
     ]);
 
-    expect(promptToText(prompt)).toBe("first\nsecond");
     expect(promptToUserMessage(prompt)).toMatchObject({
       role: "user",
       content: prompt.content,

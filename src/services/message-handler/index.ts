@@ -337,11 +337,6 @@ export class MessageHandler {
     logMemoryRecentCompleted(trace, start, true, res.data.length, 30, undefined);
     return res.data;
   }
-
-  // NOTE: tbd, I think tool calls would require another handler to generate response message
-  private async generateResponseMessageFromToolCall() {
-    throw "Not implemented";
-  }
 }
 
 function logHandlerStarted(trace: TOption<TBehaviorTraceContext>, handler: string) {

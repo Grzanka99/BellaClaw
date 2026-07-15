@@ -1,6 +1,4 @@
 import { z } from "zod";
-import type { TOption } from "../../../../types";
-import { logger } from "../../../../utils/logger";
 import { EAiProvider } from "../../types";
 
 const SNonEmptyString = z.string().trim().min(1);
@@ -30,14 +28,3 @@ export const SUpdateSettingsArgs = z
   .meta({ minProperties: 1 });
 
 export type TUpdateSettingsArgs = z.infer<typeof SUpdateSettingsArgs>;
-
-export function handleUpdateSettingsArgs(args: unknown): TOption<TUpdateSettingsArgs> {
-  const parsed = SUpdateSettingsArgs.safeParse(args);
-
-  if (!parsed.success) {
-    logger.error(`handleUpdateSettingsArgs: Zod validation failed: ${parsed.error.message}`);
-    return undefined;
-  }
-
-  return parsed.data;
-}

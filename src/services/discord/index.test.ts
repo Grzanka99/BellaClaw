@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { ChannelType } from "discord.js";
 import { CronSingleton } from "../cron";
 import { resetCronEngineJobsTable } from "../database/test-utils";
 import { MessageHandler } from "../message-handler";
@@ -16,6 +17,7 @@ type TDiscordSingletonInternals = {
   };
   handleMessage: (message: {
     author: { id: string; username: string };
+    channel: { type: ChannelType };
     content: string;
   }) => Promise<void>;
   onReady: (client: { user: { tag: string } }) => Promise<void>;
@@ -96,6 +98,9 @@ describe("DiscordSingleton", () => {
       author: {
         id: "user-1",
         username: "TestUser",
+      },
+      channel: {
+        type: ChannelType.DM,
       },
       content: "hello",
     });

@@ -20,8 +20,7 @@
     "server:update": "podman compose --profile signal build --no-cache && bun run server:seed-auth && podman compose --profile signal up -d --force-recreate",
     "start": "bun run src/index.ts",
     "logs:turn": "bun run scripts/logs-turn.ts",
-    "test:prepare": "rm -f test.db && bun --bun drizzle-kit push --config drizzle.test.config.ts",
-    "test": "bun run test:prepare && BELLACLAW_DATABASE_MODE=test bun test",
+    "test": "bun test",
     "db": "bun --bun drizzle-kit"
   },
   "type": "module",

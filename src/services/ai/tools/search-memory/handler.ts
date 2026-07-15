@@ -1,8 +1,4 @@
 import z from "zod";
-import type { TOption } from "../../../../types";
-import { logger } from "../../../../utils/logger";
-import { Memory } from "../../../memory";
-import { sortByImportanceAndDates } from "../../../memory/sort";
 import { EMemoryImportance, type TMemory } from "../../../memory/types";
 
 export const SSearchMemoryArgs = z.object({
@@ -35,33 +31,3 @@ export type TSearchMemoryArgs = z.infer<typeof SSearchMemoryArgs>;
 export type TSearchMemory = {
   memories: TMemory[];
 };
-
-export async function handleSearchMemory(
-  args: unknown,
-  chatId: string,
-): Promise<TOption<TSearchMemory>> {
-  const parsed = SSearchMemoryArgs.safeParse(args);
-
-  if (!parsed.success) {
-    logger.error("handleSearchMemory: Zod validation failed");
-    return undefined;
-  }
-
-  const parsedArgs = parsed.data;
-
-  const result = await Memory.instance.find({
-    chatId,
-    searchString: parsedArgs.searchString,
-    importance: parsedArgs.importance,
-    limit: parsedArgs.limit,
-    timeRange: parsedArgs.timeRange,
-  });
-
-  if ("operation" in result) {
-    return undefined;
-  }
-
-  result.sort(sortByImportanceAndDates);
-
-  return { memories: result };
-}
