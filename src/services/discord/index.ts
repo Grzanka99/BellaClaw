@@ -1,4 +1,4 @@
-import { Client, Events, GatewayIntentBits, type Message, Partials } from "discord.js";
+import { ChannelType, Client, Events, GatewayIntentBits, type Message, Partials } from "discord.js";
 import type { TOption } from "../../types";
 import { createLogger, type TLogger } from "../../utils/logger";
 import { MessagingAdapter } from "../messaging";
@@ -16,12 +16,7 @@ export class DiscordSingleton implements TMessageTransport {
 
   private constructor() {
     this.client = new Client({
-      intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent,
-        GatewayIntentBits.DirectMessages,
-      ],
+      intents: [GatewayIntentBits.MessageContent, GatewayIntentBits.DirectMessages],
       partials: [Partials.Channel],
     });
   }
@@ -35,6 +30,10 @@ export class DiscordSingleton implements TMessageTransport {
   }
 
   private async handleMessage(message: Message) {
+    if (message.channel.type !== ChannelType.DM) {
+      return;
+    }
+
     if (message.author.bot) {
       return;
     }

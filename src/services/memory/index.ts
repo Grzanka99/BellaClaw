@@ -143,42 +143,6 @@ export class Memory {
     };
   }
 
-  public async readFullMemory(chatId: string): Promise<TMemory[] | TMemoryError> {
-    const res = await this.queue.enqueue(async () => {
-      const results = await this.db
-        .select()
-        .from(memoriesTable)
-        .where(eq(memoriesTable.chatId, chatId))
-        .orderBy(desc(memoriesTable.createdAt));
-
-      const parsed = z.array(SMemory).safeParse(results);
-
-      if (!parsed.success) {
-        this.logger.error("Failed to parse memory from DB");
-        return undefined;
-      }
-
-      return parsed.data;
-    });
-
-    if (!res) {
-      return {
-        operation: "read",
-        error: "Failed to read memory",
-      };
-    }
-
-    return res.map((row) => ({
-      id: row.id,
-      chatId: row.chatId,
-      author: row.author,
-      importance: row.importance,
-      message: row.message,
-      createdAt: new Date(row.createdAt),
-      lastReadAt: new Date(row.lastReadAt),
-    }));
-  }
-
   public async save(args: TSaveArgs): Promise<Omit<TMemory, "id"> | TMemoryError> {
     const now = Date.now();
 

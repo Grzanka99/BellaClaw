@@ -1,6 +1,4 @@
 import { z } from "zod";
-import type { TOption } from "../../../../types";
-import { logger } from "../../../../utils/logger";
 
 export const SDefineSettingsIntent = z.object({
   intent: z
@@ -10,14 +8,3 @@ export const SDefineSettingsIntent = z.object({
 });
 
 export type TDefineSettingsIntent = z.infer<typeof SDefineSettingsIntent>;
-
-export function handleDefineSettingsIntent(args: unknown): TOption<TDefineSettingsIntent> {
-  const parsed = SDefineSettingsIntent.safeParse(args);
-
-  if (!parsed.success) {
-    logger.error(`handleDefineSettingsIntent: Zod validation failed: ${parsed.error.message}`);
-    return undefined;
-  }
-
-  return parsed.data;
-}

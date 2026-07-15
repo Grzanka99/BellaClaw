@@ -7,10 +7,6 @@ import type {
 import type { TPrompt, TToolCall } from "../types";
 import type { TNormalizedToolResult } from "./types";
 
-export function promptToText(prompt: TPrompt): string {
-  return prompt.content.map((item) => item.text).join("\n");
-}
-
 export function promptToUserMessage(prompt: TPrompt): UserMessage {
   return {
     role: "user",

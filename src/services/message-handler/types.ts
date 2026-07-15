@@ -1,13 +1,5 @@
 import type { ERole } from "../ai/types";
 
-export type TMessageAuthor =
-  | {
-      type: ERole.User;
-      id: string;
-      username: string;
-    }
-  | { type: ERole.Assistant };
-
 export type TIncommingMessage = {
   chatId: string;
   message: {
