@@ -22,7 +22,7 @@ services:
     container_name: bellaclaw-log-viewer
     restart: unless-stopped
     environment:
-      - BELLACLAW_LOG_DB_PATH=/app-data/bellaclaw-logs.db
+      - BELLACLAW_LOG_DB_PATH=${BELLACLAW_LOG_DB_PATH:-/app-data/bellaclaw-logs.db}
       - BELLACLAW_LOG_VIEWER_HOSTNAME=0.0.0.0
     command: ["bun", "run", "logs:ui"]
     ports:
