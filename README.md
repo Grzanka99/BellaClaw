@@ -23,6 +23,7 @@ Ships with a default "Bellatrix" persona -- a darkly elegant assistant that resp
 | `TAVILY_API_KEY` | No | Tavily API key, required for web search |
 | `OLLAMA_BASE_URL` | No | Ollama base URL (defaults to `http://localhost:11434`) |
 | `BELLACLAW_AI_CREDENTIALS_PATH` | No | Pi credential-store path. Compose sets this to `/app-data/pi-auth.json`; host development defaults to `.secrets/pi-auth.json` |
+| `BELLACLAW_LOG_DB_PATH` | No | Behavior-log SQLite path. Defaults to `/app-data/bellaclaw-logs.db` in the container and `./bellaclaw-logs.db` on the host |
 | `SIGNAL_ENABLED` | No | Set to `true` after Signal is linked and verified; keep `false` by default |
 | `SIGNAL_PHONE_NUMBER` | No | Signal phone number used by `signal-cli-rest-api` when Signal is enabled |
 | `SIGNAL_CLI_RPC_URL` | No | Signal API URL. Compose sets this to `http://signal-cli:8080`; use `http://127.0.0.1:8080` only when running BellaClaw on the host |
@@ -51,6 +52,11 @@ podman compose up -d --build
 ```
 
 The container restarts automatically.
+
+The same Compose project starts a read-only behavior-log viewer on port `8989`. It has no
+application login and is intended for private access through a Tailnet or an equivalently trusted
+network. Host firewall and Tailscale policy determine which interfaces can reach the published
+port.
 
 #### OpenAI Codex Subscription With Podman
 
@@ -132,6 +138,7 @@ credentials are preserved on later starts.
 | `bun install` | Install dependencies |
 | `bun run start` | Start the bot |
 | `bun run dev` | Start with file-watch (auto-restart) |
+| `bun run logs:ui` | Start the read-only behavior-log viewer on `0.0.0.0:8989` |
 | `bun run auth:seed-local` | Seed local Pi credentials from `.secrets/auth.json` when absent |
 | `bun run server:init` | Build, seed optional OpenAI auth, and start the Podman services |
 | `bun run server:update` | Rebuild, preserve existing auth, and recreate the Podman services |
@@ -142,7 +149,22 @@ credentials are preserved on later starts.
 | `bunx @biomejs/biome check .` | Lint/format check |
 | `bunx @biomejs/biome check . --write` | Lint/format auto-fix |
 
-To query a host-mounted behavior log database, set `BELLACLAW_LOG_DB_PATH` to its path before running `bun run logs:turn -- <turnId>`.
+### Behavior Log Viewer
+
+Run the viewer without Compose:
+
+```bash
+BELLACLAW_LOG_DB_PATH=./bellaclaw-logs.db bun run logs:ui
+```
+
+Open `http://<host>:8989`. The viewer searches the existing SQLite FTS index, provides structured
+filters and per-turn timelines, and can poll for new matching events every five seconds. It never
+creates or modifies the database. When the configured database is missing or unreadable, the UI
+shows the resolved path and diagnostic details while continuing to retry. `GET /health` returns
+`200` only while the database can be queried.
+
+To query a host-mounted behavior log database from the CLI, set `BELLACLAW_LOG_DB_PATH` to its path
+before running `bun run logs:turn -- <turnId>`.
 
 ### Message Flow
 
