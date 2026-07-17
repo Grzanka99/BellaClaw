@@ -1,7 +1,7 @@
 import { logger } from "../../utils/logger";
 import { createLogViewerApp } from "./app";
 
-const HOSTNAME = "0.0.0.0";
+const HOSTNAME = Bun.env.BELLACLAW_LOG_VIEWER_HOSTNAME ?? "127.0.0.1";
 const PORT = 8989;
 const application = createLogViewerApp();
 

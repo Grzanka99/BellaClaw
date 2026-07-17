@@ -105,6 +105,12 @@ function handleUpdatedContent(root) {
     return;
   }
 
+  const activeElement = document.activeElement;
+
+  if (activeElement instanceof Element && activeElement.closest(".search-panel") !== null) {
+    return;
+  }
+
   if (window.scrollY < 160 && document.querySelector("details[open]") === null) {
     const link = liveStatus.querySelector("a[href]");
 

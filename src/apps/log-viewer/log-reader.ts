@@ -150,7 +150,8 @@ export class LogReader {
   public async health(): Promise<TLogReaderResult<undefined>> {
     return this.queue.enqueue(async (): Promise<TLogReaderResult<undefined>> => {
       try {
-        this.getDatabase();
+        const db = this.getDatabase();
+        this.verifySchema(db);
         return { success: true, data: undefined };
       } catch (error) {
         return { success: false, error: this.describeError(error) };
@@ -196,8 +197,10 @@ export class LogReader {
   }
 
   private verifySchema(db: Database) {
-    db.query("SELECT id FROM app_event_logs LIMIT 1").get();
-    db.query("SELECT rowid FROM app_event_logs_fts LIMIT 1").get();
+    db.query(`SELECT ${EVENT_COLUMNS} FROM app_event_logs l LIMIT 1`).get();
+    db.query("SELECT rowid FROM app_event_logs_fts WHERE app_event_logs_fts MATCH ? LIMIT 1").get(
+      "bellaclaw_health_check",
+    );
   }
 
   private selectEvents(db: Database, query: TLogSearchQuery) {

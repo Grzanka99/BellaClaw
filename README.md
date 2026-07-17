@@ -138,7 +138,7 @@ credentials are preserved on later starts.
 | `bun install` | Install dependencies |
 | `bun run start` | Start the bot |
 | `bun run dev` | Start with file-watch (auto-restart) |
-| `bun run logs:ui` | Start the read-only behavior-log viewer on `0.0.0.0:8989` |
+| `bun run logs:ui` | Start the read-only behavior-log viewer on `127.0.0.1:8989` |
 | `bun run auth:seed-local` | Seed local Pi credentials from `.secrets/auth.json` when absent |
 | `bun run server:init` | Build, seed optional OpenAI auth, and start the Podman services |
 | `bun run server:update` | Rebuild, preserve existing auth, and recreate the Podman services |
@@ -157,11 +157,18 @@ Run the viewer without Compose:
 BELLACLAW_LOG_DB_PATH=./bellaclaw-logs.db bun run logs:ui
 ```
 
-Open `http://<host>:8989`. The viewer searches the existing SQLite FTS index, provides structured
+Open `http://127.0.0.1:8989`. The viewer searches the existing SQLite FTS index, provides structured
 filters and per-turn timelines, and can poll for new matching events every five seconds. It never
 creates or modifies the database. When the configured database is missing or unreadable, the UI
 shows the resolved path and diagnostic details while continuing to retry. `GET /health` returns
 `200` only while the database can be queried.
+
+The standalone viewer listens on loopback by default. To expose it deliberately, set
+`BELLACLAW_LOG_VIEWER_HOSTNAME=0.0.0.0` or a trusted-network address and protect access with network
+controls or an authenticated reverse proxy because behavior logs may contain sensitive data. The
+Compose service listens on all interfaces inside its container but publishes port `8989` only on
+host loopback; change the published address in `compose.yaml` only when trusted-network access is
+required.
 
 To query a host-mounted behavior log database from the CLI, set `BELLACLAW_LOG_DB_PATH` to its path
 before running `bun run logs:turn -- <turnId>`.

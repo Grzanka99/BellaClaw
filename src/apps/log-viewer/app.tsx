@@ -3,12 +3,13 @@
 import { type Context, Hono } from "hono";
 import { z } from "zod";
 import { getDefaultLogDbPath } from "../../services/app-logger";
+import type { TOption } from "../../types";
 import { LogReader } from "./log-reader";
 import { parseLogSearchQuery } from "./query";
 import { Document, ErrorPage, EventPageFragment, HomePage, LivePoller, TurnPage } from "./views";
 
 type TLogViewerOptions = {
-  dbPath?: string;
+  dbPath: TOption<string>;
 };
 
 export type TLogViewerApplication = {
@@ -21,7 +22,9 @@ const SLiveCursor = z.object({
   afterId: z.coerce.number().int().nonnegative(),
 });
 
-export function createLogViewerApp(options: TLogViewerOptions = {}): TLogViewerApplication {
+export function createLogViewerApp(
+  options: TLogViewerOptions = { dbPath: undefined },
+): TLogViewerApplication {
   const dbPath = options.dbPath ?? getDefaultLogDbPath();
   const reader = new LogReader(dbPath);
   const app = new Hono();
@@ -149,6 +152,7 @@ export function createLogViewerApp(options: TLogViewerOptions = {}): TLogViewerA
         afterCreatedAt={cursor.data.afterCreatedAt}
         afterId={cursor.data.afterId}
         count={result.data}
+        warning={undefined}
       />,
     );
   });

@@ -65,6 +65,7 @@ export function HomePage(props: { dbPath: string; query: TLogSearchQuery; page: 
                 afterCreatedAt={afterCreatedAt}
                 afterId={afterId}
                 count={0}
+                warning={undefined}
               />
             )}
           </div>
@@ -184,7 +185,7 @@ export function LivePoller(props: {
   afterCreatedAt: number;
   afterId: number;
   count: number;
-  warning?: string;
+  warning: TOption<string>;
 }) {
   const endpoint = buildLogUrl(props.query, {
     includeUntil: true,

@@ -21,11 +21,12 @@ services:
       dockerfile: Containerfile
     container_name: bellaclaw-log-viewer
     restart: unless-stopped
-    env_file:
-      - .env
+    environment:
+      - BELLACLAW_LOG_DB_PATH=/app-data/bellaclaw-logs.db
+      - BELLACLAW_LOG_VIEWER_HOSTNAME=0.0.0.0
     command: ["bun", "run", "logs:ui"]
     ports:
-      - "8989:8989"
+      - "127.0.0.1:8989:8989"
     volumes:
       - bellaclaw-data:/app-data:ro
 
