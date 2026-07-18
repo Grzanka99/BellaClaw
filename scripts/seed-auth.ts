@@ -5,6 +5,7 @@ import { z } from "zod";
 import {
   AI_CREDENTIALS_PATH,
   LOCAL_AI_CREDENTIALS_PATH,
+  SCredentials,
 } from "../src/services/ai/auth/file-credential-store";
 
 const SOURCE_PATH = resolve(import.meta.dir, "../.secrets/auth.json");
@@ -18,25 +19,7 @@ const SCodexAuth = z.object({
   }),
 });
 
-const SApiKeyCredential = z.looseObject({
-  type: z.literal("api_key"),
-  key: z.string().optional(),
-  env: z.record(z.string(), z.string()).optional(),
-});
-
-const SOAuthCredential = z.looseObject({
-  type: z.literal("oauth"),
-  access: z.string().min(1),
-  refresh: z.string().min(1),
-  expires: z.number().nonnegative(),
-});
-
-const SPiAuth = z
-  .record(z.string(), z.discriminatedUnion("type", [SApiKeyCredential, SOAuthCredential]))
-  .refine((credentials) => {
-    const codexCredential = credentials[OPENAI_CODEX_PROVIDER_ID];
-    return codexCredential !== undefined && codexCredential.type === "oauth";
-  });
+const SPiAuth = SCredentials.refine((credentials) => Object.keys(credentials).length > 0);
 
 type TPiAuth = z.infer<typeof SPiAuth>;
 
@@ -161,19 +144,6 @@ async function runOnHost(): Promise<void> {
   }
 
   const reset = Bun.argv.includes("--reset");
-
-  if (reset) {
-    const stop = Bun.spawnSync(["podman", "compose", "stop", "bellaclaw"], {
-      cwd: resolve(import.meta.dir, ".."),
-      stdout: "inherit",
-      stderr: "inherit",
-    });
-
-    if (stop.exitCode !== 0) {
-      throw new Error(`Failed to stop BellaClaw with exit code ${stop.exitCode}`);
-    }
-  }
-
   const args = [
     "podman",
     "compose",
@@ -194,33 +164,16 @@ async function runOnHost(): Promise<void> {
     args.push("--reset");
   }
 
-  let restartExitCode = 0;
+  const process = Bun.spawn(args, {
+    cwd: resolve(import.meta.dir, ".."),
+    stdin: sourceFile,
+    stdout: "inherit",
+    stderr: "inherit",
+  });
+  const exitCode = await process.exited;
 
-  try {
-    const process = Bun.spawn(args, {
-      cwd: resolve(import.meta.dir, ".."),
-      stdin: sourceFile,
-      stdout: "inherit",
-      stderr: "inherit",
-    });
-    const exitCode = await process.exited;
-
-    if (exitCode !== 0) {
-      throw new Error(`Auth seed container failed with exit code ${exitCode}`);
-    }
-  } finally {
-    if (reset) {
-      const restart = Bun.spawnSync(["podman", "compose", "up", "-d", "bellaclaw"], {
-        cwd: resolve(import.meta.dir, ".."),
-        stdout: "inherit",
-        stderr: "inherit",
-      });
-      restartExitCode = restart.exitCode;
-    }
-  }
-
-  if (restartExitCode !== 0) {
-    throw new Error(`Failed to restart BellaClaw with exit code ${restartExitCode}`);
+  if (exitCode !== 0) {
+    throw new Error(`Auth seed container failed with exit code ${exitCode}`);
   }
 }
 

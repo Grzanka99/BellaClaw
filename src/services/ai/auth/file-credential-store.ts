@@ -31,7 +31,7 @@ const SOAuthCredential = z.looseObject({
 });
 
 const SCredential = z.discriminatedUnion("type", [SApiKeyCredential, SOAuthCredential]);
-const SCredentials = z.record(z.string(), SCredential);
+export const SCredentials = z.record(z.string(), SCredential);
 
 export class FileCredentialStore implements CredentialStore {
   private writeChain: Promise<void> = Promise.resolve();
