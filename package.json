@@ -16,6 +16,7 @@
     "dev": "bun run auth:seed-local && bun run --watch src/index.ts",
     "server:down": "podman compose --profile signal down",
     "server:init": "podman compose --profile signal build && bun run server:seed-auth && podman compose --profile signal up -d",
+    "server:reset-auth": "bun run scripts/seed-auth.ts --reset",
     "server:seed-auth": "bun run scripts/seed-auth.ts",
     "server:update": "podman compose --profile signal build --no-cache && bun run server:seed-auth && podman compose --profile signal up -d --force-recreate",
     "start": "bun run src/index.ts",
