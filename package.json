@@ -20,6 +20,7 @@
     "server:seed-auth": "bun run scripts/seed-auth.ts",
     "server:update": "podman compose --profile signal build --no-cache && bun run server:seed-auth && podman compose --profile signal up -d --force-recreate",
     "start": "bun run src/index.ts",
+    "logs:ui": "bun run src/apps/log-viewer/index.ts",
     "logs:turn": "bun run scripts/logs-turn.ts",
     "test": "bun test",
     "db": "bun --bun drizzle-kit"
@@ -31,6 +32,8 @@
     "croner": "^10.0.1",
     "discord.js": "^14.25.1",
     "drizzle-orm": "^0.45.2",
+    "hono": "^4.12.30",
+    "htmx.org": "^2.0.10",
     "turndown": "^7.2.4",
     "zod": "^4.3.6"
   }

@@ -1,5 +1,6 @@
 services:
   bellaclaw:
+    image: bellaclaw:local
     build:
       context: .
       dockerfile: Containerfile
@@ -9,9 +10,27 @@ services:
       - .env
     environment:
       - BELLACLAW_AI_CREDENTIALS_PATH=/app-data/pi-auth.json
+      - BELLACLAW_LOG_DB_ROOT=/app-data
       - SIGNAL_CLI_RPC_URL=http://signal-cli:8080
     volumes:
       - bellaclaw-data:/app-data
+
+  log-viewer:
+    image: bellaclaw:local
+    build:
+      context: .
+      dockerfile: Containerfile
+    container_name: bellaclaw-log-viewer
+    restart: unless-stopped
+    environment:
+      - BELLACLAW_LOG_DB_PATH=${BELLACLAW_LOG_DB_PATH:-/app-data/bellaclaw-logs.db}
+      - BELLACLAW_LOG_DB_ROOT=/app-data
+      - BELLACLAW_LOG_VIEWER_HOSTNAME=0.0.0.0
+    command: ["bun", "run", "logs:ui"]
+    ports:
+      - "127.0.0.1:8989:8989"
+    volumes:
+      - bellaclaw-data:/app-data:ro
 
   signal-cli:
     image: docker.io/bbernhard/signal-cli-rest-api:0.100-rootless

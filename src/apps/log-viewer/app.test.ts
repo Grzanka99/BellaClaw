@@ -1,0 +1,74 @@
+import { afterEach, describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { AppLogger, EBehaviorLogLevel } from "../../services/app-logger";
+import type { TOption } from "../../types";
+import { createLogViewerApp, type TLogViewerApplication } from "./app";
+
+let application: TOption<TLogViewerApplication>;
+let tempDir: TOption<string>;
+
+afterEach(async () => {
+  await application?.close();
+
+  if (tempDir !== undefined) {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+
+  application = undefined;
+  tempDir = undefined;
+});
+
+describe("log viewer", () => {
+  test("shows a missing database without creating it", async () => {
+    tempDir = mkdtempSync(join(tmpdir(), "bellaclaw-log-viewer-"));
+    const dbPath = join(tempDir, "missing.db");
+    application = createLogViewerApp({ dbPath });
+
+    const page = await application.app.request("/");
+    const health = await application.app.request("/health");
+
+    expect(page.status).toBe(200);
+    expect(await page.text()).toContain("Behavior log database not found");
+    expect(health.status).toBe(503);
+    expect(await Bun.file(dbPath).exists()).toBe(false);
+  });
+
+  test("searches events and renders a turn timeline", async () => {
+    tempDir = mkdtempSync(join(tmpdir(), "bellaclaw-log-viewer-"));
+    const dbPath = join(tempDir, "logs.db");
+    const logger = new AppLogger({ dbPath, stdout() {} });
+
+    logger.record({
+      trace: { turnId: "turn-searchable", chatId: undefined, platform: "discord" },
+      event: "tool.started",
+      component: "ai",
+      level: EBehaviorLogLevel.Info,
+      toolName: "web-search",
+      success: true,
+      summary: "distinctive lookup started",
+    });
+    logger.record({
+      trace: { turnId: "turn-searchable", chatId: undefined, platform: "discord" },
+      event: "tool.finished",
+      component: "ai",
+      level: EBehaviorLogLevel.Info,
+      toolName: "web-search",
+      success: true,
+      summary: "distinctive lookup finished",
+    });
+    await logger.flush();
+    await logger.close();
+    application = createLogViewerApp({ dbPath });
+
+    const home = await application.app.request("/?q=distinctive&success=success");
+    const turn = await application.app.request("/turns/turn-searchable");
+    const homeHtml = await home.text();
+    const turnHtml = await turn.text();
+
+    expect(homeHtml).toContain("distinctive lookup finished");
+    expect(homeHtml).toContain("/turns/turn-searchable");
+    expect(turnHtml.indexOf("lookup started")).toBeLessThan(turnHtml.indexOf("lookup finished"));
+  });
+});
