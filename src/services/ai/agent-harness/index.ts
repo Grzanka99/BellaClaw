@@ -66,7 +66,7 @@ export class AgentHarness {
   }
 
   public async runMain(
-    args: Omit<TAgentRunArgs, "name" | "purpose" | "maxIterations">,
+    args: Omit<TAgentRunArgs, "name" | "purpose" | "maxIterations" | "parentToolCallId">,
   ): Promise<TAgentRunResult> {
     let delegationCount = 0;
 
@@ -75,6 +75,7 @@ export class AgentHarness {
       name: EAgentName.Main,
       purpose: EModelPurpose.ChatAccurate,
       maxIterations: 30,
+      parentToolCallId: undefined,
       delegationCount: () => {
         delegationCount += 1;
 
@@ -86,13 +87,14 @@ export class AgentHarness {
   }
 
   public async runScheduledTask(
-    args: Omit<TAgentRunArgs, "name" | "purpose" | "maxIterations">,
+    args: Omit<TAgentRunArgs, "name" | "purpose" | "maxIterations" | "parentToolCallId">,
   ): Promise<TAgentRunResult> {
     return this.run({
       ...args,
       name: EAgentName.ScheduledTask,
       purpose: EModelPurpose.ChatAccurate,
       maxIterations: 30,
+      parentToolCallId: undefined,
       delegationCount: undefined,
     });
   }
@@ -429,7 +431,7 @@ export class AgentHarness {
   }
 
   private createHistory(
-    history: THistoryItem[] | undefined,
+    history: TOption<THistoryItem[]>,
     api: Api,
     provider: string,
     model: string,
@@ -576,47 +578,55 @@ export class AgentHarness {
       },
     ];
 
-    return delegates.map((delegate) => ({
-      name: delegate.name,
-      label: delegate.label,
-      description: `Run the ${delegate.target} specialist for this focused task`,
-      parameters: schema,
-      executionMode: delegate.target === EAgentName.Scheduling ? SEQUENTIAL : PARALLEL,
-      execute: async (toolCallId: string, parameters: unknown, signal?: AbortSignal) => {
-        if (args.delegationCount === undefined) {
-          throw new Error("Specialists cannot delegate");
-        }
+    return delegates.map((delegate) => {
+      let executionMode: typeof SEQUENTIAL | typeof PARALLEL = PARALLEL;
 
-        const parsedParameters: Static<typeof schema> = Value.Decode(schema, parameters);
-        args.delegationCount();
-        let delegationSignal = args.signal;
+      if (delegate.target === EAgentName.Scheduling) {
+        executionMode = SEQUENTIAL;
+      }
 
-        if (signal !== undefined) {
-          delegationSignal = signal;
-        }
+      return {
+        name: delegate.name,
+        label: delegate.label,
+        description: `Run the ${delegate.target} specialist for this focused task`,
+        parameters: schema,
+        executionMode,
+        execute: async (toolCallId: string, parameters: unknown, signal?: AbortSignal) => {
+          if (args.delegationCount === undefined) {
+            throw new Error("Specialists cannot delegate");
+          }
 
-        const result = await this.run({
-          ...args,
-          name: delegate.target,
-          purpose: delegate.purpose,
-          prompt: `Original user message:\n${args.prompt}\n\nDelegated task:\n${parsedParameters.task}`,
-          history: undefined,
-          maxIterations: 12,
-          parentToolCallId: toolCallId,
-          delegationCount: undefined,
-          signal: delegationSignal,
-        });
+          const parsedParameters: Static<typeof schema> = Value.Decode(schema, parameters);
+          args.delegationCount();
+          let delegationSignal = args.signal;
 
-        if (result.text === undefined || result.text.trim().length === 0) {
-          throw new Error(`${delegate.target} specialist returned no final response`);
-        }
+          if (signal !== undefined) {
+            delegationSignal = signal;
+          }
 
-        return {
-          content: [{ type: "text" as const, text: result.text }],
-          details: result,
-        };
-      },
-    }));
+          const result = await this.run({
+            ...args,
+            name: delegate.target,
+            purpose: delegate.purpose,
+            prompt: `Original user message:\n${args.prompt}\n\nDelegated task:\n${parsedParameters.task}`,
+            history: undefined,
+            maxIterations: 12,
+            parentToolCallId: toolCallId,
+            delegationCount: undefined,
+            signal: delegationSignal,
+          });
+
+          if (result.text === undefined || result.text.trim().length === 0) {
+            throw new Error(`${delegate.target} specialist returned no final response`);
+          }
+
+          return {
+            content: [{ type: "text" as const, text: result.text }],
+            details: result,
+          };
+        },
+      };
+    });
   }
 
   private logStarted(args: TAgentRunArgs, provider: string, model: string) {
@@ -734,14 +744,26 @@ export class AgentHarness {
       data: resultDetails,
       error: resultError,
     });
+    let level = EBehaviorLogLevel.Info;
+
+    if (isError) {
+      level = EBehaviorLogLevel.Warning;
+    }
+
+    let durationMs: TOption<number>;
+
+    if (startedAt !== undefined) {
+      durationMs = performance.now() - startedAt;
+    }
+
     AppLogger.instance.record({
       trace: args.trace,
       event: "tool.call.completed",
       component: "agent-harness",
-      level: isError ? EBehaviorLogLevel.Warning : EBehaviorLogLevel.Info,
+      level,
       toolName,
       success: !isError,
-      durationMs: startedAt === undefined ? undefined : performance.now() - startedAt,
+      durationMs,
       summary: details.summary,
       metadata: {
         ...details.metadata,
@@ -820,11 +842,17 @@ export class AgentHarness {
       return;
     }
 
+    let level = EBehaviorLogLevel.Warning;
+
+    if (success) {
+      level = EBehaviorLogLevel.Info;
+    }
+
     AppLogger.instance.record({
       trace,
       event: "direct-completion.completed",
       component: "agent-harness",
-      level: success ? EBehaviorLogLevel.Info : EBehaviorLogLevel.Warning,
+      level,
       provider,
       model,
       purpose,

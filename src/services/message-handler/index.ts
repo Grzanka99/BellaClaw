@@ -80,6 +80,7 @@ export class MessageHandler {
         settings,
         platform,
         trace,
+        signal: undefined,
       });
       this.logger.info(
         `handleMessage: AI chat completed (${(performance.now() - chatStart).toFixed(0)}ms)`,

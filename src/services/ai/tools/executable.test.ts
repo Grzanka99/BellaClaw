@@ -60,7 +60,7 @@ describe("production executable tools", () => {
     );
   });
 
-  test("preserves direct reminder fallback when updating through the production tool", async () => {
+  test("preserves existing fallback when updating cron content without a new fallback", async () => {
     const existing = {
       id: 1,
       name: "daily",
@@ -77,7 +77,7 @@ describe("production executable tools", () => {
       timezone: "Europe/Warsaw",
       reminderText: "Old",
       reminderPromptData: undefined,
-      reminderFallbackText: undefined,
+      reminderFallbackText: "Existing fallback",
       taskPrompt: undefined,
       taskFallbackText: undefined,
     };
@@ -93,13 +93,12 @@ describe("production executable tools", () => {
     await tool?.execute("call", {
       name: "daily",
       reminderText: "New",
-      reminderFallbackText: "Fallback",
     });
 
     expect(createRecurring).toHaveBeenCalledWith(
       expect.objectContaining({
         reminderText: "New",
-        reminderFallbackText: "Fallback",
+        reminderFallbackText: "Existing fallback",
         reminderPromptData: undefined,
         taskPrompt: undefined,
       }),

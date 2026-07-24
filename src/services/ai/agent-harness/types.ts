@@ -21,10 +21,10 @@ export type TAgentRunArgs = {
   currentTimeContext: TOption<string>;
   platform: TOption<EMessagePlatform>;
   trace: TOption<TBehaviorTraceContext>;
-  history?: THistoryItem[];
+  history: TOption<THistoryItem[]>;
   maxIterations: number;
-  parentToolCallId?: string;
-  signal?: AbortSignal;
+  parentToolCallId: TOption<string>;
+  signal: TOption<AbortSignal>;
 };
 
 export type TAgentRunResult = {

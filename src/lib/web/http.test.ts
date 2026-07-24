@@ -48,6 +48,7 @@ describe("fetchTextWithLimit", () => {
   test("caller cancellation wins while the pinned path is awaiting DNS", async () => {
     globalThis.fetch = originalFetch;
     const controller = new AbortController();
+    const startedAt = performance.now();
     const pending = fetchTextWithLimit({
       url: `https://dns-cancel-${crypto.randomUUID()}.invalid/path`,
       timeoutMs: 5_000,
@@ -57,6 +58,7 @@ describe("fetchTextWithLimit", () => {
     controller.abort();
 
     await expect(pending).rejects.toThrow("aborted");
+    expect(performance.now() - startedAt).toBeLessThan(100);
   });
 });
 

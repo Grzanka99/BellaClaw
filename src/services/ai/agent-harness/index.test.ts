@@ -6,6 +6,7 @@ import {
   fauxToolCall,
   type Model,
 } from "@earendil-works/pi-ai";
+import type { TOption } from "../../../types";
 import type { TBehaviorTraceContext } from "../../app-logger";
 import { AppLogger } from "../../app-logger";
 import { EMessagePlatform } from "../../messaging/types";
@@ -80,6 +81,7 @@ describe("AgentHarness", () => {
       currentTimeContext: "time one",
       platform: EMessagePlatform.Discord,
       trace: undefined,
+      signal: undefined,
     });
     settings[EConfigKey.AiInstructionsTimezone] = "Asia/Tokyo";
     const second = await harness.runMain({
@@ -90,6 +92,7 @@ describe("AgentHarness", () => {
       currentTimeContext: "time two",
       platform: EMessagePlatform.Discord,
       trace: undefined,
+      signal: undefined,
     });
 
     expect(first.text).toBe("first");
@@ -125,6 +128,7 @@ describe("AgentHarness", () => {
       currentTimeContext: undefined,
       platform: EMessagePlatform.Signal,
       trace: undefined,
+      signal: undefined,
     });
 
     expect(systemPrompt).toContain("*italic*, **bold**, `monospace`, ~strikethrough~");
@@ -148,6 +152,7 @@ describe("AgentHarness", () => {
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
       trace: undefined,
+      signal: undefined,
     };
 
     expect((await AgentHarness.instance.runMain(args)).text).toBeUndefined();
@@ -197,6 +202,7 @@ describe("AgentHarness", () => {
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
       trace: undefined,
+      signal: undefined,
     });
 
     expect(root.text).toBe("root final");
@@ -219,6 +225,8 @@ describe("AgentHarness", () => {
         trace: undefined;
         history: THistoryItem[];
         maxIterations: number;
+        parentToolCallId: undefined;
+        signal: undefined;
         delegationCount: undefined;
       }): Promise<{ text?: string; iterations: number }>;
     };
@@ -236,6 +244,8 @@ describe("AgentHarness", () => {
       trace: undefined,
       history: [],
       maxIterations: 12,
+      parentToolCallId: undefined,
+      signal: undefined,
       delegationCount: undefined,
     });
 
@@ -261,6 +271,7 @@ describe("AgentHarness", () => {
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
       trace: undefined,
+      signal: undefined,
     });
 
     expect(result.text).toBeUndefined();
@@ -289,6 +300,7 @@ describe("AgentHarness", () => {
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
       trace: undefined,
+      signal: undefined,
     });
 
     expect(result.text).toBeUndefined();
@@ -356,6 +368,7 @@ describe("AgentHarness", () => {
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
       trace: undefined,
+      signal: undefined,
     });
 
     expect(result.text).toBe("forced final");
@@ -392,6 +405,7 @@ describe("AgentHarness", () => {
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
       trace: undefined,
+      signal: undefined,
     });
 
     expect(result.text).toBe("forced after canonical repeat");
@@ -438,6 +452,7 @@ describe("AgentHarness", () => {
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
       trace: undefined,
+      signal: undefined,
     });
 
     expect(result.text).toBe("combined");
@@ -477,6 +492,7 @@ describe("AgentHarness", () => {
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
       trace: undefined,
+      signal: undefined,
     });
 
     expect(result.text).toBe("Done");
@@ -498,8 +514,9 @@ describe("AgentHarness", () => {
         trace: TBehaviorTraceContext;
         history: THistoryItem[];
         maxIterations: number;
-        parentToolCallId?: string;
-        delegationCount?: () => void;
+        parentToolCallId: TOption<string>;
+        signal: TOption<AbortSignal>;
+        delegationCount: TOption<() => void>;
       }): Array<{
         name: string;
         executionMode: string;
@@ -526,6 +543,8 @@ describe("AgentHarness", () => {
       trace: { turnId: "turn", chatId: "discord:1", platform: EMessagePlatform.Discord },
       history: [],
       maxIterations: 30,
+      parentToolCallId: undefined,
+      signal: undefined,
       delegationCount: () => {
         count += 1;
         if (count > 30) {
@@ -609,6 +628,7 @@ describe("AgentHarness", () => {
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
       trace,
+      signal: undefined,
     });
     await AgentHarness.instance.completeText({
       prompt: "Reply directly",
@@ -683,6 +703,7 @@ describe("AgentHarness", () => {
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
       trace,
+      signal: undefined,
     });
     const direct = await AgentHarness.instance.completeText({
       prompt: "Fail directly",

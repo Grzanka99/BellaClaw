@@ -35,17 +35,7 @@ export function sanitizeErrorMessage(error: TOption<string>): TOption<string> {
     return undefined;
   }
 
-  let redacted = error;
-  const secrets = [Bun.env.OPENROUTER_API_KEY, Bun.env.OPENCODE_API_KEY];
-
-  for (const secret of secrets) {
-    if (secret === undefined || secret.length === 0) {
-      continue;
-    }
-
-    redacted = redacted.replaceAll(secret, "[REDACTED]");
-  }
-
+  const redacted = redactSecrets(error);
   const normalized = redacted.replace(/\s+/g, " ").trim();
   const directHttpStatus = normalized.match(/^([1-5]\d{2})(?:\b|:)/);
 
@@ -665,20 +655,25 @@ function sanitizeContentPreview(value: TOption<string>): string {
     return "";
   }
 
-  let sanitized = value.replace(/\s+/g, " ").trim();
-  const secrets = [Bun.env.OPENROUTER_API_KEY, Bun.env.OPENCODE_API_KEY];
-
-  for (const secret of secrets) {
-    if (secret !== undefined && secret.length > 0) {
-      sanitized = sanitized.replaceAll(secret, "[REDACTED]");
-    }
-  }
-
+  const sanitized = redactSecrets(value).replace(/\s+/g, " ").trim();
   if (sanitized.length <= CONTENT_PREVIEW_MAX_CHARS) {
     return sanitized;
   }
 
   return `${sanitized.slice(0, CONTENT_PREVIEW_MAX_CHARS)}...`;
+}
+
+function redactSecrets(value: string): string {
+  let redacted = value;
+  const secrets = [Bun.env.OPENROUTER_API_KEY, Bun.env.OPENCODE_API_KEY];
+
+  for (const secret of secrets) {
+    if (secret !== undefined && secret.length > 0) {
+      redacted = redacted.replaceAll(secret, "[REDACTED]");
+    }
+  }
+
+  return redacted;
 }
 
 function readString(record: Record<string, unknown>, key: string): TOption<string> {

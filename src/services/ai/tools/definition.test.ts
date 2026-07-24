@@ -53,6 +53,17 @@ describe("AI tool definitions", () => {
     expect(Value.Check(SUpdateCronJobArgs, { name: "x", unknown: true })).toBe(false);
   });
 
+  test("uses a Google-compatible string enum for memory importance", () => {
+    const importanceSchema = SSearchMemoryArgs.properties.importance;
+    const serialized = JSON.stringify(importanceSchema);
+
+    expect(serialized).toContain('"enum":["low","medium","high"]');
+    expect(serialized).not.toContain('"anyOf"');
+    expect(serialized).not.toContain('"const"');
+    expect(Value.Check(SSearchMemoryArgs, { importance: ["high"] })).toBe(true);
+    expect(Value.Check(SSearchMemoryArgs, { importance: ["urgent"] })).toBe(false);
+  });
+
   test("convert explicit-offset transport dates", () => {
     const once = validateScheduleOnceArgs({
       name: "offset-reminder",

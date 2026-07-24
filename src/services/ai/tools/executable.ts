@@ -283,13 +283,15 @@ export function createSchedulingTools(context: TToolExecutionContext) {
         if (validatedArgs.reminderText !== undefined) {
           reminderText = validatedArgs.reminderText;
           reminderPromptData = undefined;
-          reminderFallbackText = validatedArgs.reminderFallbackText;
+          reminderFallbackText =
+            validatedArgs.reminderFallbackText ?? existing.reminderFallbackText;
           taskPrompt = undefined;
           taskFallbackText = undefined;
         } else if (validatedArgs.reminderPromptData !== undefined) {
           reminderText = undefined;
           reminderPromptData = validatedArgs.reminderPromptData;
-          reminderFallbackText = validatedArgs.reminderFallbackText;
+          reminderFallbackText =
+            validatedArgs.reminderFallbackText ?? existing.reminderFallbackText;
           taskPrompt = undefined;
           taskFallbackText = undefined;
         } else if (validatedArgs.taskPrompt !== undefined) {
@@ -297,7 +299,7 @@ export function createSchedulingTools(context: TToolExecutionContext) {
           reminderPromptData = undefined;
           reminderFallbackText = undefined;
           taskPrompt = validatedArgs.taskPrompt;
-          taskFallbackText = validatedArgs.taskFallbackText;
+          taskFallbackText = validatedArgs.taskFallbackText ?? existing.taskFallbackText;
         }
 
         if (existing.type === ECronJobType.Recurring) {

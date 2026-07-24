@@ -138,6 +138,7 @@ export async function generateScheduledTaskText(
       settings,
       platform,
       trace,
+      signal: undefined,
     });
 
     if (result.text !== undefined && result.text.trim().length > 0) {

@@ -1,4 +1,4 @@
-import { type Static, Type } from "@earendil-works/pi-ai";
+import { type Static, StringEnum, Type } from "@earendil-works/pi-ai";
 import { EMemoryImportance, type TMemory } from "../../../memory/types";
 
 export const SSearchMemoryArgs = Type.Object(
@@ -30,7 +30,7 @@ export const SSearchMemoryArgs = Type.Object(
       Type.Integer({ minimum: 1, description: "Maximum number of memories to return" }),
     ),
     importance: Type.Optional(
-      Type.Array(Type.Enum(EMemoryImportance), {
+      Type.Array(StringEnum(Object.values(EMemoryImportance)), {
         description: "Importance levels to include: low, medium, or high",
       }),
     ),

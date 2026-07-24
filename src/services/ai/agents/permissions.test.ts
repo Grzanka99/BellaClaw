@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
+import type { TOption } from "../../../types";
 import { DefaultConfigRecord } from "../../settings/schema";
 import { AgentHarness, EAgentName } from "../agent-harness";
 import { EModelPurpose } from "../types";
@@ -54,12 +55,14 @@ describe("agent permissions", () => {
         trace: undefined;
         history: [];
         maxIterations: number;
-        delegationCount?: () => void;
+        parentToolCallId: TOption<string>;
+        signal: TOption<AbortSignal>;
+        delegationCount: TOption<() => void>;
       }): Promise<AgentTool[]>;
     };
 
     for (const name of Object.values(EAgentName)) {
-      let delegationCount: (() => void) | undefined;
+      let delegationCount: TOption<() => void>;
 
       if (name === EAgentName.Main) {
         delegationCount = () => undefined;
@@ -76,6 +79,8 @@ describe("agent permissions", () => {
         trace: undefined,
         history: [],
         maxIterations: 30,
+        parentToolCallId: undefined,
+        signal: undefined,
         delegationCount,
       });
 
