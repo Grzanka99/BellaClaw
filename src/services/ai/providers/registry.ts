@@ -30,7 +30,7 @@ const AI_PROVIDER_REGISTRY: Record<EAiProvider, TAiProviderRegistration> = {
     createProvider: openaiCodexProvider,
     modelByPurpose: {
       [EModelPurpose.Utility]: { model: "gpt-5.6-luna", effort: "low" },
-      [EModelPurpose.Main]: { model: "gpt-5.6-luna", effort: "max" },
+      [EModelPurpose.Main]: { model: "gpt-5.6-sol", effort: "medium" },
       [EModelPurpose.Specialist]: { model: "gpt-5.6-luna", effort: "max" },
       [EModelPurpose.SpecialistAccurate]: { model: "gpt-5.6-luna", effort: "max" },
       [EModelPurpose.ScheduledTask]: { model: "gpt-5.6-luna", effort: "max" },
@@ -83,11 +83,11 @@ const AI_PROVIDER_REGISTRY: Record<EAiProvider, TAiProviderRegistration> = {
     createProvider: opencodeGoProvider,
     modelByPurpose: {
       [EModelPurpose.Utility]: { model: "deepseek-v4-flash" },
-      [EModelPurpose.Main]: { model: "deepseek-v4-pro", effort: "high" },
+      [EModelPurpose.Main]: { model: "grok-4.5", effort: "high" },
       [EModelPurpose.Specialist]: { model: "deepseek-v4-pro", effort: "high" },
       [EModelPurpose.SpecialistAccurate]: {
-        model: "deepseek-v4-pro",
-        effort: "high",
+        model: "grok-4.5",
+        effort: "medium",
       },
       [EModelPurpose.ScheduledTask]: { model: "deepseek-v4-pro", effort: "high" },
     },

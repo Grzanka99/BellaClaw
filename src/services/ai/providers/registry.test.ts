@@ -34,7 +34,7 @@ describe("AI provider registry", () => {
   test("maps every role purpose to its configured model", () => {
     expect(getAiModelIds(EAiProvider.OpenaiCodex)).toEqual({
       [EModelPurpose.Utility]: "gpt-5.6-luna",
-      [EModelPurpose.Main]: "gpt-5.6-luna",
+      [EModelPurpose.Main]: "gpt-5.6-sol",
       [EModelPurpose.Specialist]: "gpt-5.6-luna",
       [EModelPurpose.SpecialistAccurate]: "gpt-5.6-luna",
       [EModelPurpose.ScheduledTask]: "gpt-5.6-luna",
@@ -48,9 +48,9 @@ describe("AI provider registry", () => {
     });
     expect(getAiModelIds(EAiProvider.OpencodeGo)).toEqual({
       [EModelPurpose.Utility]: "deepseek-v4-flash",
-      [EModelPurpose.Main]: "deepseek-v4-pro",
+      [EModelPurpose.Main]: "grok-4.5",
       [EModelPurpose.Specialist]: "deepseek-v4-pro",
-      [EModelPurpose.SpecialistAccurate]: "deepseek-v4-pro",
+      [EModelPurpose.SpecialistAccurate]: "grok-4.5",
       [EModelPurpose.ScheduledTask]: "deepseek-v4-pro",
     });
     expect(getAiModelIds(EAiProvider.Ollama)).toEqual({
@@ -64,9 +64,9 @@ describe("AI provider registry", () => {
 
   test("pairs each model purpose with its reasoning effort", () => {
     expect(getAiModelConfig(EAiProvider.OpenaiCodex, EModelPurpose.Utility).effort).toBe("low");
+    expect(getAiModelConfig(EAiProvider.OpenaiCodex, EModelPurpose.Main).effort).toBe("medium");
 
     for (const purpose of [
-      EModelPurpose.Main,
       EModelPurpose.Specialist,
       EModelPurpose.SpecialistAccurate,
       EModelPurpose.ScheduledTask,
@@ -86,11 +86,13 @@ describe("AI provider registry", () => {
     }
 
     expect(getAiModelConfig(EAiProvider.OpencodeGo, EModelPurpose.Utility).effort).toBeUndefined();
+    expect(getAiModelConfig(EAiProvider.OpencodeGo, EModelPurpose.SpecialistAccurate).effort).toBe(
+      "medium",
+    );
 
     for (const purpose of [
       EModelPurpose.Main,
       EModelPurpose.Specialist,
-      EModelPurpose.SpecialistAccurate,
       EModelPurpose.ScheduledTask,
     ]) {
       expect(getAiModelConfig(EAiProvider.OpencodeGo, purpose).effort).toBe("high");
