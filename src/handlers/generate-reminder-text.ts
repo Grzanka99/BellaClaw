@@ -104,7 +104,7 @@ export async function generateReminderText(
         JSON.stringify(createFiringContext(ctx.nextRunAt, timezone)),
       ].join("\n"),
       instructions: instructions.join("\n\n"),
-      purpose: EModelPurpose.ChatAccurate,
+      purpose: EModelPurpose.Main,
       settings,
       trace,
     });

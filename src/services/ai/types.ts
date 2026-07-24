@@ -42,11 +42,11 @@ export type TToolDefinition = {
 };
 
 export enum EModelPurpose {
-  ToolCheap = "ToolCheap",
-  ToolAccurate = "ToolAccurate",
-  General = "General",
-  Chat = "Chat",
-  ChatAccurate = "ChatAccurate",
+  Utility = "Utility",
+  Main = "Main",
+  Specialist = "Specialist",
+  SpecialistAccurate = "SpecialistAccurate",
+  ScheduledTask = "ScheduledTask",
 }
 
 import type { TSchema } from "@earendil-works/pi-ai";

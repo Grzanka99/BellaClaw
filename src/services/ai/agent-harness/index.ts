@@ -73,7 +73,7 @@ export class AgentHarness {
     return this.run({
       ...args,
       name: EAgentName.Main,
-      purpose: EModelPurpose.ChatAccurate,
+      purpose: EModelPurpose.Main,
       maxIterations: 30,
       parentToolCallId: undefined,
       delegationCount: () => {
@@ -92,7 +92,7 @@ export class AgentHarness {
     return this.run({
       ...args,
       name: EAgentName.ScheduledTask,
-      purpose: EModelPurpose.ChatAccurate,
+      purpose: EModelPurpose.ScheduledTask,
       maxIterations: 30,
       parentToolCallId: undefined,
       delegationCount: undefined,
@@ -558,19 +558,19 @@ export class AgentHarness {
         name: "delegate-memory",
         label: "Delegate memory",
         target: EAgentName.Memory,
-        purpose: EModelPurpose.ToolAccurate,
+        purpose: EModelPurpose.Specialist,
       },
       {
         name: "delegate-settings",
         label: "Delegate settings",
         target: EAgentName.Settings,
-        purpose: EModelPurpose.ToolAccurate,
+        purpose: EModelPurpose.Specialist,
       },
       {
         name: "delegate-scheduling",
         label: "Delegate scheduling",
         target: EAgentName.Scheduling,
-        purpose: EModelPurpose.ChatAccurate,
+        purpose: EModelPurpose.SpecialistAccurate,
       },
     ];
 

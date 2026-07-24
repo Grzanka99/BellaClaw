@@ -232,7 +232,7 @@ describe("AgentHarness", () => {
     };
     const specialist = await run.run({
       name: EAgentName.Memory,
-      purpose: EModelPurpose.ToolAccurate,
+      purpose: EModelPurpose.Specialist,
       prompt: "loop",
       chatId: "discord:1",
       settings: {
@@ -534,7 +534,7 @@ describe("AgentHarness", () => {
     let count = 0;
     const base = {
       name: EAgentName.Main,
-      purpose: EModelPurpose.ChatAccurate,
+      purpose: EModelPurpose.Main,
       prompt: "original",
       chatId: "discord:1",
       settings: DefaultConfigRecord,
@@ -634,7 +634,7 @@ describe("AgentHarness", () => {
       prompt: "Reply directly",
       instructions: "Reply directly",
       settings,
-      purpose: EModelPurpose.ToolCheap,
+      purpose: EModelPurpose.Utility,
       trace,
     });
     await appLogger.flush();
@@ -709,7 +709,7 @@ describe("AgentHarness", () => {
       prompt: "Fail directly",
       instructions: "Fail directly",
       settings,
-      purpose: EModelPurpose.ToolCheap,
+      purpose: EModelPurpose.Utility,
       trace,
     });
     await appLogger.flush();

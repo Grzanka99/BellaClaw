@@ -182,9 +182,11 @@ export function createSettingsTools(context: TToolExecutionContext) {
           }
 
           const error = await context.verifySettings(nextSettings, [
-            EModelPurpose.ToolCheap,
-            EModelPurpose.ToolAccurate,
-            EModelPurpose.ChatAccurate,
+            EModelPurpose.Utility,
+            EModelPurpose.Main,
+            EModelPurpose.Specialist,
+            EModelPurpose.SpecialistAccurate,
+            EModelPurpose.ScheduledTask,
           ]);
 
           if (error !== undefined) {

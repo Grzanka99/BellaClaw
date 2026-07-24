@@ -31,69 +31,70 @@ describe("AI provider registry", () => {
     expect(aiModels.getModel(EAiProvider.Openrouter, "unknown-model")).toBeUndefined();
   });
 
-  test("keeps the existing purpose mappings", () => {
+  test("maps every role purpose to its configured model", () => {
     expect(getAiModelIds(EAiProvider.OpenaiCodex)).toEqual({
-      [EModelPurpose.ToolCheap]: "gpt-5.6-luna",
-      [EModelPurpose.ToolAccurate]: "gpt-5.6-luna",
-      [EModelPurpose.General]: "gpt-5.6-luna",
-      [EModelPurpose.Chat]: "gpt-5.6-luna",
-      [EModelPurpose.ChatAccurate]: "gpt-5.6-luna",
+      [EModelPurpose.Utility]: "gpt-5.6-luna",
+      [EModelPurpose.Main]: "gpt-5.6-luna",
+      [EModelPurpose.Specialist]: "gpt-5.6-luna",
+      [EModelPurpose.SpecialistAccurate]: "gpt-5.6-luna",
+      [EModelPurpose.ScheduledTask]: "gpt-5.6-luna",
     });
     expect(getAiModelIds(EAiProvider.Openrouter)).toEqual({
-      [EModelPurpose.ToolCheap]: "openai/gpt-5.4-nano",
-      [EModelPurpose.ToolAccurate]: "google/gemini-3-flash-preview",
-      [EModelPurpose.General]: "openrouter/free",
-      [EModelPurpose.Chat]: "openai/gpt-5.4-mini",
-      [EModelPurpose.ChatAccurate]: "google/gemini-3.1-pro-preview",
+      [EModelPurpose.Utility]: "openai/gpt-5.4-nano",
+      [EModelPurpose.Main]: "google/gemini-3.1-pro-preview",
+      [EModelPurpose.Specialist]: "google/gemini-3-flash-preview",
+      [EModelPurpose.SpecialistAccurate]: "google/gemini-3.1-pro-preview",
+      [EModelPurpose.ScheduledTask]: "google/gemini-3.1-pro-preview",
     });
     expect(getAiModelIds(EAiProvider.OpencodeGo)).toEqual({
-      [EModelPurpose.ToolCheap]: "deepseek-v4-flash",
-      [EModelPurpose.ToolAccurate]: "deepseek-v4-pro",
-      [EModelPurpose.General]: "deepseek-v4-pro",
-      [EModelPurpose.Chat]: "deepseek-v4-pro",
-      [EModelPurpose.ChatAccurate]: "deepseek-v4-pro",
+      [EModelPurpose.Utility]: "deepseek-v4-flash",
+      [EModelPurpose.Main]: "deepseek-v4-pro",
+      [EModelPurpose.Specialist]: "deepseek-v4-pro",
+      [EModelPurpose.SpecialistAccurate]: "deepseek-v4-pro",
+      [EModelPurpose.ScheduledTask]: "deepseek-v4-pro",
     });
     expect(getAiModelIds(EAiProvider.Ollama)).toEqual({
-      [EModelPurpose.ToolCheap]: "nemotron-3-super:cloud",
-      [EModelPurpose.ToolAccurate]: "minimax-m2.7:cloud",
-      [EModelPurpose.General]: "glm-5:cloud",
-      [EModelPurpose.Chat]: "minimax-m2.7:cloud",
-      [EModelPurpose.ChatAccurate]: "minimax-m2.7:cloud",
+      [EModelPurpose.Utility]: "nemotron-3-super:cloud",
+      [EModelPurpose.Main]: "minimax-m2.7:cloud",
+      [EModelPurpose.Specialist]: "minimax-m2.7:cloud",
+      [EModelPurpose.SpecialistAccurate]: "minimax-m2.7:cloud",
+      [EModelPurpose.ScheduledTask]: "minimax-m2.7:cloud",
     });
   });
 
   test("pairs each model purpose with its reasoning effort", () => {
-    expect(getAiModelConfig(EAiProvider.OpenaiCodex, EModelPurpose.ToolCheap).effort).toBe("low");
-    expect(getAiModelConfig(EAiProvider.OpenaiCodex, EModelPurpose.ToolAccurate).effort).toBe(
-      "max",
-    );
-    expect(getAiModelConfig(EAiProvider.OpenaiCodex, EModelPurpose.General).effort).toBe("high");
-    expect(getAiModelConfig(EAiProvider.OpenaiCodex, EModelPurpose.Chat).effort).toBe("max");
-    expect(getAiModelConfig(EAiProvider.OpenaiCodex, EModelPurpose.ChatAccurate).effort).toBe(
-      "max",
-    );
+    expect(getAiModelConfig(EAiProvider.OpenaiCodex, EModelPurpose.Utility).effort).toBe("low");
 
-    expect(getAiModelConfig(EAiProvider.Openrouter, EModelPurpose.ToolCheap).effort).toBe("low");
-    expect(getAiModelConfig(EAiProvider.Openrouter, EModelPurpose.ToolAccurate).effort).toBe(
-      "high",
-    );
-    expect(getAiModelConfig(EAiProvider.Openrouter, EModelPurpose.General).effort).toBe("medium");
-    expect(getAiModelConfig(EAiProvider.Openrouter, EModelPurpose.Chat).effort).toBe("medium");
-    expect(getAiModelConfig(EAiProvider.Openrouter, EModelPurpose.ChatAccurate).effort).toBe(
-      "medium",
-    );
+    for (const purpose of [
+      EModelPurpose.Main,
+      EModelPurpose.Specialist,
+      EModelPurpose.SpecialistAccurate,
+      EModelPurpose.ScheduledTask,
+    ]) {
+      expect(getAiModelConfig(EAiProvider.OpenaiCodex, purpose).effort).toBe("max");
+    }
 
-    expect(
-      getAiModelConfig(EAiProvider.OpencodeGo, EModelPurpose.ToolCheap).effort,
-    ).toBeUndefined();
-    expect(getAiModelConfig(EAiProvider.OpencodeGo, EModelPurpose.ToolAccurate).effort).toBe(
-      "high",
-    );
-    expect(getAiModelConfig(EAiProvider.OpencodeGo, EModelPurpose.General).effort).toBeUndefined();
-    expect(getAiModelConfig(EAiProvider.OpencodeGo, EModelPurpose.Chat).effort).toBe("high");
-    expect(getAiModelConfig(EAiProvider.OpencodeGo, EModelPurpose.ChatAccurate).effort).toBe(
-      "high",
-    );
+    expect(getAiModelConfig(EAiProvider.Openrouter, EModelPurpose.Utility).effort).toBe("low");
+    expect(getAiModelConfig(EAiProvider.Openrouter, EModelPurpose.Specialist).effort).toBe("high");
+
+    for (const purpose of [
+      EModelPurpose.Main,
+      EModelPurpose.SpecialistAccurate,
+      EModelPurpose.ScheduledTask,
+    ]) {
+      expect(getAiModelConfig(EAiProvider.Openrouter, purpose).effort).toBe("medium");
+    }
+
+    expect(getAiModelConfig(EAiProvider.OpencodeGo, EModelPurpose.Utility).effort).toBeUndefined();
+
+    for (const purpose of [
+      EModelPurpose.Main,
+      EModelPurpose.Specialist,
+      EModelPurpose.SpecialistAccurate,
+      EModelPurpose.ScheduledTask,
+    ]) {
+      expect(getAiModelConfig(EAiProvider.OpencodeGo, purpose).effort).toBe("high");
+    }
 
     for (const purpose of Object.values(EModelPurpose)) {
       expect(getAiModelConfig(EAiProvider.Ollama, purpose).effort).toBeUndefined();
@@ -141,7 +142,7 @@ describe("AI provider registry", () => {
       expect(model.compat?.maxTokensField).toBe("max_tokens");
     }
 
-    const auth = await aiModels.getAuth(getAiModel(EAiProvider.Ollama, EModelPurpose.Chat));
+    const auth = await aiModels.getAuth(getAiModel(EAiProvider.Ollama, EModelPurpose.Main));
     expect(auth?.auth.apiKey).toBe("ollama");
   });
 });

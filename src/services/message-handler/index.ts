@@ -169,7 +169,7 @@ export class MessageHandler {
       prompt: `Classify this ${author} message as low, medium, or high importance. Reply with only one word.\n\n${message}`,
       instructions:
         "Classify message importance for conversational memory. Reply only with low, medium, or high.",
-      purpose: EModelPurpose.ToolCheap,
+      purpose: EModelPurpose.Utility,
       settings,
       trace,
     });
@@ -332,7 +332,7 @@ function logImportanceCompleted(
     return;
   }
 
-  const fields = resolveAiBehaviorFields(settings, EModelPurpose.ToolCheap);
+  const fields = resolveAiBehaviorFields(settings, EModelPurpose.Utility);
   let level = EBehaviorLogLevel.Info;
 
   if (!success) {
@@ -346,7 +346,7 @@ function logImportanceCompleted(
     level,
     provider: fields?.provider,
     model: fields?.model,
-    purpose: EModelPurpose.ToolCheap,
+    purpose: EModelPurpose.Utility,
     success,
     durationMs: performance.now() - start,
     summary: `importance completed author=${author} importance=${importance}`,

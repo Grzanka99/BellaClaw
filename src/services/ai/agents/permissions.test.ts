@@ -70,7 +70,7 @@ describe("agent permissions", () => {
 
       const tools = await harness.createTools({
         name,
-        purpose: EModelPurpose.ChatAccurate,
+        purpose: EModelPurpose.Main,
         prompt: "test",
         chatId: "discord:1",
         settings: DefaultConfigRecord,

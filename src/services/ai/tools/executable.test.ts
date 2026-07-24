@@ -137,7 +137,13 @@ describe("production executable tools", () => {
       expect.objectContaining({
         [EConfigKey.AiProvider]: EAiProvider.Openrouter,
       }),
-      [EModelPurpose.ToolCheap, EModelPurpose.ToolAccurate, EModelPurpose.ChatAccurate],
+      [
+        EModelPurpose.Utility,
+        EModelPurpose.Main,
+        EModelPurpose.Specialist,
+        EModelPurpose.SpecialistAccurate,
+        EModelPurpose.ScheduledTask,
+      ],
     );
   });
 

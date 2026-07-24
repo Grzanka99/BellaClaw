@@ -64,7 +64,7 @@ describe("generateReminderText", () => {
     const args = captured[0];
 
     expect(result).toBe("Generated reminder.");
-    expect(args?.purpose).toBe(EModelPurpose.ChatAccurate);
+    expect(args?.purpose).toBe(EModelPurpose.Main);
     expect(args?.settings).toBe(ownerSettings);
     expect(args?.prompt).toContain('"fireTimestamp":"2026-01-05T08:00:00.000Z"');
     expect(args?.prompt).toContain('"timezone":"America/New_York"');
