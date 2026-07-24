@@ -38,13 +38,15 @@ export type TToolCall = {
 export type TToolDefinition = {
   name: string;
   description: string;
-  parameters: Record<string, unknown>;
+  parameters: TSchema;
 };
 
 export enum EModelPurpose {
-  ToolCheap = "ToolCheap",
-  ToolAccurate = "ToolAccurate",
-  General = "General",
-  Chat = "Chat",
-  ChatAccurate = "ChatAccurate",
+  Utility = "Utility",
+  Main = "Main",
+  Specialist = "Specialist",
+  SpecialistAccurate = "SpecialistAccurate",
+  ScheduledTask = "ScheduledTask",
 }
+
+import type { TSchema } from "@earendil-works/pi-ai";

@@ -1,10 +1,15 @@
-import { z } from "zod";
+import { type Static, Type } from "@earendil-works/pi-ai";
 import type { TCronJob } from "../../../../lib/cron-engine";
 
-export const SUnscheduleCronJobArgs = z.object({
-  name: z.string().describe("Unique name of the one-time or recurring cron job to cancel"),
-});
+export const SUnscheduleCronJobArgs = Type.Object(
+  {
+    name: Type.String({
+      description: "Unique name of the one-time or recurring cron job to cancel",
+    }),
+  },
+  { additionalProperties: false },
+);
 
-export type TUnscheduleCronJobArgs = z.infer<typeof SUnscheduleCronJobArgs>;
+export type TUnscheduleCronJobArgs = Static<typeof SUnscheduleCronJobArgs>;
 
 export type TUnscheduleCronJobResult = TCronJob;

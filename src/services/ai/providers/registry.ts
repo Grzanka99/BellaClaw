@@ -29,25 +29,31 @@ const AI_PROVIDER_REGISTRY: Record<EAiProvider, TAiProviderRegistration> = {
   [EAiProvider.OpenaiCodex]: {
     createProvider: openaiCodexProvider,
     modelByPurpose: {
-      [EModelPurpose.ToolCheap]: { model: "gpt-5.6-luna", effort: "low" },
-      [EModelPurpose.ToolAccurate]: { model: "gpt-5.6-luna", effort: "max" },
-      [EModelPurpose.General]: { model: "gpt-5.6-luna", effort: "high" },
-      [EModelPurpose.Chat]: { model: "gpt-5.6-luna", effort: "max" },
-      [EModelPurpose.ChatAccurate]: { model: "gpt-5.6-luna", effort: "max" },
+      [EModelPurpose.Utility]: { model: "gpt-5.6-luna", effort: "low" },
+      [EModelPurpose.Main]: { model: "gpt-5.6-sol", effort: "medium" },
+      [EModelPurpose.Specialist]: { model: "gpt-5.6-luna", effort: "max" },
+      [EModelPurpose.SpecialistAccurate]: { model: "gpt-5.6-luna", effort: "max" },
+      [EModelPurpose.ScheduledTask]: { model: "gpt-5.6-luna", effort: "max" },
     },
     getApiKey: () => undefined,
   },
   [EAiProvider.Openrouter]: {
     createProvider: openrouterProvider,
     modelByPurpose: {
-      [EModelPurpose.ToolCheap]: { model: "openai/gpt-5.4-nano", effort: "low" },
-      [EModelPurpose.ToolAccurate]: {
+      [EModelPurpose.Utility]: { model: "openai/gpt-5.4-nano", effort: "low" },
+      [EModelPurpose.Main]: {
+        model: "google/gemini-3.1-pro-preview",
+        effort: "medium",
+      },
+      [EModelPurpose.Specialist]: {
         model: "google/gemini-3-flash-preview",
         effort: "high",
       },
-      [EModelPurpose.General]: { model: "openrouter/free", effort: "medium" },
-      [EModelPurpose.Chat]: { model: "openai/gpt-5.4-mini", effort: "medium" },
-      [EModelPurpose.ChatAccurate]: {
+      [EModelPurpose.SpecialistAccurate]: {
+        model: "google/gemini-3.1-pro-preview",
+        effort: "medium",
+      },
+      [EModelPurpose.ScheduledTask]: {
         model: "google/gemini-3.1-pro-preview",
         effort: "medium",
       },
@@ -65,22 +71,25 @@ const AI_PROVIDER_REGISTRY: Record<EAiProvider, TAiProviderRegistration> = {
   [EAiProvider.Ollama]: {
     createProvider: ollamaProvider,
     modelByPurpose: {
-      [EModelPurpose.ToolCheap]: { model: "nemotron-3-super:cloud" },
-      [EModelPurpose.ToolAccurate]: { model: "minimax-m2.7:cloud" },
-      [EModelPurpose.General]: { model: "glm-5:cloud" },
-      [EModelPurpose.Chat]: { model: "minimax-m2.7:cloud" },
-      [EModelPurpose.ChatAccurate]: { model: "minimax-m2.7:cloud" },
+      [EModelPurpose.Utility]: { model: "nemotron-3-super:cloud" },
+      [EModelPurpose.Main]: { model: "minimax-m2.7:cloud" },
+      [EModelPurpose.Specialist]: { model: "minimax-m2.7:cloud" },
+      [EModelPurpose.SpecialistAccurate]: { model: "minimax-m2.7:cloud" },
+      [EModelPurpose.ScheduledTask]: { model: "minimax-m2.7:cloud" },
     },
     getApiKey: () => undefined,
   },
   [EAiProvider.OpencodeGo]: {
     createProvider: opencodeGoProvider,
     modelByPurpose: {
-      [EModelPurpose.ToolCheap]: { model: "deepseek-v4-flash" },
-      [EModelPurpose.ToolAccurate]: { model: "deepseek-v4-pro", effort: "high" },
-      [EModelPurpose.General]: { model: "deepseek-v4-pro" },
-      [EModelPurpose.Chat]: { model: "deepseek-v4-pro", effort: "high" },
-      [EModelPurpose.ChatAccurate]: { model: "deepseek-v4-pro", effort: "high" },
+      [EModelPurpose.Utility]: { model: "deepseek-v4-flash" },
+      [EModelPurpose.Main]: { model: "grok-4.5", effort: "high" },
+      [EModelPurpose.Specialist]: { model: "deepseek-v4-pro", effort: "high" },
+      [EModelPurpose.SpecialistAccurate]: {
+        model: "grok-4.5",
+        effort: "medium",
+      },
+      [EModelPurpose.ScheduledTask]: { model: "deepseek-v4-pro", effort: "high" },
     },
     getApiKey: () => {
       const apiKey = Bun.env.OPENCODE_API_KEY;
@@ -141,11 +150,11 @@ export function getAiModelIds(provider: EAiProvider): Readonly<Record<EModelPurp
   const modelByPurpose = AI_PROVIDER_REGISTRY[provider].modelByPurpose;
 
   return {
-    [EModelPurpose.ToolCheap]: modelByPurpose[EModelPurpose.ToolCheap].model,
-    [EModelPurpose.ToolAccurate]: modelByPurpose[EModelPurpose.ToolAccurate].model,
-    [EModelPurpose.General]: modelByPurpose[EModelPurpose.General].model,
-    [EModelPurpose.Chat]: modelByPurpose[EModelPurpose.Chat].model,
-    [EModelPurpose.ChatAccurate]: modelByPurpose[EModelPurpose.ChatAccurate].model,
+    [EModelPurpose.Utility]: modelByPurpose[EModelPurpose.Utility].model,
+    [EModelPurpose.Main]: modelByPurpose[EModelPurpose.Main].model,
+    [EModelPurpose.Specialist]: modelByPurpose[EModelPurpose.Specialist].model,
+    [EModelPurpose.SpecialistAccurate]: modelByPurpose[EModelPurpose.SpecialistAccurate].model,
+    [EModelPurpose.ScheduledTask]: modelByPurpose[EModelPurpose.ScheduledTask].model,
   };
 }
 

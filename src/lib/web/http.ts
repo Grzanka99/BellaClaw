@@ -63,9 +63,11 @@ export async function fetchTextWithLimit(args: {
   timeoutMs: number;
   maxBytes: number;
   headers?: THttpHeaders;
+  signal?: AbortSignal;
   followRedirects?: boolean;
   validateResponseHeaders?: (response: Response) => void;
 }): Promise<TFetchWithLimitResult> {
+  args.signal?.throwIfAborted();
   let currentUrl = validatePublicHttpUrl(args.url);
   let redirects = 0;
   const deadline = performance.now() + args.timeoutMs;
@@ -74,6 +76,7 @@ export async function fetchTextWithLimit(args: {
     const resolved = await validateResolvedPublicHttpUrl(
       currentUrl,
       getRemainingTimeoutMs(deadline),
+      args.signal,
     );
     currentUrl = resolved.href;
 
@@ -81,6 +84,7 @@ export async function fetchTextWithLimit(args: {
       resolved,
       timeoutMs: getRemainingTimeoutMs(deadline),
       headers: args.headers,
+      signal: args.signal,
     });
 
     if (response.status >= 300 && response.status < 400) {
@@ -134,7 +138,9 @@ export async function fetchTextWithLimit(args: {
 async function validateResolvedPublicHttpUrl(
   rawUrl: string,
   timeoutMs: number,
+  signal?: AbortSignal,
 ): Promise<TResolvedHttpUrl> {
+  signal?.throwIfAborted();
   const href = validatePublicHttpUrl(rawUrl);
 
   if (globalThis.fetch !== DEFAULT_FETCH) {
@@ -146,18 +152,7 @@ async function validateResolvedPublicHttpUrl(
 
   const url = new URL(href);
   const hostname = normalizeHostname(url.hostname);
-  const addresses = await Promise.race([
-    lookup(hostname, { all: true }),
-    new Promise<{ address: string }[]>((_, reject) => {
-      AbortSignal.timeout(timeoutMs).addEventListener(
-        "abort",
-        () => {
-          reject(new Error("Request timed out"));
-        },
-        { once: true },
-      );
-    }),
-  ]);
+  const addresses = await lookupWithCancellation(hostname, timeoutMs, signal);
   const address = addresses[0];
 
   if (address === undefined) {
@@ -172,16 +167,51 @@ async function validateResolvedPublicHttpUrl(
   };
 }
 
+function lookupWithCancellation(
+  hostname: string,
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<{ address: string }[]> {
+  signal?.throwIfAborted();
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const timeout = setTimeout(() => {
+      finish(() => reject(new Error("Request timed out")));
+    }, timeoutMs);
+    const onAbort = () => {
+      finish(() => reject(signal?.reason ?? new DOMException("aborted", "AbortError")));
+    };
+    const finish = (settle: () => void) => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      clearTimeout(timeout);
+      signal?.removeEventListener("abort", onAbort);
+      settle();
+    };
+
+    signal?.addEventListener("abort", onAbort, { once: true });
+    lookup(hostname, { all: true }).then(
+      (addresses) => finish(() => resolve(addresses)),
+      (error) => finish(() => reject(error)),
+    );
+  });
+}
+
 async function fetchResolvedHttpUrl(args: {
   resolved: TResolvedHttpUrl;
   timeoutMs: number;
   headers?: THttpHeaders;
+  signal?: AbortSignal;
 }): Promise<Response> {
   if (globalThis.fetch !== DEFAULT_FETCH) {
     return await fetch(args.resolved.href, {
       headers: createBrowserHeaders(args.headers),
       redirect: "manual",
-      signal: AbortSignal.timeout(args.timeoutMs),
+      signal: combineAbortSignals(args.signal, AbortSignal.timeout(args.timeoutMs)),
     });
   }
 
@@ -248,9 +278,20 @@ async function fetchResolvedHttpUrl(args: {
     request.setTimeout(args.timeoutMs, () => {
       request.destroy(new Error("Request timed out"));
     });
+    const abort = () => request.destroy(new Error("Operation aborted"));
+    args.signal?.addEventListener("abort", abort, { once: true });
     request.on("error", reject);
+    request.on("close", () => args.signal?.removeEventListener("abort", abort));
     request.end();
   });
+}
+
+function combineAbortSignals(signal: AbortSignal | undefined, timeout: AbortSignal): AbortSignal {
+  if (signal === undefined) {
+    return timeout;
+  }
+
+  return AbortSignal.any([signal, timeout]);
 }
 
 function createPinnedRequestHeaders(url: URL, headers: THttpHeaders = {}): THttpHeaders {

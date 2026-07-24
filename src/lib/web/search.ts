@@ -28,7 +28,10 @@ type TTavilySearchRequest = {
   time_range?: "day" | "week" | "month" | "year";
 };
 
-export async function searchWeb(args: TSearchWebArgs): Promise<TWebSearchResult[]> {
+export async function searchWeb(
+  args: TSearchWebArgs,
+  signal?: AbortSignal,
+): Promise<TWebSearchResult[]> {
   const apiKey = Bun.env.TAVILY_API_KEY?.trim();
 
   if (apiKey === undefined || apiKey.length === 0) {
@@ -66,7 +69,7 @@ export async function searchWeb(args: TSearchWebArgs): Promise<TWebSearchResult[
       "content-type": "application/json",
     },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(SEARCH_TIMEOUT_MS),
+    signal: combineAbortSignals(signal, AbortSignal.timeout(SEARCH_TIMEOUT_MS)),
   });
 
   if (!response.ok) {
@@ -100,6 +103,14 @@ export async function searchWeb(args: TSearchWebArgs): Promise<TWebSearchResult[
   }
 
   return parsed.data.results;
+}
+
+function combineAbortSignals(signal: AbortSignal | undefined, timeout: AbortSignal): AbortSignal {
+  if (signal === undefined) {
+    return timeout;
+  }
+
+  return AbortSignal.any([signal, timeout]);
 }
 
 async function readShortResponseMessage(response: Response): Promise<string> {

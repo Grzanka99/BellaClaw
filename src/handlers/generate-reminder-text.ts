@@ -1,11 +1,9 @@
 import { Config } from "../config";
 import type { TCronJobContext } from "../lib/cron-engine";
-import type { AiConnector } from "../services/ai/api";
+import type { AgentHarness } from "../services/ai/agent-harness";
+import { createPlatformInstructions } from "../services/ai/instructions/platform";
 import { readXmlAndInjectConfig } from "../services/ai/instructions/read-xml-and-inject-config";
-import { EAssistantLoopStopReason } from "../services/ai/runtime";
-import { webFetchTool } from "../services/ai/tools/web-fetch/definition";
-import { webSearchTool } from "../services/ai/tools/web-search/definition";
-import { EModelPurpose, ERole, type THistoryItem, type TPrompt } from "../services/ai/types";
+import { EModelPurpose } from "../services/ai/types";
 import type { TBehaviorTraceContext } from "../services/app-logger";
 import { parseCanonicalChatKey } from "../services/messaging/chat-key";
 import type { EMessagePlatform } from "../services/messaging/types";
@@ -14,12 +12,12 @@ import { DefaultConfigRecord, EConfigKey, type TConfigRecord } from "../services
 import type { TOption } from "../types";
 import { createLogger } from "../utils/logger";
 
-type TReminderAi = Pick<AiConnector, "runToolTask">;
-type TScheduledTaskAi = Pick<AiConnector, "runAssistantToolLoop">;
+type TReminderAi = Pick<AgentHarness, "completeText">;
+type TScheduledTaskAi = Pick<AgentHarness, "runScheduledTask">;
 
 export type TScheduledTaskResult = {
   text: TOption<string>;
-  stopReason: TOption<EAssistantLoopStopReason>;
+  stopReason: TOption<string>;
   iterations: number;
   toolCallCount: number;
   durationMs: number;
@@ -86,46 +84,33 @@ export async function generateReminderText(
     "generateReminderText",
   );
 
-  const history: THistoryItem[] = [
-    {
-      role: ERole.System,
-      content:
-        "Generate one reminder message from the provided reminder payload and firing context. Use the firing context for any date, time, or weekday-relative wording. Return only the final reminder text with no quotes or explanation.",
-    },
-  ];
-
-  const prompt: TPrompt = {
-    role: ERole.User,
-    content: [
-      {
-        type: "text",
-        text: [
-          "Reminder prompt data JSON:",
-          ctx.reminderPromptData,
-          "",
-          "Firing context JSON:",
-          JSON.stringify(createFiringContext(ctx.nextRunAt, timezone)),
-        ].join("\n"),
-      },
-    ],
-  };
-
   try {
-    const res = await ai.runToolTask({
-      prompt,
-      history,
-      tools: [],
-      purpose: EModelPurpose.ChatAccurate,
-      chatId: undefined,
-      user: undefined,
+    const instructions = [
+      await readXmlAndInjectConfig("./src/services/ai/instructions/base-system.xml", settings),
+      "Generate one reminder message from the provided reminder payload and firing context. Use the firing context for any date, time, or weekday-relative wording. Return only the final reminder text with no quotes or explanation.",
+    ];
+    const platformInstructions = createPlatformInstructions(platform);
+
+    if (platformInstructions !== undefined) {
+      instructions.push(platformInstructions);
+    }
+
+    const generatedText = await ai.completeText({
+      prompt: [
+        "Reminder prompt data JSON:",
+        ctx.reminderPromptData,
+        "",
+        "Firing context JSON:",
+        JSON.stringify(createFiringContext(ctx.nextRunAt, timezone)),
+      ].join("\n"),
+      instructions: instructions.join("\n\n"),
+      purpose: EModelPurpose.Main,
       settings,
-      platform,
       trace,
     });
 
-    const generatedText = res.assistantResponse.trim();
-    if (generatedText.length > 0) {
-      return generatedText;
+    if (generatedText !== undefined && generatedText.trim().length > 0) {
+      return generatedText.trim();
     }
 
     logger.warning(`generateReminderText: empty reminder for job "${ctx.name}", using fallback`);
@@ -159,46 +144,23 @@ export async function generateScheduledTaskText(
   );
 
   try {
-    const [taskInstructions, webSearchInstructions, webFetchInstructions] = await Promise.all([
-      readXmlAndInjectConfig("./src/handlers/scheduled-task-instructions.xml", settings),
-      readXmlAndInjectConfig("./src/services/ai/tools/web-search/instructions.xml", settings),
-      readXmlAndInjectConfig("./src/services/ai/tools/web-fetch/instructions.xml", settings),
-    ]);
-    const result = await ai.runAssistantToolLoop({
-      prompt: {
-        role: ERole.User,
-        content: [{ type: "text", text: ctx.taskPrompt }],
-      },
-      history: [{ role: ERole.System, content: taskInstructions }],
+    const result = await ai.runScheduledTask({
+      prompt: ctx.taskPrompt,
+      history: undefined,
       currentTimeContext: `Scheduled firing context JSON:\n${JSON.stringify(createFiringContext(ctx.nextRunAt, timezone))}`,
-      tools: [
-        { definition: webSearchTool, instructions: webSearchInstructions },
-        { definition: webFetchTool, instructions: webFetchInstructions },
-      ],
-      purpose: EModelPurpose.ChatAccurate,
       chatId: ctx.scope,
-      user: undefined,
       settings,
       platform,
       trace,
-      maxIterations: 4,
+      signal: undefined,
     });
-    const toolCallCount = result.toolActivity.reduce(
-      (count, activity) => count + activity.toolCalls.length,
-      0,
-    );
 
-    if (
-      (result.stopReason === EAssistantLoopStopReason.FinalResponse ||
-        result.stopReason === EAssistantLoopStopReason.MaxIterations) &&
-      result.finalResponse !== undefined &&
-      result.finalResponse.trim().length > 0
-    ) {
+    if (result.text !== undefined && result.text.trim().length > 0) {
       return {
-        text: result.finalResponse,
+        text: result.text,
         stopReason: result.stopReason,
         iterations: result.iterations,
-        toolCallCount,
+        toolCallCount: result.toolCallCount,
         durationMs: performance.now() - startedAt,
       };
     }
@@ -207,7 +169,7 @@ export async function generateScheduledTaskText(
       text: ctx.taskFallbackText,
       stopReason: result.stopReason,
       iterations: result.iterations,
-      toolCallCount,
+      toolCallCount: result.toolCallCount,
       durationMs: performance.now() - startedAt,
     };
   } catch (error) {

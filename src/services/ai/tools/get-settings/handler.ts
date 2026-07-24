@@ -1,5 +1,5 @@
-import { z } from "zod";
+import { type Static, Type } from "@earendil-works/pi-ai";
 
-export const SGetSettingsArgs = z.object({}).strict();
+export const SGetSettingsArgs = Type.Object({}, { additionalProperties: false });
 
-export type TGetSettingsArgs = z.infer<typeof SGetSettingsArgs>;
+export type TGetSettingsArgs = Static<typeof SGetSettingsArgs>;

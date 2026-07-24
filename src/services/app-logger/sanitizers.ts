@@ -1,7 +1,19 @@
 import type { TOption } from "../../types";
-import type { TNormalizedToolResult } from "../ai/runtime";
-import type { TToolCall } from "../ai/types";
 import type { TBehaviorMetadata } from "./types";
+
+type TToolCall = {
+  id: string;
+  name: string;
+  arguments: unknown;
+};
+
+type TNormalizedToolResult = {
+  toolCallId: string;
+  toolName: string;
+  success: boolean;
+  data: TOption<unknown>;
+  error: TOption<string>;
+};
 
 type TSanitizedLogDetails = {
   summary: string;
@@ -9,6 +21,7 @@ type TSanitizedLogDetails = {
 };
 
 const ERROR_MAX_CHARS = 300;
+const CONTENT_PREVIEW_MAX_CHARS = 240;
 const CRON_TOOL_NAMES = new Set([
   "list-cron-jobs",
   "schedule-once",
@@ -22,17 +35,7 @@ export function sanitizeErrorMessage(error: TOption<string>): TOption<string> {
     return undefined;
   }
 
-  let redacted = error;
-  const secrets = [Bun.env.OPENROUTER_API_KEY, Bun.env.OPENCODE_API_KEY];
-
-  for (const secret of secrets) {
-    if (secret === undefined || secret.length === 0) {
-      continue;
-    }
-
-    redacted = redacted.replaceAll(secret, "[REDACTED]");
-  }
-
+  const redacted = redactSecrets(error);
   const normalized = redacted.replace(/\s+/g, " ").trim();
   const directHttpStatus = normalized.match(/^([1-5]\d{2})(?:\b|:)/);
 
@@ -84,14 +87,24 @@ export function sanitizeToolCallArguments(toolCall: TToolCall): TSanitizedLogDet
     case "define-message-importance": {
       return sanitizeDefineMessageImportanceArguments(args);
     }
-    case "define-settings-intent": {
-      return sanitizeDefineSettingsIntentArguments(args);
-    }
     case "get-settings": {
       return { summary: "get-settings args", metadata: { argumentsValid: true } };
     }
     case "update-settings": {
       return sanitizeUpdateSettingsArguments(args);
+    }
+    case "delegate-memory":
+    case "delegate-settings":
+    case "delegate-scheduling": {
+      const task = readString(args, "task");
+      return {
+        summary: `${toolName} args taskChars=${task?.length ?? 0}`,
+        metadata: {
+          argumentsValid: true,
+          taskChars: task?.length ?? 0,
+          taskPreview: sanitizeContentPreview(task),
+        },
+      };
     }
     default: {
       return {
@@ -134,14 +147,16 @@ export function sanitizeToolResult(result: TNormalizedToolResult): TSanitizedLog
     case "define-message-importance": {
       return sanitizeDefineMessageImportanceResult(data);
     }
-    case "define-settings-intent": {
-      return sanitizeDefineSettingsIntentResult(data);
-    }
     case "get-settings": {
       return sanitizeSettingsResult("get-settings", data);
     }
     case "update-settings": {
       return sanitizeSettingsResult("update-settings", data);
+    }
+    case "delegate-memory":
+    case "delegate-settings":
+    case "delegate-scheduling": {
+      return sanitizeDelegationResult(result.toolName, data);
     }
     default: {
       return sanitizeGenericToolResult(result.toolName, data);
@@ -309,27 +324,6 @@ function sanitizeDefineMessageImportanceArguments(
 
   return {
     summary: `define-message-importance args importance=${importance ?? "unknown"}`,
-    metadata,
-  };
-}
-
-function sanitizeDefineSettingsIntentArguments(
-  args: Record<string, unknown>,
-): TSanitizedLogDetails {
-  const intent = readString(args, "intent");
-  const reason = readString(args, "reason");
-  const metadata: TBehaviorMetadata = {
-    argumentsValid: true,
-  };
-
-  if (intent !== undefined) {
-    metadata.intent = intent;
-  }
-
-  addLength(metadata, "reasonChars", reason);
-
-  return {
-    summary: `define-settings-intent args intent=${intent ?? "unknown"}`,
     metadata,
   };
 }
@@ -591,30 +585,6 @@ function sanitizeDefineMessageImportanceResult(data: unknown): TSanitizedLogDeta
   };
 }
 
-function sanitizeDefineSettingsIntentResult(data: unknown): TSanitizedLogDetails {
-  const metadata: TBehaviorMetadata = {
-    status: "completed",
-  };
-  let intent = "unknown";
-
-  if (isRecord(data)) {
-    const parsedIntent = readString(data, "intent");
-    const reason = readString(data, "reason");
-
-    if (parsedIntent !== undefined) {
-      intent = parsedIntent;
-      metadata.intent = parsedIntent;
-    }
-
-    addLength(metadata, "reasonChars", reason);
-  }
-
-  return {
-    summary: `define-settings-intent completed intent=${intent}`,
-    metadata,
-  };
-}
-
 function sanitizeSettingsResult(toolName: string, data: unknown): TSanitizedLogDetails {
   let settingKeys: string[] = [];
 
@@ -650,6 +620,60 @@ function sanitizeGenericToolResult(toolName: string, data: unknown): TSanitizedL
     summary: `${toolName} completed dataKind=${describeDataKind(data)}`,
     metadata,
   };
+}
+
+function sanitizeDelegationResult(toolName: string, data: unknown): TSanitizedLogDetails {
+  let response: TOption<string>;
+
+  if (isRecord(data) && Array.isArray(data.content)) {
+    for (const content of data.content) {
+      if (!isRecord(content) || content.type !== "text") {
+        continue;
+      }
+
+      response = readString(content, "text");
+      break;
+    }
+  }
+
+  if (response === undefined && isRecord(data)) {
+    response = readString(data, "text");
+  }
+
+  return {
+    summary: `${toolName} completed responseChars=${response?.length ?? 0}`,
+    metadata: {
+      status: "completed",
+      responseChars: response?.length ?? 0,
+      responsePreview: sanitizeContentPreview(response),
+    },
+  };
+}
+
+function sanitizeContentPreview(value: TOption<string>): string {
+  if (value === undefined) {
+    return "";
+  }
+
+  const sanitized = redactSecrets(value).replace(/\s+/g, " ").trim();
+  if (sanitized.length <= CONTENT_PREVIEW_MAX_CHARS) {
+    return sanitized;
+  }
+
+  return `${sanitized.slice(0, CONTENT_PREVIEW_MAX_CHARS)}...`;
+}
+
+function redactSecrets(value: string): string {
+  let redacted = value;
+  const secrets = [Bun.env.OPENROUTER_API_KEY, Bun.env.OPENCODE_API_KEY];
+
+  for (const secret of secrets) {
+    if (secret !== undefined && secret.length > 0) {
+      redacted = redacted.replaceAll(secret, "[REDACTED]");
+    }
+  }
+
+  return redacted;
 }
 
 function readString(record: Record<string, unknown>, key: string): TOption<string> {

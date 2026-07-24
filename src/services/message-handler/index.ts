@@ -1,24 +1,8 @@
 import type { TOption } from "../../types";
 import { AsyncQueue } from "../../utils/async-queue";
 import { createLogger, type TLogger } from "../../utils/logger";
-import {
-  AiConnector,
-  DEFINE_MESSAGE_IMPORTANCE_TOOL,
-  defineMessageImportanceTool,
-  EModelPurpose,
-  ERole,
-  searchMemoryTool,
-  type THistoryItem,
-  type TPrompt,
-  webFetchTool,
-  webSearchTool,
-} from "../ai/api";
-import { SDefineMessageImportance } from "../ai/tools/define-message-importance/handler";
-import { listCronJobsTool } from "../ai/tools/list-cron-jobs/definition";
-import { scheduleOnceTool } from "../ai/tools/schedule-once/definition";
-import { scheduleRecurringTool } from "../ai/tools/schedule-recurring/definition";
-import { unscheduleCronJobTool } from "../ai/tools/unschedule-cron-job/definition";
-import { updateCronJobTool } from "../ai/tools/update-cron-job/definition";
+import { AgentHarness } from "../ai/agent-harness";
+import { EModelPurpose, ERole, type THistoryItem } from "../ai/types";
 import { AppLogger, EBehaviorLogLevel, type TBehaviorTraceContext } from "../app-logger";
 import { resolveAiBehaviorFields } from "../app-logger/ai";
 import { sanitizeErrorMessage } from "../app-logger/sanitizers";
@@ -27,14 +11,13 @@ import { EMemoryImportance, type TMemory } from "../memory/types";
 import type { EMessagePlatform } from "../messaging/types";
 import { SettingsService } from "../settings";
 import { EConfigKey, type TConfigRecord } from "../settings/schema";
-import { getMessageHandlerInstructions } from "./instructions";
 import { getMessageTrace } from "./trace";
 import type { TIncommingMessage, TOutgoingMessage } from "./types";
 
 export class MessageHandler {
   private static _instances = new Map<string, MessageHandler>();
   private logger: TLogger;
-  private ai = AiConnector.instance;
+  private ai = AgentHarness.instance;
   private queue = new AsyncQueue();
   private memory = Memory.instance;
 
@@ -67,18 +50,10 @@ export class MessageHandler {
     logHandlerStarted(trace, "message-handler");
 
     try {
-      const settings = await SettingsService.instance.getAll(message.chatId);
-      const instructions = await getMessageHandlerInstructions(message.chatId, settings);
-
+      const settings = structuredClone(await SettingsService.instance.getAll(message.chatId));
       const parallelStart = performance.now();
       const [importance, last30] = await Promise.all([
-        this.defineMessageImportance(
-          message.message.content,
-          message.chatId,
-          settings,
-          trace,
-          ERole.User,
-        ),
+        this.defineMessageImportance(message.message.content, settings, trace, ERole.User),
         this.retrieveMemory(message.chatId, trace),
       ]);
       this.logger.info(
@@ -96,51 +71,22 @@ export class MessageHandler {
         });
       }
 
-      const tools = [
-        { definition: searchMemoryTool, instructions: instructions.searchMemory },
-        { definition: listCronJobsTool, instructions: instructions.listCronJobs },
-        { definition: scheduleOnceTool, instructions: instructions.scheduleOnce },
-        {
-          definition: scheduleRecurringTool,
-          instructions: instructions.scheduleRecurring,
-        },
-        {
-          definition: unscheduleCronJobTool,
-          instructions: instructions.unscheduleCronJob,
-        },
-        {
-          definition: updateCronJobTool,
-          instructions: instructions.updateCronJob,
-        },
-        { definition: webSearchTool, instructions: instructions.webSearch },
-        { definition: webFetchTool, instructions: instructions.webFetch },
-      ];
-
       const chatStart = performance.now();
-      const aiRes = await this.ai.runAssistantToolLoop({
-        prompt: {
-          role: ERole.User,
-          content: [{ type: "text", text: message.message.content }],
-        },
+      const aiRes = await this.ai.runMain({
+        prompt: message.message.content,
         history,
-        purpose: EModelPurpose.ChatAccurate,
-        user: {
-          username: message.author.username,
-          id: message.author.id,
-          displayName: message.author.username,
-        },
         currentTimeContext: createCurrentTimeContext(settings),
-        tools,
         chatId: message.chatId,
         settings,
         platform,
         trace,
+        signal: undefined,
       });
       this.logger.info(
         `handleMessage: AI chat completed (${(performance.now() - chatStart).toFixed(0)}ms)`,
       );
 
-      if (aiRes.finalResponse === undefined) {
+      if (aiRes.text === undefined) {
         this.logger.warning("handleMessage: AI returned no final response");
         logHandlerCompleted(
           trace,
@@ -154,13 +100,12 @@ export class MessageHandler {
         return "Something went wrong.";
       }
 
-      const finalResponse = aiRes.finalResponse;
+      const finalResponse = aiRes.text;
 
       this.queue.enqueue(async () => {
         const respImpStart = performance.now();
         const responseImportance = await this.defineMessageImportance(
           finalResponse,
-          message.chatId,
           settings,
           trace,
           ERole.Assistant,
@@ -214,41 +159,22 @@ export class MessageHandler {
 
   private async defineMessageImportance(
     message: string,
-    ownerKey: string,
     settings: TConfigRecord,
     trace: TOption<TBehaviorTraceContext>,
     author: ERole,
   ): Promise<EMemoryImportance> {
     const start = performance.now();
 
-    const instructions = await getMessageHandlerInstructions(ownerKey, settings);
-
-    const system: THistoryItem = {
-      role: ERole.System,
-      content: instructions.defineMessageImportance,
-    };
-
-    const uMessage: TPrompt = {
-      role: ERole.User,
-      content: [{ type: "text", text: message }],
-    };
-
-    const res = await this.ai.runToolTask({
-      prompt: uMessage,
-      history: [system],
-      tools: [{ definition: defineMessageImportanceTool }],
-      purpose: EModelPurpose.ToolCheap,
-      chatId: undefined,
-      user: undefined,
+    const response = await this.ai.completeText({
+      prompt: `Classify this ${author} message as low, medium, or high importance. Reply with only one word.\n\n${message}`,
+      instructions:
+        "Classify message importance for conversational memory. Reply only with low, medium, or high.",
+      purpose: EModelPurpose.Utility,
       settings,
       trace,
     });
 
-    const realRes = res.toolResults.find(
-      (toolResult) => toolResult.toolName === DEFINE_MESSAGE_IMPORTANCE_TOOL && toolResult.success,
-    );
-
-    if (realRes === undefined) {
+    if (response === undefined) {
       this.logger.error(
         `defineMessageImportance: failed, defaulting to low (${(performance.now() - start).toFixed(0)}ms)`,
       );
@@ -256,9 +182,13 @@ export class MessageHandler {
       return EMemoryImportance.Low;
     }
 
-    const parsed = SDefineMessageImportance.safeParse(realRes.data);
+    const importance = response.trim().toLowerCase();
 
-    if (!parsed.success) {
+    if (
+      importance !== EMemoryImportance.Low &&
+      importance !== EMemoryImportance.Medium &&
+      importance !== EMemoryImportance.High
+    ) {
       this.logger.error(
         `defineMessageImportance: invalid tool result, defaulting to low (${(performance.now() - start).toFixed(0)}ms)`,
       );
@@ -267,8 +197,8 @@ export class MessageHandler {
     }
 
     this.logger.info(`defineMessageImportance: done (${(performance.now() - start).toFixed(0)}ms)`);
-    logImportanceCompleted(trace, settings, start, true, author, parsed.data.importance);
-    return parsed.data.importance;
+    logImportanceCompleted(trace, settings, start, true, author, importance);
+    return importance;
   }
 
   private async saveMessageToDatabase(
@@ -402,7 +332,7 @@ function logImportanceCompleted(
     return;
   }
 
-  const fields = resolveAiBehaviorFields(settings, EModelPurpose.ToolCheap);
+  const fields = resolveAiBehaviorFields(settings, EModelPurpose.Utility);
   let level = EBehaviorLogLevel.Info;
 
   if (!success) {
@@ -416,7 +346,7 @@ function logImportanceCompleted(
     level,
     provider: fields?.provider,
     model: fields?.model,
-    purpose: EModelPurpose.ToolCheap,
+    purpose: EModelPurpose.Utility,
     success,
     durationMs: performance.now() - start,
     summary: `importance completed author=${author} importance=${importance}`,

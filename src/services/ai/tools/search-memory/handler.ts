@@ -1,33 +1,68 @@
-import z from "zod";
+import { type Static, StringEnum, Type } from "@earendil-works/pi-ai";
 import { EMemoryImportance, type TMemory } from "../../../memory/types";
 
-export const SSearchMemoryArgs = z.object({
-  searchString: z
-    .string()
-    .describe("Partial text to search for anywhere within stored message content")
-    .optional(),
-  timeRange: z
-    .object({
-      start: z.iso
-        .datetime({ offset: true })
-        .describe("Inclusive start date-time with an explicit Z or numeric timezone offset")
-        .transform((value) => new Date(value)),
-      end: z.iso
-        .datetime({ offset: true })
-        .describe("Inclusive end date-time with an explicit Z or numeric timezone offset")
-        .transform((value) => new Date(value)),
-    })
-    .describe("Filter memories created within this time range")
-    .optional(),
-  limit: z.number().int().positive().describe("Maximum number of memories to return").optional(),
-  importance: z
-    .array(z.enum(EMemoryImportance))
-    .describe("Importance levels to include: low, medium, or high")
-    .optional(),
-});
+export const SSearchMemoryArgs = Type.Object(
+  {
+    searchString: Type.Optional(
+      Type.String({
+        description: "Partial text to search for anywhere within stored message content",
+      }),
+    ),
+    timeRange: Type.Optional(
+      Type.Object(
+        {
+          start: Type.String({
+            format: "date-time",
+            description: "Inclusive ISO 8601 start date-time",
+          }),
+          end: Type.String({
+            format: "date-time",
+            description: "Inclusive ISO 8601 end date-time",
+          }),
+        },
+        {
+          additionalProperties: false,
+          description: "Filter memories created within this time range",
+        },
+      ),
+    ),
+    limit: Type.Optional(
+      Type.Integer({ minimum: 1, description: "Maximum number of memories to return" }),
+    ),
+    importance: Type.Optional(
+      Type.Array(StringEnum(Object.values(EMemoryImportance)), {
+        description: "Importance levels to include: low, medium, or high",
+      }),
+    ),
+  },
+  { additionalProperties: false },
+);
 
-export type TSearchMemoryArgs = z.infer<typeof SSearchMemoryArgs>;
+export type TSearchMemoryArgs = Static<typeof SSearchMemoryArgs>;
 
 export type TSearchMemory = {
   memories: TMemory[];
 };
+
+type TConvertedSearchMemoryArgs = Omit<TSearchMemoryArgs, "timeRange"> & {
+  timeRange?: {
+    start: Date;
+    end: Date;
+  };
+};
+
+export function convertSearchMemoryArgs(args: TSearchMemoryArgs): TConvertedSearchMemoryArgs {
+  const { timeRange, ...rest } = args;
+
+  if (timeRange === undefined) {
+    return rest;
+  }
+
+  return {
+    ...rest,
+    timeRange: {
+      start: new Date(timeRange.start),
+      end: new Date(timeRange.end),
+    },
+  };
+}

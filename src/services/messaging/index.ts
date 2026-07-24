@@ -6,7 +6,7 @@ import {
 import type { TCronJobContext } from "../../lib/cron-engine";
 import type { TOption } from "../../types";
 import { createLogger, type TLogger } from "../../utils/logger";
-import { AiConnector } from "../ai/api";
+import { AgentHarness } from "../ai/agent-harness";
 import { ERole } from "../ai/types";
 import {
   AppLogger,
@@ -22,8 +22,6 @@ import { EMemoryImportance } from "../memory/types";
 import { MessageHandler } from "../message-handler";
 import { attachMessageTrace } from "../message-handler/trace";
 import type { TIncommingMessage } from "../message-handler/types";
-import { SettingsIntentClassifier } from "../settings-intent-classifier";
-import { SettingsMessageHandler } from "../settings-message-handler";
 import { createCanonicalChatKey, parseCanonicalChatKey } from "./chat-key";
 import type { EMessagePlatform, TMessageTransport, TPlatformMessage } from "./types";
 
@@ -31,7 +29,7 @@ export class MessagingAdapter {
   private static _instance: TOption<MessagingAdapter>;
   private logger: TLogger = createLogger("MESSAGING");
   private transports = new Map<EMessagePlatform, TMessageTransport>();
-  private ai = AiConnector.instance;
+  private ai = AgentHarness.instance;
   private cronListenerRegistered = false;
   private runningCronTaskKeys = new Set<string>();
 
@@ -81,9 +79,6 @@ export class MessagingAdapter {
         return;
       }
 
-      const classifier = SettingsIntentClassifier.instance;
-      const intent = await classifier.classify(message.message.content, canonicalChatId, trace);
-
       const incomingMessage: TIncommingMessage = {
         chatId: canonicalChatId,
         author: {
@@ -95,21 +90,8 @@ export class MessagingAdapter {
       };
       attachMessageTrace(incomingMessage, trace);
 
-      let reply: string;
-
-      if (intent === undefined) {
-        this.logger.warning(
-          `handleInboundMessage: settings-intent classifier returned no result; falling back to normal handler for platform ${message.platform}, raw chat ${message.chatId}, canonical chat ${canonicalChatId}, author ${message.author.id}, message type ${message.message.type}, content length ${message.message.content.length}`,
-        );
-        const handler = MessageHandler.getInstance(canonicalChatId);
-        reply = await handler.handleMessage(incomingMessage, message.platform);
-      } else if (intent.intent === "settings") {
-        const handler = SettingsMessageHandler.getInstance(canonicalChatId);
-        reply = await handler.handleMessage(incomingMessage, message.platform);
-      } else {
-        const handler = MessageHandler.getInstance(canonicalChatId);
-        reply = await handler.handleMessage(incomingMessage, message.platform);
-      }
+      const handler = MessageHandler.getInstance(canonicalChatId);
+      const reply = await handler.handleMessage(incomingMessage, message.platform);
 
       if (reply.trim().length === 0) {
         logHandlerCompleted(trace, "messaging", handlerStart, true, 0, "empty reply", undefined);

@@ -25,7 +25,7 @@
     The result contains two objects:
     - settings — the effective flat settings map, including ai.provider and ai.instructions.* preferences
     - aiRuntime.provider — the active provider resolved from settings
-    - aiRuntime.models — the computed code-registry model IDs for ToolCheap, ToolAccurate, General, Chat, and ChatAccurate
+    - aiRuntime.models — the computed code-registry model IDs for Utility, Main, Specialist, SpecialistAccurate, and ScheduledTask
 
     Model IDs are computed runtime values. They are not stored settings and cannot be edited through settings tools.
   </result_fields>

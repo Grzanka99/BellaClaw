@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, open, rename, rm } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
-import type { Credential, CredentialStore } from "@earendil-works/pi-ai";
+import type { Credential, CredentialInfo, CredentialStore } from "@earendil-works/pi-ai";
 import { z } from "zod";
 
 export const LOCAL_AI_CREDENTIALS_PATH = resolve(
@@ -41,6 +41,15 @@ export class FileCredentialStore implements CredentialStore {
   public async read(providerId: string): Promise<Credential | undefined> {
     const credentials = await this.readAll();
     return credentials[providerId];
+  }
+
+  public async list(): Promise<readonly CredentialInfo[]> {
+    const credentials = await this.readAll();
+
+    return Object.entries(credentials).map(([providerId, credential]) => ({
+      providerId,
+      type: credential.type,
+    }));
   }
 
   public modify(

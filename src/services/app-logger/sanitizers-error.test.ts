@@ -60,4 +60,17 @@ describe("app logger sanitizer errors", () => {
     expect(serialized).not.toContain("private reasoning");
     expect(serialized).not.toContain("private response body");
   });
+
+  test("bounds generic tool errors", () => {
+    const error = sanitizeToolResultError({
+      toolCallId: "tool-call-1",
+      toolName: "web-search",
+      success: false,
+      data: undefined,
+      error: "x".repeat(1_000),
+    });
+
+    expect(error?.length).toBe(303);
+    expect(error).toEndWith("...");
+  });
 });

@@ -1,140 +1,173 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
-import type { TOption } from "../../types";
-import { GET_SETTINGS_TOOL } from "../ai/tools/get-settings/definition";
-import { LIST_CRON_JOBS_TOOL } from "../ai/tools/list-cron-jobs/definition";
-import { SCHEDULE_ONCE_TOOL } from "../ai/tools/schedule-once/definition";
-import { SCHEDULE_RECURRING_TOOL } from "../ai/tools/schedule-recurring/definition";
-import { UNSCHEDULE_CRON_JOB_TOOL } from "../ai/tools/unschedule-cron-job/definition";
-import { UPDATE_CRON_JOB_TOOL } from "../ai/tools/update-cron-job/definition";
-import { UPDATE_SETTINGS_TOOL } from "../ai/tools/update-settings/definition";
+import { afterEach, describe, expect, mock, test } from "bun:test";
 import { ERole } from "../ai/types";
-import { Memory } from "../memory";
+import { EMemoryImportance } from "../memory/types";
 import { EMessagePlatform } from "../messaging/types";
 import { SettingsService } from "../settings";
-import { DefaultConfigRecord } from "../settings/schema";
-import { MessageHandler } from "./index";
+import { DefaultConfigRecord, EConfigKey } from "../settings/schema";
+import { MessageHandler } from ".";
 
-const EXPECTED_CRON_TOOL_NAMES = [
-  LIST_CRON_JOBS_TOOL,
-  SCHEDULE_RECURRING_TOOL,
-  UNSCHEDULE_CRON_JOB_TOOL,
-  UPDATE_CRON_JOB_TOOL,
-  SCHEDULE_ONCE_TOOL,
-];
-
-const EXCLUDED_SETTINGS_TOOL_NAMES = [GET_SETTINGS_TOOL, UPDATE_SETTINGS_TOOL];
-
-type TAiConnectorInternals = {
+type THandlerInternals = {
   ai: {
-    runAssistantToolLoop: typeof import("../ai/api").AiConnector.prototype.runAssistantToolLoop;
-    runToolTask: typeof import("../ai/api").AiConnector.prototype.runToolTask;
+    completeText: ReturnType<typeof mock>;
+    runMain: ReturnType<typeof mock>;
   };
   memory: {
-    findRecent: typeof import("../memory").Memory.prototype.findRecent;
-    save: typeof import("../memory").Memory.prototype.save;
+    findRecent: ReturnType<typeof mock>;
+    save: ReturnType<typeof mock>;
+  };
+  queue: {
+    enqueue(callback: () => unknown): Promise<unknown>;
   };
 };
 
-function resetMemoryInstance() {
-  const MemoryWithPrivate = Memory as unknown as {
-    _instance: unknown;
-  };
-  MemoryWithPrivate._instance = undefined;
+function reset() {
+  (MessageHandler as unknown as { _instances: Map<string, MessageHandler> })._instances.clear();
+  (SettingsService as unknown as { _instance: unknown })._instance = undefined;
 }
 
-function mockSettingsService() {
-  const SettingsServiceStatic = SettingsService as unknown as { _instance: unknown };
-  SettingsServiceStatic._instance = {
-    getAll: mock(async () => DefaultConfigRecord),
-  };
-}
-
-function resetSettingsInstance() {
-  const SettingsServiceStatic = SettingsService as unknown as { _instance: unknown };
-  SettingsServiceStatic._instance = undefined;
-}
+afterEach(reset);
 
 describe("MessageHandler", () => {
-  beforeEach(() => {
-    resetMemoryInstance();
-    resetSettingsInstance();
-    mockSettingsService();
+  test("passes latest-30 chronological history and saves only root user/final messages", async () => {
+    const settings = structuredClone(DefaultConfigRecord);
+    (SettingsService as unknown as { _instance: unknown })._instance = {
+      getAll: mock(async () => settings),
+    };
+    const handler = MessageHandler.getInstance("discord:1");
+    const internals = handler as unknown as THandlerInternals;
+    const recent = Array.from({ length: 30 }, (_, index) => ({
+      chatId: "discord:1",
+      author: index % 2 === 0 ? ERole.User : ERole.Assistant,
+      importance: EMemoryImportance.Low,
+      message: `message-${29 - index}`,
+      createdAt: new Date(),
+      lastReadAt: new Date(),
+    }));
+    internals.memory = {
+      findRecent: mock(async () => ({ success: true, data: recent })),
+      save: mock(async (args) => args),
+    };
+    internals.queue = {
+      enqueue: async (callback) => callback(),
+    };
+    internals.ai = {
+      completeText: mock(async () => EMemoryImportance.Medium),
+      runMain: mock(async () => ({
+        text: "Final answer",
+        iterations: 1,
+        toolCallCount: 0,
+        stopReason: "completed",
+      })),
+    };
+
+    const result = await handler.handleMessage(
+      {
+        chatId: "discord:1",
+        message: { type: "text", content: "new question" },
+        author: { type: ERole.User, id: "1", username: "Owner" },
+      },
+      EMessagePlatform.Discord,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(result).toBe("Final answer");
+    expect(internals.memory.findRecent).toHaveBeenCalledWith("discord:1", 30);
+    expect(internals.ai.runMain).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: "new question",
+        platform: EMessagePlatform.Discord,
+        history: expect.arrayContaining([
+          { role: ERole.Assistant, content: "message-0" },
+          { role: ERole.User, content: "message-29" },
+        ]),
+      }),
+    );
+    const history = internals.ai.runMain.mock.calls[0]?.[0].history;
+    expect(history[0]?.content).toBe("message-0");
+    expect(history[29]?.content).toBe("message-29");
+    expect(internals.memory.save).toHaveBeenCalledTimes(2);
+    expect(internals.memory.save).toHaveBeenNthCalledWith(1, {
+      chatId: "discord:1",
+      author: ERole.User,
+      importance: EMemoryImportance.Medium,
+      message: "new question",
+    });
+    expect(internals.memory.save).toHaveBeenNthCalledWith(2, {
+      chatId: "discord:1",
+      author: ERole.Assistant,
+      importance: EMemoryImportance.Medium,
+      message: "Final answer",
+    });
   });
 
-  afterEach(() => {
-    (MessageHandler as unknown as { _instances: Map<string, MessageHandler> })._instances.clear();
-    resetMemoryInstance();
-    resetSettingsInstance();
-  });
-
-  test("handleMessage passes cron tools into runAssistantToolLoop", async () => {
-    const capturedTools: Array<unknown> = [];
-    const capturedPlatforms: Array<TOption<EMessagePlatform>> = [];
-
-    const handler = MessageHandler.getInstance("test-chat-id");
-    const internals = handler as unknown as TAiConnectorInternals;
-
+  test("takes an immutable settings snapshot and has no classifier routing path", async () => {
+    const sharedSettings = structuredClone(DefaultConfigRecord);
+    (SettingsService as unknown as { _instance: unknown })._instance = {
+      getAll: mock(async () => sharedSettings),
+    };
+    const handler = MessageHandler.getInstance("signal:1");
+    const internals = handler as unknown as THandlerInternals;
     internals.memory = {
       findRecent: mock(async () => ({ success: true, data: [] })),
-      save: mock(async () => ({
-        chatId: "test-chat-id",
-        author: ERole.User,
-        importance: "low",
-        message: "hello",
-        createdAt: new Date(),
-        lastReadAt: new Date(),
-      })),
-    } as never;
-
+      save: mock(async (args) => args),
+    };
+    internals.queue = { enqueue: async (callback) => callback() };
+    let capturedSettings: typeof DefaultConfigRecord | undefined;
     internals.ai = {
-      runToolTask: mock(async () => ({
-        assistantResponse: "",
-        toolCalls: [],
-        toolResults: [],
-      })),
-      runAssistantToolLoop: mock(
-        async (args: { tools: Array<unknown>; platform?: EMessagePlatform }) => {
-          capturedTools.push(...(args.tools ?? []));
-          capturedPlatforms.push(args.platform);
-          return {
-            conversation: [],
-            toolActivity: [],
-            finalResponse: "test response",
-            stopReason: "final-response" as const,
-            iterations: 1,
-          };
-        },
-      ),
-    } as never;
+      completeText: mock(async () => EMemoryImportance.Low),
+      runMain: mock(async (args) => {
+        capturedSettings = args.settings;
+        return {
+          text: "Done",
+          iterations: 1,
+          toolCallCount: 0,
+          stopReason: "completed",
+        };
+      }),
+    };
 
-    await handler.handleMessage(
-      {
-        chatId: "test-chat-id",
-        message: { type: "text", content: "hello" },
-        author: { type: ERole.User, id: "test-user-id", username: "TestUser" },
-      },
-      EMessagePlatform.Signal,
-    );
-
-    const toolNames = (capturedTools as Array<{ definition: { name: string } }>).map(
-      (t) => t.definition.name,
-    );
-
-    for (const name of EXPECTED_CRON_TOOL_NAMES) {
-      expect(toolNames).toContain(name);
-    }
-
-    for (const name of EXCLUDED_SETTINGS_TOOL_NAMES) {
-      expect(toolNames).not.toContain(name);
-    }
-
-    expect(capturedPlatforms).toContain(EMessagePlatform.Signal);
-
-    expect(internals.memory.save).toHaveBeenCalledWith({
-      chatId: "test-chat-id",
-      author: ERole.User,
-      importance: "low",
-      message: "hello",
+    await handler.handleMessage({
+      chatId: "signal:1",
+      message: { type: "text", content: "change my settings" },
+      author: { type: ERole.User, id: "1", username: "Owner" },
     });
+    sharedSettings[EConfigKey.AiInstructionsTimezone] = "Asia/Tokyo";
+
+    expect(capturedSettings).not.toBe(sharedSettings);
+    expect(capturedSettings?.[EConfigKey.AiInstructionsTimezone]).toBe(
+      DefaultConfigRecord[EConfigKey.AiInstructionsTimezone],
+    );
+    expect(internals.ai.runMain).toHaveBeenCalledTimes(1);
+  });
+
+  test("returns the user fallback and does not save an assistant message for blank final output", async () => {
+    (SettingsService as unknown as { _instance: unknown })._instance = {
+      getAll: mock(async () => DefaultConfigRecord),
+    };
+    const handler = MessageHandler.getInstance("discord:2");
+    const internals = handler as unknown as THandlerInternals;
+    internals.memory = {
+      findRecent: mock(async () => ({ success: true, data: [] })),
+      save: mock(async (args) => args),
+    };
+    internals.queue = { enqueue: async (callback) => callback() };
+    internals.ai = {
+      completeText: mock(async () => EMemoryImportance.Low),
+      runMain: mock(async () => ({
+        text: undefined,
+        iterations: 1,
+        toolCallCount: 0,
+        stopReason: "error",
+      })),
+    };
+
+    expect(
+      await handler.handleMessage({
+        chatId: "discord:2",
+        message: { type: "text", content: "hello" },
+        author: { type: ERole.User, id: "2", username: "Owner" },
+      }),
+    ).toBe("Something went wrong.");
+    expect(internals.memory.save).toHaveBeenCalledTimes(1);
   });
 });
