@@ -2,8 +2,10 @@ import { afterEach, describe, expect, mock, test } from "bun:test";
 import { ECronJobStatus, ECronJobType } from "../../../lib/cron-engine";
 import { CronSingleton } from "../../cron";
 import { Memory } from "../../memory";
-import { DefaultConfigRecord } from "../../settings/schema";
-import { createMemoryTools, createSchedulingTools } from "./executable";
+import { SettingsService } from "../../settings";
+import { DefaultConfigRecord, EConfigKey } from "../../settings/schema";
+import { EAiProvider, EModelPurpose } from "../types";
+import { createMemoryTools, createSchedulingTools, createSettingsTools } from "./executable";
 
 const context = {
   chatId: "discord:1",
@@ -14,6 +16,7 @@ const context = {
 function reset() {
   (CronSingleton as unknown as { _instance: unknown })._instance = undefined;
   (Memory as unknown as { _instance: unknown })._instance = undefined;
+  (SettingsService as unknown as { _instance: unknown })._instance = undefined;
 }
 
 afterEach(reset);
@@ -115,6 +118,26 @@ describe("production executable tools", () => {
 
     await expect(tool?.execute("call", { name: "daily" })).rejects.toThrow(
       "cancel failed: database unavailable",
+    );
+  });
+
+  test("verifies every model purpose used by the harness before changing providers", async () => {
+    const verifySettings = mock(async () => "verification failed");
+    (SettingsService as unknown as { _instance: unknown })._instance = {
+      getAll: mock(async () => DefaultConfigRecord),
+    };
+    const tool = createSettingsTools({ ...context, verifySettings }).find(
+      (candidate) => candidate.name === "update-settings",
+    );
+
+    await expect(tool?.execute("call", { aiProvider: EAiProvider.Openrouter })).rejects.toThrow(
+      "verification failed",
+    );
+    expect(verifySettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        [EConfigKey.AiProvider]: EAiProvider.Openrouter,
+      }),
+      [EModelPurpose.ToolCheap, EModelPurpose.ToolAccurate, EModelPurpose.ChatAccurate],
     );
   });
 

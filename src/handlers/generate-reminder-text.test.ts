@@ -50,6 +50,8 @@ describe("generateReminderText", () => {
     const ownerSettings = {
       ...DefaultConfigRecord,
       [EConfigKey.AiInstructionsTimezone]: "America/New_York",
+      [EConfigKey.AiInstructionsLanguage]: "Polish",
+      [EConfigKey.AiInstructionsAddressStyle]: "Address the owner as Captain",
     };
     settings(ownerSettings);
     const captured: Array<Parameters<AgentHarness["completeText"]>[0]> = [];
@@ -68,6 +70,10 @@ describe("generateReminderText", () => {
     expect(args?.prompt).toContain('"timezone":"America/New_York"');
     expect(args?.prompt).toContain('"localDateTime":"2026-01-05 03:00:00"');
     expect(args?.prompt).toContain('"localWeekday":"Monday"');
+    expect(args?.instructions).toContain("Always reply in Polish");
+    expect(args?.instructions).toContain("Address the owner as Captain");
+    expect(args?.instructions).toContain("You are replying through Signal");
+    expect(args?.instructions).toContain("Never use headings, tables, blockquotes");
   });
 
   test("uses fallback for blank output and failures", async () => {

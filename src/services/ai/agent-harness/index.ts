@@ -17,8 +17,8 @@ import {
   sanitizeToolResult,
   sanitizeToolResultError,
 } from "../../app-logger/sanitizers";
-import { EMessagePlatform } from "../../messaging/types";
 import { EConfigKey, type TConfigRecord } from "../../settings/schema";
+import { createPlatformInstructions } from "../instructions/platform";
 import { readXmlAndInjectConfig } from "../instructions/read-xml-and-inject-config";
 import { aiModels, getAiApiKey, getAiModelConfig } from "../providers/registry";
 import {
@@ -488,14 +488,10 @@ export class AgentHarness {
       parts.push(args.currentTimeContext);
     }
 
-    if (args.platform === EMessagePlatform.Signal) {
-      parts.push(
-        "You are replying through Signal. Use only Signal styled-text syntax: *italic*, **bold**, `monospace`, ~strikethrough~, and ||spoiler||. Use short paragraphs and simple lists. Never use headings, tables, blockquotes, embeds, or Discord mentions.",
-      );
-    }
+    const platformInstructions = createPlatformInstructions(args.platform);
 
-    if (args.platform === EMessagePlatform.Discord) {
-      parts.push("You are replying through Discord direct messages.");
+    if (platformInstructions !== undefined) {
+      parts.push(platformInstructions);
     }
 
     return parts.join("\n\n");

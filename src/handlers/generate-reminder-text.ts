@@ -1,6 +1,8 @@
 import { Config } from "../config";
 import type { TCronJobContext } from "../lib/cron-engine";
 import type { AgentHarness } from "../services/ai/agent-harness";
+import { createPlatformInstructions } from "../services/ai/instructions/platform";
+import { readXmlAndInjectConfig } from "../services/ai/instructions/read-xml-and-inject-config";
 import { EModelPurpose } from "../services/ai/types";
 import type { TBehaviorTraceContext } from "../services/app-logger";
 import { parseCanonicalChatKey } from "../services/messaging/chat-key";
@@ -77,9 +79,22 @@ export async function generateReminderText(
     return ctx.reminderFallbackText;
   }
 
-  const { settings, timezone } = await resolveCronScopeContext(ctx, "generateReminderText");
+  const { settings, timezone, platform } = await resolveCronScopeContext(
+    ctx,
+    "generateReminderText",
+  );
 
   try {
+    const instructions = [
+      await readXmlAndInjectConfig("./src/services/ai/instructions/base-system.xml", settings),
+      "Generate one reminder message from the provided reminder payload and firing context. Use the firing context for any date, time, or weekday-relative wording. Return only the final reminder text with no quotes or explanation.",
+    ];
+    const platformInstructions = createPlatformInstructions(platform);
+
+    if (platformInstructions !== undefined) {
+      instructions.push(platformInstructions);
+    }
+
     const generatedText = await ai.completeText({
       prompt: [
         "Reminder prompt data JSON:",
@@ -88,8 +103,7 @@ export async function generateReminderText(
         "Firing context JSON:",
         JSON.stringify(createFiringContext(ctx.nextRunAt, timezone)),
       ].join("\n"),
-      instructions:
-        "Generate one reminder message from the provided reminder payload and firing context. Return only the final reminder text with no quotes or explanation.",
+      instructions: instructions.join("\n\n"),
       purpose: EModelPurpose.ChatAccurate,
       settings,
       trace,
