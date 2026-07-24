@@ -1,8 +1,14 @@
-import { z } from "zod";
+import { type Static, Type } from "@earendil-works/pi-ai";
 import type { TCronJob } from "../../../../lib/cron-engine";
 
-export const SListCronJobsArgs = z.object({}).describe("No arguments are required");
+export const SListCronJobsArgs = Type.Object(
+  {},
+  {
+    additionalProperties: false,
+    description: "No arguments are required",
+  },
+);
 
-export type TListCronJobsArgs = z.infer<typeof SListCronJobsArgs>;
+export type TListCronJobsArgs = Static<typeof SListCronJobsArgs>;
 
 export type TListCronJobsResult = TCronJob[];

@@ -5,7 +5,10 @@ import type { TFetchWebArgs, TFetchWebResult, TWebContentFormat } from "./types"
 const FETCH_MAX_BYTES = 5_000_000;
 const MAX_FORMATTED_CHARS = 80_000;
 
-export async function fetchWeb(args: TFetchWebArgs): Promise<TFetchWebResult> {
+export async function fetchWeb(
+  args: TFetchWebArgs,
+  signal?: AbortSignal,
+): Promise<TFetchWebResult> {
   const format = args.format ?? "markdown";
   const timeoutSeconds = args.timeout ?? 15;
   const { response, text, url } = await fetchTextWithLimit({
@@ -13,6 +16,7 @@ export async function fetchWeb(args: TFetchWebArgs): Promise<TFetchWebResult> {
     timeoutMs: timeoutSeconds * 1000,
     maxBytes: FETCH_MAX_BYTES,
     followRedirects: true,
+    signal,
     headers: {
       accept: acceptHeaderForFormat(format),
     },

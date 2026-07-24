@@ -27,6 +27,37 @@ describe("fetchTextWithLimit", () => {
 
     expect(performance.now() - startedAt).toBeLessThan(300);
   });
+
+  test("fails before DNS resolution when the pinned-path caller is already aborted", async () => {
+    globalThis.fetch = originalFetch;
+    const controller = new AbortController();
+    controller.abort();
+    const startedAt = performance.now();
+
+    await expect(
+      fetchTextWithLimit({
+        url: "https://must-not-resolve.invalid/path",
+        timeoutMs: 5_000,
+        maxBytes: 5_000,
+        signal: controller.signal,
+      }),
+    ).rejects.toThrow("aborted");
+    expect(performance.now() - startedAt).toBeLessThan(100);
+  });
+
+  test("caller cancellation wins while the pinned path is awaiting DNS", async () => {
+    globalThis.fetch = originalFetch;
+    const controller = new AbortController();
+    const pending = fetchTextWithLimit({
+      url: `https://dns-cancel-${crypto.randomUUID()}.invalid/path`,
+      timeoutMs: 5_000,
+      maxBytes: 5_000,
+      signal: controller.signal,
+    });
+    controller.abort();
+
+    await expect(pending).rejects.toThrow("aborted");
+  });
 });
 
 function createSlowBody(): ReadableStream<Uint8Array> {

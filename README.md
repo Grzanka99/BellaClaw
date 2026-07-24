@@ -176,7 +176,14 @@ before running `bun run logs:turn -- <turnId>`.
 ### Message Flow
 
 1. User sends a Signal direct message.
-2. Three operations run in parallel: importance classification, recent memory retrieval, and AI-driven memory search.
-3. The incoming message is saved to the libSQL database with its importance tag.
-4. Conversation history (recent + searched memories) is assembled and sent to the AI model along with the system prompt.
-5. The AI response is sent back as a Signal direct message, then classified and saved to the database asynchronously.
+2. MessageHandler loads the latest stored conversation and classifies the incoming message's importance.
+3. The root user message is saved to the libSQL database with its importance tag.
+4. A fresh Pi Main Agent receives the latest 30 messages and delegates memory, settings, and scheduling work to isolated specialists when needed.
+5. Specialists have only their role-specific tools and never persist conversational memory. Main returns the only interactive response.
+6. The AI response is sent back as a Signal direct message, then classified and saved to the database asynchronously. Scheduled-task output is persisted only after successful delivery.
+
+### AI Runtime
+
+BellaClaw owns the root run context, permissions, limits, provider selection, credentials, logging, and memory persistence. Each root run and delegation creates a fresh Pi `Agent` with no session persistence. Pi owns model streaming, the TypeBox tool contract, tool execution, and lifecycle events.
+
+Main can use web tools and explicitly delegate to Memory, Settings, or Scheduling. Memory is read-only; Settings can read and update settings; Scheduling can manage cron jobs and use web research; Scheduled Task can use read-only memory and web tools. Main and the cron delivery root are the only paths that write conversational memory.

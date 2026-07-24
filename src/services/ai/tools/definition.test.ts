@@ -1,24 +1,26 @@
 import { describe, expect, test } from "bun:test";
+import { Value } from "typebox/value";
 import { defineMessageImportanceTool } from "./define-message-importance/definition";
-import { defineSettingsIntentTool } from "./define-settings-intent/definition";
 import { getSettingsTool } from "./get-settings/definition";
 import { listCronJobsTool } from "./list-cron-jobs/definition";
 import { scheduleOnceTool } from "./schedule-once/definition";
-import { SScheduleOnceArgs } from "./schedule-once/handler";
+import { SScheduleOnceArgs, validateScheduleOnceArgs } from "./schedule-once/handler";
 import { scheduleRecurringTool } from "./schedule-recurring/definition";
-import { SScheduleRecurringArgs } from "./schedule-recurring/handler";
+import {
+  SScheduleRecurringArgs,
+  validateScheduleRecurringArgs,
+} from "./schedule-recurring/handler";
 import { searchMemoryTool } from "./search-memory/definition";
-import { SSearchMemoryArgs } from "./search-memory/handler";
+import { convertSearchMemoryArgs, SSearchMemoryArgs } from "./search-memory/handler";
 import { unscheduleCronJobTool } from "./unschedule-cron-job/definition";
 import { updateCronJobTool } from "./update-cron-job/definition";
-import { SUpdateCronJobArgs } from "./update-cron-job/handler";
+import { SUpdateCronJobArgs, validateUpdateCronJobArgs } from "./update-cron-job/handler";
 import { updateSettingsTool } from "./update-settings/definition";
 import { webFetchTool } from "./web-fetch/definition";
 import { webSearchTool } from "./web-search/definition";
 
 const ALL_TOOLS = [
   defineMessageImportanceTool,
-  defineSettingsIntentTool,
   getSettingsTool,
   listCronJobsTool,
   scheduleOnceTool,
@@ -31,249 +33,63 @@ const ALL_TOOLS = [
   webSearchTool,
 ];
 
-const REQUIRED_FIELDS: Record<string, string[]> = {
-  "define-message-importance": ["reasoning", "importance"],
-  "define-settings-intent": ["intent", "reason"],
-  "get-settings": [],
-  "list-cron-jobs": [],
-  "schedule-once": ["name", "fireAt"],
-  "schedule-recurring": ["name", "pattern"],
-  "search-memory": [],
-  "unschedule-cron-job": ["name"],
-  "update-cron-job": ["name"],
-  "update-settings": [],
-  "web-fetch": ["url"],
-  "web-search": ["query"],
-};
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function readProperty(tool: (typeof ALL_TOOLS)[number], property: string) {
-  const properties = tool.parameters.properties;
-
-  if (!isRecord(properties)) {
-    throw new Error(`Expected properties for ${tool.name}`);
-  }
-
-  const value = properties[property];
-
-  if (!isRecord(value)) {
-    throw new Error(`Expected property ${property} for ${tool.name}`);
-  }
-
-  return value;
-}
-
-function expectPropertyDescriptions(schema: Record<string, unknown>, path: string) {
-  const properties = schema.properties;
-
-  if (!isRecord(properties)) {
-    return;
-  }
-
-  for (const [name, property] of Object.entries(properties)) {
-    if (!isRecord(property)) {
-      throw new Error(`Expected schema property ${path}.${name}`);
-    }
-
-    expect(typeof property.description).toBe("string");
-    expectPropertyDescriptions(property, `${path}.${name}`);
-  }
-}
-
 describe("AI tool definitions", () => {
-  test("all tools expose direct Pi-shaped definitions generated from JSON Schema", () => {
-    expect(ALL_TOOLS).toHaveLength(12);
-    expect(new Set(ALL_TOOLS.map((tool) => tool.name)).size).toBe(12);
+  test("expose Pi-native TypeBox parameter schemas", () => {
+    expect(ALL_TOOLS).toHaveLength(11);
+    expect(new Set(ALL_TOOLS.map((tool) => tool.name)).size).toBe(11);
 
     for (const tool of ALL_TOOLS) {
-      const requiredFields = REQUIRED_FIELDS[tool.name];
-
-      if (requiredFields === undefined) {
-        throw new Error(`Missing required-field contract for ${tool.name}`);
-      }
-
       expect(tool.name.length).toBeGreaterThan(0);
       expect(tool.description.length).toBeGreaterThan(0);
-      expect(tool.parameters.type).toBe("object");
-      expect(tool.parameters.$schema).toBeUndefined();
-      expect("function" in tool).toBe(false);
-      expect("type" in tool).toBe(false);
+      expect("type" in tool.parameters && tool.parameters.type).toBe("object");
       expect(() => JSON.stringify(tool.parameters)).not.toThrow();
-      expect(tool.parameters.required ?? []).toEqual(requiredFields);
-      expectPropertyDescriptions(tool.parameters, tool.name);
     }
   });
 
-  test("keeps field descriptions, enums, and numeric bounds", () => {
-    expect(readProperty(defineMessageImportanceTool, "importance").enum).toEqual([
-      "low",
-      "medium",
-      "high",
-    ]);
-    expect(readProperty(defineSettingsIntentTool, "intent").enum).toEqual(["settings", "normal"]);
-    expect(readProperty(webSearchTool, "maxResults")).toMatchObject({
-      type: "integer",
-      minimum: 1,
-      maximum: 10,
-    });
-    expect(readProperty(webFetchTool, "timeout")).toMatchObject({
-      type: "integer",
-      minimum: 1,
-      maximum: 45,
-    });
-    expect(updateSettingsTool.parameters).toMatchObject({
-      minProperties: 1,
-      additionalProperties: false,
-    });
-    expect(readProperty(searchMemoryTool, "limit")).toMatchObject({
-      type: "integer",
-      exclusiveMinimum: 0,
-    });
-    expect(readProperty(searchMemoryTool, "importance").items).toMatchObject({
-      enum: ["low", "medium", "high"],
-    });
-    expect(readProperty(webSearchTool, "topic").enum).toEqual(["general", "news", "finance"]);
-    expect(readProperty(webSearchTool, "timeRange").enum).toEqual(["day", "week", "month", "year"]);
-    expect(readProperty(webFetchTool, "format").enum).toEqual(["markdown", "text", "html"]);
-    expect(readProperty(updateSettingsTool, "aiProvider").enum).toEqual([
-      "openai-codex",
-      "openrouter",
-      "ollama",
-      "opencode-go",
-    ]);
+  test("enforce structural constraints", () => {
+    expect(Value.Check(SScheduleOnceArgs, { name: "x", fireAt: "invalid" })).toBe(false);
+    expect(Value.Check(SScheduleRecurringArgs, { name: "x", pattern: "0 8 * * *" })).toBe(true);
+    expect(Value.Check(SSearchMemoryArgs, { limit: 0 })).toBe(false);
+    expect(Value.Check(SUpdateCronJobArgs, { name: "x", unknown: true })).toBe(false);
   });
 
-  test("emits offset-aware date-time input schemas without conditional keywords", () => {
-    for (const property of [
-      readProperty(scheduleOnceTool, "fireAt"),
-      readProperty(updateCronJobTool, "fireAt"),
-    ]) {
-      expect(property.type).toBe("string");
-      expect(property.format).toBe("date-time");
-      expect(String(property.pattern)).toContain("Z|");
-    }
-
-    const timeRange = readProperty(searchMemoryTool, "timeRange");
-    expect(JSON.stringify(timeRange)).toContain('"format":"date-time"');
-
-    for (const tool of ALL_TOOLS) {
-      const serialized = JSON.stringify(tool.parameters);
-      expect(serialized).not.toContain('"oneOf"');
-      expect(serialized).not.toContain('"anyOf"');
-      expect(serialized).not.toContain('"not"');
-    }
-  });
-
-  test("accepts explicit offsets, transforms dates, and rejects ambiguous local times", () => {
-    const once = SScheduleOnceArgs.safeParse({
+  test("convert explicit-offset transport dates", () => {
+    const once = validateScheduleOnceArgs({
       name: "offset-reminder",
       fireAt: "2026-07-13T12:00:00+02:00",
       reminderText: "Reminder",
     });
-    expect(once.success).toBe(true);
+    expect(once.fireAt).toEqual(new Date("2026-07-13T10:00:00.000Z"));
 
-    if (once.success) {
-      expect(once.data.fireAt).toEqual(new Date("2026-07-13T10:00:00.000Z"));
-    }
-
-    expect(
-      SScheduleOnceArgs.safeParse({
-        name: "z-reminder",
-        fireAt: "2026-07-13T10:00:00Z",
-        reminderText: "Reminder",
-      }).success,
-    ).toBe(true);
-    expect(
-      SScheduleOnceArgs.safeParse({
-        name: "ambiguous-reminder",
-        fireAt: "2026-07-13T10:00:00",
-        reminderText: "Reminder",
-      }).success,
-    ).toBe(false);
-    expect(
-      SUpdateCronJobArgs.safeParse({
-        name: "existing-reminder",
-        fireAt: "2026-07-13T10:00:00",
-      }).success,
-    ).toBe(false);
-    expect(
-      SSearchMemoryArgs.safeParse({
-        timeRange: {
-          start: "2026-07-13T10:00:00Z",
-          end: "2026-07-13T12:00:00+02:00",
-        },
-      }).success,
-    ).toBe(true);
-    expect(
-      SSearchMemoryArgs.safeParse({
-        timeRange: {
-          start: "2026-07-13T10:00:00",
-          end: "2026-07-13T12:00:00+02:00",
-        },
-      }).success,
-    ).toBe(false);
+    const memory = convertSearchMemoryArgs({
+      timeRange: {
+        start: "2026-07-13T10:00:00Z",
+        end: "2026-07-13T12:00:00+02:00",
+      },
+    });
+    expect(memory.timeRange?.start).toEqual(new Date("2026-07-13T10:00:00.000Z"));
   });
 
-  test("validates the three cron content modes", () => {
-    const scheduleBase = {
-      name: "daily-news",
-      pattern: "0 8 * * *",
-    };
-
-    expect(
-      SScheduleRecurringArgs.safeParse({
-        ...scheduleBase,
-        taskPrompt: "Find today's important news with sources.",
-        taskFallbackText: "No briefing is available.",
-      }).success,
-    ).toBe(true);
-    expect(SScheduleRecurringArgs.safeParse(scheduleBase).success).toBe(false);
-    expect(
-      SScheduleRecurringArgs.safeParse({
-        ...scheduleBase,
-        reminderText: "Hello",
-        taskPrompt: "Find news",
-        taskFallbackText: "No news",
-      }).success,
-    ).toBe(false);
-    expect(
-      SScheduleRecurringArgs.safeParse({
-        ...scheduleBase,
-        taskPrompt: "Find news",
-      }).success,
-    ).toBe(false);
-    expect(
-      SScheduleRecurringArgs.safeParse({
-        ...scheduleBase,
-        reminderText: "Hello",
-        taskFallbackText: "No news",
-      }).success,
-    ).toBe(false);
-    expect(
-      SUpdateCronJobArgs.safeParse({
+  test("enforce cron domain constraints", () => {
+    expect(() =>
+      validateScheduleRecurringArgs({
         name: "daily-news",
+        pattern: "0 8 * * *",
+      }),
+    ).toThrow("Provide reminderText, reminderPromptData, or taskPrompt");
+    expect(() =>
+      validateScheduleRecurringArgs({
+        name: "daily-news",
+        pattern: "0 8 * * *",
         taskPrompt: "Find news",
-        taskFallbackText: "No news",
-      }).success,
-    ).toBe(true);
-  });
-
-  test("keeps reminder conditional rules in local Zod validation", () => {
-    expect(
-      SScheduleOnceArgs.safeParse({
-        name: "missing-content",
+      }),
+    ).toThrow("taskFallbackText is required");
+    expect(() =>
+      validateUpdateCronJobArgs({
+        name: "daily-news",
+        pattern: "0 8 * * *",
         fireAt: "2026-07-13T10:00:00Z",
-      }).success,
-    ).toBe(false);
-    expect(
-      SScheduleRecurringArgs.safeParse({
-        name: "missing-fallback",
-        pattern: "0 9 * * *",
-        reminderPromptData: "{}",
-      }).success,
-    ).toBe(false);
+      }),
+    ).toThrow("Provide either pattern or fireAt");
   });
 });

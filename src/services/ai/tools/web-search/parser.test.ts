@@ -129,4 +129,29 @@ describe("searchWeb", () => {
       "Tavily quota exhausted: plan or API key limit reached (HTTP 432): monthly limit reached",
     );
   });
+
+  test("cancels an active Tavily request from the caller signal", async () => {
+    const controller = new AbortController();
+    let requestStarted: () => void = () => undefined;
+    const started = new Promise<void>((resolve) => {
+      requestStarted = resolve;
+    });
+    useMockFetch(async (_input, init) => {
+      requestStarted();
+      await new Promise<void>((_resolve, reject) => {
+        init?.signal?.addEventListener(
+          "abort",
+          () => reject(new DOMException("aborted", "AbortError")),
+          { once: true },
+        );
+      });
+      return new Response("unreachable");
+    });
+
+    const pending = searchWeb({ query: "example" }, controller.signal);
+    await started;
+    controller.abort();
+
+    await expect(pending).rejects.toThrow("aborted");
+  });
 });

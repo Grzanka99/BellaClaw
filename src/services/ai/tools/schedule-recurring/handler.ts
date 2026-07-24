@@ -1,100 +1,74 @@
-import { z } from "zod";
+import { type Static, Type } from "@earendil-works/pi-ai";
 import type { TCronJob } from "../../../../lib/cron-engine";
 
-export const SScheduleRecurringArgs = z
-  .object({
-    name: z.string().describe("Unique recurring job name used to reference, update, or cancel it"),
-    pattern: z
-      .string()
-      .describe("Standard 5-field cron expression: minute hour day-of-month month day-of-week"),
-    group: z.string().describe("Optional group label stored with the cron job").optional(),
-    reminderText: z
-      .string()
-      .describe("Plain reminder text for a direct, non-generated reminder")
-      .optional(),
-    reminderPromptData: z
-      .string()
-      .describe(
-        "Structured prompt data serialized as JSON for a reminder generated later by the model",
-      )
-      .optional(),
-    reminderFallbackText: z
-      .string()
-      .describe("Fallback text required when reminderPromptData is provided")
-      .optional(),
-    taskPrompt: z
-      .string()
-      .describe("Autonomous objective to complete with fresh web information when the job fires")
-      .optional(),
-    taskFallbackText: z
-      .string()
-      .describe("Fallback text required when taskPrompt is provided")
-      .optional(),
-    overwrite: z
-      .boolean()
-      .describe("Replace an existing recurring job with the same name; defaults to false")
-      .optional(),
-  })
-  .superRefine((value, ctx) => {
-    const contentModeCount = [
-      value.reminderText,
-      value.reminderPromptData,
-      value.taskPrompt,
-    ].filter((field) => field !== undefined).length;
+export const SScheduleRecurringArgs = Type.Object(
+  {
+    name: Type.String({
+      description: "Unique recurring job name used to reference, update, or cancel it",
+    }),
+    pattern: Type.String({ description: "Standard 5-field cron expression" }),
+    group: Type.Optional(
+      Type.String({ description: "Optional group label stored with the cron job" }),
+    ),
+    reminderText: Type.Optional(
+      Type.String({ description: "Plain reminder text for a direct, non-generated reminder" }),
+    ),
+    reminderPromptData: Type.Optional(
+      Type.String({ description: "Structured reminder prompt data serialized as JSON" }),
+    ),
+    reminderFallbackText: Type.Optional(
+      Type.String({ description: "Fallback text required with reminderPromptData" }),
+    ),
+    taskPrompt: Type.Optional(
+      Type.String({ description: "Autonomous objective to complete with fresh web information" }),
+    ),
+    taskFallbackText: Type.Optional(
+      Type.String({ description: "Fallback text required with taskPrompt" }),
+    ),
+    overwrite: Type.Optional(
+      Type.Boolean({ description: "Replace an existing recurring job with the same name" }),
+    ),
+  },
+  { additionalProperties: false },
+);
 
-    if (contentModeCount === 0) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Provide reminderText, reminderPromptData, or taskPrompt",
-        path: ["reminderText"],
-      });
-    }
-
-    if (contentModeCount > 1) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Provide only one of reminderText, reminderPromptData, or taskPrompt",
-        path: ["reminderText"],
-      });
-    }
-
-    if (value.reminderPromptData !== undefined && value.reminderFallbackText === undefined) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "reminderFallbackText is required when reminderPromptData is set",
-        path: ["reminderFallbackText"],
-      });
-    }
-
-    if (
-      value.reminderFallbackText !== undefined &&
-      value.reminderText === undefined &&
-      value.reminderPromptData === undefined
-    ) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "reminderFallbackText requires reminderText or reminderPromptData",
-        path: ["reminderFallbackText"],
-      });
-    }
-
-    if (value.taskPrompt !== undefined && value.taskFallbackText === undefined) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "taskFallbackText is required when taskPrompt is set",
-        path: ["taskFallbackText"],
-      });
-    }
-
-    if (value.taskFallbackText !== undefined && value.taskPrompt === undefined) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "taskFallbackText requires taskPrompt",
-        path: ["taskFallbackText"],
-      });
-    }
-  });
-
-export type TScheduleRecurringArgs = z.infer<typeof SScheduleRecurringArgs>;
-
+export type TScheduleRecurringArgs = Static<typeof SScheduleRecurringArgs>;
 export type TScheduleRecurringResult = TCronJob;
+
+export function validateScheduleRecurringArgs(
+  args: TScheduleRecurringArgs,
+): TScheduleRecurringArgs {
+  const contentModeCount = [args.reminderText, args.reminderPromptData, args.taskPrompt].filter(
+    (field) => field !== undefined,
+  ).length;
+
+  if (contentModeCount === 0) {
+    throw new Error("Provide reminderText, reminderPromptData, or taskPrompt");
+  }
+
+  if (contentModeCount > 1) {
+    throw new Error("Provide only one of reminderText, reminderPromptData, or taskPrompt");
+  }
+
+  if (args.reminderPromptData !== undefined && args.reminderFallbackText === undefined) {
+    throw new Error("reminderFallbackText is required when reminderPromptData is set");
+  }
+
+  if (
+    args.reminderFallbackText !== undefined &&
+    args.reminderText === undefined &&
+    args.reminderPromptData === undefined
+  ) {
+    throw new Error("reminderFallbackText requires reminderText or reminderPromptData");
+  }
+
+  if (args.taskPrompt !== undefined && args.taskFallbackText === undefined) {
+    throw new Error("taskFallbackText is required when taskPrompt is set");
+  }
+
+  if (args.taskFallbackText !== undefined && args.taskPrompt === undefined) {
+    throw new Error("taskFallbackText requires taskPrompt");
+  }
+
+  return args;
+}

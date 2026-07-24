@@ -1,28 +1,32 @@
-import z from "zod";
+import { type Static, Type } from "@earendil-works/pi-ai";
 import type { TWebSearchResult } from "../../../../lib/web";
 
-export const SWebSearchArgs = z
-  .object({
-    query: z.string().min(1).describe("Search query to submit to Tavily"),
-    maxResults: z
-      .number()
-      .int()
-      .min(1)
-      .max(10)
-      .describe("Maximum number of results; defaults to 5")
-      .optional(),
-    topic: z
-      .enum(["general", "news", "finance"])
-      .describe("Search topic; defaults to general")
-      .optional(),
-    timeRange: z
-      .enum(["day", "week", "month", "year"])
-      .describe("Optional freshness range")
-      .optional(),
-  })
-  .strict();
+export const SWebSearchArgs = Type.Object(
+  {
+    query: Type.String({ minLength: 1, description: "Search query to submit to Tavily" }),
+    maxResults: Type.Optional(
+      Type.Integer({
+        minimum: 1,
+        maximum: 10,
+        description: "Maximum number of results; defaults to 5",
+      }),
+    ),
+    topic: Type.Optional(
+      Type.Union([Type.Literal("general"), Type.Literal("news"), Type.Literal("finance")]),
+    ),
+    timeRange: Type.Optional(
+      Type.Union([
+        Type.Literal("day"),
+        Type.Literal("week"),
+        Type.Literal("month"),
+        Type.Literal("year"),
+      ]),
+    ),
+  },
+  { additionalProperties: false },
+);
 
-export type TWebSearchArgs = z.infer<typeof SWebSearchArgs>;
+export type TWebSearchArgs = Static<typeof SWebSearchArgs>;
 
 export type TWebSearch = {
   query: string;

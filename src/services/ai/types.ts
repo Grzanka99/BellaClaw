@@ -38,7 +38,7 @@ export type TToolCall = {
 export type TToolDefinition = {
   name: string;
   description: string;
-  parameters: Record<string, unknown>;
+  parameters: TSchema;
 };
 
 export enum EModelPurpose {
@@ -48,3 +48,5 @@ export enum EModelPurpose {
   Chat = "Chat",
   ChatAccurate = "ChatAccurate",
 }
+
+import type { TSchema } from "@earendil-works/pi-ai";

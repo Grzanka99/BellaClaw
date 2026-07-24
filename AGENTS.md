@@ -91,6 +91,12 @@ All SQLite operations must go through `this.queue.enqueue()`. Never call `this.d
 
 Always use `safeParse` and branch on `.success` — never use `.parse` (throws on failure).
 
+## AI Tool Schemas
+
+AI-facing tool schemas use TypeBox imported through `@earendil-works/pi-ai`. Keep `S*` schema
+names and derive argument types with `Static<typeof SArguments>`. Zod remains appropriate for
+non-AI persistence, settings, logging, memory, and configuration schemas.
+
 ## Environment Variables
 
 Use `Bun.env.*` — never `process.env`.
@@ -107,13 +113,13 @@ Each tool lives in its own directory under `src/services/ai/tools/`:
 
 ```
 src/services/ai/tools/<tool-name>/
-  definition.ts    — exports a provider-neutral TToolDefinition derived from Zod
-  handler.ts       — parses arguments with Zod, returns parsed data
+  definition.ts    — exports TypeBox schema and Pi tool metadata
+  handler.ts       — typed execution and domain validation
   instructions.xml — detailed instructions for the AI on when/how to use the tool
 ```
 
-- `definition.ts`: Use `createToolDefinition()` with an `S*` Zod schema. Parameters are generated from the schema as provider-neutral JSON Schema.
-- `handler.ts`: Treat tool arguments as structured `unknown` data and use the `S*` schema's `safeParse()` directly or through `parseAndValidateToolArgs()`. Never apply `JSON.parse` to tool arguments. Branch on `.success`.
+- `definition.ts`: Use `createToolDefinition()` with an `S*` TypeBox schema.
+- `handler.ts`: Treat tool arguments as structured data. TypeBox/Pi validates shape; keep cross-field domain validation in handlers and throw descriptive errors. Never apply `JSON.parse` to tool arguments.
 - `instructions.xml`: XML format with `<purpose>`, `<tool>`, `<usage_rules>`, and `<examples>` sections.
 
 ## Scope Rules
@@ -124,7 +130,6 @@ src/services/ai/tools/<tool-name>/
 - If you find errors that are caused by current task changes, ask for permission to fix them
 - If a type error in an unrelated file blocks your task, report it instead of silently fixing it.
 - Do not modify stub methods (those with `throw "Not implemented"`) unless explicitly asked to implement them.
-- Do not modify existing test files unless given direct permission
 - NEVER use types cast - 'as Type' - outside of tests
 - Instead of `some-type | undefined` use `TOption<some-type>`
 - Prefer braces even if statement has one line

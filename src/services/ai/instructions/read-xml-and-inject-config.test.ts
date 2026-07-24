@@ -152,6 +152,21 @@ describe("readXmlAndInjectConfig", () => {
     expect(result).not.toContain("{{config.");
   });
 
+  test("keeps the shared base instructions capability-neutral", async () => {
+    const { readXmlAndInjectConfig } = await import("./read-xml-and-inject-config");
+    const instructions = await readXmlAndInjectConfig(
+      "./src/services/ai/instructions/base-system.xml",
+      DefaultConfigRecord,
+    );
+
+    expect(instructions).not.toContain("search-memory");
+    expect(instructions).not.toContain("schedule-once");
+    expect(instructions).not.toContain("schedule-recurring");
+    expect(instructions).not.toContain("web-search");
+    expect(instructions).not.toContain("web-fetch");
+    expect(instructions).toContain("Use only the tools registered for this run");
+  });
+
   test("resolves placeholders from a flat TConfigRecord keyed by dotted strings", async () => {
     const { readXmlAndInjectConfig } = await import("./read-xml-and-inject-config");
 
