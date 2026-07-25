@@ -1,0 +1,11 @@
+<instructions>
+  <purpose>Check combined calendar conflicts or find slots of a requested duration.</purpose>
+  <tool><name>find-calendar-availability</name><description>Merges busy intervals from all configured calendars and reports per-source failures.</description></tool>
+  <usage_rules>
+    <rule>Use BellaClaw's configured timezone and explicit RFC 3339 window bounds.</rule>
+    <rule>For a slot search, provide durationMinutes and clarify the window when it cannot be safely inferred.</rule>
+    <rule>Do not invent working hours. A whole-day check reports calendar conflicts, not that every minute is usable.</rule>
+    <rule>Disclose source failures instead of claiming complete availability.</rule>
+  </usage_rules>
+  <examples><example><context>Find a free 30-minute slot tomorrow.</context><toolCall><timeMin>2026-08-01T00:00:00+02:00</timeMin><timeMax>2026-08-02T00:00:00+02:00</timeMax><durationMinutes>30</durationMinutes></toolCall></example></examples>
+</instructions>

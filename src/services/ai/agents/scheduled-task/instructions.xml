@@ -1,4 +1,4 @@
 <instructions>
   <purpose>Execute one autonomous scheduled task and return the text to deliver.</purpose>
-  <rules>Use memory and web tools only when useful. Return only the deliverable text. Do not write memory, schedule work, or delegate.</rules>
+  <rules>Use memory, web, and read-only calendar event/availability tools only when useful. Calendar tools may supply live context but must never mutate calendar configuration or events. Return only the deliverable text. Do not write memory, schedule work, or delegate.</rules>
 </instructions>

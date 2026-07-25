@@ -1,11 +1,17 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
 import { ECronJobStatus, ECronJobType } from "../../../lib/cron-engine";
+import { CalendarService } from "../../calendar";
 import { CronSingleton } from "../../cron";
 import { Memory } from "../../memory";
 import { SettingsService } from "../../settings";
 import { DefaultConfigRecord, EConfigKey } from "../../settings/schema";
 import { EAiProvider, EModelPurpose } from "../types";
-import { createMemoryTools, createSchedulingTools, createSettingsTools } from "./executable";
+import {
+  createCalendarTools,
+  createMemoryTools,
+  createSchedulingTools,
+  createSettingsTools,
+} from "./executable";
 
 const context = {
   chatId: "discord:1",
@@ -14,6 +20,7 @@ const context = {
 };
 
 function reset() {
+  (CalendarService as unknown as { _instance: unknown })._instance = undefined;
   (CronSingleton as unknown as { _instance: unknown })._instance = undefined;
   (Memory as unknown as { _instance: unknown })._instance = undefined;
   (SettingsService as unknown as { _instance: unknown })._instance = undefined;
@@ -22,6 +29,46 @@ function reset() {
 afterEach(reset);
 
 describe("production executable tools", () => {
+  test("uses the configured timezone and trusted service for calendar creation", async () => {
+    const createEvent = mock(async (args) => args);
+    (CalendarService as unknown as { _instance: unknown })._instance = { createEvent };
+    const tool = createCalendarTools(context).find(
+      (candidate) => candidate.name === "create-calendar-event",
+    );
+
+    await tool?.execute("call", {
+      summary: "Meeting",
+      start: "2026-08-01T10:00:00+02:00",
+    });
+
+    expect(createEvent).toHaveBeenCalledWith({
+      summary: "Meeting",
+      start: "2026-08-01T10:00:00+02:00",
+      timezone: "Europe/Warsaw",
+      signal: undefined,
+    });
+  });
+
+  test("returns explicit success for void calendar mutations", async () => {
+    const removeReadonlyCalendar = mock(async () => undefined);
+    const deleteEvent = mock(async () => undefined);
+    (CalendarService as unknown as { _instance: unknown })._instance = {
+      removeReadonlyCalendar,
+      deleteEvent,
+    };
+    const tools = createCalendarTools(context);
+
+    const removeResult = await tools
+      .find((candidate) => candidate.name === "remove-readonly-calendar")
+      ?.execute("remove", { calendarId: "shared" });
+    const deleteResult = await tools
+      .find((candidate) => candidate.name === "delete-calendar-event")
+      ?.execute("delete", { eventId: "event", scope: "series" });
+
+    expect(removeResult?.details).toEqual({ success: true });
+    expect(deleteResult?.details).toEqual({ success: true });
+  });
+
   test("uses the schedule-once handler validation and date conversion", async () => {
     const createOnce = mock(async (args) => ({
       ...args,

@@ -1,0 +1,11 @@
+<instructions>
+  <purpose>Read events from all configured calendars in a bounded range.</purpose>
+  <tool><name>list-calendar-events</name><description>Returns full Google-permitted event details and per-source failures.</description></tool>
+  <usage_rules>
+    <rule>Always provide explicit RFC 3339 range bounds derived using the configured timezone.</rule>
+    <rule>Use this to resolve an exact writable event ID before update or deletion.</rule>
+    <rule>If matches are ambiguous, ask the user to choose; do not mutate any match.</rule>
+    <rule>Report failures because returned events may be incomplete.</rule>
+  </usage_rules>
+  <examples><example><context>Find events on 2026-08-01 in Warsaw.</context><toolCall><timeMin>2026-08-01T00:00:00+02:00</timeMin><timeMax>2026-08-02T00:00:00+02:00</timeMax></toolCall></example></examples>
+</instructions>

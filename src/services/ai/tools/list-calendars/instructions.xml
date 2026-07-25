@@ -1,0 +1,9 @@
+<instructions>
+  <purpose>Inspect every calendar currently configured in BellaClaw.</purpose>
+  <tool><name>list-calendars</name><description>Returns stored access, live Google summary, and an error for each unavailable source.</description></tool>
+  <usage_rules>
+    <rule>Use before adding or removing a source when current configuration matters.</rule>
+    <rule>Report per-source errors; never describe an errored source as successfully checked.</rule>
+  </usage_rules>
+  <examples><example><context>User asks which calendars are connected.</context><toolCall>{}</toolCall></example></examples>
+</instructions>

@@ -12,17 +12,22 @@ describe("delegation log sanitizers", () => {
     }
   });
 
-  test("keeps bounded useful delegation task and response previews while redacting secrets", () => {
+  test.each([
+    "delegate-memory",
+    "delegate-calendar",
+    "delegate-settings",
+    "delegate-scheduling",
+  ])("keeps bounded useful %s previews while redacting secrets", (toolName) => {
     Bun.env.OPENROUTER_API_KEY = "super-secret";
     const longText = `summarize super-secret ${"detail ".repeat(80)}`;
     const args = sanitizeToolCallArguments({
       id: "call-1",
-      name: "delegate-memory",
+      name: toolName,
       arguments: { task: longText },
     });
     const result = sanitizeToolResult({
       toolCallId: "call-1",
-      toolName: "delegate-memory",
+      toolName,
       success: true,
       data: {
         content: [{ type: "text", text: `Found super-secret ${"memory ".repeat(80)}` }],

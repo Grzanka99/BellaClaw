@@ -1,8 +1,20 @@
 import { describe, expect, test } from "bun:test";
 import { Value } from "typebox/value";
+import { addReadonlyCalendarTool } from "./add-readonly-calendar/definition";
+import { createCalendarEventTool } from "./create-calendar-event/definition";
+import {
+  SCreateCalendarEventArgs,
+  validateCreateCalendarEventArgs,
+} from "./create-calendar-event/handler";
 import { defineMessageImportanceTool } from "./define-message-importance/definition";
+import { deleteCalendarEventTool } from "./delete-calendar-event/definition";
+import { SDeleteCalendarEventArgs } from "./delete-calendar-event/handler";
+import { findCalendarAvailabilityTool } from "./find-calendar-availability/definition";
 import { getSettingsTool } from "./get-settings/definition";
+import { listCalendarEventsTool } from "./list-calendar-events/definition";
+import { listCalendarsTool } from "./list-calendars/definition";
 import { listCronJobsTool } from "./list-cron-jobs/definition";
+import { removeReadonlyCalendarTool } from "./remove-readonly-calendar/definition";
 import { scheduleOnceTool } from "./schedule-once/definition";
 import { SScheduleOnceArgs, validateScheduleOnceArgs } from "./schedule-once/handler";
 import { scheduleRecurringTool } from "./schedule-recurring/definition";
@@ -13,6 +25,11 @@ import {
 import { searchMemoryTool } from "./search-memory/definition";
 import { convertSearchMemoryArgs, SSearchMemoryArgs } from "./search-memory/handler";
 import { unscheduleCronJobTool } from "./unschedule-cron-job/definition";
+import { updateCalendarEventTool } from "./update-calendar-event/definition";
+import {
+  SUpdateCalendarEventArgs,
+  validateUpdateCalendarEventArgs,
+} from "./update-calendar-event/handler";
 import { updateCronJobTool } from "./update-cron-job/definition";
 import { SUpdateCronJobArgs, validateUpdateCronJobArgs } from "./update-cron-job/handler";
 import { updateSettingsTool } from "./update-settings/definition";
@@ -20,14 +37,22 @@ import { webFetchTool } from "./web-fetch/definition";
 import { webSearchTool } from "./web-search/definition";
 
 const ALL_TOOLS = [
+  addReadonlyCalendarTool,
+  createCalendarEventTool,
+  deleteCalendarEventTool,
   defineMessageImportanceTool,
+  findCalendarAvailabilityTool,
   getSettingsTool,
+  listCalendarEventsTool,
+  listCalendarsTool,
   listCronJobsTool,
+  removeReadonlyCalendarTool,
   scheduleOnceTool,
   scheduleRecurringTool,
   searchMemoryTool,
   unscheduleCronJobTool,
   updateCronJobTool,
+  updateCalendarEventTool,
   updateSettingsTool,
   webFetchTool,
   webSearchTool,
@@ -35,8 +60,8 @@ const ALL_TOOLS = [
 
 describe("AI tool definitions", () => {
   test("expose Pi-native TypeBox parameter schemas", () => {
-    expect(ALL_TOOLS).toHaveLength(11);
-    expect(new Set(ALL_TOOLS.map((tool) => tool.name)).size).toBe(11);
+    expect(ALL_TOOLS).toHaveLength(19);
+    expect(new Set(ALL_TOOLS.map((tool) => tool.name)).size).toBe(19);
 
     for (const tool of ALL_TOOLS) {
       expect(tool.name.length).toBeGreaterThan(0);
@@ -102,5 +127,61 @@ describe("AI tool definitions", () => {
         fireAt: "2026-07-13T10:00:00Z",
       }),
     ).toThrow("Provide either pattern or fireAt");
+  });
+
+  test("keeps mutation targets structural and validates event combinations", () => {
+    for (const schema of [
+      SCreateCalendarEventArgs,
+      SDeleteCalendarEventArgs,
+      SUpdateCalendarEventArgs,
+    ]) {
+      expect("calendarId" in schema.properties).toBe(false);
+      expect(Value.Check(schema, { calendarId: "other" })).toBe(false);
+    }
+
+    expect(() =>
+      validateCreateCalendarEventArgs({
+        summary: "Holiday",
+        start: "2026-08-01",
+        durationMinutes: 30,
+      }),
+    ).toThrow("All-day events do not accept durationMinutes");
+    expect(() =>
+      validateCreateCalendarEventArgs({
+        summary: "Meeting",
+        start: "2026-08-01T10:00:00",
+      }),
+    ).toThrow("explicit timezone");
+    expect(() =>
+      validateCreateCalendarEventArgs({
+        summary: "Meeting",
+        start: "2026-08-01T10:00:00+02:00",
+        recurrence: ["FREQ=DAILY"],
+      }),
+    ).toThrow("Recurrence lines");
+    expect(
+      validateCreateCalendarEventArgs({
+        summary: "Parameterized recurrence",
+        start: "2026-08-01",
+        recurrence: [
+          "RDATE;VALUE=DATE:20260802",
+          "RDATE;TZID=Europe/Warsaw:20260803T100000",
+          "EXDATE;TZID=Europe/Warsaw:20260804T100000",
+        ],
+      }).recurrence,
+    ).toHaveLength(3);
+    expect(() =>
+      validateUpdateCalendarEventArgs({
+        eventId: "event",
+        scope: "occurrence",
+      }),
+    ).toThrow("Provide at least one event field");
+    expect(() =>
+      validateUpdateCalendarEventArgs({
+        eventId: "event",
+        scope: "occurrence",
+        timezone: "Europe/Warsaw",
+      }),
+    ).toThrow("requires start");
   });
 });

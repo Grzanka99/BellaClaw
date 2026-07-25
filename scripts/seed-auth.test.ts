@@ -61,6 +61,31 @@ describe("auth seed", () => {
     expect(await readFile(destinationPath, "utf8")).toBe("existing");
   });
 
+  test("resets an existing destination when requested", async () => {
+    const destinationPath = await createDestinationPath();
+    await Bun.write(destinationPath, "existing");
+    const expires = 2_000_000_000;
+
+    const seeded = await seedAuthFile(
+      {
+        tokens: {
+          access_token: createAccessToken(expires),
+          refresh_token: "replacement-refresh-token",
+          account_id: "account-id",
+        },
+      },
+      destinationPath,
+      true,
+    );
+
+    expect(seeded).toBe(true);
+    expect(JSON.parse(await readFile(destinationPath, "utf8"))).toHaveProperty(
+      "openai-codex.refresh",
+      "replacement-refresh-token",
+    );
+    expect((await stat(destinationPath)).mode & 0o777).toBe(0o600);
+  });
+
   test("publishes one complete file when seeders run concurrently", async () => {
     const destinationPath = await createDestinationPath();
     const source = {

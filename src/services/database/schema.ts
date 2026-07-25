@@ -52,6 +52,20 @@ export const userConfigsTable = sqliteTable(
   (table) => [primaryKey({ columns: [table.ownerKey, table.key] })],
 );
 
+export const calendarsTable = sqliteTable(
+  "calendars",
+  {
+    calendarId: text("calendarId").primaryKey(),
+    access: text("access").notNull(),
+    addedAt: integer("addedAt").notNull(),
+  },
+  (table) => [
+    uniqueIndex("calendars_single_write_unique")
+      .on(table.access)
+      .where(sql`${table.access} = 'write'`),
+  ],
+);
+
 export type TInsertMemory = typeof memoriesTable.$inferInsert;
 export type TSelectMemory = typeof memoriesTable.$inferSelect;
 
@@ -60,3 +74,6 @@ export type TSelectCronJob = typeof cronEngineJobsTable.$inferSelect;
 
 export type TInsertUserConfig = typeof userConfigsTable.$inferInsert;
 export type TSelectUserConfig = typeof userConfigsTable.$inferSelect;
+
+export type TInsertCalendar = typeof calendarsTable.$inferInsert;
+export type TSelectCalendar = typeof calendarsTable.$inferSelect;

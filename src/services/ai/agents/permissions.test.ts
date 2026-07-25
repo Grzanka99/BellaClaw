@@ -7,10 +7,23 @@ import { EModelPurpose } from "../types";
 import { AGENT_TOOL_NAMES } from "./permissions";
 
 describe("agent permissions", () => {
-  test("matches the five-agent tool matrix without specialist delegation", () => {
+  test("matches the six-agent tool matrix without specialist delegation", () => {
+    expect(AGENT_TOOL_NAMES[EAgentName.Calendar]).toEqual([
+      "list-calendars",
+      "add-readonly-calendar",
+      "remove-readonly-calendar",
+      "list-calendar-events",
+      "find-calendar-availability",
+      "create-calendar-event",
+      "update-calendar-event",
+      "delete-calendar-event",
+      "web-search",
+      "web-fetch",
+    ]);
     expect(AGENT_TOOL_NAMES[EAgentName.Main]).toEqual([
       "web-search",
       "web-fetch",
+      "delegate-calendar",
       "delegate-memory",
       "delegate-settings",
       "delegate-scheduling",
@@ -30,6 +43,8 @@ describe("agent permissions", () => {
       "search-memory",
       "web-search",
       "web-fetch",
+      "list-calendar-events",
+      "find-calendar-availability",
     ]);
 
     for (const name of [
@@ -37,6 +52,7 @@ describe("agent permissions", () => {
       EAgentName.Settings,
       EAgentName.Scheduling,
       EAgentName.ScheduledTask,
+      EAgentName.Calendar,
     ]) {
       expect(AGENT_TOOL_NAMES[name].some((tool) => tool.startsWith("delegate-"))).toBe(false);
     }
@@ -92,6 +108,12 @@ describe("agent permissions", () => {
       for (const tool of tools) {
         if (
           tool.name === "delegate-scheduling" ||
+          tool.name === "delegate-calendar" ||
+          tool.name === "add-readonly-calendar" ||
+          tool.name === "remove-readonly-calendar" ||
+          tool.name === "create-calendar-event" ||
+          tool.name === "update-calendar-event" ||
+          tool.name === "delete-calendar-event" ||
           tool.name === "update-settings" ||
           tool.name === "schedule-once" ||
           tool.name === "schedule-recurring" ||

@@ -3,7 +3,6 @@ import { link, open, rename, rm } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { z } from "zod";
 import {
-  AI_CREDENTIALS_PATH,
   LOCAL_AI_CREDENTIALS_PATH,
   SCredentials,
 } from "../src/services/ai/auth/file-credential-store";
@@ -123,7 +122,7 @@ export async function seedAuthFile(
   return true;
 }
 
-async function runOnHost(): Promise<void> {
+async function run(): Promise<void> {
   const sourceFile = Bun.file(SOURCE_PATH);
 
   if (!(await sourceFile.exists())) {
@@ -131,72 +130,21 @@ async function runOnHost(): Promise<void> {
     return;
   }
 
-  if (Bun.argv.includes("--local")) {
-    const seeded = await seedAuthFile(await sourceFile.json(), LOCAL_AI_CREDENTIALS_PATH);
-
-    if (seeded) {
-      console.log(`Seeded local AI credentials: ${LOCAL_AI_CREDENTIALS_PATH}`);
-      return;
-    }
-
-    console.log(`Local AI credentials already exist, preserving: ${LOCAL_AI_CREDENTIALS_PATH}`);
-    return;
-  }
-
   const reset = Bun.argv.includes("--reset");
-  const args = [
-    "podman",
-    "compose",
-    "--profile",
-    "signal",
-    "run",
-    "--rm",
-    "--no-deps",
-    "-T",
-    "bellaclaw",
-    "bun",
-    "run",
-    "scripts/seed-auth.ts",
-    "--container",
-  ];
-
-  if (reset) {
-    args.push("--reset");
-  }
-
-  const process = Bun.spawn(args, {
-    cwd: resolve(import.meta.dir, ".."),
-    stdin: sourceFile,
-    stdout: "inherit",
-    stderr: "inherit",
-  });
-  const exitCode = await process.exited;
-
-  if (exitCode !== 0) {
-    throw new Error(`Auth seed container failed with exit code ${exitCode}`);
-  }
-}
-
-async function runInContainer(): Promise<void> {
-  const reset = Bun.argv.includes("--reset");
-  const seeded = await seedAuthFile(await Bun.stdin.json(), AI_CREDENTIALS_PATH, reset);
+  const seeded = await seedAuthFile(await sourceFile.json(), LOCAL_AI_CREDENTIALS_PATH, reset);
 
   if (seeded) {
     if (reset) {
-      console.log(`Reset AI credentials: ${AI_CREDENTIALS_PATH}`);
+      console.log(`Reset local AI credentials: ${LOCAL_AI_CREDENTIALS_PATH}`);
     } else {
-      console.log(`Seeded AI credentials: ${AI_CREDENTIALS_PATH}`);
+      console.log(`Seeded local AI credentials: ${LOCAL_AI_CREDENTIALS_PATH}`);
     }
     return;
   }
 
-  console.log(`AI credentials already exist, preserving: ${AI_CREDENTIALS_PATH}`);
+  console.log(`Local AI credentials already exist, preserving: ${LOCAL_AI_CREDENTIALS_PATH}`);
 }
 
 if (import.meta.main) {
-  if (Bun.argv.includes("--container")) {
-    await runInContainer();
-  } else {
-    await runOnHost();
-  }
+  await run();
 }
