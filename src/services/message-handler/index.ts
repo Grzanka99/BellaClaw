@@ -6,7 +6,7 @@ import { EModelPurpose, ERole, type THistoryItem } from "../ai/types";
 import { AppLogger, EBehaviorLogLevel, type TBehaviorTraceContext } from "../app-logger";
 import { resolveAiBehaviorFields } from "../app-logger/ai";
 import { sanitizeErrorMessage } from "../app-logger/sanitizers";
-import { Memory } from "../memory";
+import { Memory, type TMemorySaveResult } from "../memory";
 import { EMemoryImportance, type TMemory } from "../memory/types";
 import type { EMessagePlatform } from "../messaging/types";
 import { SettingsService } from "../settings";
@@ -14,14 +14,13 @@ import { EConfigKey, type TConfigRecord } from "../settings/schema";
 import { getMessageTrace } from "./trace";
 import type { TIncommingMessage, TOutgoingMessage } from "./types";
 
-type TMemorySaveResult = Awaited<ReturnType<Memory["save"]>>;
-
 export class MessageHandler {
   private static _instances = new Map<string, MessageHandler>();
   private logger: TLogger;
   private ai = AgentHarness.instance;
   private queue = new AsyncQueue();
   private memory = Memory.instance;
+  private settingsSnapshot: TOption<TConfigRecord>;
 
   constructor(chatId: string) {
     this.logger = createLogger(`AbstractMessageHandler (cid: ${chatId})`);
@@ -53,6 +52,7 @@ export class MessageHandler {
 
     try {
       const settings = structuredClone(await SettingsService.instance.getAll(message.chatId));
+      this.settingsSnapshot = settings;
       const parallelStart = performance.now();
       const [importance, last30] = await Promise.all([
         this.defineMessageImportance(message.message.content, settings, trace, ERole.User),
@@ -133,7 +133,13 @@ export class MessageHandler {
 
   public async saveAssistantMessage(message: TIncommingMessage, response: string): Promise<void> {
     const trace = getMessageTrace(message);
-    const settings = structuredClone(await SettingsService.instance.getAll(message.chatId));
+    let settings = this.settingsSnapshot;
+    this.settingsSnapshot = undefined;
+
+    if (settings === undefined) {
+      settings = structuredClone(await SettingsService.instance.getAll(message.chatId));
+    }
+
     const respImpStart = performance.now();
     const responseImportance = await this.defineMessageImportance(
       response,

@@ -23,7 +23,7 @@
     <rule>When the user asks to remove reminders, cancel only jobs with reminderText or reminderPromptData. Jobs with taskPrompt are autonomous scheduled tasks and require an explicit request to remove scheduled tasks.</rule>
     <rule>Return mixed or ambiguous removal scope to Main before cancelling any jobs.</rule>
     <rule>If there are no jobs, report that no scheduled jobs exist</rule>
-    <rule>Reuse results within a conversation turn</rule>
+    <rule>Reuse results within a conversation turn only until schedule-once, schedule-recurring, update-cron-job, or unschedule-cron-job mutates the schedule. After any scheduling mutation, call list-cron-jobs again before reporting current jobs.</rule>
   </usage_rules>
 
   <examples>

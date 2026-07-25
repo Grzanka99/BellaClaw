@@ -111,7 +111,7 @@ Use `Bun.env.*` — never `process.env`.
 
 Each tool lives in its own directory under `src/services/ai/tools/`:
 
-```
+```text
 src/services/ai/tools/<tool-name>/
   definition.ts    — exports the tool name and schema-backed Pi metadata
   handler.ts       — exports the TypeBox schema, argument type, and domain validation/conversion
@@ -120,7 +120,7 @@ src/services/ai/tools/<tool-name>/
 
 - `definition.ts`: Use `createToolDefinition()` with an `S*` TypeBox schema.
 - `handler.ts`: Treat tool arguments as structured data. TypeBox/Pi validates shape; keep cross-field domain validation and transport conversion here. Never apply `JSON.parse` to tool arguments.
-- `executable.ts`: Centrally binds definition metadata and handlers to BellaClaw services as Pi `AgentTool`s. Keep service execution and tool-result shaping here.
+- `src/services/ai/tools/executable.ts`: Centrally binds definition metadata and handlers to BellaClaw services as Pi `AgentTool`s. Keep service execution and tool-result shaping here.
 - `instructions.xml`: XML format with `<purpose>`, `<tool>`, `<usage_rules>`, and `<examples>` sections.
 
 ## Scope Rules

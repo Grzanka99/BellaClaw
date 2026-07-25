@@ -18,7 +18,7 @@ import {
 } from "../app-logger";
 import { sanitizeErrorMessage } from "../app-logger/sanitizers";
 import { CronSingleton } from "../cron";
-import { Memory } from "../memory";
+import { Memory, type TMemorySaveResult } from "../memory";
 import { EMemoryImportance } from "../memory/types";
 import { MessageHandler } from "../message-handler";
 import { attachMessageTrace } from "../message-handler/trace";
@@ -30,8 +30,6 @@ type TInboundChatQueue = {
   queue: AsyncQueue;
   pending: number;
 };
-
-type TMemorySaveResult = Awaited<ReturnType<Memory["save"]>>;
 
 export class MessagingAdapter {
   private static _instance: TOption<MessagingAdapter>;

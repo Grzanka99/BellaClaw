@@ -30,8 +30,9 @@ afterEach(reset);
 describe("MessageHandler", () => {
   test("passes latest-30 chronological history and saves only root user/final messages", async () => {
     const settings = structuredClone(DefaultConfigRecord);
+    const getAll = mock(async () => settings);
     (SettingsService as unknown as { _instance: unknown })._instance = {
-      getAll: mock(async () => settings),
+      getAll,
     };
     const handler = MessageHandler.getInstance("discord:1");
     const internals = handler as unknown as THandlerInternals;
@@ -84,6 +85,7 @@ describe("MessageHandler", () => {
     expect(history[29]?.content).toBe("message-29");
     expect(internals.memory.save).toHaveBeenCalledTimes(1);
     await handler.saveAssistantMessage(incomingMessage, result);
+    expect(getAll).toHaveBeenCalledTimes(1);
     expect(internals.memory.save).toHaveBeenCalledTimes(2);
     expect(internals.memory.save).toHaveBeenNthCalledWith(1, {
       chatId: "discord:1",

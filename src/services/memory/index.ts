@@ -238,3 +238,5 @@ export class Memory {
     }
   }
 }
+
+export type TMemorySaveResult = Awaited<ReturnType<Memory["save"]>>;

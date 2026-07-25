@@ -51,7 +51,7 @@
     </example>
 
     <example>
-      <context>Current date is 2099-01-27. User says: "What did I tell you about my job last week?"</context>
+      <context>Current date is 2099-01-27. User says: "What did I tell you about my job in the last seven days?"</context>
       <toolCall>
         <searchString>job</searchString>
         <timeRange>
@@ -60,7 +60,7 @@
         </timeRange>
         <importance>["medium", "high"]</importance>
       </toolCall>
-      <reasoning>User is asking about work-related information from last week. Search with text and time filters computed from the supplied current date in the {{config.ai.instructions.timezone}} timezone.</reasoning>
+      <reasoning>User is asking about work-related information from the last seven days. Search with text and time filters computed from the supplied current date in the {{config.ai.instructions.timezone}} timezone.</reasoning>
     </example>
 
     <example>
