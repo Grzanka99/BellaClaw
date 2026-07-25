@@ -5,6 +5,7 @@ import type { TConfigRecord } from "../../settings/schema";
 import type { EModelPurpose, THistoryItem } from "../types";
 
 export enum EAgentName {
+  Calendar = "calendar",
   Main = "main",
   Memory = "memory",
   Settings = "settings",

@@ -22,6 +22,7 @@ import { createPlatformInstructions } from "../instructions/platform";
 import { readXmlAndInjectConfig } from "../instructions/read-xml-and-inject-config";
 import { aiModels, getAiApiKey, getAiModelConfig } from "../providers/registry";
 import {
+  createCalendarTools,
   createMemoryTools,
   createSchedulingTools,
   createSettingsTools,
@@ -35,6 +36,7 @@ const BASE_INSTRUCTIONS_PATH = "./src/services/ai/instructions/base-system.xml";
 const SEQUENTIAL: "sequential" = "sequential";
 const PARALLEL: "parallel" = "parallel";
 const AGENT_INSTRUCTIONS: Record<EAgentName, string> = {
+  [EAgentName.Calendar]: "./src/services/ai/agents/calendar/instructions.xml",
   [EAgentName.Main]: "./src/services/ai/agents/main/instructions.xml",
   [EAgentName.Memory]: "./src/services/ai/agents/memory/instructions.xml",
   [EAgentName.Settings]: "./src/services/ai/agents/settings/instructions.xml",
@@ -42,6 +44,14 @@ const AGENT_INSTRUCTIONS: Record<EAgentName, string> = {
   [EAgentName.ScheduledTask]: "./src/services/ai/agents/scheduled-task/instructions.xml",
 };
 const TOOL_INSTRUCTIONS = {
+  listCalendars: "./src/services/ai/tools/list-calendars/instructions.xml",
+  addReadonlyCalendar: "./src/services/ai/tools/add-readonly-calendar/instructions.xml",
+  removeReadonlyCalendar: "./src/services/ai/tools/remove-readonly-calendar/instructions.xml",
+  listCalendarEvents: "./src/services/ai/tools/list-calendar-events/instructions.xml",
+  findCalendarAvailability: "./src/services/ai/tools/find-calendar-availability/instructions.xml",
+  createCalendarEvent: "./src/services/ai/tools/create-calendar-event/instructions.xml",
+  updateCalendarEvent: "./src/services/ai/tools/update-calendar-event/instructions.xml",
+  deleteCalendarEvent: "./src/services/ai/tools/delete-calendar-event/instructions.xml",
   searchMemory: "./src/services/ai/tools/search-memory/instructions.xml",
   getSettings: "./src/services/ai/tools/get-settings/instructions.xml",
   updateSettings: "./src/services/ai/tools/update-settings/instructions.xml",
@@ -504,6 +514,8 @@ export class AgentHarness {
       verifySettings: this.verifySettings.bind(this),
     };
     switch (args.name) {
+      case EAgentName.Calendar:
+        return [...createCalendarTools(context), ...createWebTools()];
       case EAgentName.Main:
         return [...createWebTools(), ...this.createDelegationTools(args)];
       case EAgentName.Memory:
@@ -513,12 +525,33 @@ export class AgentHarness {
       case EAgentName.Scheduling:
         return [...createSchedulingTools(context), ...createWebTools()];
       case EAgentName.ScheduledTask:
-        return [...createMemoryTools(context), ...createWebTools()];
+        return [
+          ...createMemoryTools(context),
+          ...createWebTools(),
+          ...createCalendarTools(context).filter((tool) => {
+            return (
+              tool.name === "list-calendar-events" || tool.name === "find-calendar-availability"
+            );
+          }),
+        ];
     }
   }
 
   private getToolInstructionPaths(name: EAgentName): string[] {
     switch (name) {
+      case EAgentName.Calendar:
+        return [
+          TOOL_INSTRUCTIONS.listCalendars,
+          TOOL_INSTRUCTIONS.addReadonlyCalendar,
+          TOOL_INSTRUCTIONS.removeReadonlyCalendar,
+          TOOL_INSTRUCTIONS.listCalendarEvents,
+          TOOL_INSTRUCTIONS.findCalendarAvailability,
+          TOOL_INSTRUCTIONS.createCalendarEvent,
+          TOOL_INSTRUCTIONS.updateCalendarEvent,
+          TOOL_INSTRUCTIONS.deleteCalendarEvent,
+          TOOL_INSTRUCTIONS.webSearch,
+          TOOL_INSTRUCTIONS.webFetch,
+        ];
       case EAgentName.Main:
         return [TOOL_INSTRUCTIONS.webSearch, TOOL_INSTRUCTIONS.webFetch];
       case EAgentName.Memory:
@@ -540,6 +573,8 @@ export class AgentHarness {
           TOOL_INSTRUCTIONS.searchMemory,
           TOOL_INSTRUCTIONS.webSearch,
           TOOL_INSTRUCTIONS.webFetch,
+          TOOL_INSTRUCTIONS.listCalendarEvents,
+          TOOL_INSTRUCTIONS.findCalendarAvailability,
         ];
     }
   }
@@ -554,6 +589,12 @@ export class AgentHarness {
       target: EAgentName;
       purpose: EModelPurpose;
     }> = [
+      {
+        name: "delegate-calendar",
+        label: "Delegate calendar",
+        target: EAgentName.Calendar,
+        purpose: EModelPurpose.SpecialistAccurate,
+      },
       {
         name: "delegate-memory",
         label: "Delegate memory",
@@ -577,7 +618,7 @@ export class AgentHarness {
     return delegates.map((delegate) => {
       let executionMode: typeof SEQUENTIAL | typeof PARALLEL = PARALLEL;
 
-      if (delegate.target === EAgentName.Scheduling) {
+      if (delegate.target === EAgentName.Calendar || delegate.target === EAgentName.Scheduling) {
         executionMode = SEQUENTIAL;
       }
 

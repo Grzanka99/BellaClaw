@@ -1,0 +1,10 @@
+<instructions>
+  <purpose>Delete exactly one resolved writable-calendar event.</purpose>
+  <tool><name>delete-calendar-event</name><description>Deletes an event with explicit recurrence scope and no calendar selector.</description></tool>
+  <usage_rules>
+    <rule>Call list-calendar-events first and use its exact event ID. Return multiple matches to Main.</rule>
+    <rule>Never infer deletion or recurrence scope.</rule>
+    <rule>After an explicit, unambiguous deletion request resolves uniquely, execute immediately without extra confirmation.</rule>
+  </usage_rules>
+  <examples><example><context>User explicitly asks to delete resolved event abc for the whole series.</context><toolCall><eventId>abc</eventId><scope>series</scope></toolCall></example></examples>
+</instructions>

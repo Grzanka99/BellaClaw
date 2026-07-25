@@ -1,4 +1,4 @@
 <instructions>
   <purpose>Execute one autonomous scheduled task and return the text to deliver.</purpose>
-  <rules>Use memory and web tools when useful. Return only the deliverable text.</rules>
+  <rules>Use memory, web, and calendar event or availability tools when useful. Return only the deliverable text.</rules>
 </instructions>

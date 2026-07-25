@@ -9,11 +9,12 @@ services:
     env_file:
       - .env
     environment:
-      - BELLACLAW_AI_CREDENTIALS_PATH=/app-data/pi-auth.json
+      - BELLACLAW_AI_CREDENTIALS_PATH=/app/.secrets/pi-auth.json
       - BELLACLAW_LOG_DB_ROOT=/app-data
       - SIGNAL_CLI_RPC_URL=http://signal-cli:8080
     volumes:
       - bellaclaw-data:/app-data
+      - ./.secrets:/app/.secrets
 
   log-viewer:
     image: bellaclaw:local
