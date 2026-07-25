@@ -96,6 +96,89 @@ describe("CalendarService mutation boundary", () => {
     expect(calls[0]?.body.reminders).toEqual({ useDefault: true });
   });
 
+  test("preserves a timed event duration when moving only its start", async () => {
+    let patchedBody: Record<string, unknown> | undefined;
+    const client = {
+      getEvent: async () =>
+        googleEvent("timed", {
+          start: { dateTime: "2026-07-25T09:00:00Z", timeZone: "Europe/Warsaw" },
+          end: { dateTime: "2026-07-25T11:00:00Z", timeZone: "Europe/Warsaw" },
+        }),
+      patchEvent: async (_calendarId: string, _eventId: string, body: Record<string, unknown>) => {
+        patchedBody = body;
+        return googleEvent("timed", body);
+      },
+    } as unknown as GwsCalendarClient;
+    const service = new CalendarService(database, client, "trusted-writer");
+    Object.assign(service, { status: { ready: true, error: undefined } });
+
+    await service.updateEvent({
+      eventId: "timed",
+      scope: "occurrence",
+      patch: { start: "2026-07-26T12:00:00Z" },
+    });
+
+    expect(patchedBody?.start).toEqual({
+      dateTime: "2026-07-26T12:00:00Z",
+      timeZone: "Europe/Warsaw",
+    });
+    expect(patchedBody?.end).toEqual({
+      dateTime: "2026-07-26T14:00:00.000Z",
+      timeZone: "Europe/Warsaw",
+    });
+  });
+
+  test("preserves a multi-day all-day duration when moving only its start", async () => {
+    let patchedBody: Record<string, unknown> | undefined;
+    const client = {
+      getEvent: async () =>
+        googleEvent("all-day", {
+          start: { date: "2026-07-25" },
+          end: { date: "2026-07-28" },
+        }),
+      patchEvent: async (_calendarId: string, _eventId: string, body: Record<string, unknown>) => {
+        patchedBody = body;
+        return googleEvent("all-day", body);
+      },
+    } as unknown as GwsCalendarClient;
+    const service = new CalendarService(database, client, "trusted-writer");
+    Object.assign(service, { status: { ready: true, error: undefined } });
+
+    await service.updateEvent({
+      eventId: "all-day",
+      scope: "occurrence",
+      patch: { start: "2026-08-10" },
+    });
+
+    expect(patchedBody?.start).toEqual({ date: "2026-08-10" });
+    expect(patchedBody?.end).toEqual({ date: "2026-08-13" });
+  });
+
+  test("sorts timed events by their actual instants across UTC offsets", async () => {
+    const listDatabase = {
+      select: () => ({
+        from: async () => [{ calendarId: "trusted-writer", access: "write", addedAt: 1 }],
+      }),
+    } as unknown as LibSQLDatabase;
+    const client = {
+      listEvents: async () => ({
+        items: [
+          googleEvent("later", { start: { dateTime: "2026-07-25T08:00:00Z" } }),
+          googleEvent("earlier", { start: { dateTime: "2026-07-25T09:00:00+02:00" } }),
+        ],
+      }),
+    } as unknown as GwsCalendarClient;
+    const service = new CalendarService(listDatabase, client, "trusted-writer");
+    Object.assign(service, { status: { ready: true, error: undefined } });
+
+    const result = await service.listEvents({
+      timeMin: "2026-07-25T00:00:00Z",
+      timeMax: "2026-07-26T00:00:00Z",
+    });
+
+    expect(result.events.map((event) => event.id)).toEqual(["earlier", "later"]);
+  });
+
   test("routes occurrence, series, and following updates", async () => {
     const patched: string[] = [];
     const inserted: Record<string, unknown>[] = [];

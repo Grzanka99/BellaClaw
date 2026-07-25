@@ -12,6 +12,7 @@ import type {
   TAvailabilityArguments,
   TAvailabilityResult,
   TCalendar,
+  TCalendarAccess,
   TCalendarEvent,
   TCalendarPerson,
   TCreateEventArguments,
@@ -323,7 +324,23 @@ function isConfirmedNotFound(error: unknown): boolean {
   return detail.includes("404") || detail.includes("not found");
 }
 
-function applyPatch(body: Record<string, unknown>, patch: TUpdateEventPatch): void {
+function eventStartTimestamp(event: TCalendarEvent): number {
+  const start = event.start.dateTime ?? event.start.date;
+  if (start === undefined) {
+    return Number.POSITIVE_INFINITY;
+  }
+  const timestamp = Date.parse(start);
+  if (Number.isNaN(timestamp)) {
+    return Number.POSITIVE_INFINITY;
+  }
+  return timestamp;
+}
+
+function applyPatch(
+  body: Record<string, unknown>,
+  patch: TUpdateEventPatch,
+  currentEvent: TCalendarEvent,
+): void {
   if (patch.summary !== undefined) {
     body.summary = patch.summary;
   }
@@ -340,8 +357,52 @@ function applyPatch(body: Record<string, unknown>, patch: TUpdateEventPatch): vo
     body.recurrence = patch.recurrence;
   }
   if (patch.start !== undefined) {
-    const timezone = patch.timezone ?? "UTC";
-    const times = normalizeEventTimes(patch.start, patch.end, patch.durationMinutes, timezone);
+    let end = patch.end;
+    if (end === undefined && patch.durationMinutes === undefined) {
+      const patchIsAllDay = /^\d{4}-\d{2}-\d{2}$/.test(patch.start);
+      if (patchIsAllDay) {
+        if (currentEvent.start.date === undefined || currentEvent.end.date === undefined) {
+          throw new Error(
+            "Changing between timed and all-day events requires an explicit end or duration",
+          );
+        }
+        const currentStart = Date.parse(`${currentEvent.start.date}T00:00:00Z`);
+        const currentEnd = Date.parse(`${currentEvent.end.date}T00:00:00Z`);
+        const newStart = Date.parse(`${patch.start}T00:00:00Z`);
+        const duration = currentEnd - currentStart;
+        if (
+          Number.isNaN(currentStart) ||
+          Number.isNaN(currentEnd) ||
+          Number.isNaN(newStart) ||
+          duration <= 0 ||
+          duration % 86_400_000 !== 0
+        ) {
+          throw new Error("Existing all-day event has invalid start or end");
+        }
+        end = new Date(newStart + duration).toISOString().slice(0, 10);
+      } else {
+        if (currentEvent.start.dateTime === undefined || currentEvent.end.dateTime === undefined) {
+          throw new Error(
+            "Changing between all-day and timed events requires an explicit end or duration",
+          );
+        }
+        const currentStart = Date.parse(currentEvent.start.dateTime);
+        const currentEnd = Date.parse(currentEvent.end.dateTime);
+        const newStart = Date.parse(patch.start);
+        const duration = currentEnd - currentStart;
+        if (
+          Number.isNaN(currentStart) ||
+          Number.isNaN(currentEnd) ||
+          Number.isNaN(newStart) ||
+          duration <= 0
+        ) {
+          throw new Error("Existing timed event has invalid start or end");
+        }
+        end = new Date(newStart + duration).toISOString();
+      }
+    }
+    const timezone = patch.timezone ?? currentEvent.start.timeZone ?? "UTC";
+    const times = normalizeEventTimes(patch.start, end, patch.durationMinutes, timezone);
     body.start = times.start;
     body.end = times.end;
   } else if (
@@ -429,11 +490,15 @@ export class CalendarService {
     const rows = await this.queue.enqueue(() => this.db.select().from(calendarsTable));
     return Promise.all(
       rows.map(async (row) => {
+        let access: TCalendarAccess = "read";
+        if (row.access === "write") {
+          access = "write";
+        }
         try {
           const live = await this.client.probeCalendar(row.calendarId, signal);
           return {
             calendarId: row.calendarId,
-            access: row.access === "write" ? "write" : "read",
+            access,
             addedAt: row.addedAt,
             summary: live.summary,
             error: undefined,
@@ -444,7 +509,7 @@ export class CalendarService {
           }
           return {
             calendarId: row.calendarId,
-            access: row.access === "write" ? "write" : "read",
+            access,
             addedAt: row.addedAt,
             summary: undefined,
             error: String(error),
@@ -531,9 +596,15 @@ export class CalendarService {
       }),
     );
     events.sort((left, right) => {
-      const leftStart = left.start.dateTime ?? left.start.date ?? "";
-      const rightStart = right.start.dateTime ?? right.start.date ?? "";
-      return leftStart.localeCompare(rightStart);
+      const leftTimestamp = eventStartTimestamp(left);
+      const rightTimestamp = eventStartTimestamp(right);
+      if (leftTimestamp < rightTimestamp) {
+        return -1;
+      }
+      if (leftTimestamp > rightTimestamp) {
+        return 1;
+      }
+      return left.id.localeCompare(right.id);
     });
     return { events, failures };
   }
@@ -618,7 +689,7 @@ export class CalendarService {
         );
       }
       const body: Record<string, unknown> = {};
-      applyPatch(body, args.patch);
+      applyPatch(body, args.patch, resolved);
       return mapEvent(
         calendarId,
         await this.client.patchEvent(calendarId, resolved.id, body, args.signal),
@@ -629,7 +700,7 @@ export class CalendarService {
     const master = await this.resolveMutation(masterId, args.signal);
     if (args.scope === "series") {
       const body: Record<string, unknown> = {};
-      applyPatch(body, args.patch);
+      applyPatch(body, args.patch, master);
       return mapEvent(
         calendarId,
         await this.client.patchEvent(calendarId, master.id, body, args.signal),
@@ -640,7 +711,7 @@ export class CalendarService {
     }
     if (isFirstOccurrence(master, resolved)) {
       const body: Record<string, unknown> = {};
-      applyPatch(body, args.patch);
+      applyPatch(body, args.patch, master);
       return mapEvent(
         calendarId,
         await this.client.patchEvent(calendarId, master.id, body, args.signal),
@@ -667,7 +738,7 @@ export class CalendarService {
     successor.recurrence = split.successor;
     const deterministicId = successorId(calendarId, master.id, resolved);
     successor.id = deterministicId;
-    applyPatch(successor, args.patch);
+    applyPatch(successor, args.patch, resolved);
     try {
       return mapEvent(
         calendarId,

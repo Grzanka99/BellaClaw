@@ -154,10 +154,15 @@ function partitionValues(
       before.push(value);
     }
   }
-  return {
-    original: before.length > 0 ? `${prefix}${before.join(",")}` : undefined,
-    successor: after.length > 0 ? `${prefix}${after.join(",")}` : undefined,
-  };
+  let original: string | undefined;
+  if (before.length > 0) {
+    original = `${prefix}${before.join(",")}`;
+  }
+  let successor: string | undefined;
+  if (after.length > 0) {
+    successor = `${prefix}${after.join(",")}`;
+  }
+  return { original, successor };
 }
 
 export function splitRecurrence(
