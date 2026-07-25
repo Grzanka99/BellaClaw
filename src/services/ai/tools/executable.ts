@@ -3,6 +3,7 @@ import { Value } from "typebox/value";
 import { ECronJobType } from "../../../lib/cron-engine";
 import { fetchWeb, searchWeb } from "../../../lib/web";
 import type { TOption } from "../../../types";
+import { CalendarService } from "../../calendar";
 import { CronSingleton } from "../../cron";
 import { Memory } from "../../memory";
 import { sortByImportanceAndDates } from "../../memory/sort";
@@ -11,12 +12,47 @@ import { SettingsService } from "../../settings";
 import { ConfigValidators, EConfigKey, type TConfigRecord } from "../../settings/schema";
 import { getAiModelIds } from "../providers/registry";
 import { EAiProvider, EModelPurpose } from "../types";
+import { ADD_READONLY_CALENDAR_TOOL } from "./add-readonly-calendar/definition";
+import {
+  SAddReadonlyCalendarArgs,
+  type TAddReadonlyCalendarArgs,
+} from "./add-readonly-calendar/handler";
+import { CREATE_CALENDAR_EVENT_TOOL } from "./create-calendar-event/definition";
+import {
+  SCreateCalendarEventArgs,
+  type TCreateCalendarEventArgs,
+  validateCreateCalendarEventArgs,
+} from "./create-calendar-event/handler";
 import { DEFINE_MESSAGE_IMPORTANCE_TOOL } from "./define-message-importance/definition";
 import { SDefineMessageImportance } from "./define-message-importance/handler";
+import { DELETE_CALENDAR_EVENT_TOOL } from "./delete-calendar-event/definition";
+import {
+  SDeleteCalendarEventArgs,
+  type TDeleteCalendarEventArgs,
+} from "./delete-calendar-event/handler";
+import { FIND_CALENDAR_AVAILABILITY_TOOL } from "./find-calendar-availability/definition";
+import {
+  SFindCalendarAvailabilityArgs,
+  type TFindCalendarAvailabilityArgs,
+  validateFindCalendarAvailabilityArgs,
+} from "./find-calendar-availability/handler";
 import { GET_SETTINGS_TOOL } from "./get-settings/definition";
 import { SGetSettingsArgs } from "./get-settings/handler";
+import { LIST_CALENDAR_EVENTS_TOOL } from "./list-calendar-events/definition";
+import {
+  SListCalendarEventsArgs,
+  type TListCalendarEventsArgs,
+  validateListCalendarEventsArgs,
+} from "./list-calendar-events/handler";
+import { LIST_CALENDARS_TOOL } from "./list-calendars/definition";
+import { SListCalendarsArgs } from "./list-calendars/handler";
 import { LIST_CRON_JOBS_TOOL } from "./list-cron-jobs/definition";
 import { SListCronJobsArgs } from "./list-cron-jobs/handler";
+import { REMOVE_READONLY_CALENDAR_TOOL } from "./remove-readonly-calendar/definition";
+import {
+  SRemoveReadonlyCalendarArgs,
+  type TRemoveReadonlyCalendarArgs,
+} from "./remove-readonly-calendar/handler";
 import { SCHEDULE_ONCE_TOOL } from "./schedule-once/definition";
 import {
   SScheduleOnceArgs,
@@ -37,6 +73,12 @@ import {
 } from "./search-memory/handler";
 import { UNSCHEDULE_CRON_JOB_TOOL } from "./unschedule-cron-job/definition";
 import { SUnscheduleCronJobArgs } from "./unschedule-cron-job/handler";
+import { UPDATE_CALENDAR_EVENT_TOOL } from "./update-calendar-event/definition";
+import {
+  SUpdateCalendarEventArgs,
+  type TUpdateCalendarEventArgs,
+  validateUpdateCalendarEventArgs,
+} from "./update-calendar-event/handler";
 import { UPDATE_CRON_JOB_TOOL } from "./update-cron-job/definition";
 import {
   SUpdateCronJobArgs,
@@ -384,6 +426,132 @@ export function createSchedulingTools(context: TToolExecutionContext) {
         }
 
         return textResult(result);
+      },
+    },
+  ];
+}
+
+export function createCalendarTools(context: TToolExecutionContext) {
+  const ownerTimezone = context.settings[EConfigKey.AiInstructionsTimezone];
+
+  return [
+    {
+      name: LIST_CALENDARS_TOOL,
+      label: "List calendars",
+      description: "List configured calendars and their live status",
+      parameters: SListCalendarsArgs,
+      execute: async (_toolCallId: string, args: unknown, signal?: AbortSignal) => {
+        Value.Decode(SListCalendarsArgs, args);
+        return textResult(await CalendarService.instance.listCalendars(signal));
+      },
+    },
+    {
+      name: ADD_READONLY_CALENDAR_TOOL,
+      label: "Add read-only calendar",
+      description: "Add a Google calendar as a read-only source",
+      parameters: SAddReadonlyCalendarArgs,
+      executionMode: SEQUENTIAL,
+      execute: async (_toolCallId: string, args: unknown, signal?: AbortSignal) => {
+        const parsedArgs: TAddReadonlyCalendarArgs = Value.Decode(SAddReadonlyCalendarArgs, args);
+        return textResult(
+          await CalendarService.instance.addReadonlyCalendar(parsedArgs.calendarId, signal),
+        );
+      },
+    },
+    {
+      name: REMOVE_READONLY_CALENDAR_TOOL,
+      label: "Remove read-only calendar",
+      description: "Remove a configured read-only calendar",
+      parameters: SRemoveReadonlyCalendarArgs,
+      executionMode: SEQUENTIAL,
+      execute: async (_toolCallId: string, args: unknown) => {
+        const parsedArgs: TRemoveReadonlyCalendarArgs = Value.Decode(
+          SRemoveReadonlyCalendarArgs,
+          args,
+        );
+        await CalendarService.instance.removeReadonlyCalendar(parsedArgs.calendarId);
+        return textResult({ success: true });
+      },
+    },
+    {
+      name: LIST_CALENDAR_EVENTS_TOOL,
+      label: "List calendar events",
+      description: "List events across all configured calendars",
+      parameters: SListCalendarEventsArgs,
+      execute: async (_toolCallId: string, args: unknown, signal?: AbortSignal) => {
+        const parsedArgs: TListCalendarEventsArgs = Value.Decode(SListCalendarEventsArgs, args);
+        const validatedArgs = validateListCalendarEventsArgs(parsedArgs);
+        return textResult(await CalendarService.instance.listEvents({ ...validatedArgs, signal }));
+      },
+    },
+    {
+      name: FIND_CALENDAR_AVAILABILITY_TOOL,
+      label: "Find calendar availability",
+      description: "Check conflicts or find free slots across all configured calendars",
+      parameters: SFindCalendarAvailabilityArgs,
+      execute: async (_toolCallId: string, args: unknown, signal?: AbortSignal) => {
+        const parsedArgs: TFindCalendarAvailabilityArgs = Value.Decode(
+          SFindCalendarAvailabilityArgs,
+          args,
+        );
+        const validatedArgs = validateFindCalendarAvailabilityArgs(parsedArgs);
+        return textResult(
+          await CalendarService.instance.findAvailability({
+            ...validatedArgs,
+            timezone: ownerTimezone,
+            signal,
+          }),
+        );
+      },
+    },
+    {
+      name: CREATE_CALENDAR_EVENT_TOOL,
+      label: "Create calendar event",
+      description: "Create an event on the trusted writable calendar",
+      parameters: SCreateCalendarEventArgs,
+      executionMode: SEQUENTIAL,
+      execute: async (_toolCallId: string, args: unknown, signal?: AbortSignal) => {
+        const parsedArgs: TCreateCalendarEventArgs = Value.Decode(SCreateCalendarEventArgs, args);
+        const validatedArgs = validateCreateCalendarEventArgs(parsedArgs);
+        return textResult(
+          await CalendarService.instance.createEvent({
+            ...validatedArgs,
+            timezone: validatedArgs.timezone ?? ownerTimezone,
+            signal,
+          }),
+        );
+      },
+    },
+    {
+      name: UPDATE_CALENDAR_EVENT_TOOL,
+      label: "Update calendar event",
+      description: "Update one resolved event on the trusted writable calendar",
+      parameters: SUpdateCalendarEventArgs,
+      executionMode: SEQUENTIAL,
+      execute: async (_toolCallId: string, args: unknown, signal?: AbortSignal) => {
+        const parsedArgs: TUpdateCalendarEventArgs = Value.Decode(SUpdateCalendarEventArgs, args);
+        const patch = validateUpdateCalendarEventArgs(parsedArgs);
+
+        return textResult(
+          await CalendarService.instance.updateEvent({
+            eventId: parsedArgs.eventId,
+            scope: parsedArgs.scope,
+            patch,
+            signal,
+          }),
+        );
+      },
+    },
+    {
+      name: DELETE_CALENDAR_EVENT_TOOL,
+      label: "Delete calendar event",
+      description: "Delete one resolved event from the trusted writable calendar",
+      parameters: SDeleteCalendarEventArgs,
+      executionMode: SEQUENTIAL,
+      execute: async (_toolCallId: string, args: unknown, signal?: AbortSignal) => {
+        const parsedArgs: TDeleteCalendarEventArgs = Value.Decode(SDeleteCalendarEventArgs, args);
+        await CalendarService.instance.deleteEvent({ ...parsedArgs, signal });
+        return textResult({ success: true });
       },
     },
   ];

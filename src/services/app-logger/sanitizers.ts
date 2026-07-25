@@ -94,6 +94,7 @@ export function sanitizeToolCallArguments(toolCall: TToolCall): TSanitizedLogDet
       return sanitizeUpdateSettingsArguments(args);
     }
     case "delegate-memory":
+    case "delegate-calendar":
     case "delegate-settings":
     case "delegate-scheduling": {
       const task = readString(args, "task");
@@ -154,6 +155,7 @@ export function sanitizeToolResult(result: TNormalizedToolResult): TSanitizedLog
       return sanitizeSettingsResult("update-settings", data);
     }
     case "delegate-memory":
+    case "delegate-calendar":
     case "delegate-settings":
     case "delegate-scheduling": {
       return sanitizeDelegationResult(result.toolName, data);

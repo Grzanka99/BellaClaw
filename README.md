@@ -22,7 +22,8 @@ Ships with a default "Bellatrix" persona -- a darkly elegant assistant that resp
 | `OPENROUTER_API_KEY` | No | OpenRouter API key, required only when using the OpenRouter provider |
 | `TAVILY_API_KEY` | No | Tavily API key, required for web search |
 | `OLLAMA_BASE_URL` | No | Ollama base URL (defaults to `http://localhost:11434`) |
-| `BELLACLAW_AI_CREDENTIALS_PATH` | No | Pi credential-store path. Compose sets this to `/app-data/pi-auth.json`; host development defaults to `.secrets/pi-auth.json` |
+| `BELLACLAW_AI_CREDENTIALS_PATH` | No | Pi credential-store path. Compose sets this to `/app/.secrets/pi-auth.json`; host development defaults to `.secrets/pi-auth.json` |
+| `BELLACLAW_GOOGLE_CALENDAR_WRITE_ID` | For Calendar | Google calendar ID of the one calendar BellaClaw may modify |
 | `BELLACLAW_LOG_DB_PATH` | No | Behavior-log SQLite path. Defaults to `/app-data/bellaclaw-logs.db` in the container and `./bellaclaw-logs.db` on the host |
 | `SIGNAL_ENABLED` | No | Set to `true` after Signal is linked and verified; keep `false` by default |
 | `SIGNAL_PHONE_NUMBER` | No | Signal phone number used by `signal-cli-rest-api` when Signal is enabled |
@@ -74,13 +75,42 @@ bun run server:init
 bun run server:update
 ```
 
-The script imports the credential once into `/app-data/pi-auth.json` in the persistent
-`bellaclaw-data` volume. It never overwrites an existing destination because Pi may have refreshed
-and rotated its tokens there. Delete `/app-data/pi-auth.json` from the volume only when you
-intentionally want to import `.secrets/auth.json` again.
+The scripts prepare `.secrets/pi-auth.json` on the host before Compose starts. BellaClaw mounts the
+`.secrets` directory read-write so Pi can persist refreshed tokens in that file. Later starts
+preserve the existing file. To intentionally replace it from `.secrets/auth.json`, run:
+
+```bash
+bun run server:reset-auth
+```
 
 Credential seeding does not change the active provider. After startup, ask BellaClaw to switch the
 AI provider to `openai-codex`.
+
+### Google Calendar Setup
+
+1. In a Google Cloud project, enable the Google Calendar API.
+2. Create a service account, create a JSON key for it, and save the downloaded key as:
+
+```text
+.secrets/google-calendar-service-account.json
+```
+
+3. In Google Calendar, create or choose the calendar BellaClaw may modify. Share it with the
+   service account's `client_email` using **Make changes to events**.
+4. Copy that calendar's ID from its Google Calendar integration settings and set it in `.env`:
+
+```text
+BELLACLAW_GOOGLE_CALENDAR_WRITE_ID=your-calendar-id
+```
+
+5. Configure the writable calendar's default event notifications in Google Calendar. BellaClaw
+   uses those defaults and does not create per-event reminder overrides.
+6. For each additional calendar BellaClaw should read, share it with the same `client_email` using
+   **See all event details**, then ask BellaClaw in chat to add its calendar ID. Calendars added
+   through chat are read-only.
+
+Calendar currently supports one user and one global set of calendars. The service-account key stays
+under `.secrets`, which is excluded from Git and container build context.
 
 ### Signal Setup With Podman
 
@@ -140,8 +170,9 @@ credentials are preserved on later starts.
 | `bun run dev` | Start with file-watch (auto-restart) |
 | `bun run logs:ui` | Start the read-only behavior-log viewer on `127.0.0.1:8989` |
 | `bun run auth:seed-local` | Seed local Pi credentials from `.secrets/auth.json` when absent |
-| `bun run server:init` | Build, seed optional OpenAI auth, and start the Podman services |
-| `bun run server:update` | Rebuild, preserve existing auth, and recreate the Podman services |
+| `bun run server:init` | Prepare optional OpenAI auth, build, and start the Podman services |
+| `bun run server:update` | Preserve existing auth, rebuild, and recreate the Podman services |
+| `bun run server:reset-auth` | Replace `.secrets/pi-auth.json` from `.secrets/auth.json` |
 | `podman compose exec bellaclaw bun run logs:turn -- <turnId>` | Show behavior events for a turn in the container |
 | `bun test` | Run all tests |
 | `bun test <file>` | Run a single test file |

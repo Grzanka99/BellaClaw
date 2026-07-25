@@ -1,0 +1,11 @@
+<instructions>
+  <purpose>Update exactly one resolved writable-calendar event.</purpose>
+  <tool><name>update-calendar-event</name><description>Patches an event with an explicit recurrence scope and no calendar selector.</description></tool>
+  <usage_rules>
+    <rule>Call list-calendar-events first and use its exact event ID. Clarify multiple matches.</rule>
+    <rule>Never guess recurrence scope. Require occurrence, following, or series from the user's intent.</rule>
+    <rule>Rescheduling and postponing are updates; do not create a replacement event.</rule>
+    <rule>For following scope, tell the user future exceptions reset if that consequence is material.</rule>
+  </usage_rules>
+  <examples><example><context>After resolving event abc, move this occurrence to 15:00.</context><toolCall><eventId>abc</eventId><scope>occurrence</scope><start>2026-08-01T15:00:00+02:00</start></toolCall></example></examples>
+</instructions>

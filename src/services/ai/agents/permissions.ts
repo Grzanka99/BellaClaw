@@ -1,9 +1,22 @@
 import { EAgentName } from "../agent-harness";
 
 export const AGENT_TOOL_NAMES: Record<EAgentName, readonly string[]> = {
+  [EAgentName.Calendar]: [
+    "list-calendars",
+    "add-readonly-calendar",
+    "remove-readonly-calendar",
+    "list-calendar-events",
+    "find-calendar-availability",
+    "create-calendar-event",
+    "update-calendar-event",
+    "delete-calendar-event",
+    "web-search",
+    "web-fetch",
+  ],
   [EAgentName.Main]: [
     "web-search",
     "web-fetch",
+    "delegate-calendar",
     "delegate-memory",
     "delegate-settings",
     "delegate-scheduling",
@@ -19,5 +32,11 @@ export const AGENT_TOOL_NAMES: Record<EAgentName, readonly string[]> = {
     "web-search",
     "web-fetch",
   ],
-  [EAgentName.ScheduledTask]: ["search-memory", "web-search", "web-fetch"],
+  [EAgentName.ScheduledTask]: [
+    "search-memory",
+    "web-search",
+    "web-fetch",
+    "list-calendar-events",
+    "find-calendar-availability",
+  ],
 };

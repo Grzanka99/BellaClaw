@@ -1,0 +1,9 @@
+<instructions>
+  <purpose>Remove one configured read-only calendar source.</purpose>
+  <tool><name>remove-readonly-calendar</name><description>Removes only a row classified as read-only and rejects the writable calendar.</description></tool>
+  <usage_rules>
+    <rule>List calendars first unless the user supplied one exact configured ID.</rule>
+    <rule>Clarify when multiple calendars could match. Never infer deletion.</rule>
+  </usage_rules>
+  <examples><example><context>User explicitly asks to remove family@example.com.</context><toolCall><calendarId>family@example.com</calendarId></toolCall></example></examples>
+</instructions>
