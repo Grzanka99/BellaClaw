@@ -11,6 +11,8 @@ export class DiscordSingleton implements TMessageTransport {
   private logger: TLogger = createLogger("DISCORD");
   private client: Client;
   private readyPromise: TOption<Promise<void>>;
+  private retryTimer: TOption<ReturnType<typeof setTimeout>>;
+  private retryDelayMs = 2_000;
   private messageHandlerRegistered = false;
   public platform = EMessagePlatform.Discord;
 
@@ -50,18 +52,24 @@ export class DiscordSingleton implements TMessageTransport {
       return;
     }
 
-    await MessagingAdapter.instance.handleInboundMessage({
-      platform: EMessagePlatform.Discord,
-      chatId: message.author.id,
-      author: {
-        username: message.author.username,
-        id: message.author.id,
-      },
-      message: {
-        type: "text",
-        content: message.content,
-      },
-    });
+    try {
+      await MessagingAdapter.instance.handleInboundMessage({
+        platform: EMessagePlatform.Discord,
+        chatId: message.author.id,
+        author: {
+          username: message.author.username,
+          id: message.author.id,
+        },
+        message: {
+          type: "text",
+          content: message.content,
+        },
+      });
+    } catch (error) {
+      this.logger.error(
+        `handleMessage: failed to process message from ${message.author.id}: ${String(error)}`,
+      );
+    }
   }
 
   private async onReady(c: Client<true>) {
@@ -100,6 +108,11 @@ export class DiscordSingleton implements TMessageTransport {
 
     this.readyPromise = new Promise((resolve) => {
       const readyListener = (client: Client<true>) => {
+        if (this.retryTimer !== undefined) {
+          clearTimeout(this.retryTimer);
+          this.retryTimer = undefined;
+        }
+
         MessagingAdapter.instance.registerTransport(this);
         void this.onReady(client);
         resolve();
@@ -111,6 +124,14 @@ export class DiscordSingleton implements TMessageTransport {
         this.client.off(Events.ClientReady, readyListener);
         this.readyPromise = undefined;
         this.logger.error(`Discord unavailable: failed to log in: ${String(error)}`);
+
+        if (this.retryTimer === undefined) {
+          this.retryTimer = setTimeout(() => {
+            this.retryTimer = undefined;
+            void this.setup();
+          }, this.retryDelayMs);
+        }
+
         resolve();
       });
     });

@@ -32,6 +32,7 @@ type TDiscordSingletonInternals = {
     error: (message: string) => void;
     warning: (message: string) => void;
   };
+  retryDelayMs: number;
   handleMessage: (message: {
     author: { id: string; username: string };
     channel: { type: ChannelType };
@@ -106,10 +107,11 @@ describe("DiscordSingleton", () => {
     expect(adapter.transports.has(EMessagePlatform.Discord)).toBeFalse();
   });
 
-  test("keeps Discord unavailable after login failure and allows a concurrent-safe retry", async () => {
+  test("keeps Discord unavailable after login failure and retries automatically", async () => {
     Bun.env.DISCORD_TOKEN = "discord-token";
 
     const discord = DiscordSingleton.instance as unknown as TDiscordSingletonInternals;
+    discord.retryDelayMs = 1;
     const adapter = MessagingAdapter.instance as unknown as {
       registerTransport: ReturnType<typeof mock>;
     };
@@ -118,9 +120,17 @@ describe("DiscordSingleton", () => {
     const off = mock(() => {});
     const error = mock(() => {});
     let readyListener: TOption<TReadyListener>;
+    let markRetryStarted: () => void = () => undefined;
+    const retryStarted = new Promise<void>((resolve) => {
+      markRetryStarted = resolve;
+    });
 
     login.mockImplementationOnce(async () => {
       throw new Error("invalid token");
+    });
+    login.mockImplementationOnce(async () => {
+      markRetryStarted();
+      return "token";
     });
     discord.client = {
       login,
@@ -133,20 +143,20 @@ describe("DiscordSingleton", () => {
     discord.logger.error = error;
     adapter.registerTransport = registerTransport;
 
-    await expect(DiscordSingleton.instance.setup()).resolves.toBeUndefined();
+    const setup = DiscordSingleton.instance.setup();
+    const concurrentSetup = DiscordSingleton.instance.setup();
 
-    expect(login).toHaveBeenCalledTimes(1);
-    expect(login).toHaveBeenCalledWith("discord-token");
+    expect(concurrentSetup).toBe(setup);
+    await expect(setup).resolves.toBeUndefined();
+
+    expect(login).toHaveBeenNthCalledWith(1, "discord-token");
     expect(off).toHaveBeenCalledTimes(1);
     expect(registerTransport).toHaveBeenCalledTimes(0);
     expect(error).toHaveBeenCalledWith(
       "Discord unavailable: failed to log in: Error: invalid token",
     );
 
-    const retry = DiscordSingleton.instance.setup();
-    const concurrentRetry = DiscordSingleton.instance.setup();
-
-    expect(concurrentRetry).toBe(retry);
+    await retryStarted;
     expect(login).toHaveBeenCalledTimes(2);
     expect(registerTransport).toHaveBeenCalledTimes(0);
 
@@ -160,7 +170,6 @@ describe("DiscordSingleton", () => {
       },
     });
 
-    await retry;
     await DiscordSingleton.instance.setup();
 
     expect(registerTransport).toHaveBeenCalledTimes(1);
@@ -225,5 +234,41 @@ describe("DiscordSingleton", () => {
         content: "hello",
       },
     });
+  });
+
+  test("absorbs inbound processing failures at the Discord event boundary", async () => {
+    const discord = DiscordSingleton.instance as unknown as TDiscordSingletonInternals;
+    const adapter = MessagingAdapter.instance as unknown as {
+      handleInboundMessage: typeof MessagingAdapter.prototype.handleInboundMessage;
+    };
+    const handleInboundMessageMock = mock(async () => {
+      throw new Error("assistant persistence failed");
+    });
+    const error = mock(() => {});
+
+    adapter.handleInboundMessage = handleInboundMessageMock;
+    discord.logger.error = error;
+    discord.client = {
+      user: {
+        id: "bot-1",
+      },
+    } as never;
+
+    await expect(
+      discord.handleMessage({
+        author: {
+          id: "user-1",
+          username: "TestUser",
+        },
+        channel: {
+          type: ChannelType.DM,
+        },
+        content: "hello",
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(error).toHaveBeenCalledWith(
+      "handleMessage: failed to process message from user-1: Error: assistant persistence failed",
+    );
   });
 });
