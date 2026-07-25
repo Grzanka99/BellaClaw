@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { fetchTextWithLimit } from "./http";
+import { fetchTextWithLimit, validatePublicHttpUrl } from "./http";
 
 const originalFetch = globalThis.fetch;
 const encoder = new TextEncoder();
@@ -59,6 +59,58 @@ describe("fetchTextWithLimit", () => {
 
     await expect(pending).rejects.toThrow("aborted");
     expect(performance.now() - startedAt).toBeLessThan(100);
+  });
+
+  test("blocks redirects to non-public IP addresses", async () => {
+    let requests = 0;
+    globalThis.fetch = (async () => {
+      requests += 1;
+
+      return new Response(null, {
+        status: 302,
+        headers: { location: "http://127.0.0.1:3000/admin" },
+      });
+    }) as unknown as typeof fetch;
+
+    await expect(
+      fetchTextWithLimit({
+        url: "https://example.com/redirect",
+        timeoutMs: 1_000,
+        maxBytes: 5_000,
+        followRedirects: true,
+      }),
+    ).rejects.toThrow("Private or reserved IP addresses are blocked");
+    expect(requests).toBe(1);
+  });
+});
+
+describe("validatePublicHttpUrl", () => {
+  test.each([
+    "http://0.0.0.0",
+    "http://10.0.0.1",
+    "http://100.64.0.1",
+    "http://127.0.0.1",
+    "http://127.1",
+    "http://2130706433",
+    "http://169.254.169.254/latest/meta-data",
+    "http://172.16.0.1",
+    "http://192.168.0.1",
+    "http://[::1]",
+    "http://[::ffff:127.0.0.1]",
+    "http://[2001:db8::1]",
+    "http://[fc00::1]",
+    "http://[fe80::1]",
+  ])("blocks non-public IP address %s", (url) => {
+    expect(() => validatePublicHttpUrl(url)).toThrow(
+      "Private or reserved IP addresses are blocked",
+    );
+  });
+
+  test.each([
+    "https://8.8.8.8/path",
+    "https://[2606:4700:4700::1111]/path",
+  ])("allows public IP address %s", (url) => {
+    expect(validatePublicHttpUrl(url)).toBe(url);
   });
 });
 

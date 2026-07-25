@@ -2,6 +2,7 @@ import { lookup } from "node:dns/promises";
 import type { ClientRequest, IncomingHttpHeaders, IncomingMessage } from "node:http";
 import { request as requestHttp } from "node:http";
 import { request as requestHttps } from "node:https";
+import { BlockList, isIP } from "node:net";
 import { Readable } from "node:stream";
 import type { TOption } from "../../types";
 
@@ -26,6 +27,30 @@ const BROWSER_HEADERS = {
 
 const MAX_REDIRECTS = 5;
 const DEFAULT_FETCH = globalThis.fetch;
+const NON_PUBLIC_IP_ADDRESSES = new BlockList();
+const PUBLIC_IPV6_ADDRESSES = new BlockList();
+
+NON_PUBLIC_IP_ADDRESSES.addSubnet("0.0.0.0", 8, "ipv4");
+NON_PUBLIC_IP_ADDRESSES.addSubnet("10.0.0.0", 8, "ipv4");
+NON_PUBLIC_IP_ADDRESSES.addSubnet("100.64.0.0", 10, "ipv4");
+NON_PUBLIC_IP_ADDRESSES.addSubnet("127.0.0.0", 8, "ipv4");
+NON_PUBLIC_IP_ADDRESSES.addSubnet("169.254.0.0", 16, "ipv4");
+NON_PUBLIC_IP_ADDRESSES.addSubnet("172.16.0.0", 12, "ipv4");
+NON_PUBLIC_IP_ADDRESSES.addSubnet("192.0.0.0", 24, "ipv4");
+NON_PUBLIC_IP_ADDRESSES.addSubnet("192.0.2.0", 24, "ipv4");
+NON_PUBLIC_IP_ADDRESSES.addSubnet("192.88.99.0", 24, "ipv4");
+NON_PUBLIC_IP_ADDRESSES.addSubnet("192.168.0.0", 16, "ipv4");
+NON_PUBLIC_IP_ADDRESSES.addSubnet("198.18.0.0", 15, "ipv4");
+NON_PUBLIC_IP_ADDRESSES.addSubnet("198.51.100.0", 24, "ipv4");
+NON_PUBLIC_IP_ADDRESSES.addSubnet("203.0.113.0", 24, "ipv4");
+NON_PUBLIC_IP_ADDRESSES.addSubnet("224.0.0.0", 4, "ipv4");
+NON_PUBLIC_IP_ADDRESSES.addSubnet("240.0.0.0", 4, "ipv4");
+
+PUBLIC_IPV6_ADDRESSES.addSubnet("2000::", 3, "ipv6");
+NON_PUBLIC_IP_ADDRESSES.addSubnet("2001::", 23, "ipv6");
+NON_PUBLIC_IP_ADDRESSES.addSubnet("2001:db8::", 32, "ipv6");
+NON_PUBLIC_IP_ADDRESSES.addSubnet("2002::", 16, "ipv6");
+NON_PUBLIC_IP_ADDRESSES.addSubnet("3fff::", 20, "ipv6");
 
 export function createBrowserHeaders(headers: THttpHeaders = {}): THttpHeaders {
   return {
@@ -53,7 +78,9 @@ export function validatePublicHttpUrl(rawUrl: string): string {
     throw new Error("Localhost URLs are blocked");
   }
 
-  // TODO: Add public-IP validation for literal URL hosts.
+  if (isIP(hostname) !== 0 && !isPublicIpAddress(hostname)) {
+    throw new Error("Private or reserved IP addresses are blocked");
+  }
 
   return url.href;
 }
@@ -159,7 +186,9 @@ async function validateResolvedPublicHttpUrl(
     throw new Error("Hostname did not resolve to any IP address");
   }
 
-  // TODO: Add public-IP validation for resolved DNS addresses.
+  if (!isPublicIpAddress(address.address)) {
+    throw new Error("Hostname resolves to a private or reserved IP address");
+  }
 
   return {
     href,
@@ -415,4 +444,21 @@ async function readResponseTextWithLimit(
 
 function normalizeHostname(hostname: string): string {
   return hostname.toLowerCase().replace(/^\[/, "").replace(/\]$/, "").replace(/\.$/, "");
+}
+
+function isPublicIpAddress(address: string): boolean {
+  const family = isIP(address);
+
+  if (family === 4) {
+    return !NON_PUBLIC_IP_ADDRESSES.check(address, "ipv4");
+  }
+
+  if (family === 6) {
+    return (
+      PUBLIC_IPV6_ADDRESSES.check(address, "ipv6") &&
+      !NON_PUBLIC_IP_ADDRESSES.check(address, "ipv6")
+    );
+  }
+
+  return false;
 }
