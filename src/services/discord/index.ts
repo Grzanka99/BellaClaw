@@ -1,4 +1,12 @@
-import { ChannelType, Client, Events, GatewayIntentBits, type Message, Partials } from "discord.js";
+import {
+  ChannelType,
+  Client,
+  DiscordjsErrorCodes,
+  Events,
+  GatewayIntentBits,
+  type Message,
+  Partials,
+} from "discord.js";
 import type { TOption } from "../../types";
 import { createLogger, type TLogger } from "../../utils/logger";
 import { MessagingAdapter } from "../messaging";
@@ -17,7 +25,11 @@ export class DiscordSingleton implements TMessageTransport {
   public platform = EMessagePlatform.Discord;
 
   private constructor() {
-    this.client = new Client({
+    this.client = this.createClient();
+  }
+
+  private createClient(): Client {
+    return new Client({
       intents: [GatewayIntentBits.MessageContent, GatewayIntentBits.DirectMessages],
       partials: [Partials.Channel],
     });
@@ -106,6 +118,8 @@ export class DiscordSingleton implements TMessageTransport {
       return Promise.resolve();
     }
 
+    const client = this.client;
+
     this.readyPromise = new Promise((resolve) => {
       const readyListener = (client: Client<true>) => {
         if (this.retryTimer !== undefined) {
@@ -118,14 +132,21 @@ export class DiscordSingleton implements TMessageTransport {
         resolve();
       };
 
-      this.client.once(Events.ClientReady, readyListener);
+      client.once(Events.ClientReady, readyListener);
 
-      this.client.login(token).catch((error) => {
-        this.client.off(Events.ClientReady, readyListener);
+      client.login(token).catch((error) => {
+        client.off(Events.ClientReady, readyListener);
         this.readyPromise = undefined;
         this.logger.error(`Discord unavailable: failed to log in: ${String(error)}`);
+        this.client = this.createClient();
+        this.messageHandlerRegistered = false;
 
-        if (this.retryTimer === undefined) {
+        const invalidToken =
+          error instanceof Error &&
+          "code" in error &&
+          error.code === DiscordjsErrorCodes.TokenInvalid;
+
+        if (!invalidToken && this.retryTimer === undefined) {
           this.retryTimer = setTimeout(() => {
             this.retryTimer = undefined;
             void this.setup();
@@ -137,7 +158,7 @@ export class DiscordSingleton implements TMessageTransport {
     });
 
     if (!this.messageHandlerRegistered) {
-      this.client.on(Events.MessageCreate, this.handleMessage.bind(this));
+      client.on(Events.MessageCreate, this.handleMessage.bind(this));
       this.messageHandlerRegistered = true;
     }
 

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
-import { ChannelType } from "discord.js";
+import { ChannelType, DiscordjsErrorCodes } from "discord.js";
 import type { TOption } from "../../types";
 import { CronSingleton } from "../cron";
 import { resetCronEngineJobsTable } from "../database/test-utils";
@@ -22,7 +22,7 @@ type TDiscordSingletonInternals = {
     off: (event: string, listener: TReadyListener) => void;
     on: (event: string, listener: () => void) => void;
     once: (event: string, listener: TReadyListener) => void;
-    users: {
+    users?: {
       fetch: (userId: string) => Promise<{
         send: (text: string) => Promise<void>;
       }>;
@@ -32,7 +32,9 @@ type TDiscordSingletonInternals = {
     error: (message: string) => void;
     warning: (message: string) => void;
   };
+  createClient: ReturnType<typeof mock>;
   retryDelayMs: number;
+  retryTimer: TOption<ReturnType<typeof setTimeout>>;
   handleMessage: (message: {
     author: { id: string; username: string };
     channel: { type: ChannelType };
@@ -107,7 +109,7 @@ describe("DiscordSingleton", () => {
     expect(adapter.transports.has(EMessagePlatform.Discord)).toBeFalse();
   });
 
-  test("keeps Discord unavailable after login failure and retries automatically", async () => {
+  test("recreates the Discord client and retries after a transient login failure", async () => {
     Bun.env.DISCORD_TOKEN = "discord-token";
 
     const discord = DiscordSingleton.instance as unknown as TDiscordSingletonInternals;
@@ -116,7 +118,13 @@ describe("DiscordSingleton", () => {
       registerTransport: ReturnType<typeof mock>;
     };
     const registerTransport = mock(() => {});
-    const login = mock(async (_token: string) => "token");
+    const login = mock(async (_token: string) => {
+      throw new Error("network unavailable");
+    });
+    const retryLogin = mock(async (_token: string) => {
+      markRetryStarted();
+      return "token";
+    });
     const off = mock(() => {});
     const error = mock(() => {});
     let readyListener: TOption<TReadyListener>;
@@ -125,21 +133,22 @@ describe("DiscordSingleton", () => {
       markRetryStarted = resolve;
     });
 
-    login.mockImplementationOnce(async () => {
-      throw new Error("invalid token");
-    });
-    login.mockImplementationOnce(async () => {
-      markRetryStarted();
-      return "token";
-    });
     discord.client = {
       login,
       off,
       on: mock(() => {}),
+      once: mock(() => {}),
+    } as never;
+    const retryClient = {
+      login: retryLogin,
+      off: mock(() => {}),
+      on: mock(() => {}),
       once: mock((_event: string, listener: TReadyListener) => {
         readyListener = listener;
       }),
-    } as never;
+    };
+    const createClient = mock(() => retryClient);
+    discord.createClient = createClient;
     discord.logger.error = error;
     adapter.registerTransport = registerTransport;
 
@@ -153,11 +162,14 @@ describe("DiscordSingleton", () => {
     expect(off).toHaveBeenCalledTimes(1);
     expect(registerTransport).toHaveBeenCalledTimes(0);
     expect(error).toHaveBeenCalledWith(
-      "Discord unavailable: failed to log in: Error: invalid token",
+      "Discord unavailable: failed to log in: Error: network unavailable",
     );
+    expect(createClient).toHaveBeenCalledTimes(1);
+    expect(discord.client).toBe(retryClient);
 
     await retryStarted;
-    expect(login).toHaveBeenCalledTimes(2);
+    expect(login).toHaveBeenCalledTimes(1);
+    expect(retryLogin).toHaveBeenCalledWith("discord-token");
     expect(registerTransport).toHaveBeenCalledTimes(0);
 
     if (readyListener === undefined) {
@@ -174,6 +186,42 @@ describe("DiscordSingleton", () => {
 
     expect(registerTransport).toHaveBeenCalledTimes(1);
     expect(registerTransport).toHaveBeenCalledWith(DiscordSingleton.instance);
+  });
+
+  test("does not retry an invalid Discord token", async () => {
+    Bun.env.DISCORD_TOKEN = "invalid-token";
+
+    const discord = DiscordSingleton.instance as unknown as TDiscordSingletonInternals;
+    const invalidTokenError = Object.assign(new Error("An invalid token was provided."), {
+      code: DiscordjsErrorCodes.TokenInvalid,
+    });
+    const login = mock(async () => {
+      throw invalidTokenError;
+    });
+    const replacementLogin = mock(async () => "token");
+    const replacementClient = {
+      login: replacementLogin,
+      off: mock(() => {}),
+      on: mock(() => {}),
+      once: mock(() => {}),
+    };
+    const createClient = mock(() => replacementClient);
+
+    discord.client = {
+      login,
+      off: mock(() => {}),
+      on: mock(() => {}),
+      once: mock(() => {}),
+    } as never;
+    discord.createClient = createClient;
+
+    await expect(DiscordSingleton.instance.setup()).resolves.toBeUndefined();
+
+    expect(login).toHaveBeenCalledTimes(1);
+    expect(createClient).toHaveBeenCalledTimes(1);
+    expect(discord.client).toBe(replacementClient);
+    expect(discord.retryTimer).toBeUndefined();
+    expect(replacementLogin).toHaveBeenCalledTimes(0);
   });
 
   test("does not start cron after Discord client is ready", async () => {
