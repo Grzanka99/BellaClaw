@@ -20,11 +20,6 @@ const mockConfig = {
       assistantName: "Bellatrix",
       language: "Polish",
       timeFormat: "24-hour format (e.g. 14:30, not 2:30 PM)",
-      memoryRetention: {
-        low: "Discard after short-term context window",
-        medium: "Keep for several weeks, review periodically",
-        high: "Keep indefinitely, reference in future conversations",
-      },
     },
   },
 };
@@ -42,19 +37,14 @@ describe("readXmlAndInjectConfig", () => {
     await Bun.file(tempPath).delete();
   });
 
-  test("injects nested config values like memoryRetention.high", async () => {
+  test("injects nested config values", async () => {
     const { readXmlAndInjectConfig } = await import("./read-xml-and-inject-config");
 
     const tempPath = getTempXmlPath("test-inject-nested");
-    await Bun.write(
-      tempPath,
-      `<retention>{{config.ai.instructions.memoryRetention.high}}</retention>`,
-    );
+    await Bun.write(tempPath, `<timezone>{{config.ai.instructions.timezone}}</timezone>`);
 
     const result = await readXmlAndInjectConfig(tempPath, mockConfig);
-    expect(result).toBe(
-      "<retention>Keep indefinitely, reference in future conversations</retention>",
-    );
+    expect(result).toBe("<timezone>Europe/Warsaw</timezone>");
 
     await Bun.file(tempPath).delete();
   });
@@ -164,7 +154,9 @@ describe("readXmlAndInjectConfig", () => {
     expect(instructions).not.toContain("schedule-recurring");
     expect(instructions).not.toContain("web-search");
     expect(instructions).not.toContain("web-fetch");
-    expect(instructions).toContain("Use only the tools registered for this run");
+    expect(instructions).toContain("Call independent tools together");
+    expect(instructions).toContain("make the dependent call in the next turn");
+    expect(instructions).toContain("Describe capabilities according to the tools registered");
   });
 
   test("resolves placeholders from a flat TConfigRecord keyed by dotted strings", async () => {

@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
 import { Value } from "typebox/value";
-import { defineMessageImportanceTool } from "./define-message-importance/definition";
 import { getSettingsTool } from "./get-settings/definition";
 import { listCronJobsTool } from "./list-cron-jobs/definition";
 import { scheduleOnceTool } from "./schedule-once/definition";
@@ -20,7 +19,6 @@ import { webFetchTool } from "./web-fetch/definition";
 import { webSearchTool } from "./web-search/definition";
 
 const ALL_TOOLS = [
-  defineMessageImportanceTool,
   getSettingsTool,
   listCronJobsTool,
   scheduleOnceTool,
@@ -35,8 +33,8 @@ const ALL_TOOLS = [
 
 describe("AI tool definitions", () => {
   test("expose Pi-native TypeBox parameter schemas", () => {
-    expect(ALL_TOOLS).toHaveLength(11);
-    expect(new Set(ALL_TOOLS.map((tool) => tool.name)).size).toBe(11);
+    expect(ALL_TOOLS).toHaveLength(10);
+    expect(new Set(ALL_TOOLS.map((tool) => tool.name)).size).toBe(10);
 
     for (const tool of ALL_TOOLS) {
       expect(tool.name.length).toBeGreaterThan(0);

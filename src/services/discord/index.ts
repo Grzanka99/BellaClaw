@@ -92,20 +92,26 @@ export class DiscordSingleton implements TMessageTransport {
       return this.readyPromise;
     }
 
-    MessagingAdapter.instance.registerTransport(this);
+    const token = Bun.env.DISCORD_TOKEN?.trim();
+    if (token === undefined || token.length === 0) {
+      this.logger.warning("Discord unavailable: DISCORD_TOKEN is not configured");
+      return Promise.resolve();
+    }
 
-    this.readyPromise = new Promise((resolve, reject) => {
+    this.readyPromise = new Promise((resolve) => {
       const readyListener = (client: Client<true>) => {
+        MessagingAdapter.instance.registerTransport(this);
         void this.onReady(client);
         resolve();
       };
 
       this.client.once(Events.ClientReady, readyListener);
 
-      this.client.login(Bun.env.DISCORD_TOKEN).catch((error) => {
+      this.client.login(token).catch((error) => {
         this.client.off(Events.ClientReady, readyListener);
         this.readyPromise = undefined;
-        reject(error);
+        this.logger.error(`Discord unavailable: failed to log in: ${String(error)}`);
+        resolve();
       });
     });
 

@@ -60,15 +60,12 @@ describe("MessageHandler", () => {
       })),
     };
 
-    const result = await handler.handleMessage(
-      {
-        chatId: "discord:1",
-        message: { type: "text", content: "new question" },
-        author: { type: ERole.User, id: "1", username: "Owner" },
-      },
-      EMessagePlatform.Discord,
-    );
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    const incomingMessage = {
+      chatId: "discord:1",
+      message: { type: "text" as const, content: "new question" },
+      author: { type: ERole.User as const, id: "1", username: "Owner" },
+    };
+    const result = await handler.handleMessage(incomingMessage, EMessagePlatform.Discord);
 
     expect(result).toBe("Final answer");
     expect(internals.memory.findRecent).toHaveBeenCalledWith("discord:1", 30);
@@ -85,6 +82,8 @@ describe("MessageHandler", () => {
     const history = internals.ai.runMain.mock.calls[0]?.[0].history;
     expect(history[0]?.content).toBe("message-0");
     expect(history[29]?.content).toBe("message-29");
+    expect(internals.memory.save).toHaveBeenCalledTimes(1);
+    await handler.saveAssistantMessage(incomingMessage, result);
     expect(internals.memory.save).toHaveBeenCalledTimes(2);
     expect(internals.memory.save).toHaveBeenNthCalledWith(1, {
       chatId: "discord:1",

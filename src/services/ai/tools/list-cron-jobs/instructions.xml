@@ -2,8 +2,8 @@
 
   <purpose>
     Retrieve the full list of currently scheduled cron jobs. Use this tool to discover
-    what reminders and recurring tasks are active, so you can inform the user about them
-    or follow up with an unschedule-cron-job call if the user wants to remove them.
+    what reminders and recurring tasks are active, so Main can report them or you can
+    follow up with an unschedule-cron-job call when the task requests removal.
   </purpose>
 
   <tool>
@@ -15,13 +15,13 @@
   </tool>
 
   <usage_rules>
-    <rule>Call this tool whenever the user asks about their current reminders, scheduled tasks, or active cron jobs</rule>
-    <rule>After receiving the results, present each job clearly to the user — include the name, schedule pattern, and next fire time</rule>
+    <rule>Call this tool whenever the task asks about current reminders, scheduled tasks, or active cron jobs</rule>
+    <rule>Return each job clearly to Main, including the name, schedule pattern, and next fire time</rule>
     <rule>For contentMode scheduled-task, summarize the objective from taskPrompt without quoting it verbatim</rule>
     <rule>Quote a stored taskPrompt only when the user explicitly requests the exact prompt</rule>
-    <rule>If the user wants to remove one or more jobs, use the unschedule-cron-job tool with the exact job name</rule>
-    <rule>If there are no jobs, inform the user that no scheduled jobs exist</rule>
-    <rule>Do not call this tool repeatedly in a short time span — cache the results within a conversation turn</rule>
+    <rule>If the task requests removing one or more jobs, use the unschedule-cron-job tool with the exact job name</rule>
+    <rule>If there are no jobs, report that no scheduled jobs exist</rule>
+    <rule>Reuse results within a conversation turn</rule>
   </usage_rules>
 
   <examples>
@@ -34,7 +34,7 @@
     <example>
       <context>User says: "Cancel all my reminders"</context>
       <toolCall />
-      <reasoning>First list all jobs to see what exists, then call unschedule-cron-job for each one the user confirms.</reasoning>
+      <reasoning>First list all jobs to get their exact names, then cancel each job as explicitly requested.</reasoning>
     </example>
 
     <example>

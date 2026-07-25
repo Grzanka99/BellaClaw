@@ -15,10 +15,10 @@
   </tool>
 
   <usage_rules>
-    <rule>Always confirm with the user which job they want to cancel before calling this tool</rule>
+    <rule>Treat an explicit request to cancel an exact job as confirmation; list or clarify when the job is uncertain</rule>
     <rule>Use the exact job name that was provided when the job was originally scheduled</rule>
-    <rule>Inform the user once the job has been successfully cancelled</rule>
-    <rule>If the job name does not exist, inform the user that no matching job was found</rule>
+    <rule>Return a successful cancellation to Main</rule>
+    <rule>If the job name does not exist, report that no matching job was found</rule>
   </usage_rules>
 
   <examples>

@@ -28,14 +28,14 @@
   </cron_patterns>
 
   <usage_rules>
-    <rule>After this tool succeeds, confirm the schedule and the reminder or autonomous objective with the user</rule>
+    <rule>After this tool succeeds, return the schedule and reminder or autonomous objective to Main</rule>
     <rule>Choose clear, descriptive names for jobs so they can be easily referenced later</rule>
     <rule>If a job with the same name already exists, set overwrite to true only if the user explicitly agrees to replace it</rule>
     <rule>Validate that the cron pattern matches the user's intended schedule before calling</rule>
     <rule>Provide exactly one mode: reminderText; reminderPromptData plus reminderFallbackText; or taskPrompt plus taskFallbackText</rule>
     <rule>Use taskPrompt when firing-time web search or fetch is required; use reminderPromptData only for fresh wording that needs no tools</rule>
     <rule>Pass reminderPromptData as a serialized JSON string, not as a nested object</rule>
-    <rule>Inform the user of the next fire time after successfully scheduling</rule>
+    <rule>Include the next fire time in the result returned to Main</rule>
   </usage_rules>
 
   <examples>

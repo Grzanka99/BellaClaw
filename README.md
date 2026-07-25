@@ -24,6 +24,7 @@ Ships with a default "Bellatrix" persona -- a darkly elegant assistant that resp
 | `OLLAMA_BASE_URL` | No | Ollama base URL (defaults to `http://localhost:11434`) |
 | `BELLACLAW_AI_CREDENTIALS_PATH` | No | Pi credential-store path. Compose sets this to `/app-data/pi-auth.json`; host development defaults to `.secrets/pi-auth.json` |
 | `BELLACLAW_LOG_DB_PATH` | No | Behavior-log SQLite path. Defaults to `/app-data/bellaclaw-logs.db` in the container and `./bellaclaw-logs.db` on the host |
+| `DISCORD_TOKEN` | No | Discord bot token. Without it, Discord stays unavailable while other configured transports continue to run |
 | `SIGNAL_ENABLED` | No | Set to `true` after Signal is linked and verified; keep `false` by default |
 | `SIGNAL_PHONE_NUMBER` | No | Signal phone number used by `signal-cli-rest-api` when Signal is enabled |
 | `SIGNAL_CLI_RPC_URL` | No | Signal API URL. Compose sets this to `http://signal-cli:8080`; use `http://127.0.0.1:8080` only when running BellaClaw on the host |
@@ -175,12 +176,12 @@ before running `bun run logs:turn -- <turnId>`.
 
 ### Message Flow
 
-1. User sends a Signal direct message.
+1. User sends a direct message through Signal or Discord.
 2. MessageHandler loads the latest stored conversation and classifies the incoming message's importance.
 3. The root user message is saved to the libSQL database with its importance tag.
 4. A fresh Pi Main Agent receives the latest 30 messages and delegates memory, settings, and scheduling work to isolated specialists when needed.
 5. Specialists have only their role-specific tools and never persist conversational memory. Main returns the only interactive response.
-6. The AI response is sent back as a Signal direct message, then classified and saved to the database asynchronously. Scheduled-task output is persisted only after successful delivery.
+6. The AI response is sent back through the originating transport, then classified and saved to the database. Scheduled-task output is persisted only after successful delivery.
 
 ### AI Runtime
 

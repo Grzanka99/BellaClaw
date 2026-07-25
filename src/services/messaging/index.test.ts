@@ -15,6 +15,7 @@ type TAdapterInternals = {
     runScheduledTask: ReturnType<typeof mock>;
   };
   transports: Map<EMessagePlatform, TMessageTransport>;
+  inboundChatQueues: Map<string, unknown>;
   runningCronTaskKeys: Set<string>;
   handleCronFire(ctx: TCronJobContext): Promise<void>;
 };
@@ -51,12 +52,15 @@ describe("MessagingAdapter", () => {
   test("delivers the sole MessageHandler result and absorbs transport failures", async () => {
     const originalGetInstance = MessageHandler.getInstance;
     const handleMessage = mock(async () => "Root reply");
+    const saveAssistantMessage = mock(async () => undefined);
     MessageHandler.getInstance = mock(() => ({
       handleMessage,
+      saveAssistantMessage,
     })) as unknown as typeof MessageHandler.getInstance;
     const sendText = mock(async () => undefined);
     const adapter = MessagingAdapter.instance;
     adapter.registerTransport({ platform: EMessagePlatform.Signal, sendText });
+    const internals = adapter as unknown as TAdapterInternals;
 
     await adapter.handleInboundMessage({
       platform: EMessagePlatform.Signal,
@@ -66,6 +70,7 @@ describe("MessagingAdapter", () => {
     });
     expect(handleMessage).toHaveBeenCalledTimes(1);
     expect(sendText).toHaveBeenCalledWith("+100", "Root reply");
+    expect(saveAssistantMessage).toHaveBeenCalledTimes(1);
 
     sendText.mockImplementation(async () => {
       throw new Error("offline");
@@ -78,6 +83,128 @@ describe("MessagingAdapter", () => {
         message: { type: "text", content: "again" },
       }),
     ).resolves.toBeUndefined();
+    expect(saveAssistantMessage).toHaveBeenCalledTimes(1);
+    expect(internals.inboundChatQueues.size).toBe(0);
+    MessageHandler.getInstance = originalGetInstance;
+  });
+
+  test("serializes complete inbound turns for the same canonical chat and cleans up its queue", async () => {
+    const originalGetInstance = MessageHandler.getInstance;
+    const events: string[] = [];
+    let releaseFirst: () => void = () => undefined;
+    let markFirstStarted: () => void = () => undefined;
+    const firstWaiting = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const firstStarted = new Promise<void>((resolve) => {
+      markFirstStarted = resolve;
+    });
+    const handleMessage = mock(async (message: { message: { content: string } }) => {
+      events.push(`generate:${message.message.content}`);
+
+      if (message.message.content === "first") {
+        markFirstStarted();
+        await firstWaiting;
+      }
+
+      return `reply:${message.message.content}`;
+    });
+    const saveAssistantMessage = mock(
+      async (message: { message: { content: string } }, response: string) => {
+        events.push(`save:${message.message.content}:${response}`);
+      },
+    );
+    MessageHandler.getInstance = mock(() => ({
+      handleMessage,
+      saveAssistantMessage,
+    })) as unknown as typeof MessageHandler.getInstance;
+    const sendText = mock(async (_chatId: string, text: string) => {
+      events.push(`send:${text}`);
+    });
+    const adapter = MessagingAdapter.instance;
+    adapter.registerTransport({ platform: EMessagePlatform.Signal, sendText });
+    const internals = adapter as unknown as TAdapterInternals;
+
+    const first = adapter.handleInboundMessage({
+      platform: EMessagePlatform.Signal,
+      chatId: "+100",
+      author: { id: "1", username: "Owner" },
+      message: { type: "text", content: "first" },
+    });
+    await firstStarted;
+    const second = adapter.handleInboundMessage({
+      platform: EMessagePlatform.Signal,
+      chatId: "+100",
+      author: { id: "1", username: "Owner" },
+      message: { type: "text", content: "second" },
+    });
+    await Promise.resolve();
+
+    expect(events).toEqual(["generate:first"]);
+
+    releaseFirst();
+    await Promise.all([first, second]);
+
+    expect(events).toEqual([
+      "generate:first",
+      "send:reply:first",
+      "save:first:reply:first",
+      "generate:second",
+      "send:reply:second",
+      "save:second:reply:second",
+    ]);
+    expect(internals.inboundChatQueues.size).toBe(0);
+    MessageHandler.getInstance = originalGetInstance;
+  });
+
+  test("processes different canonical chats concurrently", async () => {
+    const originalGetInstance = MessageHandler.getInstance;
+    let releaseFirst: () => void = () => undefined;
+    let markFirstStarted: () => void = () => undefined;
+    const firstWaiting = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const firstStarted = new Promise<void>((resolve) => {
+      markFirstStarted = resolve;
+    });
+    const completed: string[] = [];
+    const handleMessage = mock(async (message: { chatId: string }) => {
+      if (message.chatId === "signal:+100") {
+        markFirstStarted();
+        await firstWaiting;
+      }
+
+      completed.push(message.chatId);
+      return message.chatId;
+    });
+    const saveAssistantMessage = mock(async () => undefined);
+    MessageHandler.getInstance = mock(() => ({
+      handleMessage,
+      saveAssistantMessage,
+    })) as unknown as typeof MessageHandler.getInstance;
+    const sendText = mock(async () => undefined);
+    const adapter = MessagingAdapter.instance;
+    adapter.registerTransport({ platform: EMessagePlatform.Signal, sendText });
+
+    const first = adapter.handleInboundMessage({
+      platform: EMessagePlatform.Signal,
+      chatId: "+100",
+      author: { id: "1", username: "Owner" },
+      message: { type: "text", content: "first" },
+    });
+    await firstStarted;
+    await adapter.handleInboundMessage({
+      platform: EMessagePlatform.Signal,
+      chatId: "+200",
+      author: { id: "1", username: "Owner" },
+      message: { type: "text", content: "second" },
+    });
+
+    expect(completed).toEqual(["signal:+200"]);
+
+    releaseFirst();
+    await first;
+    expect(completed).toEqual(["signal:+200", "signal:+100"]);
     MessageHandler.getInstance = originalGetInstance;
   });
 

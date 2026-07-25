@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { ChannelType } from "discord.js";
+import type { TOption } from "../../types";
 import { CronSingleton } from "../cron";
 import { resetCronEngineJobsTable } from "../database/test-utils";
 import { MessageHandler } from "../message-handler";
@@ -7,20 +8,36 @@ import { MessagingAdapter } from "../messaging";
 import { EMessagePlatform } from "../messaging/types";
 import { DiscordSingleton } from "./index";
 
+type TReadyClient = {
+  user: {
+    tag: string;
+  };
+};
+
+type TReadyListener = (client: TReadyClient) => void;
+
 type TDiscordSingletonInternals = {
   client: {
+    login: (token: string) => Promise<string>;
+    off: (event: string, listener: TReadyListener) => void;
+    on: (event: string, listener: () => void) => void;
+    once: (event: string, listener: TReadyListener) => void;
     users: {
       fetch: (userId: string) => Promise<{
         send: (text: string) => Promise<void>;
       }>;
     };
   };
+  logger: {
+    error: (message: string) => void;
+    warning: (message: string) => void;
+  };
   handleMessage: (message: {
     author: { id: string; username: string };
     channel: { type: ChannelType };
     content: string;
   }) => Promise<void>;
-  onReady: (client: { user: { tag: string } }) => Promise<void>;
+  onReady: (client: TReadyClient) => Promise<void>;
 };
 
 type TDiscordSingletonStatic = {
@@ -34,6 +51,8 @@ type TCronSingletonStatic = {
 type TMessagingAdapterStatic = {
   _instance: MessagingAdapter | undefined;
 };
+
+const originalDiscordToken = Bun.env.DISCORD_TOKEN;
 
 function cleanupSingletons() {
   const CronSingletonWithInternals = CronSingleton as unknown as TCronSingletonStatic;
@@ -57,6 +76,95 @@ describe("DiscordSingleton", () => {
 
   afterEach(() => {
     cleanupSingletons();
+
+    if (originalDiscordToken === undefined) {
+      delete Bun.env.DISCORD_TOKEN;
+    } else {
+      Bun.env.DISCORD_TOKEN = originalDiscordToken;
+    }
+  });
+
+  test("stays unavailable without a configured Discord token", async () => {
+    Bun.env.DISCORD_TOKEN = "   ";
+
+    const discord = DiscordSingleton.instance as unknown as TDiscordSingletonInternals;
+    const login = mock(async () => "token");
+    const warning = mock(() => {});
+    discord.client = {
+      login,
+    } as never;
+    discord.logger.warning = warning;
+
+    await expect(DiscordSingleton.instance.setup()).resolves.toBeUndefined();
+
+    expect(login).toHaveBeenCalledTimes(0);
+    expect(warning).toHaveBeenCalledWith("Discord unavailable: DISCORD_TOKEN is not configured");
+
+    const adapter = MessagingAdapter.instance as unknown as {
+      transports: Map<EMessagePlatform, unknown>;
+    };
+    expect(adapter.transports.has(EMessagePlatform.Discord)).toBeFalse();
+  });
+
+  test("keeps Discord unavailable after login failure and allows a concurrent-safe retry", async () => {
+    Bun.env.DISCORD_TOKEN = "discord-token";
+
+    const discord = DiscordSingleton.instance as unknown as TDiscordSingletonInternals;
+    const adapter = MessagingAdapter.instance as unknown as {
+      registerTransport: ReturnType<typeof mock>;
+    };
+    const registerTransport = mock(() => {});
+    const login = mock(async (_token: string) => "token");
+    const off = mock(() => {});
+    const error = mock(() => {});
+    let readyListener: TOption<TReadyListener>;
+
+    login.mockImplementationOnce(async () => {
+      throw new Error("invalid token");
+    });
+    discord.client = {
+      login,
+      off,
+      on: mock(() => {}),
+      once: mock((_event: string, listener: TReadyListener) => {
+        readyListener = listener;
+      }),
+    } as never;
+    discord.logger.error = error;
+    adapter.registerTransport = registerTransport;
+
+    await expect(DiscordSingleton.instance.setup()).resolves.toBeUndefined();
+
+    expect(login).toHaveBeenCalledTimes(1);
+    expect(login).toHaveBeenCalledWith("discord-token");
+    expect(off).toHaveBeenCalledTimes(1);
+    expect(registerTransport).toHaveBeenCalledTimes(0);
+    expect(error).toHaveBeenCalledWith(
+      "Discord unavailable: failed to log in: Error: invalid token",
+    );
+
+    const retry = DiscordSingleton.instance.setup();
+    const concurrentRetry = DiscordSingleton.instance.setup();
+
+    expect(concurrentRetry).toBe(retry);
+    expect(login).toHaveBeenCalledTimes(2);
+    expect(registerTransport).toHaveBeenCalledTimes(0);
+
+    if (readyListener === undefined) {
+      throw new Error("Expected the retry to register a ready listener");
+    }
+
+    readyListener({
+      user: {
+        tag: "BellaClaw#0001",
+      },
+    });
+
+    await retry;
+    await DiscordSingleton.instance.setup();
+
+    expect(registerTransport).toHaveBeenCalledTimes(1);
+    expect(registerTransport).toHaveBeenCalledWith(DiscordSingleton.instance);
   });
 
   test("does not start cron after Discord client is ready", async () => {

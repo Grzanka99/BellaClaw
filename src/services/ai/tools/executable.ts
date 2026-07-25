@@ -1,4 +1,3 @@
-import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { Value } from "typebox/value";
 import { ECronJobType } from "../../../lib/cron-engine";
 import { fetchWeb, searchWeb } from "../../../lib/web";
@@ -6,48 +5,43 @@ import type { TOption } from "../../../types";
 import { CronSingleton } from "../../cron";
 import { Memory } from "../../memory";
 import { sortByImportanceAndDates } from "../../memory/sort";
-import { invalidateMessageHandlerInstructions } from "../../message-handler/instructions";
 import { SettingsService } from "../../settings";
 import { ConfigValidators, EConfigKey, type TConfigRecord } from "../../settings/schema";
 import { getAiModelIds } from "../providers/registry";
 import { EAiProvider, EModelPurpose } from "../types";
-import { DEFINE_MESSAGE_IMPORTANCE_TOOL } from "./define-message-importance/definition";
-import { SDefineMessageImportance } from "./define-message-importance/handler";
-import { GET_SETTINGS_TOOL } from "./get-settings/definition";
-import { SGetSettingsArgs } from "./get-settings/handler";
-import { LIST_CRON_JOBS_TOOL } from "./list-cron-jobs/definition";
-import { SListCronJobsArgs } from "./list-cron-jobs/handler";
-import { SCHEDULE_ONCE_TOOL } from "./schedule-once/definition";
+import { getSettingsTool } from "./get-settings/definition";
+import { listCronJobsTool } from "./list-cron-jobs/definition";
+import { scheduleOnceTool } from "./schedule-once/definition";
 import {
   SScheduleOnceArgs,
   type TScheduleOnceArgs,
   validateScheduleOnceArgs,
 } from "./schedule-once/handler";
-import { SCHEDULE_RECURRING_TOOL } from "./schedule-recurring/definition";
+import { scheduleRecurringTool } from "./schedule-recurring/definition";
 import {
   SScheduleRecurringArgs,
   type TScheduleRecurringArgs,
   validateScheduleRecurringArgs,
 } from "./schedule-recurring/handler";
-import { SEARCH_MEMORY_TOOL } from "./search-memory/definition";
+import { searchMemoryTool } from "./search-memory/definition";
 import {
   convertSearchMemoryArgs,
   SSearchMemoryArgs,
   type TSearchMemoryArgs,
 } from "./search-memory/handler";
-import { UNSCHEDULE_CRON_JOB_TOOL } from "./unschedule-cron-job/definition";
+import { unscheduleCronJobTool } from "./unschedule-cron-job/definition";
 import { SUnscheduleCronJobArgs } from "./unschedule-cron-job/handler";
-import { UPDATE_CRON_JOB_TOOL } from "./update-cron-job/definition";
+import { updateCronJobTool } from "./update-cron-job/definition";
 import {
   SUpdateCronJobArgs,
   type TUpdateCronJobArgs,
   validateUpdateCronJobArgs,
 } from "./update-cron-job/handler";
-import { UPDATE_SETTINGS_TOOL } from "./update-settings/definition";
+import { updateSettingsTool } from "./update-settings/definition";
 import { SUpdateSettingsArgs, type TUpdateSettingsArgs } from "./update-settings/handler";
-import { WEB_FETCH_TOOL } from "./web-fetch/definition";
+import { webFetchTool } from "./web-fetch/definition";
 import { SWebFetchArgs, validateWebFetchArgs } from "./web-fetch/handler";
-import { WEB_SEARCH_TOOL } from "./web-search/definition";
+import { webSearchTool } from "./web-search/definition";
 import { SWebSearchArgs } from "./web-search/handler";
 
 const SEQUENTIAL: "sequential" = "sequential";
@@ -73,24 +67,11 @@ function requireChatId(chatId: TOption<string>): string {
   return chatId;
 }
 
-export function createImportanceTool(): AgentTool<typeof SDefineMessageImportance> {
-  return {
-    name: DEFINE_MESSAGE_IMPORTANCE_TOOL,
-    label: "Define message importance",
-    description: "Assign an importance level to the supplied message",
-    parameters: SDefineMessageImportance,
-    execute: async (_toolCallId: string, args: unknown) =>
-      textResult(Value.Decode(SDefineMessageImportance, args)),
-  };
-}
-
 export function createMemoryTools(context: TToolExecutionContext) {
   return [
     {
-      name: SEARCH_MEMORY_TOOL,
+      ...searchMemoryTool,
       label: "Search memory",
-      description: "Search stored conversation memory",
-      parameters: SSearchMemoryArgs,
       execute: async (_toolCallId: string, args: unknown) => {
         const parsedArgs: TSearchMemoryArgs = Value.Decode(SSearchMemoryArgs, args);
         const convertedArgs = convertSearchMemoryArgs(parsedArgs);
@@ -114,10 +95,8 @@ export function createMemoryTools(context: TToolExecutionContext) {
 export function createSettingsTools(context: TToolExecutionContext) {
   return [
     {
-      name: GET_SETTINGS_TOOL,
+      ...getSettingsTool,
       label: "Get settings",
-      description: "Read the owner's assistant settings",
-      parameters: SGetSettingsArgs,
       execute: async () => {
         const settings = await SettingsService.instance.getAll(requireChatId(context.chatId));
         const provider = settings[EConfigKey.AiProvider];
@@ -137,10 +116,8 @@ export function createSettingsTools(context: TToolExecutionContext) {
       },
     },
     {
-      name: UPDATE_SETTINGS_TOOL,
+      ...updateSettingsTool,
       label: "Update settings",
-      description: "Update the owner's assistant settings",
-      parameters: SUpdateSettingsArgs,
       executionMode: SEQUENTIAL,
       execute: async (_toolCallId: string, args: unknown) => {
         const parsedArgs: TUpdateSettingsArgs = Value.Decode(SUpdateSettingsArgs, args);
@@ -198,7 +175,6 @@ export function createSettingsTools(context: TToolExecutionContext) {
           await SettingsService.instance.set(chatId, update.key, update.value);
         }
 
-        invalidateMessageHandlerInstructions(chatId);
         return textResult({ settings: await SettingsService.instance.getAll(chatId) });
       },
     },
@@ -210,18 +186,14 @@ export function createSchedulingTools(context: TToolExecutionContext) {
 
   return [
     {
-      name: LIST_CRON_JOBS_TOOL,
+      ...listCronJobsTool,
       label: "List cron jobs",
-      description: "List the owner's scheduled jobs",
-      parameters: SListCronJobsArgs,
       execute: async () =>
         textResult(await CronSingleton.instance.list(requireChatId(context.chatId))),
     },
     {
-      name: SCHEDULE_ONCE_TOOL,
+      ...scheduleOnceTool,
       label: "Schedule one-time job",
-      description: "Schedule a one-time reminder or autonomous task",
-      parameters: SScheduleOnceArgs,
       executionMode: SEQUENTIAL,
       execute: async (_toolCallId: string, args: unknown) => {
         const parsedArgs: TScheduleOnceArgs = Value.Decode(SScheduleOnceArgs, args);
@@ -240,10 +212,8 @@ export function createSchedulingTools(context: TToolExecutionContext) {
       },
     },
     {
-      name: SCHEDULE_RECURRING_TOOL,
+      ...scheduleRecurringTool,
       label: "Schedule recurring job",
-      description: "Schedule a recurring reminder or autonomous task",
-      parameters: SScheduleRecurringArgs,
       executionMode: SEQUENTIAL,
       execute: async (_toolCallId: string, args: unknown) => {
         const parsedArgs: TScheduleRecurringArgs = Value.Decode(SScheduleRecurringArgs, args);
@@ -262,10 +232,8 @@ export function createSchedulingTools(context: TToolExecutionContext) {
       },
     },
     {
-      name: UPDATE_CRON_JOB_TOOL,
+      ...updateCronJobTool,
       label: "Update cron job",
-      description: "Update an existing scheduled job",
-      parameters: SUpdateCronJobArgs,
       executionMode: SEQUENTIAL,
       execute: async (_toolCallId: string, args: unknown) => {
         const parsedArgs: TUpdateCronJobArgs = Value.Decode(SUpdateCronJobArgs, args);
@@ -367,10 +335,8 @@ export function createSchedulingTools(context: TToolExecutionContext) {
       },
     },
     {
-      name: UNSCHEDULE_CRON_JOB_TOOL,
+      ...unscheduleCronJobTool,
       label: "Delete cron job",
-      description: "Delete a scheduled job",
-      parameters: SUnscheduleCronJobArgs,
       executionMode: SEQUENTIAL,
       execute: async (_toolCallId: string, args: unknown) => {
         const parsedArgs = Value.Decode(SUnscheduleCronJobArgs, args);
@@ -392,10 +358,8 @@ export function createSchedulingTools(context: TToolExecutionContext) {
 export function createWebTools() {
   return [
     {
-      name: WEB_SEARCH_TOOL,
+      ...webSearchTool,
       label: "Web search",
-      description: "Search the public web for current information",
-      parameters: SWebSearchArgs,
       execute: async (_toolCallId: string, args: unknown, signal?: AbortSignal) => {
         const parsedArgs = Value.Decode(SWebSearchArgs, args);
         return textResult({
@@ -405,10 +369,8 @@ export function createWebTools() {
       },
     },
     {
-      name: WEB_FETCH_TOOL,
+      ...webFetchTool,
       label: "Web fetch",
-      description: "Fetch a public HTTP or HTTPS URL",
-      parameters: SWebFetchArgs,
       execute: async (_toolCallId: string, args: unknown, signal?: AbortSignal) => {
         const parsedArgs = validateWebFetchArgs(Value.Decode(SWebFetchArgs, args));
         return textResult(await fetchWeb(parsedArgs, signal));

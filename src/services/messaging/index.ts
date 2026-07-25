@@ -5,6 +5,7 @@ import {
 } from "../../handlers/generate-reminder-text";
 import type { TCronJobContext } from "../../lib/cron-engine";
 import type { TOption } from "../../types";
+import { AsyncQueue } from "../../utils/async-queue";
 import { createLogger, type TLogger } from "../../utils/logger";
 import { AgentHarness } from "../ai/agent-harness";
 import { ERole } from "../ai/types";
@@ -25,6 +26,13 @@ import type { TIncommingMessage } from "../message-handler/types";
 import { createCanonicalChatKey, parseCanonicalChatKey } from "./chat-key";
 import type { EMessagePlatform, TMessageTransport, TPlatformMessage } from "./types";
 
+type TInboundChatQueue = {
+  queue: AsyncQueue;
+  pending: number;
+};
+
+type TMemorySaveResult = Awaited<ReturnType<Memory["save"]>>;
+
 export class MessagingAdapter {
   private static _instance: TOption<MessagingAdapter>;
   private logger: TLogger = createLogger("MESSAGING");
@@ -32,6 +40,7 @@ export class MessagingAdapter {
   private ai = AgentHarness.instance;
   private cronListenerRegistered = false;
   private runningCronTaskKeys = new Set<string>();
+  private inboundChatQueues = new Map<string, TInboundChatQueue>();
 
   private constructor() {}
 
@@ -55,6 +64,35 @@ export class MessagingAdapter {
 
   public async handleInboundMessage(message: TPlatformMessage) {
     const canonicalChatId = createCanonicalChatKey(message.platform, message.chatId);
+    let chatQueue = this.inboundChatQueues.get(canonicalChatId);
+
+    if (chatQueue === undefined) {
+      chatQueue = {
+        queue: new AsyncQueue(),
+        pending: 0,
+      };
+      this.inboundChatQueues.set(canonicalChatId, chatQueue);
+    }
+
+    chatQueue.pending += 1;
+
+    try {
+      await chatQueue.queue.enqueue(() =>
+        this.handleInboundMessageForChat(message, canonicalChatId),
+      );
+    } finally {
+      chatQueue.pending -= 1;
+
+      if (chatQueue.pending === 0 && this.inboundChatQueues.get(canonicalChatId) === chatQueue) {
+        this.inboundChatQueues.delete(canonicalChatId);
+      }
+    }
+  }
+
+  private async handleInboundMessageForChat(
+    message: TPlatformMessage,
+    canonicalChatId: string,
+  ): Promise<void> {
     const handlerStart = performance.now();
     const trace: TBehaviorTraceContext = {
       turnId: createMessageTurnId(),
@@ -133,6 +171,8 @@ export class MessagingAdapter {
         );
         return;
       }
+
+      await handler.saveAssistantMessage(incomingMessage, reply);
 
       logHandlerCompleted(
         trace,
@@ -495,13 +535,13 @@ function logMemorySaveCompleted(
   author: ERole,
   importance: EMemoryImportance,
   messageChars: number,
-  result: unknown,
+  result: TMemorySaveResult,
 ) {
   let success = true;
   let level = EBehaviorLogLevel.Info;
   let error: TOption<string>;
 
-  if (isRecord(result) && "operation" in result) {
+  if ("operation" in result) {
     success = false;
     level = EBehaviorLogLevel.Warning;
     error = String(result.error);
@@ -522,8 +562,4 @@ function logMemorySaveCompleted(
     },
     error: sanitizeErrorMessage(error),
   });
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

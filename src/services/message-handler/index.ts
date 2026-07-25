@@ -14,6 +14,8 @@ import { EConfigKey, type TConfigRecord } from "../settings/schema";
 import { getMessageTrace } from "./trace";
 import type { TIncommingMessage, TOutgoingMessage } from "./types";
 
+type TMemorySaveResult = Awaited<ReturnType<Memory["save"]>>;
+
 export class MessageHandler {
   private static _instances = new Map<string, MessageHandler>();
   private logger: TLogger;
@@ -102,34 +104,6 @@ export class MessageHandler {
 
       const finalResponse = aiRes.text;
 
-      this.queue.enqueue(async () => {
-        const respImpStart = performance.now();
-        const responseImportance = await this.defineMessageImportance(
-          finalResponse,
-          settings,
-          trace,
-          ERole.Assistant,
-        );
-        this.logger.info(
-          `handleMessage: response importance: ${responseImportance} (${(performance.now() - respImpStart).toFixed(0)}ms)`,
-        );
-
-        await this.saveMessageToDatabase(
-          {
-            chatId: message.chatId,
-            message: {
-              type: "text",
-              content: finalResponse,
-            },
-            author: {
-              type: ERole.Assistant,
-            },
-          },
-          responseImportance,
-          trace,
-        );
-      });
-
       this.logger.info(
         `handleMessage: done (${(performance.now() - handleMessageStart).toFixed(0)}ms)`,
       );
@@ -155,6 +129,38 @@ export class MessageHandler {
       );
       throw error;
     }
+  }
+
+  public async saveAssistantMessage(message: TIncommingMessage, response: string): Promise<void> {
+    const trace = getMessageTrace(message);
+    const settings = structuredClone(await SettingsService.instance.getAll(message.chatId));
+    const respImpStart = performance.now();
+    const responseImportance = await this.defineMessageImportance(
+      response,
+      settings,
+      trace,
+      ERole.Assistant,
+    );
+    this.logger.info(
+      `saveAssistantMessage: response importance: ${responseImportance} (${(performance.now() - respImpStart).toFixed(0)}ms)`,
+    );
+
+    await this.queue.enqueue(() =>
+      this.saveMessageToDatabase(
+        {
+          chatId: message.chatId,
+          message: {
+            type: "text",
+            content: response,
+          },
+          author: {
+            type: ERole.Assistant,
+          },
+        },
+        responseImportance,
+        trace,
+      ),
+    );
   }
 
   private async defineMessageImportance(
@@ -224,7 +230,7 @@ export class MessageHandler {
           message.message.content.length,
           result,
         );
-        return !isRecord(result) || !("operation" in result);
+        return !("operation" in result);
       }
       case ERole.Assistant: {
         const result = await this.memory.save({
@@ -241,7 +247,7 @@ export class MessageHandler {
           message.message.content.length,
           result,
         );
-        return !isRecord(result) || !("operation" in result);
+        return !("operation" in result);
       }
     }
   }
@@ -397,7 +403,7 @@ function logMemorySaveCompleted(
   author: ERole,
   importance: EMemoryImportance,
   messageChars: number,
-  result: unknown,
+  result: TMemorySaveResult,
 ) {
   if (trace === undefined) {
     return;
@@ -407,7 +413,7 @@ function logMemorySaveCompleted(
   let level = EBehaviorLogLevel.Info;
   let error: TOption<string>;
 
-  if (isRecord(result) && "operation" in result) {
+  if ("operation" in result) {
     success = false;
     level = EBehaviorLogLevel.Warning;
     error = String(result.error);
@@ -428,10 +434,6 @@ function logMemorySaveCompleted(
     },
     error: sanitizeErrorMessage(error),
   });
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function createCurrentTimeContext(settings: TConfigRecord) {

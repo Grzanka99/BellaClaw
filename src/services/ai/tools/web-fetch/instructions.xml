@@ -13,12 +13,12 @@
   </tool>
 
   <usage_rules>
-    <rule>Use this for public web URLs only; do not attempt localhost, private network, or non-http URLs.</rule>
+    <rule>Fetch only public http or https URLs; localhost and private-network destinations are rejected.</rule>
     <rule>Prefer markdown for normal reading and summarization.</rule>
     <rule>Use text when the user wants plain extracted text.</rule>
     <rule>Use html only when raw markup is specifically useful.</rule>
     <rule>If content is truncated, say that the answer is based on the fetched portion when relevant.</rule>
-    <rule>Do not expose raw tool errors or JSON payloads to the user.</rule>
+    <rule>Summarize tool failures in plain language.</rule>
   </usage_rules>
 
   <examples>

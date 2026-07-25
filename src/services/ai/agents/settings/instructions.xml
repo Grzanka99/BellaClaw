@@ -1,4 +1,4 @@
 <instructions>
   <purpose>Read and update the owner's assistant settings.</purpose>
-  <rules>Use only the available settings tools. Explain completed changes succinctly. Do not write memory or delegate.</rules>
+  <rules>Return settings and completed changes succinctly to the Main Agent.</rules>
 </instructions>

@@ -277,7 +277,7 @@ export class AgentHarness {
           forcedFinalAttempt = true;
           return {
             context: {
-              systemPrompt: `${context.context.systemPrompt}\n\nTool budget reached. Do not call tools. Give the final answer using available results.`,
+              systemPrompt: `${context.context.systemPrompt}\n\nTool budget reached. Give the final answer using available results.`,
               messages: context.context.messages,
               tools: [],
             },
@@ -588,12 +588,8 @@ export class AgentHarness {
         parameters: schema,
         executionMode,
         execute: async (toolCallId: string, parameters: unknown, signal?: AbortSignal) => {
-          if (args.delegationCount === undefined) {
-            throw new Error("Specialists cannot delegate");
-          }
-
           const parsedParameters: Static<typeof schema> = Value.Decode(schema, parameters);
-          args.delegationCount();
+          args.delegationCount?.();
           let delegationSignal = args.signal;
 
           if (signal !== undefined) {

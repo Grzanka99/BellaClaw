@@ -107,19 +107,20 @@ Use `Bun.env.*` — never `process.env`.
 - Outside classes: import and use the `logger` utility directly
 - Never use raw `console.log` inside service files
 
-## Tool Definitions Pattern
+## AI Tool Structure
 
 Each tool lives in its own directory under `src/services/ai/tools/`:
 
 ```
 src/services/ai/tools/<tool-name>/
-  definition.ts    — exports TypeBox schema and Pi tool metadata
-  handler.ts       — typed execution and domain validation
+  definition.ts    — exports the tool name and schema-backed Pi metadata
+  handler.ts       — exports the TypeBox schema, argument type, and domain validation/conversion
   instructions.xml — detailed instructions for the AI on when/how to use the tool
 ```
 
 - `definition.ts`: Use `createToolDefinition()` with an `S*` TypeBox schema.
-- `handler.ts`: Treat tool arguments as structured data. TypeBox/Pi validates shape; keep cross-field domain validation in handlers and throw descriptive errors. Never apply `JSON.parse` to tool arguments.
+- `handler.ts`: Treat tool arguments as structured data. TypeBox/Pi validates shape; keep cross-field domain validation and transport conversion here. Never apply `JSON.parse` to tool arguments.
+- `executable.ts`: Centrally binds definition metadata and handlers to BellaClaw services as Pi `AgentTool`s. Keep service execution and tool-result shaping here.
 - `instructions.xml`: XML format with `<purpose>`, `<tool>`, `<usage_rules>`, and `<examples>` sections.
 
 ## Scope Rules
@@ -129,7 +130,6 @@ src/services/ai/tools/<tool-name>/
 - Do not fix type errors in files outside the current task's scope, even if you notice them.
 - If you find errors that are caused by current task changes, ask for permission to fix them
 - If a type error in an unrelated file blocks your task, report it instead of silently fixing it.
-- Do not modify stub methods (those with `throw "Not implemented"`) unless explicitly asked to implement them.
 - NEVER use types cast - 'as Type' - outside of tests
 - Instead of `some-type | undefined` use `TOption<some-type>`
 - Prefer braces even if statement has one line

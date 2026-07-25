@@ -17,8 +17,8 @@
   </tool>
 
   <response_handling>
-    If the search is not needed or no memories match the query, return an empty array or
-    do not call the tool. Do not fabricate memories.
+    Skip the tool when memory recall is not needed. Treat an empty result as no matching
+    context. Do not fabricate memories.
   </response_handling>
 
   <filter_priority>
@@ -31,13 +31,13 @@
   </filter_priority>
 
   <usage_rules>
-    <rule>Only call this tool when the user explicitly asks about past information or when recalling context is essential</rule>
+    <rule>Call this tool when the task concerns past information or recalling context is essential</rule>
     <rule>Use searchString to narrow results when the user references a specific topic</rule>
     <rule>Use timeRange when the user mentions a specific time period</rule>
     <rule>Always include an explicit Z or numeric timezone offset in timeRange start and end values</rule>
     <rule>Use limit to avoid overwhelming context with too many results (prefer 5-10)</rule>
-    <rule>Use importance to prioritize high-value memories when the query is broad</rule>
-    <rule>When no filters are needed, simply return an empty array or do not call the tool</rule>
+    <rule>Use importance to filter by memory importance when relevant</rule>
+    <rule>Use an empty argument object for a broad memory search with no filters</rule>
   </usage_rules>
 
   <examples>
@@ -51,21 +51,21 @@
     </example>
 
     <example>
-      <context>User says: "What did I tell you about my job last week?"</context>
+      <context>Current date is 2099-01-27. User says: "What did I tell you about my job last week?"</context>
       <toolCall>
         <searchString>job</searchString>
         <timeRange>
-          <start>2025-01-20T00:00:00+01:00</start>
-          <end>2025-01-27T23:59:59+01:00</end>
+          <start>2099-01-20T00:00:00+01:00</start>
+          <end>2099-01-26T23:59:59+01:00</end>
         </timeRange>
         <importance>["medium", "high"]</importance>
       </toolCall>
-      <reasoning>User is asking about work-related information from last week. Search with text filter and time range. Date values are examples — always compute actual dates relative to the current time in the {{config.ai.instructions.timezone}} timezone.</reasoning>
+      <reasoning>User is asking about work-related information from last week. Search with text and time filters computed from the supplied current date in the {{config.ai.instructions.timezone}} timezone.</reasoning>
     </example>
 
     <example>
       <context>User says: "hey co tam?"</context>
-      <reasoning>Casual greeting with no need to search past memories. Do not call the search tool.</reasoning>
+      <reasoning>Casual greeting with no need to search past memories.</reasoning>
     </example>
   </examples>
 

@@ -14,12 +14,11 @@
 
   <usage_rules>
     <rule>Use this only when the user needs current, external, or source-backed information.</rule>
-    <rule>Do not use it for simple conversation, internal memory recall, or facts already present in context.</rule>
     <rule>Prefer a focused query and maxResults of 3-5 unless the user asks for broader research.</rule>
     <rule>Use topic news for news queries, finance for finance/market queries, and general otherwise.</rule>
     <rule>Use timeRange only when freshness matters: day, week, month, or year.</rule>
     <rule>Use web-fetch afterward only when result content is needed to answer accurately.</rule>
-    <rule>If the tool fails because of authentication, quota, or service errors, do not retry the same search. Explain briefly that search was unavailable.</rule>
+    <rule>After an authentication, quota, or service failure, explain briefly that search was unavailable instead of repeating the same query.</rule>
   </usage_rules>
 
   <examples>

@@ -70,10 +70,10 @@ describe("generateReminderText", () => {
     expect(args?.prompt).toContain('"timezone":"America/New_York"');
     expect(args?.prompt).toContain('"localDateTime":"2026-01-05 03:00:00"');
     expect(args?.prompt).toContain('"localWeekday":"Monday"');
-    expect(args?.instructions).toContain("Always reply in Polish");
+    expect(args?.instructions).toContain("Default to Polish");
     expect(args?.instructions).toContain("Address the owner as Captain");
     expect(args?.instructions).toContain("You are replying through Signal");
-    expect(args?.instructions).toContain("Never use headings, tables, blockquotes");
+    expect(args?.instructions).toContain("Use only Signal styled-text syntax");
   });
 
   test("uses fallback for blank output and failures", async () => {

@@ -1,54 +1,40 @@
-// @ts-nocheck
-// biome-ignore-all lint: legacy queue implementation kept as-is
-
 export class AsyncQueue {
-  private queue: Array<[() => Promise<unknown>, (v: any) => void, (v: string) => void]> = [];
+  private queue: Array<() => Promise<void>> = [];
   private isRunning = false;
 
-  private resolver: (v: boolean) => void = (_) => {};
-  private rejecter: (v: boolean) => void = (_) => {};
+  public enqueue<T>(callback: () => Promise<T>, autostart = true): Promise<T> {
+    return new Promise((resolve, reject) => {
+      this.queue.push(async () => {
+        try {
+          resolve(await callback());
+        } catch (error) {
+          reject(error);
+        }
+      });
 
-  public async enqueue<T>(callback: () => Promise<T>, autostart = true): Promise<T> {
-    return new Promise((res, rej) => {
-      this.queue.push([callback, res, rej]);
       if (!this.isRunning && autostart) {
         this.start();
       }
     });
   }
 
-  private run() {
-    if (!this.queue.length) {
-      this.done();
-      return;
+  private async run(): Promise<void> {
+    let callback = this.queue.shift();
+    while (callback !== undefined) {
+      await callback();
+      callback = this.queue.shift();
     }
 
-    const curr = this.queue.splice(0, 1)[0];
-
-    curr[0]()
-      .then((r) => {
-        curr[1](r);
-        this.run();
-      })
-      .catch((e) => {
-        curr[2](e);
-        this.rejecter(e);
-      });
-  }
-
-  private done() {
-    this.resolver(true);
     this.isRunning = false;
   }
 
-  public start() {
-    this.isRunning = true;
-    this.run();
+  public start(): void {
+    if (this.isRunning) {
+      return;
+    }
 
-    new Promise((res, rej) => {
-      this.resolver = res;
-      this.rejecter = rej;
-    });
+    this.isRunning = true;
+    void this.run();
   }
 
   public get enqueued(): number {

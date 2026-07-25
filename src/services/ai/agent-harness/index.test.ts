@@ -132,7 +132,7 @@ describe("AgentHarness", () => {
     });
 
     expect(systemPrompt).toContain("*italic*, **bold**, `monospace`, ~strikethrough~");
-    expect(systemPrompt).toContain("Never use headings, tables, blockquotes, embeds");
+    expect(systemPrompt).toContain("Use only Signal styled-text syntax");
     expect(systemPrompt).not.toContain("Discord mentions are supported");
   });
 
@@ -501,7 +501,7 @@ describe("AgentHarness", () => {
     expect(schedulingTask).toContain("returned by Memory");
   });
 
-  test("enforces 30 delegations, specialist nonblank results, and depth one", async () => {
+  test("enforces 30 delegations and specialist nonblank results", async () => {
     const harness = AgentHarness.instance as unknown as {
       createDelegationTools(args: {
         name: EAgentName;
@@ -572,15 +572,6 @@ describe("AgentHarness", () => {
         parentToolCallId: "call-0",
         delegationCount: undefined,
       }),
-    );
-
-    const specialistTools = harness.createDelegationTools({
-      ...base,
-      name: EAgentName.Memory,
-      delegationCount: undefined,
-    });
-    expect(specialistTools[0]?.execute("nested", { task: "no" })).rejects.toThrow(
-      "Specialists cannot delegate",
     );
 
     harness.run = mock(async () => ({

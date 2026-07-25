@@ -1,8 +1,8 @@
 <instructions>
 
   <purpose>
-    Read and display the user's current effective assistant settings and computed AI runtime.
-    Use this whenever the user asks to view, check, or inspect any configured preference
+    Read the user's current effective assistant settings and computed AI runtime for Main.
+    Use this whenever the task asks to view, check, or inspect any configured preference
     (timezone, language, assistant name, address style, reply length, AI provider, or chat model).
   </purpose>
 
@@ -10,15 +10,15 @@
     <name>get-settings</name>
     <description>
       Returns the full effective settings record and computed provider/model-purpose mapping for the current user. Takes no arguments.
-      The owner is resolved automatically from the chat context — never ask the user for an owner key.
+      The owner is resolved automatically from the chat context.
     </description>
   </tool>
 
   <usage_rules>
-    <rule>Call this tool when the user asks what is currently configured.</rule>
+    <rule>Call this tool when the task asks what is currently configured.</rule>
     <rule>This tool takes no arguments. Always pass an empty object.</rule>
-    <rule>After receiving the settings, present them to the user in a clear, human-readable way in the user's language.</rule>
-    <rule>Do not invent settings that are not present in the returned record.</rule>
+    <rule>Return the relevant settings to Main in a clear, human-readable form.</rule>
+    <rule>Report only settings and runtime values present in the returned record.</rule>
   </usage_rules>
 
   <result_fields>
@@ -27,20 +27,20 @@
     - aiRuntime.provider — the active provider resolved from settings
     - aiRuntime.models — the computed code-registry model IDs for Utility, Main, Specialist, SpecialistAccurate, and ScheduledTask
 
-    Model IDs are computed runtime values. They are not stored settings and cannot be edited through settings tools.
+    Model IDs are computed runtime values.
   </result_fields>
 
   <examples>
     <example>
       <message>"what timezone are you using?"</message>
       <action>Call get-settings with an empty object.</action>
-      <response>"You're currently on Europe/Warsaw."</response>
+      <response>Return the configured timezone to Main.</response>
     </example>
 
     <example>
       <message>"what model are you running on?"</message>
       <action>Call get-settings with an empty object.</action>
-      <response>"Your active provider is opencode-go and the chat model is glm-5.2."</response>
+      <response>Report aiRuntime.provider and the Main model ID returned in aiRuntime.models.</response>
     </example>
   </examples>
 

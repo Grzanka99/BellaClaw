@@ -6,6 +6,7 @@ import { SettingsService } from "../../settings";
 import { DefaultConfigRecord, EConfigKey } from "../../settings/schema";
 import { EAiProvider, EModelPurpose } from "../types";
 import { createMemoryTools, createSchedulingTools, createSettingsTools } from "./executable";
+import { scheduleOnceTool } from "./schedule-once/definition";
 
 const context = {
   chatId: "discord:1",
@@ -22,6 +23,15 @@ function reset() {
 afterEach(reset);
 
 describe("production executable tools", () => {
+  test("uses definition metadata in the production binding", () => {
+    const tool = createSchedulingTools(context).find(
+      (candidate) => candidate.name === "schedule-once",
+    );
+
+    expect(tool?.description).toBe(scheduleOnceTool.description);
+    expect(tool?.parameters).toBe(scheduleOnceTool.parameters);
+  });
+
   test("uses the schedule-once handler validation and date conversion", async () => {
     const createOnce = mock(async (args) => ({
       ...args,

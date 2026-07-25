@@ -84,9 +84,6 @@ export function sanitizeToolCallArguments(toolCall: TToolCall): TSanitizedLogDet
     case "web-fetch": {
       return sanitizeWebFetchArguments(args);
     }
-    case "define-message-importance": {
-      return sanitizeDefineMessageImportanceArguments(args);
-    }
     case "get-settings": {
       return { summary: "get-settings args", metadata: { argumentsValid: true } };
     }
@@ -143,9 +140,6 @@ export function sanitizeToolResult(result: TNormalizedToolResult): TSanitizedLog
     }
     case "web-fetch": {
       return sanitizeWebFetchResult(data);
-    }
-    case "define-message-importance": {
-      return sanitizeDefineMessageImportanceResult(data);
     }
     case "get-settings": {
       return sanitizeSettingsResult("get-settings", data);
@@ -303,27 +297,6 @@ function sanitizeWebFetchArguments(args: Record<string, unknown>): TSanitizedLog
 
   return {
     summary: `web-fetch args host=${host ?? "unknown"}`,
-    metadata,
-  };
-}
-
-function sanitizeDefineMessageImportanceArguments(
-  args: Record<string, unknown>,
-): TSanitizedLogDetails {
-  const importance = readString(args, "importance");
-  const reasoning = readString(args, "reasoning");
-  const metadata: TBehaviorMetadata = {
-    argumentsValid: true,
-  };
-
-  if (importance !== undefined) {
-    metadata.importance = importance;
-  }
-
-  addLength(metadata, "reasoningChars", reasoning);
-
-  return {
-    summary: `define-message-importance args importance=${importance ?? "unknown"}`,
     metadata,
   };
 }
@@ -557,30 +530,6 @@ function sanitizeWebFetchResult(data: unknown): TSanitizedLogDetails {
 
   return {
     summary: `web-fetch completed host=${host ?? "unknown"}`,
-    metadata,
-  };
-}
-
-function sanitizeDefineMessageImportanceResult(data: unknown): TSanitizedLogDetails {
-  const metadata: TBehaviorMetadata = {
-    status: "completed",
-  };
-  let importance = "unknown";
-
-  if (isRecord(data)) {
-    const parsedImportance = readString(data, "importance");
-    const reasoning = readString(data, "reasoning");
-
-    if (parsedImportance !== undefined) {
-      importance = parsedImportance;
-      metadata.importance = parsedImportance;
-    }
-
-    addLength(metadata, "reasoningChars", reasoning);
-  }
-
-  return {
-    summary: `define-message-importance completed importance=${importance}`,
     metadata,
   };
 }

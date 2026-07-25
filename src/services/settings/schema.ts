@@ -10,16 +10,13 @@ export enum EConfigKey {
   AiInstructionsTimezone = "ai.instructions.timezone",
   AiInstructionsTimeFormat = "ai.instructions.timeFormat",
   AiInstructionsPreferredReplyLength = "ai.instructions.preferredReplyLength",
-  AiInstructionsMemoryRetentionLow = "ai.instructions.memoryRetention.low",
-  AiInstructionsMemoryRetentionMedium = "ai.instructions.memoryRetention.medium",
-  AiInstructionsMemoryRetentionHigh = "ai.instructions.memoryRetention.high",
 }
 
 export type TConfigRecord = { [key in EConfigKey]: string };
 
 export const DefaultConfigRecord: TConfigRecord = {
   [EConfigKey.AiProvider]: EAiProvider.OpencodeGo,
-  [EConfigKey.AiInstructionsPersona]: `You are a personal assistant named {{config.ai.instructions.assistantName}}, inspired by Bellatrix Lestrange. You are intensely devoted, passionate, and fiercely loyal to your supervisor. Your tone carries a dark elegance — sharp, dramatic, and unapologetically bold. You address your supervisor with zealous dedication, as if their every request is of utmost importance. Do not mention your capabilities, tools, or limitations unless directly asked. You cooperate closely with the user on their tasks and daily workflow — treat their goals as your own with unwavering commitment. Keep your replies short and concise. Prefer {{config.ai.instructions.preferredReplyLength}} unless the user explicitly asks for detail or the task requires a longer explanation. Avoid unnecessary filler, preamble, or restating the question.`,
+  [EConfigKey.AiInstructionsPersona]: `You are a personal assistant named {{config.ai.instructions.assistantName}}, inspired by Bellatrix Lestrange. You are intensely devoted, passionate, and fiercely loyal to your supervisor. Your tone carries a dark elegance — sharp, dramatic, and unapologetically bold. You address your supervisor with zealous dedication, as if their every request is of utmost importance. Discuss your capabilities, tools, or limitations when directly asked or when needed to set accurate expectations. You cooperate closely with the user on their tasks and daily workflow — treat their goals as your own with unwavering commitment. Keep your replies short, concise, and focused. Prefer {{config.ai.instructions.preferredReplyLength}} unless the user explicitly asks for detail or the task requires a longer explanation.`,
   [EConfigKey.AiInstructionsAssistantName]: "Bellatrix",
   [EConfigKey.AiInstructionsLanguage]: "Polish",
   [EConfigKey.AiInstructionsAddressStyle]:
@@ -27,10 +24,6 @@ export const DefaultConfigRecord: TConfigRecord = {
   [EConfigKey.AiInstructionsTimezone]: "Europe/Warsaw",
   [EConfigKey.AiInstructionsTimeFormat]: "24-hour format (e.g. 14:30, not 2:30 PM)",
   [EConfigKey.AiInstructionsPreferredReplyLength]: "1-3 sentences",
-  [EConfigKey.AiInstructionsMemoryRetentionLow]: "Discard after short-term context window",
-  [EConfigKey.AiInstructionsMemoryRetentionMedium]: "Keep for several weeks, review periodically",
-  [EConfigKey.AiInstructionsMemoryRetentionHigh]:
-    "Keep indefinitely, reference in future conversations",
 };
 
 const SNonEmptyString = z.string().trim().min(1);
@@ -55,9 +48,6 @@ export const ConfigValidators: { [key in EConfigKey]: z.ZodType<string> } = {
   [EConfigKey.AiInstructionsTimezone]: STimezone,
   [EConfigKey.AiInstructionsTimeFormat]: SNonEmptyString,
   [EConfigKey.AiInstructionsPreferredReplyLength]: SNonEmptyString,
-  [EConfigKey.AiInstructionsMemoryRetentionLow]: SNonEmptyString,
-  [EConfigKey.AiInstructionsMemoryRetentionMedium]: SNonEmptyString,
-  [EConfigKey.AiInstructionsMemoryRetentionHigh]: SNonEmptyString,
 };
 
 export function createStableAiRuntimeSettings(settings: TConfigRecord): TConfigRecord {
