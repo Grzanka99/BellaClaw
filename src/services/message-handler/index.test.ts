@@ -139,6 +139,39 @@ describe("MessageHandler", () => {
     expect(internals.ai.runMain).toHaveBeenCalledTimes(1);
   });
 
+  test("rejects when the assistant message cannot be saved", async () => {
+    (SettingsService as unknown as { _instance: unknown })._instance = {
+      getAll: mock(async () => DefaultConfigRecord),
+    };
+    const handler = MessageHandler.getInstance("discord:save-failure");
+    const internals = handler as unknown as THandlerInternals;
+    internals.memory = {
+      findRecent: mock(async () => ({ success: true, data: [] })),
+      save: mock(async () => ({ operation: "write", error: "database unavailable" })),
+    };
+    internals.queue = { enqueue: async (callback) => callback() };
+    internals.ai = {
+      completeText: mock(async () => EMemoryImportance.Low),
+      runMain: mock(async () => ({
+        text: "unused",
+        iterations: 1,
+        toolCallCount: 0,
+        stopReason: "completed",
+      })),
+    };
+
+    await expect(
+      handler.saveAssistantMessage(
+        {
+          chatId: "discord:save-failure",
+          message: { type: "text", content: "question" },
+          author: { type: ERole.User, id: "1", username: "Owner" },
+        },
+        "Delivered reply",
+      ),
+    ).rejects.toThrow("Failed to save assistant message");
+  });
+
   test("returns the user fallback and does not save an assistant message for blank final output", async () => {
     (SettingsService as unknown as { _instance: unknown })._instance = {
       getAll: mock(async () => DefaultConfigRecord),

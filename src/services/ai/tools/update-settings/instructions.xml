@@ -31,8 +31,8 @@
     <rule>Use only the listed fields.</rule>
     <rule>
       If the user's message contains BOTH a settings change AND a normal task (mixed intent),
-      apply the settings change and return its result to Main so Main can continue the remaining
-      task with the appropriate specialist.
+      apply only the settings change and return its result and the deferred task to Main.
+      The normal task must run in a new user turn so every agent uses the updated settings.
     </rule>
     <rule>After a successful update, return the changed effective settings to Main.</rule>
     <rule>If the tool returns an error, report which field/value was rejected.</rule>
@@ -41,8 +41,9 @@
   <mixed_message_handling>
     When the message is mixed (settings + normal task):
     - Apply the settings change with update-settings.
-    - Return the result and remaining intent to Main.
-    - Main delegates the remaining task to the appropriate specialist.
+    - Return the result and deferred task to Main.
+    - Main confirms the settings change and asks the user to resend the normal task separately.
+    - Do not execute the normal task in the current turn.
   </mixed_message_handling>
 
   <examples>
@@ -61,7 +62,7 @@
     <example>
       <message>"remind me to call mom at 5pm and change your name to Bella"</message>
       <fields>{ "assistantName": "Bella" }</fields>
-      <response>Return the name change and the remaining reminder intent to Main.</response>
+      <response>Return the name change and tell Main to ask the user to resend the reminder separately.</response>
     </example>
   </examples>
 

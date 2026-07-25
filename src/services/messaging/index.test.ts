@@ -88,6 +88,38 @@ describe("MessagingAdapter", () => {
     MessageHandler.getInstance = originalGetInstance;
   });
 
+  test("propagates assistant persistence failures after delivery and cleans up its queue", async () => {
+    const originalGetInstance = MessageHandler.getInstance;
+    const saveAssistantMessage = mock(async () => {
+      throw new Error("assistant persistence failed");
+    });
+    MessageHandler.getInstance = mock(() => ({
+      handleMessage: mock(async () => "Delivered reply"),
+      saveAssistantMessage,
+    })) as unknown as typeof MessageHandler.getInstance;
+    const sendText = mock(async () => undefined);
+    const adapter = MessagingAdapter.instance;
+    adapter.registerTransport({ platform: EMessagePlatform.Signal, sendText });
+    const internals = adapter as unknown as TAdapterInternals;
+
+    try {
+      await expect(
+        adapter.handleInboundMessage({
+          platform: EMessagePlatform.Signal,
+          chatId: "+100",
+          author: { id: "1", username: "Owner" },
+          message: { type: "text", content: "hello" },
+        }),
+      ).rejects.toThrow("assistant persistence failed");
+
+      expect(sendText).toHaveBeenCalledWith("+100", "Delivered reply");
+      expect(saveAssistantMessage).toHaveBeenCalledTimes(1);
+      expect(internals.inboundChatQueues.size).toBe(0);
+    } finally {
+      MessageHandler.getInstance = originalGetInstance;
+    }
+  });
+
   test("serializes complete inbound turns for the same canonical chat and cleans up its queue", async () => {
     const originalGetInstance = MessageHandler.getInstance;
     const events: string[] = [];

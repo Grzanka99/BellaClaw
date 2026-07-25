@@ -159,6 +159,25 @@ describe("readXmlAndInjectConfig", () => {
     expect(instructions).toContain("Describe capabilities according to the tools registered");
   });
 
+  test("keeps mixed settings and reminder cancellation on safe boundaries", async () => {
+    const { readXmlAndInjectConfig } = await import("./read-xml-and-inject-config");
+    const updateSettings = await readXmlAndInjectConfig(
+      "./src/services/ai/tools/update-settings/instructions.xml",
+      DefaultConfigRecord,
+    );
+    const listCronJobs = await readXmlAndInjectConfig(
+      "./src/services/ai/tools/list-cron-jobs/instructions.xml",
+      DefaultConfigRecord,
+    );
+
+    expect(updateSettings).toContain("normal task must run in a new user turn");
+    expect(updateSettings).toContain("asks the user to resend the normal task separately");
+    expect(listCronJobs).toContain(
+      "Jobs with taskPrompt are autonomous scheduled tasks and require an explicit request",
+    );
+    expect(listCronJobs).toContain("cancel only reminder jobs");
+  });
+
   test("resolves placeholders from a flat TConfigRecord keyed by dotted strings", async () => {
     const { readXmlAndInjectConfig } = await import("./read-xml-and-inject-config");
 

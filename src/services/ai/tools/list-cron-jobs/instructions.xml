@@ -20,6 +20,8 @@
     <rule>For contentMode scheduled-task, summarize the objective from taskPrompt without quoting it verbatim</rule>
     <rule>Quote a stored taskPrompt only when the user explicitly requests the exact prompt</rule>
     <rule>If the task requests removing one or more jobs, use the unschedule-cron-job tool with the exact job name</rule>
+    <rule>When the user asks to remove reminders, cancel only jobs with reminderText or reminderPromptData. Jobs with taskPrompt are autonomous scheduled tasks and require an explicit request to remove scheduled tasks.</rule>
+    <rule>Return mixed or ambiguous removal scope to Main before cancelling any jobs.</rule>
     <rule>If there are no jobs, report that no scheduled jobs exist</rule>
     <rule>Reuse results within a conversation turn</rule>
   </usage_rules>
@@ -34,7 +36,7 @@
     <example>
       <context>User says: "Cancel all my reminders"</context>
       <toolCall />
-      <reasoning>First list all jobs to get their exact names, then cancel each job as explicitly requested.</reasoning>
+      <reasoning>First list all jobs, then cancel only reminder jobs. Preserve jobs with taskPrompt unless the user explicitly asks to remove scheduled tasks.</reasoning>
     </example>
 
     <example>

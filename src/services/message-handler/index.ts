@@ -145,7 +145,7 @@ export class MessageHandler {
       `saveAssistantMessage: response importance: ${responseImportance} (${(performance.now() - respImpStart).toFixed(0)}ms)`,
     );
 
-    await this.queue.enqueue(() =>
+    const saved = await this.queue.enqueue(() =>
       this.saveMessageToDatabase(
         {
           chatId: message.chatId,
@@ -161,6 +161,10 @@ export class MessageHandler {
         trace,
       ),
     );
+
+    if (!saved) {
+      throw new Error("Failed to save assistant message");
+    }
   }
 
   private async defineMessageImportance(
