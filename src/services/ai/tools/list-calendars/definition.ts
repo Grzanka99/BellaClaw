@@ -1,7 +1,7 @@
 import { createToolDefinition } from "../definition";
 import { SListCalendarsArgs } from "./handler";
 
-export const LIST_CALENDARS_TOOL = "list-calendars" as const;
+export const LIST_CALENDARS_TOOL = "list-calendars";
 
 export const listCalendarsTool = createToolDefinition(
   LIST_CALENDARS_TOOL,

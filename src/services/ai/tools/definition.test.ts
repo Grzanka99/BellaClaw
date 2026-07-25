@@ -130,15 +130,38 @@ describe("AI tool definitions", () => {
   });
 
   test("keeps mutation targets structural and validates event combinations", () => {
-    for (const schema of [
-      SCreateCalendarEventArgs,
-      SDeleteCalendarEventArgs,
-      SUpdateCalendarEventArgs,
+    for (const { schema, args } of [
+      {
+        schema: SCreateCalendarEventArgs,
+        args: { summary: "Event", start: "2026-08-01" },
+      },
+      {
+        schema: SDeleteCalendarEventArgs,
+        args: { eventId: "event", scope: "occurrence" },
+      },
+      {
+        schema: SUpdateCalendarEventArgs,
+        args: { eventId: "event", scope: "occurrence", summary: "Event" },
+      },
     ]) {
       expect("calendarId" in schema.properties).toBe(false);
-      expect(Value.Check(schema, { calendarId: "other" })).toBe(false);
+      expect(Value.Check(schema, args)).toBe(true);
+      expect(Value.Check(schema, { ...args, calendarId: "other" })).toBe(false);
     }
 
+    expect(() =>
+      validateCreateCalendarEventArgs({
+        summary: "Invalid holiday",
+        start: "2026-02-30",
+      }),
+    ).toThrow("start must be a valid calendar date");
+    expect(() =>
+      validateCreateCalendarEventArgs({
+        summary: "Invalid holiday",
+        start: "2026-02-27",
+        end: "2026-02-30",
+      }),
+    ).toThrow("end must be a valid calendar date");
     expect(() =>
       validateCreateCalendarEventArgs({
         summary: "Holiday",

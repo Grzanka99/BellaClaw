@@ -49,6 +49,37 @@ describe("production executable tools", () => {
     });
   });
 
+  test("preserves the existing timezone for start-only calendar updates", async () => {
+    const updateEvent = mock(async (args) => args);
+    (CalendarService as unknown as { _instance: unknown })._instance = { updateEvent };
+    const tool = createCalendarTools(context).find(
+      (candidate) => candidate.name === "update-calendar-event",
+    );
+
+    await tool?.execute("call", {
+      eventId: "event",
+      scope: "occurrence",
+      start: "2026-08-01T10:00:00+02:00",
+    });
+
+    expect(updateEvent).toHaveBeenCalledWith({
+      eventId: "event",
+      scope: "occurrence",
+      patch: {
+        summary: undefined,
+        description: undefined,
+        location: undefined,
+        start: "2026-08-01T10:00:00+02:00",
+        end: undefined,
+        durationMinutes: undefined,
+        timezone: undefined,
+        transparency: undefined,
+        recurrence: undefined,
+      },
+      signal: undefined,
+    });
+  });
+
   test("returns explicit success for void calendar mutations", async () => {
     const removeReadonlyCalendar = mock(async () => undefined);
     const deleteEvent = mock(async () => undefined);

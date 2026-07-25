@@ -1,6 +1,6 @@
 CREATE TABLE `calendars` (
 	`calendarId` text PRIMARY KEY NOT NULL,
-	`access` text NOT NULL,
+	`access` text NOT NULL CHECK (`access` IN ('read', 'write')),
 	`addedAt` integer NOT NULL
 );
 --> statement-breakpoint

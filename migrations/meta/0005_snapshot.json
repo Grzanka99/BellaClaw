@@ -40,7 +40,12 @@
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "checkConstraints": {}
+      "checkConstraints": {
+        "calendars_access_check": {
+          "name": "calendars_access_check",
+          "value": "\"calendars\".\"access\" in ('read', 'write')"
+        }
+      }
     },
     "cron_engine_jobs": {
       "name": "cron_engine_jobs",

@@ -38,16 +38,28 @@ const ALL_DAY = /^\d{4}-\d{2}-\d{2}$/;
 const EXPLICIT_TIMEZONE = /T.*(?:Z|[+-]\d{2}:\d{2})$/;
 const RECURRENCE = /^(RRULE|RDATE|EXDATE)(?:;[^:]*)?:/;
 
+function allDayTimestamp(value: string, field: string): number {
+  const timestamp = Date.parse(`${value}T00:00:00Z`);
+  if (Number.isNaN(timestamp) || new Date(timestamp).toISOString().slice(0, 10) !== value) {
+    throw new Error(`${field} must be a valid calendar date`);
+  }
+  return timestamp;
+}
+
 export function validateCreateCalendarEventArgs(
   args: TCreateCalendarEventArgs,
 ): TCreateCalendarEventArgs {
   const startAllDay = ALL_DAY.test(args.start);
-
-  if (
-    !startAllDay &&
-    (!EXPLICIT_TIMEZONE.test(args.start) || Number.isNaN(Date.parse(args.start)))
-  ) {
-    throw new Error("start must be YYYY-MM-DD or an RFC 3339 date-time with an explicit timezone");
+  let startTimestamp: number;
+  if (startAllDay) {
+    startTimestamp = allDayTimestamp(args.start, "start");
+  } else {
+    startTimestamp = Date.parse(args.start);
+    if (!EXPLICIT_TIMEZONE.test(args.start) || Number.isNaN(startTimestamp)) {
+      throw new Error(
+        "start must be YYYY-MM-DD or an RFC 3339 date-time with an explicit timezone",
+      );
+    }
   }
   if (args.end !== undefined) {
     const endAllDay = ALL_DAY.test(args.end);
@@ -55,10 +67,16 @@ export function validateCreateCalendarEventArgs(
     if (startAllDay !== endAllDay) {
       throw new Error("start and end must both be all-day dates or timed date-times");
     }
-    if (!endAllDay && (!EXPLICIT_TIMEZONE.test(args.end) || Number.isNaN(Date.parse(args.end)))) {
-      throw new Error("end must be an RFC 3339 date-time with an explicit timezone");
+    let endTimestamp: number;
+    if (endAllDay) {
+      endTimestamp = allDayTimestamp(args.end, "end");
+    } else {
+      endTimestamp = Date.parse(args.end);
+      if (!EXPLICIT_TIMEZONE.test(args.end) || Number.isNaN(endTimestamp)) {
+        throw new Error("end must be an RFC 3339 date-time with an explicit timezone");
+      }
     }
-    if (Date.parse(args.end) <= Date.parse(args.start)) {
+    if (endTimestamp <= startTimestamp) {
       throw new Error("end must be after start");
     }
   }

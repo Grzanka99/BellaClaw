@@ -1,7 +1,7 @@
 import { createToolDefinition } from "../definition";
 import { SAddReadonlyCalendarArgs } from "./handler";
 
-export const ADD_READONLY_CALENDAR_TOOL = "add-readonly-calendar" as const;
+export const ADD_READONLY_CALENDAR_TOOL = "add-readonly-calendar";
 
 export const addReadonlyCalendarTool = createToolDefinition(
   ADD_READONLY_CALENDAR_TOOL,

@@ -1,5 +1,12 @@
 import { sql } from "drizzle-orm";
-import { integer, primaryKey, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import {
+  check,
+  integer,
+  primaryKey,
+  sqliteTable,
+  text,
+  uniqueIndex,
+} from "drizzle-orm/sqlite-core";
 
 export const memoriesTable = sqliteTable("memories", {
   id: integer("id").primaryKey({ autoIncrement: true }),
@@ -60,6 +67,7 @@ export const calendarsTable = sqliteTable(
     addedAt: integer("addedAt").notNull(),
   },
   (table) => [
+    check("calendars_access_check", sql`${table.access} in ('read', 'write')`),
     uniqueIndex("calendars_single_write_unique")
       .on(table.access)
       .where(sql`${table.access} = 'write'`),

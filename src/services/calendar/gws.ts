@@ -21,7 +21,7 @@ export type TGwsRequest = {
 
 export type TGwsRunner = (request: TGwsRequest) => Promise<unknown>;
 
-export function gwsEnvironment(): Record<string, string | undefined> {
+export function gwsEnvironment(): Record<string, TOption<string>> {
   const env = { ...Bun.env };
   delete env.GOOGLE_WORKSPACE_CLI_TOKEN;
   delete env.GOOGLE_WORKSPACE_CLI_CREDENTIALS;

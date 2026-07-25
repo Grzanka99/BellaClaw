@@ -532,10 +532,6 @@ export function createCalendarTools(context: TToolExecutionContext) {
         const parsedArgs: TUpdateCalendarEventArgs = Value.Decode(SUpdateCalendarEventArgs, args);
         const patch = validateUpdateCalendarEventArgs(parsedArgs);
 
-        if (patch.start !== undefined && patch.timezone === undefined) {
-          patch.timezone = ownerTimezone;
-        }
-
         return textResult(
           await CalendarService.instance.updateEvent({
             eventId: parsedArgs.eventId,

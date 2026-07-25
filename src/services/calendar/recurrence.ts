@@ -1,4 +1,5 @@
 import { RRule } from "rrule";
+import type { TOption } from "../../types";
 import type { TEventDateTime } from "./types";
 
 export type TRecurrenceSplit = {
@@ -130,7 +131,7 @@ function formatUntil(boundary: number, allDay: boolean): string {
 function partitionValues(
   line: string,
   boundary: number,
-): { original: string | undefined; successor: string | undefined } {
+): { original: TOption<string>; successor: TOption<string> } {
   const separator = line.indexOf(":");
   if (separator === -1) {
     return { original: line, successor: line };
@@ -145,8 +146,12 @@ function partitionValues(
   const after: string[] = [];
   for (const value of line.slice(separator + 1).split(",")) {
     let timestamp = recurrenceTimestamp(value);
-    if (Number.isNaN(timestamp) && timezone !== undefined) {
-      timestamp = Number(value.replace(/\D/g, ""));
+    if (timezone !== undefined) {
+      if (Number.isNaN(timestamp)) {
+        timestamp = Number(value.replace(/\D/g, ""));
+      } else {
+        timestamp = localBoundaryOrder(timestamp, timezone);
+      }
     }
     if (!Number.isNaN(timestamp) && timestamp >= localBoundary) {
       after.push(value);
@@ -154,11 +159,11 @@ function partitionValues(
       before.push(value);
     }
   }
-  let original: string | undefined;
+  let original: TOption<string>;
   if (before.length > 0) {
     original = `${prefix}${before.join(",")}`;
   }
-  let successor: string | undefined;
+  let successor: TOption<string>;
   if (after.length > 0) {
     successor = `${prefix}${after.join(",")}`;
   }

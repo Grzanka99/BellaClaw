@@ -1,7 +1,7 @@
 import { createToolDefinition } from "../definition";
 import { SCreateCalendarEventArgs } from "./handler";
 
-export const CREATE_CALENDAR_EVENT_TOOL = "create-calendar-event" as const;
+export const CREATE_CALENDAR_EVENT_TOOL = "create-calendar-event";
 
 export const createCalendarEventTool = createToolDefinition(
   CREATE_CALENDAR_EVENT_TOOL,

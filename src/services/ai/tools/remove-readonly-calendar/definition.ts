@@ -1,7 +1,7 @@
 import { createToolDefinition } from "../definition";
 import { SRemoveReadonlyCalendarArgs } from "./handler";
 
-export const REMOVE_READONLY_CALENDAR_TOOL = "remove-readonly-calendar" as const;
+export const REMOVE_READONLY_CALENDAR_TOOL = "remove-readonly-calendar";
 
 export const removeReadonlyCalendarTool = createToolDefinition(
   REMOVE_READONLY_CALENDAR_TOOL,

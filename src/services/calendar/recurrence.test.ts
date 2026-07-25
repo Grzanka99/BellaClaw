@@ -26,6 +26,26 @@ describe("recurrence splitting", () => {
     ]);
   });
 
+  test("compares TZID recurrence values in the same wall-clock representation", () => {
+    const split = splitRecurrence(
+      ["RRULE:FREQ=DAILY;COUNT=10", "RDATE;TZID=Europe/Warsaw:20260725T063000Z,20260725T073000Z"],
+      {
+        date: undefined,
+        dateTime: "2026-07-24T09:00:00+02:00",
+        timeZone: "Europe/Warsaw",
+      },
+      {
+        date: undefined,
+        dateTime: "2026-07-25T09:00:00+02:00",
+        timeZone: "Europe/Warsaw",
+      },
+      [1],
+    );
+
+    expect(split.original).toContain("RDATE;TZID=Europe/Warsaw:20260725T063000Z");
+    expect(split.successor).toContain("RDATE;TZID=Europe/Warsaw:20260725T073000Z");
+  });
+
   test("preserves the original UNTIL on the successor", () => {
     const split = splitRecurrence(
       ["RRULE:FREQ=WEEKLY;UNTIL=20261201T100000Z"],
