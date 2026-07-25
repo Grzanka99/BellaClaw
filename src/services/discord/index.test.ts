@@ -9,6 +9,7 @@ import { DiscordSingleton } from "./index";
 
 type TDiscordSingletonInternals = {
   client: {
+    login: (token: string) => Promise<string>;
     users: {
       fetch: (userId: string) => Promise<{
         send: (text: string) => Promise<void>;
@@ -35,6 +36,8 @@ type TMessagingAdapterStatic = {
   _instance: MessagingAdapter | undefined;
 };
 
+const originalDiscordToken = Bun.env.DISCORD_TOKEN;
+
 function cleanupSingletons() {
   const CronSingletonWithInternals = CronSingleton as unknown as TCronSingletonStatic;
   CronSingletonWithInternals._instance?.destroy();
@@ -52,11 +55,26 @@ function cleanupSingletons() {
 describe("DiscordSingleton", () => {
   beforeEach(async () => {
     cleanupSingletons();
+    Bun.env.DISCORD_TOKEN = originalDiscordToken;
     await resetCronEngineJobsTable();
   });
 
   afterEach(() => {
     cleanupSingletons();
+    Bun.env.DISCORD_TOKEN = originalDiscordToken;
+  });
+
+  test("disabled setup does not log in Discord client", async () => {
+    Bun.env.DISCORD_TOKEN = undefined;
+    const loginMock = mock(async () => "token");
+    const discord = DiscordSingleton.instance as unknown as TDiscordSingletonInternals;
+    discord.client = {
+      login: loginMock,
+    } as never;
+
+    await DiscordSingleton.instance.setup();
+
+    expect(loginMock).toHaveBeenCalledTimes(0);
   });
 
   test("does not start cron after Discord client is ready", async () => {

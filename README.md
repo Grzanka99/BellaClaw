@@ -16,6 +16,7 @@ Ships with a default "Bellatrix" persona -- a darkly elegant assistant that resp
 
 | Variable | Required | Description |
 |---|---|---|
+| `DISCORD_TOKEN` | No | Discord bot token; Discord is disabled when omitted |
 | `OPENCODE_API_KEY` | Yes | opencode API key |
 | `TURSO_CONNECTION_URL` | Yes | libSQL/Turso database connection URL |
 | `TURSO_AUTH_TOKEN` | Yes | libSQL/Turso auth token |

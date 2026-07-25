@@ -92,6 +92,12 @@ export class DiscordSingleton implements TMessageTransport {
       return this.readyPromise;
     }
 
+    const token = Bun.env.DISCORD_TOKEN;
+    if (token === undefined || token.trim().length === 0) {
+      this.logger.info("Discord disabled");
+      return Promise.resolve();
+    }
+
     MessagingAdapter.instance.registerTransport(this);
 
     this.readyPromise = new Promise((resolve, reject) => {
@@ -102,7 +108,7 @@ export class DiscordSingleton implements TMessageTransport {
 
       this.client.once(Events.ClientReady, readyListener);
 
-      this.client.login(Bun.env.DISCORD_TOKEN).catch((error) => {
+      this.client.login(token).catch((error) => {
         this.client.off(Events.ClientReady, readyListener);
         this.readyPromise = undefined;
         reject(error);
