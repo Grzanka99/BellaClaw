@@ -170,12 +170,26 @@ describe("readXmlAndInjectConfig", () => {
       DefaultConfigRecord,
     );
 
-    expect(updateSettings).toContain("normal task must run in a new user turn");
-    expect(updateSettings).toContain("asks the user to resend the normal task separately");
-    expect(listCronJobs).toContain(
+    const mixedSettingsRule = updateSettings.match(
+      /<rule>\s*If the user's message contains BOTH a settings change AND a normal task[\s\S]*?<\/rule>/,
+    )?.[0];
+    const reminderCancellationRule = listCronJobs.match(
+      /<rule>When the user asks to remove reminders[\s\S]*?<\/rule>/,
+    )?.[0];
+    const reminderCancellationExample = listCronJobs.match(
+      /<example>\s*<context>User says: "Cancel all my reminders"[\s\S]*?<\/example>/,
+    )?.[0];
+
+    expect(mixedSettingsRule).toContain("normal task must run in a new user turn");
+    expect(mixedSettingsRule).toContain("apply only the settings change");
+    expect(mixedSettingsRule).not.toContain("cancel only reminder jobs");
+    expect(reminderCancellationRule).toContain(
       "Jobs with taskPrompt are autonomous scheduled tasks and require an explicit request",
     );
-    expect(listCronJobs).toContain("cancel only reminder jobs");
+    expect(reminderCancellationExample).toContain("cancel only reminder jobs");
+    expect(listCronJobs).toContain(
+      "<rule>Return mixed or ambiguous removal scope to Main before cancelling any jobs.</rule>",
+    );
   });
 
   test("resolves placeholders from a flat TConfigRecord keyed by dotted strings", async () => {
