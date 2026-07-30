@@ -3,7 +3,6 @@ import { existsSync } from "node:fs";
 import { z } from "zod";
 import { rowToEvent } from "../../services/app-logger/sqlite";
 import {
-  EBehaviorLogLevel,
   SBehaviorMetadata,
   SStoredBehaviorLogRow,
   type TPersistedBehaviorLogEvent,
@@ -19,7 +18,6 @@ import type {
   TLogReaderResult,
   TLogSearchQuery,
   TRecentTurn,
-  TTurnPage,
 } from "./types";
 
 type TSqlBinding = string | number | null;
@@ -66,46 +64,6 @@ export class LogReader {
             recentTurns: this.selectRecentTurns(db),
             filters: this.selectFilters(db),
           },
-        };
-      } catch (error) {
-        return { success: false, error: this.describeError(error) };
-      }
-    });
-  }
-
-  public async readTurn(turnId: string): Promise<TLogReaderResult<TTurnPage>> {
-    return this.queue.enqueue(async (): Promise<TLogReaderResult<TTurnPage>> => {
-      try {
-        const db = this.getDatabase();
-        const rows = db
-          .query<unknown, string>(
-            `
-              SELECT ${EVENT_COLUMNS}
-              FROM app_event_logs l
-              WHERE l.turnId = ?
-              ORDER BY l.createdAt ASC, l.id ASC
-            `,
-          )
-          .all(turnId);
-        const events = this.parseEvents(rows);
-        let startedAtMs = 0;
-        let latestCreatedAtMs = 0;
-        let hasFailure = false;
-
-        if (events.length > 0) {
-          startedAtMs = events[0]?.createdAtMs ?? 0;
-          latestCreatedAtMs = events[events.length - 1]?.createdAtMs ?? 0;
-        }
-
-        for (const event of events) {
-          if (event.success === false || event.level === EBehaviorLogLevel.Error) {
-            hasFailure = true;
-          }
-        }
-
-        return {
-          success: true,
-          data: { events, startedAtMs, latestCreatedAtMs, hasFailure },
         };
       } catch (error) {
         return { success: false, error: this.describeError(error) };

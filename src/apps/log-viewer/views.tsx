@@ -13,8 +13,9 @@ import type {
   TLogReaderError,
   TLogSearchQuery,
   TRecentTurn,
-  TTurnPage,
 } from "./types";
+
+const SLOW_EVENT_THRESHOLD_MS = 5_000;
 
 export function Document(props: PropsWithChildren) {
   return (
@@ -25,7 +26,7 @@ export function Document(props: PropsWithChildren) {
         <meta name="color-scheme" content="dark light" />
         <title>BellaClaw Logs</title>
         <link rel="icon" href="data:," />
-        <link rel="stylesheet" href="/assets/styles.css" />
+        <link rel="stylesheet" href="/assets/styles.css?v=log-viewer-redesign-4" />
         <script src="/assets/htmx.min.js" defer></script>
         <script src="/assets/app.js" defer></script>
       </head>
@@ -45,85 +46,48 @@ export function HomePage(props: { dbPath: string; query: TLogSearchQuery; page: 
   }
 
   return (
-    <div id="app-shell">
+    <div id="app-shell" class="log-viewer-shell">
       <div class="sticky-top">
         <PageHeader dbPath={props.dbPath} query={props.query} />
         <div id="transient-warning" class="transient-warning" hidden></div>
         <SearchForm query={props.query} filters={props.page.filters} />
       </div>
-      <div class="page-grid">
-        <RecentTurns turns={props.page.recentTurns} />
-        <main>
+      <div class="workspace-grid">
+        <RecentTurns turns={props.page.recentTurns} query={props.query} />
+        <main class="event-workspace">
           <div class="results-heading">
-            <div>
-              <p class="eyebrow">Events</p>
-              <h2>{props.page.events.length} loaded</h2>
+            <div class="results-title">
+              <strong>{props.page.events.length} events</strong>
+              {props.query.turnId !== undefined && (
+                <span>
+                  Turn <code>{shortenId(props.query.turnId)}</code>
+                </span>
+              )}
             </div>
-            {props.query.live && (
-              <LivePoller
-                query={props.query}
-                afterCreatedAt={afterCreatedAt}
-                afterId={afterId}
-                count={0}
-                warning={undefined}
-              />
-            )}
+            <div class="results-actions">
+              {props.query.live && (
+                <LivePoller
+                  query={props.query}
+                  afterCreatedAt={afterCreatedAt}
+                  afterId={afterId}
+                  count={0}
+                  warning={undefined}
+                />
+              )}
+              <span class="sort-label">Newest first</span>
+            </div>
           </div>
           <div id="events-list">
-            <EventRows events={props.page.events} query={props.query} />
+            <EventRows
+              events={props.page.events}
+              query={props.query}
+              selectedEventId={newest?.id}
+            />
             <LoadMore query={props.query} events={props.page.events} hasMore={props.page.hasMore} />
           </div>
         </main>
+        <EventInspector event={newest} />
       </div>
-    </div>
-  );
-}
-
-export function TurnPage(props: { dbPath: string; turnId: string; page: TTurnPage }) {
-  let failureSummary = "None";
-
-  if (props.page.hasFailure) {
-    failureSummary = "Present";
-  }
-
-  return (
-    <div id="app-shell">
-      <header class="topbar turn-topbar sticky-top">
-        <div>
-          <a class="back-link" href="/">
-            ← All logs
-          </a>
-          <p class="eyebrow">Turn</p>
-          <h1 class="turn-title">{props.turnId}</h1>
-          <p class="db-path">{props.dbPath}</p>
-        </div>
-        <button class="button secondary" type="button" data-copy={props.turnId}>
-          Copy turn ID
-        </button>
-      </header>
-      {props.page.events.length === 0 && (
-        <main class="empty-page">
-          <h2>Turn not found</h2>
-          <p>No persisted events use this turn ID.</p>
-        </main>
-      )}
-      {props.page.events.length > 0 && (
-        <main class="turn-page">
-          <section class="turn-summary">
-            <SummaryStat label="Started" value={<LocalTime ms={props.page.startedAtMs} />} />
-            <SummaryStat label="Latest" value={<LocalTime ms={props.page.latestCreatedAtMs} />} />
-            <SummaryStat label="Events" value={String(props.page.events.length)} />
-            <SummaryStat
-              label="Elapsed span"
-              value={formatDuration(props.page.latestCreatedAtMs - props.page.startedAtMs)}
-            />
-            <SummaryStat label="Failures" value={failureSummary} />
-          </section>
-          <section class="timeline">
-            <EventRows events={props.page.events} query={undefined} />
-          </section>
-        </main>
-      )}
     </div>
   );
 }
@@ -174,7 +138,7 @@ export function EventPageFragment(props: {
 }) {
   return (
     <>
-      <EventRows events={props.events} query={props.query} />
+      <EventRows events={props.events} query={props.query} selectedEventId={undefined} />
       <LoadMore query={props.query} events={props.events} hasMore={props.hasMore} />
     </>
   );
@@ -239,25 +203,25 @@ function PageHeader(props: { dbPath: string; query: TLogSearchQuery }) {
     includeCursor: false,
     live: !props.query.live,
   });
-  let liveLabel = "Start live";
-
-  if (props.query.live) {
-    liveLabel = "Stop live";
-  }
 
   return (
     <header class="topbar">
-      <div>
+      <div class="brand-block">
         <p class="eyebrow">BellaClaw diagnostics</p>
         <h1>Behavior logs</h1>
         <p class="db-path">{props.dbPath}</p>
       </div>
       <nav class="header-actions" aria-label="Log actions">
+        <button class="button secondary theme-toggle" type="button" data-theme-toggle>
+          <span class="theme-toggle-icon" aria-hidden="true"></span>
+          <span data-theme-label>Theme</span>
+        </button>
         <a class="button secondary" href={refreshUrl}>
-          Refresh
+          ↻ Refresh
         </a>
-        <a class="button" href={liveUrl}>
-          {liveLabel}
+        <a class={`button live-button${props.query.live ? " active" : ""}`} href={liveUrl}>
+          <span class="live-dot"></span>
+          {props.query.live ? "Pause live" : "Go live"}
         </a>
       </nav>
     </header>
@@ -277,137 +241,231 @@ function SearchForm(props: { query: TLogSearchQuery; filters: TLogFilterOptions 
       hx-push-url="true"
     >
       {props.query.live && <input type="hidden" name="live" value="1" />}
-      <label class="search-box">
-        <span>Search</span>
-        <input name="q" value={props.query.q ?? ""} placeholder="summary, event, tool, metadata…" />
-      </label>
-      <FilterSelect label="Range" name="range">
-        <option value="15m" selected={props.query.range === "15m"}>
-          15 minutes
-        </option>
-        <option value="1h" selected={props.query.range === "1h"}>
-          1 hour
-        </option>
-        <option value="24h" selected={props.query.range === "24h"}>
-          24 hours
-        </option>
-        <option value="7d" selected={props.query.range === "7d"}>
-          7 days
-        </option>
-        <option value="all" selected={props.query.range === "all"}>
-          All history
-        </option>
-      </FilterSelect>
-      <FilterSelect label="Level" name="level">
-        <option value="" selected={props.query.level === undefined}>
-          Any
-        </option>
-        {Object.values(EBehaviorLogLevel).map((level) => (
-          <option value={level} selected={props.query.level === level}>
-            {level}
+      <div class="primary-filters">
+        <label class="search-box">
+          <span class="sr-only">Search</span>
+          <span class="search-icon" aria-hidden="true">
+            ⌕
+          </span>
+          <input
+            name="q"
+            value={props.query.q ?? ""}
+            placeholder="Search events, turns, tools, metadata…"
+          />
+        </label>
+        <FilterSelect label="Time range" name="range" compact>
+          <option value="15m" selected={props.query.range === "15m"}>
+            Last 15 minutes
           </option>
-        ))}
-      </FilterSelect>
-      <FilterSelect label="Result" name="success">
-        <option value="" selected={props.query.success === undefined}>
-          Any
-        </option>
-        <option value="success" selected={props.query.success === "success"}>
-          Success
-        </option>
-        <option value="failure" selected={props.query.success === "failure"}>
-          Failure
-        </option>
-      </FilterSelect>
-      <FilterSelect label="Event" name="event">
-        <option value="" selected={props.query.event === undefined}>
-          Any
-        </option>
-        {props.filters.events.map((event) => (
-          <option value={event} selected={props.query.event === event}>
-            {event}
+          <option value="1h" selected={props.query.range === "1h"}>
+            Last hour
           </option>
-        ))}
-      </FilterSelect>
-      <FilterSelect label="Component" name="component">
-        <option value="" selected={props.query.component === undefined}>
-          Any
-        </option>
-        {props.filters.components.map((component) => (
-          <option value={component} selected={props.query.component === component}>
-            {component}
+          <option value="24h" selected={props.query.range === "24h"}>
+            Last 24 hours
           </option>
-        ))}
-      </FilterSelect>
-      <FilterSelect label="Tool" name="toolName">
-        <option value="" selected={props.query.toolName === undefined}>
-          Any
-        </option>
-        {props.filters.toolNames.map((toolName) => (
-          <option value={toolName} selected={props.query.toolName === toolName}>
-            {toolName}
+          <option value="7d" selected={props.query.range === "7d"}>
+            Last 7 days
           </option>
-        ))}
-      </FilterSelect>
-      <label>
-        <span>Turn ID</span>
-        <input name="turnId" value={props.query.turnId ?? ""} placeholder="Exact ID" />
-      </label>
-      <div class="filter-actions">
-        <button class="button" type="submit">
-          Apply
+          <option value="all" selected={props.query.range === "all"}>
+            All history
+          </option>
+        </FilterSelect>
+        <FilterSelect label="Level" name="level" compact>
+          <option value="" selected={props.query.level === undefined}>
+            All levels
+          </option>
+          {Object.values(EBehaviorLogLevel).map((level) => (
+            <option value={level} selected={props.query.level === level}>
+              {level}
+            </option>
+          ))}
+        </FilterSelect>
+        <FilterSelect label="Result" name="success" compact>
+          <option value="" selected={props.query.success === undefined}>
+            All results
+          </option>
+          <option value="success" selected={props.query.success === "success"}>
+            Success
+          </option>
+          <option value="failure" selected={props.query.success === "failure"}>
+            Failure
+          </option>
+        </FilterSelect>
+        <details class="advanced-filters">
+          <summary>+ More filters</summary>
+          <div class="advanced-filter-grid">
+            <FilterSelect label="Event" name="event">
+              <option value="" selected={props.query.event === undefined}>
+                Any event
+              </option>
+              {props.filters.events.map((event) => (
+                <option value={event} selected={props.query.event === event}>
+                  {event}
+                </option>
+              ))}
+            </FilterSelect>
+            <FilterSelect label="Component" name="component">
+              <option value="" selected={props.query.component === undefined}>
+                Any component
+              </option>
+              {props.filters.components.map((component) => (
+                <option value={component} selected={props.query.component === component}>
+                  {component}
+                </option>
+              ))}
+            </FilterSelect>
+            <FilterSelect label="Tool" name="toolName">
+              <option value="" selected={props.query.toolName === undefined}>
+                Any tool
+              </option>
+              {props.filters.toolNames.map((toolName) => (
+                <option value={toolName} selected={props.query.toolName === toolName}>
+                  {toolName}
+                </option>
+              ))}
+            </FilterSelect>
+            <label class="filter-field">
+              <span>Turn ID</span>
+              <input name="turnId" value={props.query.turnId ?? ""} placeholder="Exact turn ID" />
+            </label>
+          </div>
+        </details>
+        <button class="button apply-button" type="submit">
+          Apply filters
         </button>
-        <a class="button secondary" href="/">
-          Clear
-        </a>
       </div>
+      <ActiveFilters query={props.query} />
     </form>
   );
 }
 
-function FilterSelect(props: PropsWithChildren<{ label: string; name: string }>) {
+function ActiveFilters(props: { query: TLogSearchQuery }) {
+  const filters: Array<{ label: string; field: keyof TLogSearchQuery }> = [];
+
+  if (props.query.q !== undefined) {
+    filters.push({ label: `search: ${props.query.q}`, field: "q" });
+  }
+  if (props.query.level !== undefined) {
+    filters.push({ label: `level: ${props.query.level}`, field: "level" });
+  }
+  if (props.query.success !== undefined) {
+    filters.push({ label: `result: ${props.query.success}`, field: "success" });
+  }
+  if (props.query.event !== undefined) {
+    filters.push({ label: `event: ${props.query.event}`, field: "event" });
+  }
+  if (props.query.component !== undefined) {
+    filters.push({ label: `component: ${props.query.component}`, field: "component" });
+  }
+  if (props.query.toolName !== undefined) {
+    filters.push({ label: `tool: ${props.query.toolName}`, field: "toolName" });
+  }
+  if (props.query.turnId !== undefined) {
+    filters.push({ label: `turn: ${shortenId(props.query.turnId)}`, field: "turnId" });
+  }
+
+  if (filters.length === 0) {
+    return <div class="filter-summary">Showing all events in the selected time range</div>;
+  }
+
   return (
-    <label>
-      <span>{props.label}</span>
-      <select name={props.name}>{props.children}</select>
+    <fieldset class="active-filters">
+      <legend class="sr-only">Active filters</legend>
+      {filters.map((filter) => (
+        <a
+          class="filter-chip"
+          href={buildLogUrl(props.query, {
+            includeUntil: false,
+            includeCursor: false,
+            live: props.query.live,
+            overrides: { [filter.field]: undefined },
+          })}
+        >
+          {filter.label} <span aria-hidden="true">×</span>
+        </a>
+      ))}
+      <a class="clear-filters" href="/">
+        Clear all
+      </a>
+    </fieldset>
+  );
+}
+
+function FilterSelect(
+  props: PropsWithChildren<{ label: string; name: string; compact?: boolean }>,
+) {
+  return (
+    <label class={props.compact ? "filter-control" : "filter-field"}>
+      <span class={props.compact ? "sr-only" : undefined}>{props.label}</span>
+      <select name={props.name} aria-label={props.label}>
+        {props.children}
+      </select>
     </label>
   );
 }
 
-function RecentTurns(props: { turns: TRecentTurn[] }) {
+function RecentTurns(props: { turns: TRecentTurn[]; query: TLogSearchQuery }) {
   return (
     <aside class="turn-sidebar">
       <div class="sidebar-heading">
-        <p class="eyebrow">Navigation</p>
         <h2>Recent turns</h2>
+        <span>{props.turns.length} turns</span>
       </div>
       {props.turns.length === 0 && <p class="muted">No turns recorded.</p>}
       <ol class="turn-list">
-        {props.turns.map((turn) => (
-          <li>
-            <a
-              class="turn-link"
-              href={`/turns/${encodeURIComponent(turn.turnId)}`}
-              title={turn.turnId}
-            >
-              <span class="turn-link-main">
-                <code>{shortenId(turn.turnId)}</code>
-                {turn.hasFailure && <span class="failure-dot" title="Contains a failure"></span>}
-              </span>
-              <span class="turn-meta">
-                <LocalTime ms={turn.latestCreatedAtMs} /> · {turn.eventCount} events
-              </span>
-            </a>
-            <button
-              class="copy-icon"
-              type="button"
-              data-copy={turn.turnId}
-              aria-label="Copy turn ID"
-            >
-              Copy
-            </button>
-          </li>
-        ))}
+        {props.turns.map((turn) => {
+          const selected = props.query.turnId === turn.turnId;
+          const url = buildLogUrl(props.query, {
+            includeUntil: false,
+            includeCursor: false,
+            live: false,
+            overrides: {
+              range: selected ? props.query.range : "all",
+              turnId: selected ? undefined : turn.turnId,
+            },
+          });
+          const turnPresentation = describeTurn(turn.turnId);
+
+          return (
+            <li class={selected ? "selected" : undefined}>
+              <a
+                class="turn-link"
+                href={url}
+                title={turn.turnId}
+                aria-current={selected ? "page" : undefined}
+              >
+                <span class="turn-icon" aria-hidden="true">
+                  {turnPresentation.icon}
+                </span>
+                <span class="turn-link-content">
+                  <span class="turn-type">{turnPresentation.label}</span>
+                  <code>{shortenId(turn.turnId)}</code>
+                  <span class="turn-meta">
+                    <LocalTime ms={turn.latestCreatedAtMs} /> · {turn.eventCount} events
+                  </span>
+                </span>
+                <span
+                  class={turn.hasFailure ? "turn-status failed" : "turn-status healthy"}
+                  title={turn.hasFailure ? "Contains a failure" : "No failures reported"}
+                >
+                  <span aria-hidden="true">{turn.hasFailure ? "!" : "✓"}</span>
+                  <span class="sr-only">
+                    {turn.hasFailure ? "Contains a failure" : "No failures reported"}
+                  </span>
+                </span>
+              </a>
+              <button
+                class="copy-icon"
+                type="button"
+                data-copy={turn.turnId}
+                aria-label="Copy turn ID"
+                title="Copy turn ID"
+              >
+                Copy
+              </button>
+            </li>
+          );
+        })}
       </ol>
     </aside>
   );
@@ -415,7 +473,8 @@ function RecentTurns(props: { turns: TRecentTurn[] }) {
 
 function EventRows(props: {
   events: TPersistedBehaviorLogEvent[];
-  query: TOption<TLogSearchQuery>;
+  query: TLogSearchQuery;
+  selectedEventId?: number;
 }) {
   if (props.events.length === 0) {
     return (
@@ -427,9 +486,9 @@ function EventRows(props: {
   }
 
   return (
-    <div class="event-list">
+    <div class="event-list timeline-list">
       {props.events.map((event) => (
-        <EventRow event={event} query={props.query} />
+        <EventRow event={event} query={props.query} selected={props.selectedEventId === event.id} />
       ))}
     </div>
   );
@@ -437,15 +496,11 @@ function EventRows(props: {
 
 function PivotLink(
   props: PropsWithChildren<{
-    query: TOption<TLogSearchQuery>;
+    query: TLogSearchQuery;
     field: "event" | "component" | "toolName";
     value: string;
   }>,
 ) {
-  if (props.query === undefined) {
-    return <span>{props.children}</span>;
-  }
-
   const active = props.query[props.field] === props.value;
   const overrides: Partial<TLogSearchQuery> = {};
 
@@ -476,80 +531,203 @@ function PivotLink(
   );
 }
 
-function EventRow(props: { event: TPersistedBehaviorLogEvent; query: TOption<TLogSearchQuery> }) {
+function EventRow(props: {
+  event: TPersistedBehaviorLogEvent;
+  query: TLogSearchQuery;
+  selected: boolean;
+}) {
   const event = props.event;
-  let resultLabel = "not reported";
-
-  if (event.success === true) {
-    resultLabel = "success";
-  }
-
-  if (event.success === false) {
-    resultLabel = "failure";
-  }
+  const slow = isSlowEvent(event);
+  const status = eventStatus(event);
+  const turnUrl = buildLogUrl(props.query, {
+    includeUntil: false,
+    includeCursor: false,
+    live: false,
+    overrides: { range: "all", turnId: event.turnId },
+  });
 
   return (
-    <article class={eventClass(event)} data-event-id={String(event.id)}>
-      <div class="event-accent"></div>
+    <article
+      class={eventClass(event, props.selected)}
+      data-event-id={String(event.id)}
+      data-event-selectable="true"
+      aria-current={props.selected ? "true" : undefined}
+      tabindex={0}
+    >
+      <span class="timeline-dot" aria-hidden="true"></span>
       <div class="event-body">
-        <div class="event-header">
-          <div class="event-title">
-            {event.level !== EBehaviorLogLevel.Info && (
-              <span class={`badge level-${event.level}`}>{event.level}</span>
-            )}
-            <strong>
-              <PivotLink query={props.query} field="event" value={event.event}>
-                {event.event}
+        <div class="event-main">
+          <div class="event-copy">
+            <div class="event-title">
+              <strong>
+                <PivotLink query={props.query} field="event" value={event.event}>
+                  {event.event}
+                </PivotLink>
+              </strong>
+              {event.level !== EBehaviorLogLevel.Info && (
+                <span class={`badge level-${event.level}`}>{event.level}</span>
+              )}
+              {event.success === false && <span class="badge result-failure">Failure</span>}
+              {isStartedEvent(event) && <span class="event-state">{status.label}</span>}
+            </div>
+            {event.summary !== null && <p class="event-summary">{event.summary}</p>}
+            {event.error !== null && <p class="event-error">{event.error}</p>}
+            <div class="event-turn">
+              <a href={turnUrl} title={`Filter to turn ${event.turnId}`}>
+                {shortenId(event.turnId)}
+              </a>
+            </div>
+          </div>
+          <div class="event-component">
+            {event.component !== null && (
+              <PivotLink query={props.query} field="component" value={event.component}>
+                {event.component}
               </PivotLink>
-            </strong>
-            {event.success !== null && (
-              <span class={`badge result-${resultLabel}`}>{resultLabel}</span>
             )}
+            {event.toolName !== null && (
+              <PivotLink query={props.query} field="toolName" value={event.toolName}>
+                {event.toolName}
+              </PivotLink>
+            )}
+          </div>
+          <div
+            class={`event-duration${slow ? " slow" : ""}`}
+            title={slow ? "Slow event" : undefined}
+          >
+            {event.durationMs === null ? "—" : formatDuration(event.durationMs)}
           </div>
           <LocalTime ms={event.createdAtMs} />
+          <span class="event-chevron" aria-hidden="true">
+            ›
+          </span>
         </div>
-        <div class="event-context">
-          <a href={`/turns/${encodeURIComponent(event.turnId)}`} title={event.turnId}>
-            {shortenId(event.turnId)}
-          </a>
-          {event.component !== null && (
-            <PivotLink query={props.query} field="component" value={event.component}>
-              {event.component}
-            </PivotLink>
-          )}
-          {event.toolName !== null && (
-            <PivotLink query={props.query} field="toolName" value={event.toolName}>
-              {event.toolName}
-            </PivotLink>
-          )}
-          {event.durationMs !== null && <span>{formatDuration(event.durationMs)}</span>}
-        </div>
-        {event.summary !== null && <p class="event-summary">{event.summary}</p>}
-        {event.error !== null && <p class="event-error">{event.error}</p>}
-        <details class="event-details">
-          <summary>Details</summary>
-          <div class="detail-toolbar">
-            <button class="button secondary small" type="button" data-copy={JSON.stringify(event)}>
-              Copy event JSON
-            </button>
-          </div>
-          {event.error !== null && (
-            <section>
-              <h4>Error</h4>
-              <pre>{event.error}</pre>
-            </section>
-          )}
-          <section>
-            <h4>Metadata</h4>
-            <pre>{JSON.stringify(event.metadata, null, 2)}</pre>
-          </section>
-          <section>
-            <h4>Complete event</h4>
-            <pre>{JSON.stringify(event, null, 2)}</pre>
-          </section>
-        </details>
       </div>
+      <template class="event-inspector-template">
+        <EventInspectorContent event={event} />
+      </template>
     </article>
+  );
+}
+
+function EventInspector(props: { event: TOption<TPersistedBehaviorLogEvent> }) {
+  return (
+    <aside class="event-inspector" aria-label="Event details">
+      <div class="inspector-heading">
+        <h2>Event details</h2>
+        <div class="inspector-heading-actions">
+          <button
+            class="icon-button"
+            type="button"
+            data-copy-current-event
+            aria-label="Copy event JSON"
+            title="Copy event JSON"
+          >
+            ⧉
+          </button>
+        </div>
+      </div>
+      <div id="event-inspector-content" aria-live="polite">
+        {props.event === undefined ? (
+          <div class="inspector-empty">
+            <strong>Select an event</strong>
+            <p>Choose an event from the timeline to inspect its context and raw payload.</p>
+          </div>
+        ) : (
+          <EventInspectorContent event={props.event} />
+        )}
+      </div>
+    </aside>
+  );
+}
+
+function EventInspectorContent(props: { event: TPersistedBehaviorLogEvent }) {
+  const event = props.event;
+  const status = eventStatus(event);
+  const metadataEntries = Object.entries(event.metadata);
+
+  return (
+    <div class="inspector-content" data-event-json={JSON.stringify(event)}>
+      <div class="inspector-event-title">
+        <strong>{event.event}</strong>
+        <span class={`status-label ${status.className}`}>
+          <span class="status-dot" aria-hidden="true"></span>
+          {status.label}
+        </span>
+      </div>
+      <InspectorSection title="Overview">
+        <InspectorValue label="Result" value={status.label} className={status.className} />
+        <InspectorValue
+          label="Duration"
+          value={event.durationMs === null ? "Not reported" : formatDuration(event.durationMs)}
+          className={isSlowEvent(event) ? "warning" : undefined}
+        />
+        <InspectorValue
+          label="Timestamp"
+          value={new Date(event.createdAtMs).toLocaleString()}
+          mono
+        />
+        <InspectorValue label="Level" value={event.level} />
+      </InspectorSection>
+      <InspectorSection title="Context">
+        <InspectorValue label="Turn ID" value={event.turnId} mono />
+        {event.chatId !== null && <InspectorValue label="Chat ID" value={event.chatId} mono />}
+        {event.component !== null && <InspectorValue label="Component" value={event.component} />}
+        {event.toolName !== null && <InspectorValue label="Tool" value={event.toolName} />}
+        {event.platform !== null && <InspectorValue label="Platform" value={event.platform} />}
+        {event.provider !== null && <InspectorValue label="Provider" value={event.provider} />}
+        {event.model !== null && <InspectorValue label="Model" value={event.model} />}
+      </InspectorSection>
+      <InspectorSection title="Metadata">
+        {metadataEntries.length === 0 ? (
+          <p class="inspector-muted">No metadata recorded.</p>
+        ) : (
+          metadataEntries.map(([key, value]) => (
+            <InspectorValue label={key} value={formatMetadataValue(value)} mono />
+          ))
+        )}
+      </InspectorSection>
+      {event.error !== null && (
+        <InspectorSection title="Error">
+          <pre class="error-pre">{event.error}</pre>
+        </InspectorSection>
+      )}
+      <InspectorSection title="Raw event" className="inspector-raw-section">
+        <pre class="raw-event">{JSON.stringify(event, null, 2)}</pre>
+      </InspectorSection>
+      <div class="inspector-actions">
+        <button class="button secondary" type="button" data-copy={JSON.stringify(event)}>
+          Copy JSON
+        </button>
+        <a class="button secondary" href={`/?range=all&turnId=${encodeURIComponent(event.turnId)}`}>
+          Filter to this turn
+        </a>
+      </div>
+    </div>
+  );
+}
+
+function InspectorSection(props: PropsWithChildren<{ title: string; className?: string }>) {
+  return (
+    <section class={`inspector-section ${props.className ?? ""}`.trim()}>
+      <h3>{props.title}</h3>
+      <div class="inspector-section-body">{props.children}</div>
+    </section>
+  );
+}
+
+function InspectorValue(props: {
+  label: string;
+  value: string;
+  className?: string;
+  mono?: boolean;
+}) {
+  return (
+    <div class="inspector-value">
+      <span>{props.label}</span>
+      <strong class={`${props.mono ? "mono" : ""}${props.className ? ` ${props.className}` : ""}`}>
+        {props.value}
+      </strong>
+    </div>
   );
 }
 
@@ -600,15 +778,6 @@ function LoadMore(props: {
   );
 }
 
-function SummaryStat(props: { label: string; value: unknown }) {
-  return (
-    <div>
-      <span>{props.label}</span>
-      <strong>{props.value}</strong>
-    </div>
-  );
-}
-
 function LocalTime(props: { ms: number }) {
   const iso = new Date(props.ms).toISOString();
   return (
@@ -626,14 +795,72 @@ function shortenId(value: string): string {
   return `${value.slice(0, 12)}…${value.slice(-10)}`;
 }
 
-function eventClass(event: TPersistedBehaviorLogEvent): string {
+function eventClass(event: TPersistedBehaviorLogEvent, selected: boolean): string {
   let className = `event-row event-level-${event.level}`;
 
   if (event.success === false) {
     className += " event-failed";
+  } else if (isSlowEvent(event)) {
+    className += " event-slow";
+  } else if (isStartedEvent(event) || event.success === null) {
+    className += " event-neutral";
+  } else {
+    className += " event-success";
+  }
+
+  if (selected) {
+    className += " selected";
   }
 
   return className;
+}
+
+function eventStatus(event: TPersistedBehaviorLogEvent): { label: string; className: string } {
+  if (event.success === false) {
+    return { label: "Failure", className: "danger" };
+  }
+
+  if (isStartedEvent(event)) {
+    return { label: "Started", className: "neutral" };
+  }
+
+  if (event.success === true) {
+    return { label: "Success", className: "success" };
+  }
+
+  return { label: "Recorded", className: "neutral" };
+}
+
+function isStartedEvent(event: TPersistedBehaviorLogEvent): boolean {
+  return event.event.endsWith(".started") || event.event.endsWith(".starting");
+}
+
+function isSlowEvent(event: TPersistedBehaviorLogEvent): boolean {
+  return event.durationMs !== null && event.durationMs >= SLOW_EVENT_THRESHOLD_MS;
+}
+
+function describeTurn(turnId: string): { label: string; icon: string } {
+  if (turnId.startsWith("cron:")) {
+    return { label: "Scheduled task", icon: "◷" };
+  }
+
+  if (turnId.startsWith("msg:")) {
+    return { label: "Message", icon: "◌" };
+  }
+
+  if (turnId.startsWith("boot:")) {
+    return { label: "System boot", icon: "□" };
+  }
+
+  return { label: "Turn", icon: "◇" };
+}
+
+function formatMetadataValue(value: unknown): string {
+  if (typeof value === "string") {
+    return value;
+  }
+
+  return JSON.stringify(value);
 }
 
 function formatDuration(value: number): string {

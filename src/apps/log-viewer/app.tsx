@@ -6,7 +6,7 @@ import { getDefaultLogDbPath } from "../../services/app-logger";
 import type { TOption } from "../../types";
 import { LogReader } from "./log-reader";
 import { parseLogSearchQuery } from "./query";
-import { Document, ErrorPage, EventPageFragment, HomePage, LivePoller, TurnPage } from "./views";
+import { Document, ErrorPage, EventPageFragment, HomePage, LivePoller } from "./views";
 
 type TLogViewerOptions = {
   dbPath: TOption<string>;
@@ -76,27 +76,9 @@ export function createLogViewerApp(
     );
   });
 
-  app.get("/turns/:turnId", async (context) => {
+  app.get("/turns/:turnId", (context) => {
     const turnId = context.req.param("turnId");
-    const result = await reader.readTurn(turnId);
-
-    if (!result.success) {
-      if (context.req.header("HX-Request") === "true") {
-        return hxError(context, result.error.message);
-      }
-
-      return context.html(
-        <Document>
-          <ErrorPage error={result.error} retryUrl={requestPath(context.req.url)} />
-        </Document>,
-      );
-    }
-
-    return context.html(
-      <Document>
-        <TurnPage dbPath={dbPath} turnId={turnId} page={result.data} />
-      </Document>,
-    );
+    return context.redirect(`/?range=all&turnId=${encodeURIComponent(turnId)}`);
   });
 
   app.get("/fragments/events", async (context) => {

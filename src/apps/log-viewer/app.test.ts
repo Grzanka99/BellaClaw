@@ -63,12 +63,22 @@ describe("log viewer", () => {
     application = createLogViewerApp({ dbPath });
 
     const home = await application.app.request("/?q=distinctive&success=success");
-    const turn = await application.app.request("/turns/turn-searchable");
+    const turnRedirect = await application.app.request("/turns/turn-searchable");
+    const styles = await application.app.request("/assets/styles.css");
     const homeHtml = await home.text();
-    const turnHtml = await turn.text();
+    const stylesCss = await styles.text();
 
     expect(homeHtml).toContain("distinctive lookup finished");
-    expect(homeHtml).toContain("/turns/turn-searchable");
-    expect(turnHtml.indexOf("lookup started")).toBeLessThan(turnHtml.indexOf("lookup finished"));
+    expect(homeHtml).toContain("turnId=turn-searchable");
+    expect(homeHtml).not.toContain("/turns/turn-searchable");
+    expect(turnRedirect.status).toBe(302);
+    expect(turnRedirect.headers.get("location")).toBe("/?range=all&turnId=turn-searchable");
+    expect(homeHtml).toContain('class="event-inspector"');
+    expect(homeHtml).toContain('data-event-selectable="true"');
+    expect(homeHtml).toContain("Filter to this turn");
+    expect(homeHtml).toContain("+ More filters");
+    expect(homeHtml).toContain("data-theme-toggle");
+    expect(stylesCss).toContain("--background: #000000");
+    expect(stylesCss).toContain(':root[data-theme="light"]');
   });
 });

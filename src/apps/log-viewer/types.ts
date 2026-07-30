@@ -74,10 +74,3 @@ export type TLogPage = {
   recentTurns: TRecentTurn[];
   filters: TLogFilterOptions;
 };
-
-export type TTurnPage = {
-  events: TPersistedBehaviorLogEvent[];
-  startedAtMs: number;
-  latestCreatedAtMs: number;
-  hasFailure: boolean;
-};
