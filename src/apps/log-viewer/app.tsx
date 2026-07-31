@@ -76,11 +76,6 @@ export function createLogViewerApp(
     );
   });
 
-  app.get("/turns/:turnId", (context) => {
-    const turnId = context.req.param("turnId");
-    return context.redirect(`/?range=all&turnId=${encodeURIComponent(turnId)}`);
-  });
-
   app.get("/fragments/events", async (context) => {
     const query = parseLogSearchQuery(context.req.query());
     const result = await reader.readLogPage(query);

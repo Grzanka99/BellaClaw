@@ -175,7 +175,7 @@ async function updateCopyButton(button, value) {
   const label = button.textContent;
 
   try {
-    await copyText(value);
+    await navigator.clipboard.writeText(value);
     button.textContent = "Copied";
   } catch (_error) {
     button.textContent = "Copy failed";
@@ -184,26 +184,6 @@ async function updateCopyButton(button, value) {
   setTimeout(() => {
     button.textContent = label;
   }, 1200);
-}
-
-async function copyText(value) {
-  if (navigator.clipboard && window.isSecureContext) {
-    await navigator.clipboard.writeText(value);
-    return;
-  }
-
-  const textarea = document.createElement("textarea");
-  textarea.value = value;
-  textarea.style.position = "fixed";
-  textarea.style.opacity = "0";
-  document.body.append(textarea);
-  textarea.select();
-  const copied = document.execCommand("copy");
-  textarea.remove();
-
-  if (!copied) {
-    throw new Error("Copy command failed");
-  }
 }
 
 function handleUpdatedContent(root) {

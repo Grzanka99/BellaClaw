@@ -76,7 +76,7 @@ describe("log viewer", () => {
     application = createLogViewerApp({ dbPath });
 
     const home = await application.app.request("/?q=distinctive&success=success");
-    const turnRedirect = await application.app.request("/turns/turn-searchable");
+    const removedTurnRoute = await application.app.request("/turns/turn-searchable");
     const styles = await application.app.request("/assets/styles.css");
     const script = await application.app.request("/assets/app.js");
     const homeHtml = await home.text();
@@ -86,8 +86,7 @@ describe("log viewer", () => {
     expect(homeHtml).toContain("distinctive lookup finished");
     expect(homeHtml).toContain("turnId=turn-searchable");
     expect(homeHtml).not.toContain("/turns/turn-searchable");
-    expect(turnRedirect.status).toBe(302);
-    expect(turnRedirect.headers.get("location")).toBe("/?range=all&turnId=turn-searchable");
+    expect(removedTurnRoute.status).toBe(404);
     expect(homeHtml).toContain('class="event-inspector"');
     expect(homeHtml).toContain('data-event-selectable="true"');
     expect(homeHtml).toContain("Filter to this turn");
