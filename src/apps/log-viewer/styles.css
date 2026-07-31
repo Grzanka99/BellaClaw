@@ -28,6 +28,7 @@
   font-size: 14px;
 }
 
+/* Keep these tokens paired with the system-preference light block below. */
 :root[data-theme="light"] {
   color-scheme: light;
   --background: #f5f7fa;
@@ -55,6 +56,7 @@
 }
 
 @media (prefers-color-scheme: light) {
+  /* Keep these tokens paired with the explicit light-theme block above. */
   :root:not([data-theme]) {
     color-scheme: light;
     --background: #f5f7fa;
@@ -145,7 +147,7 @@ pre,
   padding: 0;
   margin: -1px;
   overflow: hidden;
-  clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
   white-space: nowrap;
   border: 0;
 }
@@ -268,7 +270,7 @@ pre,
 }
 
 .live-button .live-dot {
-  background: currentColor;
+  background: currentcolor;
 }
 
 .live-button.active {
@@ -617,7 +619,7 @@ pre,
   display: grid;
   width: 16px;
   height: 16px;
-  border: 1px solid currentColor;
+  border: 1px solid currentcolor;
   border-radius: 50%;
   font-size: 9px;
   font-weight: 700;
@@ -1021,7 +1023,7 @@ pre,
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: currentColor;
+  background: currentcolor;
 }
 
 .status-label.success,

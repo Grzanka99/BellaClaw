@@ -26,6 +26,17 @@ export function Document(props: PropsWithChildren) {
         <meta name="color-scheme" content="dark light" />
         <title>BellaClaw Logs</title>
         <link rel="icon" href="data:," />
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `{
+  const savedTheme = localStorage.getItem("bellaclaw-log-viewer-theme");
+
+  if (savedTheme === "light" || savedTheme === "dark") {
+    document.documentElement.dataset.theme = savedTheme;
+  }
+}`,
+          }}
+        ></script>
         <link rel="stylesheet" href="/assets/styles.css?v=log-viewer-redesign-4" />
         <script src="/assets/htmx.min.js" defer></script>
         <script src="/assets/app.js" defer></script>
@@ -86,7 +97,7 @@ export function HomePage(props: { dbPath: string; query: TLogSearchQuery; page: 
             <LoadMore query={props.query} events={props.page.events} hasMore={props.page.hasMore} />
           </div>
         </main>
-        <EventInspector event={newest} />
+        <EventInspector event={newest} query={props.query} />
       </div>
     </div>
   );
@@ -203,6 +214,13 @@ function PageHeader(props: { dbPath: string; query: TLogSearchQuery }) {
     includeCursor: false,
     live: !props.query.live,
   });
+  let liveButtonClass = "button live-button";
+  let liveButtonLabel = "Go live";
+
+  if (props.query.live) {
+    liveButtonClass += " active";
+    liveButtonLabel = "Pause live";
+  }
 
   return (
     <header class="topbar">
@@ -219,9 +237,9 @@ function PageHeader(props: { dbPath: string; query: TLogSearchQuery }) {
         <a class="button secondary" href={refreshUrl}>
           ↻ Refresh
         </a>
-        <a class={`button live-button${props.query.live ? " active" : ""}`} href={liveUrl}>
+        <a class={liveButtonClass} href={liveUrl}>
           <span class="live-dot"></span>
-          {props.query.live ? "Pause live" : "Go live"}
+          {liveButtonLabel}
         </a>
       </nav>
     </header>
@@ -294,7 +312,7 @@ function SearchForm(props: { query: TLogSearchQuery; filters: TLogFilterOptions 
         <details class="advanced-filters">
           <summary>+ More filters</summary>
           <div class="advanced-filter-grid">
-            <FilterSelect label="Event" name="event">
+            <FilterSelect label="Event" name="event" compact={undefined}>
               <option value="" selected={props.query.event === undefined}>
                 Any event
               </option>
@@ -304,7 +322,7 @@ function SearchForm(props: { query: TLogSearchQuery; filters: TLogFilterOptions 
                 </option>
               ))}
             </FilterSelect>
-            <FilterSelect label="Component" name="component">
+            <FilterSelect label="Component" name="component" compact={undefined}>
               <option value="" selected={props.query.component === undefined}>
                 Any component
               </option>
@@ -314,7 +332,7 @@ function SearchForm(props: { query: TLogSearchQuery; filters: TLogFilterOptions 
                 </option>
               ))}
             </FilterSelect>
-            <FilterSelect label="Tool" name="toolName">
+            <FilterSelect label="Tool" name="toolName" compact={undefined}>
               <option value="" selected={props.query.toolName === undefined}>
                 Any tool
               </option>
@@ -392,11 +410,19 @@ function ActiveFilters(props: { query: TLogSearchQuery }) {
 }
 
 function FilterSelect(
-  props: PropsWithChildren<{ label: string; name: string; compact?: boolean }>,
+  props: PropsWithChildren<{ label: string; name: string; compact: TOption<boolean> }>,
 ) {
+  let labelClass = "filter-field";
+  let textClass: TOption<string>;
+
+  if (props.compact === true) {
+    labelClass = "filter-control";
+    textClass = "sr-only";
+  }
+
   return (
-    <label class={props.compact ? "filter-control" : "filter-field"}>
-      <span class={props.compact ? "sr-only" : undefined}>{props.label}</span>
+    <label class={labelClass}>
+      <span class={textClass}>{props.label}</span>
       <select name={props.name} aria-label={props.label}>
         {props.children}
       </select>
@@ -415,25 +441,41 @@ function RecentTurns(props: { turns: TRecentTurn[]; query: TLogSearchQuery }) {
       <ol class="turn-list">
         {props.turns.map((turn) => {
           const selected = props.query.turnId === turn.turnId;
+          let range: TLogSearchQuery["range"] = "all";
+          let turnId: TOption<string> = turn.turnId;
+          let listClass: TOption<string>;
+          let currentPage: TOption<string>;
+
+          if (selected) {
+            range = props.query.range;
+            turnId = undefined;
+            listClass = "selected";
+            currentPage = "page";
+          }
+
           const url = buildLogUrl(props.query, {
             includeUntil: false,
             includeCursor: false,
             live: false,
             overrides: {
-              range: selected ? props.query.range : "all",
-              turnId: selected ? undefined : turn.turnId,
+              range,
+              turnId,
             },
           });
           const turnPresentation = describeTurn(turn.turnId);
+          let statusClass = "turn-status healthy";
+          let statusTitle = "No failures reported";
+          let statusSymbol = "✓";
+
+          if (turn.hasFailure) {
+            statusClass = "turn-status failed";
+            statusTitle = "Contains a failure";
+            statusSymbol = "!";
+          }
 
           return (
-            <li class={selected ? "selected" : undefined}>
-              <a
-                class="turn-link"
-                href={url}
-                title={turn.turnId}
-                aria-current={selected ? "page" : undefined}
-              >
+            <li class={listClass}>
+              <a class="turn-link" href={url} title={turn.turnId} aria-current={currentPage}>
                 <span class="turn-icon" aria-hidden="true">
                   {turnPresentation.icon}
                 </span>
@@ -444,14 +486,9 @@ function RecentTurns(props: { turns: TRecentTurn[]; query: TLogSearchQuery }) {
                     <LocalTime ms={turn.latestCreatedAtMs} /> · {turn.eventCount} events
                   </span>
                 </span>
-                <span
-                  class={turn.hasFailure ? "turn-status failed" : "turn-status healthy"}
-                  title={turn.hasFailure ? "Contains a failure" : "No failures reported"}
-                >
-                  <span aria-hidden="true">{turn.hasFailure ? "!" : "✓"}</span>
-                  <span class="sr-only">
-                    {turn.hasFailure ? "Contains a failure" : "No failures reported"}
-                  </span>
+                <span class={statusClass} title={statusTitle}>
+                  <span aria-hidden="true">{statusSymbol}</span>
+                  <span class="sr-only">{statusTitle}</span>
                 </span>
               </a>
               <button
@@ -474,7 +511,7 @@ function RecentTurns(props: { turns: TRecentTurn[]; query: TLogSearchQuery }) {
 function EventRows(props: {
   events: TPersistedBehaviorLogEvent[];
   query: TLogSearchQuery;
-  selectedEventId?: number;
+  selectedEventId: TOption<number>;
 }) {
   if (props.events.length === 0) {
     return (
@@ -539,10 +576,28 @@ function EventRow(props: {
   const event = props.event;
   const slow = isSlowEvent(event);
   const status = eventStatus(event);
+  let currentEvent: TOption<string>;
+  let durationClass = "event-duration";
+  let durationTitle: TOption<string>;
+  let durationLabel = "—";
+
+  if (props.selected) {
+    currentEvent = "true";
+  }
+
+  if (slow) {
+    durationClass += " slow";
+    durationTitle = "Slow event";
+  }
+
+  if (event.durationMs !== null) {
+    durationLabel = formatDuration(event.durationMs);
+  }
+
   const turnUrl = buildLogUrl(props.query, {
     includeUntil: false,
     includeCursor: false,
-    live: false,
+    live: props.query.live,
     overrides: { range: "all", turnId: event.turnId },
   });
 
@@ -551,7 +606,7 @@ function EventRow(props: {
       class={eventClass(event, props.selected)}
       data-event-id={String(event.id)}
       data-event-selectable="true"
-      aria-current={props.selected ? "true" : undefined}
+      aria-current={currentEvent}
       tabindex={0}
     >
       <span class="timeline-dot" aria-hidden="true"></span>
@@ -590,11 +645,8 @@ function EventRow(props: {
               </PivotLink>
             )}
           </div>
-          <div
-            class={`event-duration${slow ? " slow" : ""}`}
-            title={slow ? "Slow event" : undefined}
-          >
-            {event.durationMs === null ? "—" : formatDuration(event.durationMs)}
+          <div class={durationClass} title={durationTitle}>
+            {durationLabel}
           </div>
           <LocalTime ms={event.createdAtMs} />
           <span class="event-chevron" aria-hidden="true">
@@ -603,13 +655,16 @@ function EventRow(props: {
         </div>
       </div>
       <template class="event-inspector-template">
-        <EventInspectorContent event={event} />
+        <EventInspectorContent event={event} query={props.query} />
       </template>
     </article>
   );
 }
 
-function EventInspector(props: { event: TOption<TPersistedBehaviorLogEvent> }) {
+function EventInspector(props: {
+  event: TOption<TPersistedBehaviorLogEvent>;
+  query: TLogSearchQuery;
+}) {
   return (
     <aside class="event-inspector" aria-label="Event details">
       <div class="inspector-heading">
@@ -627,23 +682,44 @@ function EventInspector(props: { event: TOption<TPersistedBehaviorLogEvent> }) {
         </div>
       </div>
       <div id="event-inspector-content" aria-live="polite">
-        {props.event === undefined ? (
+        {props.event === undefined && (
           <div class="inspector-empty">
             <strong>Select an event</strong>
             <p>Choose an event from the timeline to inspect its context and raw payload.</p>
           </div>
-        ) : (
-          <EventInspectorContent event={props.event} />
+        )}
+        {props.event !== undefined && (
+          <EventInspectorContent event={props.event} query={props.query} />
         )}
       </div>
     </aside>
   );
 }
 
-function EventInspectorContent(props: { event: TPersistedBehaviorLogEvent }) {
+function EventInspectorContent(props: {
+  event: TPersistedBehaviorLogEvent;
+  query: TLogSearchQuery;
+}) {
   const event = props.event;
   const status = eventStatus(event);
   const metadataEntries = Object.entries(event.metadata);
+  let duration = "Not reported";
+  let durationClass: TOption<string>;
+
+  if (event.durationMs !== null) {
+    duration = formatDuration(event.durationMs);
+  }
+
+  if (isSlowEvent(event)) {
+    durationClass = "warning";
+  }
+
+  const turnUrl = buildLogUrl(props.query, {
+    includeUntil: false,
+    includeCursor: false,
+    live: props.query.live,
+    overrides: { range: "all", turnId: event.turnId },
+  });
 
   return (
     <div class="inspector-content" data-event-json={JSON.stringify(event)}>
@@ -654,40 +730,87 @@ function EventInspectorContent(props: { event: TPersistedBehaviorLogEvent }) {
           {status.label}
         </span>
       </div>
-      <InspectorSection title="Overview">
-        <InspectorValue label="Result" value={status.label} className={status.className} />
+      <InspectorSection title="Overview" className={undefined}>
+        <InspectorValue
+          label="Result"
+          value={status.label}
+          className={status.className}
+          mono={undefined}
+        />
         <InspectorValue
           label="Duration"
-          value={event.durationMs === null ? "Not reported" : formatDuration(event.durationMs)}
-          className={isSlowEvent(event) ? "warning" : undefined}
+          value={duration}
+          className={durationClass}
+          mono={undefined}
         />
-        <InspectorValue
-          label="Timestamp"
-          value={new Date(event.createdAtMs).toLocaleString()}
-          mono
-        />
-        <InspectorValue label="Level" value={event.level} />
+        <div class="inspector-value">
+          <span>Timestamp</span>
+          <strong class="mono">
+            <LocalTime ms={event.createdAtMs} />
+          </strong>
+        </div>
+        <InspectorValue label="Level" value={event.level} className={undefined} mono={undefined} />
       </InspectorSection>
-      <InspectorSection title="Context">
-        <InspectorValue label="Turn ID" value={event.turnId} mono />
-        {event.chatId !== null && <InspectorValue label="Chat ID" value={event.chatId} mono />}
-        {event.component !== null && <InspectorValue label="Component" value={event.component} />}
-        {event.toolName !== null && <InspectorValue label="Tool" value={event.toolName} />}
-        {event.platform !== null && <InspectorValue label="Platform" value={event.platform} />}
-        {event.provider !== null && <InspectorValue label="Provider" value={event.provider} />}
-        {event.model !== null && <InspectorValue label="Model" value={event.model} />}
-      </InspectorSection>
-      <InspectorSection title="Metadata">
-        {metadataEntries.length === 0 ? (
-          <p class="inspector-muted">No metadata recorded.</p>
-        ) : (
-          metadataEntries.map(([key, value]) => (
-            <InspectorValue label={key} value={formatMetadataValue(value)} mono />
-          ))
+      <InspectorSection title="Context" className={undefined}>
+        <InspectorValue label="Turn ID" value={event.turnId} className={undefined} mono />
+        {event.chatId !== null && (
+          <InspectorValue label="Chat ID" value={event.chatId} className={undefined} mono />
+        )}
+        {event.component !== null && (
+          <InspectorValue
+            label="Component"
+            value={event.component}
+            className={undefined}
+            mono={undefined}
+          />
+        )}
+        {event.toolName !== null && (
+          <InspectorValue
+            label="Tool"
+            value={event.toolName}
+            className={undefined}
+            mono={undefined}
+          />
+        )}
+        {event.platform !== null && (
+          <InspectorValue
+            label="Platform"
+            value={event.platform}
+            className={undefined}
+            mono={undefined}
+          />
+        )}
+        {event.provider !== null && (
+          <InspectorValue
+            label="Provider"
+            value={event.provider}
+            className={undefined}
+            mono={undefined}
+          />
+        )}
+        {event.model !== null && (
+          <InspectorValue
+            label="Model"
+            value={event.model}
+            className={undefined}
+            mono={undefined}
+          />
         )}
       </InspectorSection>
+      <InspectorSection title="Metadata" className={undefined}>
+        {metadataEntries.length === 0 && <p class="inspector-muted">No metadata recorded.</p>}
+        {metadataEntries.length > 0 &&
+          metadataEntries.map(([key, value]) => (
+            <InspectorValue
+              label={key}
+              value={formatMetadataValue(value)}
+              className={undefined}
+              mono
+            />
+          ))}
+      </InspectorSection>
       {event.error !== null && (
-        <InspectorSection title="Error">
+        <InspectorSection title="Error" className={undefined}>
           <pre class="error-pre">{event.error}</pre>
         </InspectorSection>
       )}
@@ -695,10 +818,10 @@ function EventInspectorContent(props: { event: TPersistedBehaviorLogEvent }) {
         <pre class="raw-event">{JSON.stringify(event, null, 2)}</pre>
       </InspectorSection>
       <div class="inspector-actions">
-        <button class="button secondary" type="button" data-copy={JSON.stringify(event)}>
+        <button class="button secondary" type="button" data-copy-current-event>
           Copy JSON
         </button>
-        <a class="button secondary" href={`/?range=all&turnId=${encodeURIComponent(event.turnId)}`}>
+        <a class="button secondary" href={turnUrl}>
           Filter to this turn
         </a>
       </div>
@@ -706,9 +829,15 @@ function EventInspectorContent(props: { event: TPersistedBehaviorLogEvent }) {
   );
 }
 
-function InspectorSection(props: PropsWithChildren<{ title: string; className?: string }>) {
+function InspectorSection(props: PropsWithChildren<{ title: string; className: TOption<string> }>) {
+  let className = "inspector-section";
+
+  if (props.className !== undefined) {
+    className += ` ${props.className}`;
+  }
+
   return (
-    <section class={`inspector-section ${props.className ?? ""}`.trim()}>
+    <section class={className}>
       <h3>{props.title}</h3>
       <div class="inspector-section-body">{props.children}</div>
     </section>
@@ -718,15 +847,27 @@ function InspectorSection(props: PropsWithChildren<{ title: string; className?: 
 function InspectorValue(props: {
   label: string;
   value: string;
-  className?: string;
-  mono?: boolean;
+  className: TOption<string>;
+  mono: TOption<boolean>;
 }) {
+  let className = "";
+
+  if (props.mono === true) {
+    className = "mono";
+  }
+
+  if (props.className !== undefined) {
+    if (className.length > 0) {
+      className += " ";
+    }
+
+    className += props.className;
+  }
+
   return (
     <div class="inspector-value">
       <span>{props.label}</span>
-      <strong class={`${props.mono ? "mono" : ""}${props.className ? ` ${props.className}` : ""}`}>
-        {props.value}
-      </strong>
+      <strong class={className}>{props.value}</strong>
     </div>
   );
 }
@@ -768,7 +909,7 @@ function LoadMore(props: {
         class="button secondary"
         type="button"
         hx-get={url}
-        hx-trigger="click, revealed"
+        hx-trigger="click, intersect once root:#events-list"
         hx-target="#load-more"
         hx-swap="outerHTML"
       >
@@ -832,7 +973,7 @@ function eventStatus(event: TPersistedBehaviorLogEvent): { label: string; classN
 }
 
 function isStartedEvent(event: TPersistedBehaviorLogEvent): boolean {
-  return event.event.endsWith(".started") || event.event.endsWith(".starting");
+  return event.event.endsWith(".started");
 }
 
 function isSlowEvent(event: TPersistedBehaviorLogEvent): boolean {

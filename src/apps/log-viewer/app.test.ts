@@ -58,6 +58,19 @@ describe("log viewer", () => {
       success: true,
       summary: "distinctive lookup finished",
     });
+
+    for (let index = 0; index < 99; index += 1) {
+      logger.record({
+        trace: { turnId: "turn-searchable", chatId: undefined, platform: "discord" },
+        event: "tool.finished",
+        component: "ai",
+        level: EBehaviorLogLevel.Info,
+        toolName: "web-search",
+        success: true,
+        summary: `distinctive lookup ${index}`,
+      });
+    }
+
     await logger.flush();
     await logger.close();
     application = createLogViewerApp({ dbPath });
@@ -65,8 +78,10 @@ describe("log viewer", () => {
     const home = await application.app.request("/?q=distinctive&success=success");
     const turnRedirect = await application.app.request("/turns/turn-searchable");
     const styles = await application.app.request("/assets/styles.css");
+    const script = await application.app.request("/assets/app.js");
     const homeHtml = await home.text();
     const stylesCss = await styles.text();
+    const appJs = await script.text();
 
     expect(homeHtml).toContain("distinctive lookup finished");
     expect(homeHtml).toContain("turnId=turn-searchable");
@@ -78,7 +93,21 @@ describe("log viewer", () => {
     expect(homeHtml).toContain("Filter to this turn");
     expect(homeHtml).toContain("+ More filters");
     expect(homeHtml).toContain("data-theme-toggle");
+    expect(homeHtml.indexOf("bellaclaw-log-viewer-theme")).toBeLessThan(
+      homeHtml.indexOf("/assets/styles.css"),
+    );
+    expect(homeHtml).toContain('localStorage.getItem("bellaclaw-log-viewer-theme")');
+    expect(homeHtml).toContain('data-copy-current-event="true"');
+    expect(homeHtml).toContain("data-event-json=");
+    expect(homeHtml).toContain(
+      "q=distinctive&amp;range=all&amp;success=success&amp;turnId=turn-searchable",
+    );
+    expect(homeHtml).toContain('hx-trigger="click, intersect once root:#events-list"');
     expect(stylesCss).toContain("--background: #000000");
     expect(stylesCss).toContain(':root[data-theme="light"]');
+    expect(stylesCss).toContain("clip-path: inset(50%)");
+    expect(stylesCss).not.toContain("currentColor");
+    expect(appJs).toContain("eventsList.scrollTop < 160");
+    expect(appJs).not.toContain("window.scrollY");
   });
 });

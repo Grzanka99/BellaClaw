@@ -10,16 +10,6 @@ function getActiveTheme() {
   return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
 }
 
-function initializeTheme() {
-  const saved = localStorage.getItem(THEME_STORAGE_KEY);
-
-  if (saved === "light" || saved === "dark") {
-    document.documentElement.dataset.theme = saved;
-  }
-
-  updateThemeControls();
-}
-
 function updateThemeControls() {
   const activeTheme = getActiveTheme();
   document.documentElement.dataset.currentTheme = activeTheme;
@@ -91,10 +81,6 @@ function selectEvent(row, manual) {
   const template = row.querySelector(":scope > .event-inspector-template");
   const inspector = document.querySelector("#event-inspector-content");
 
-  if (!(template instanceof HTMLTemplateElement) || !inspector) {
-    return;
-  }
-
   for (const candidate of document.querySelectorAll("[data-event-selectable]")) {
     const selected = candidate === row;
     candidate.classList.toggle("selected", selected);
@@ -120,7 +106,7 @@ function currentEventJson() {
 }
 
 setInterval(() => updateLocalTimes(), 30_000);
-initializeTheme();
+updateThemeControls();
 
 window.matchMedia("(prefers-color-scheme: light)").addEventListener("change", () => {
   if (document.documentElement.dataset.theme === undefined) {
@@ -154,7 +140,7 @@ document.addEventListener("click", async (event) => {
   const copyButton = event.target.closest("button[data-copy]");
 
   if (copyButton) {
-    await updateCopyButton(copyButton, copyButton.dataset.copy ?? "");
+    await updateCopyButton(copyButton, copyButton.dataset.copy);
     return;
   }
 
@@ -246,7 +232,13 @@ function handleUpdatedContent(root) {
     return;
   }
 
-  if (window.scrollY < 160 && document.querySelector("details[open]") === null) {
+  const eventsList = document.querySelector("#events-list");
+
+  if (!(eventsList instanceof HTMLElement)) {
+    return;
+  }
+
+  if (eventsList.scrollTop < 160 && document.querySelector("details[open]") === null) {
     const link = liveStatus.querySelector("a[href]");
 
     if (link) {
