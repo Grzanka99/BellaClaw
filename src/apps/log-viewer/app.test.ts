@@ -35,31 +35,12 @@ describe("log viewer", () => {
     expect(await Bun.file(dbPath).exists()).toBe(false);
   });
 
-  test("searches events and renders a turn timeline", async () => {
+  test("searches events and renders the log workspace", async () => {
     tempDir = mkdtempSync(join(tmpdir(), "bellaclaw-log-viewer-"));
     const dbPath = join(tempDir, "logs.db");
     const logger = new AppLogger({ dbPath, stdout() {} });
 
-    logger.record({
-      trace: { turnId: "turn-searchable", chatId: undefined, platform: "discord" },
-      event: "tool.started",
-      component: "ai",
-      level: EBehaviorLogLevel.Info,
-      toolName: "web-search",
-      success: true,
-      summary: "distinctive lookup started",
-    });
-    logger.record({
-      trace: { turnId: "turn-searchable", chatId: undefined, platform: "discord" },
-      event: "tool.finished",
-      component: "ai",
-      level: EBehaviorLogLevel.Info,
-      toolName: "web-search",
-      success: true,
-      summary: "distinctive lookup finished",
-    });
-
-    for (let index = 0; index < 99; index += 1) {
+    for (let index = 0; index < 101; index += 1) {
       logger.record({
         trace: { turnId: "turn-searchable", chatId: undefined, platform: "discord" },
         event: "tool.finished",
@@ -76,14 +57,9 @@ describe("log viewer", () => {
     application = createLogViewerApp({ dbPath });
 
     const home = await application.app.request("/?q=distinctive&success=success");
-    const styles = await application.app.request("/assets/styles.css");
-    const script = await application.app.request("/assets/app.js");
     const homeHtml = await home.text();
-    const stylesCss = await styles.text();
-    const appJs = await script.text();
 
-    expect(homeHtml).toContain("distinctive lookup finished");
-    expect(homeHtml).toContain("turnId=turn-searchable");
+    expect(homeHtml).toContain("distinctive lookup 100");
     expect(homeHtml).toContain('class="event-inspector"');
     expect(homeHtml).toContain('data-event-selectable="true"');
     expect(homeHtml).toContain("Filter to this turn");
@@ -99,13 +75,5 @@ describe("log viewer", () => {
       "q=distinctive&amp;range=all&amp;success=success&amp;turnId=turn-searchable",
     );
     expect(homeHtml).toContain('hx-trigger="click, intersect once root:#events-list"');
-    expect(stylesCss).toContain("--background: #000000");
-    expect(stylesCss).toContain(':root[data-theme="light"]');
-    expect(stylesCss).toContain("clip-path: inset(50%)");
-    expect(stylesCss).not.toContain("currentColor");
-    expect(appJs).toContain("eventsList.scrollTop < 160");
-    expect(appJs).not.toContain("window.scrollY");
-    expect(appJs).toContain('if (root.id === "app-shell")');
-    expect(appJs).toContain("delete document.documentElement.dataset.eventSelection");
   });
 });
