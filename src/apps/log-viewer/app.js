@@ -3,7 +3,7 @@ const THEME_STORAGE_KEY = "bellaclaw-log-viewer-theme";
 function getActiveTheme() {
   const selected = document.documentElement.dataset.theme;
 
-  if (selected === "light" || selected === "dark") {
+  if (selected !== undefined) {
     return selected;
   }
 
@@ -68,16 +68,12 @@ function updateLocalTimes(root = document) {
     const value = element.getAttribute("datetime");
     const date = new Date(value);
 
-    if (Number.isNaN(date.getTime())) {
-      continue;
-    }
-
     element.textContent = formatTimestamp(date);
     element.title = date.toLocaleString();
   }
 }
 
-function selectEvent(row, manual) {
+function selectEvent(row) {
   const template = row.querySelector(":scope > .event-inspector-template");
   const inspector = document.querySelector("#event-inspector-content");
 
@@ -94,15 +90,7 @@ function selectEvent(row, manual) {
 
   inspector.replaceChildren(template.content.cloneNode(true));
   updateLocalTimes(inspector);
-
-  if (manual) {
-    document.documentElement.dataset.eventSelection = "manual";
-  }
-}
-
-function currentEventJson() {
-  const content = document.querySelector("#event-inspector-content [data-event-json]");
-  return content?.dataset.eventJson;
+  document.documentElement.dataset.eventSelection = "manual";
 }
 
 setInterval(() => updateLocalTimes(), 30_000);
@@ -115,10 +103,6 @@ window.matchMedia("(prefers-color-scheme: light)").addEventListener("change", ()
 });
 
 document.addEventListener("click", async (event) => {
-  if (!(event.target instanceof Element)) {
-    return;
-  }
-
   const themeToggle = event.target.closest("[data-theme-toggle]");
 
   if (themeToggle) {
@@ -129,11 +113,8 @@ document.addEventListener("click", async (event) => {
   const copyCurrentEventButton = event.target.closest("button[data-copy-current-event]");
 
   if (copyCurrentEventButton) {
-    const value = currentEventJson();
-
-    if (value !== undefined) {
-      await updateCopyButton(copyCurrentEventButton, value);
-    }
+    const content = copyCurrentEventButton.closest("[data-event-json]");
+    await updateCopyButton(copyCurrentEventButton, content.dataset.eventJson);
     return;
   }
 
@@ -150,15 +131,11 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
-  selectEvent(row, true);
+  selectEvent(row);
 });
 
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Enter" && event.key !== " ") {
-    return;
-  }
-
-  if (!(event.target instanceof Element)) {
     return;
   }
 
@@ -169,7 +146,7 @@ document.addEventListener("keydown", (event) => {
   }
 
   event.preventDefault();
-  selectEvent(row, true);
+  selectEvent(row);
 });
 
 async function updateCopyButton(button, value) {
@@ -228,7 +205,7 @@ function handleUpdatedContent(root) {
 
   const activeElement = document.activeElement;
 
-  if (activeElement instanceof Element && activeElement.closest(".search-panel") !== null) {
+  if (activeElement.closest(".search-panel") !== null) {
     return;
   }
 
@@ -236,10 +213,7 @@ function handleUpdatedContent(root) {
 
   if (eventsList.scrollTop < 160 && document.querySelector("details[open]") === null) {
     const link = liveStatus.querySelector("a[href]");
-
-    if (link) {
-      window.location.assign(link.href);
-    }
+    window.location.assign(link.href);
   }
 }
 
@@ -247,11 +221,6 @@ document.addEventListener("DOMContentLoaded", () => handleUpdatedContent(documen
 document.body.addEventListener("htmx:afterSwap", (event) => handleUpdatedContent(event.target));
 document.body.addEventListener("logViewerWarning", (event) => {
   const warning = document.querySelector("#transient-warning");
-
-  if (!warning) {
-    return;
-  }
-
   warning.textContent = event.detail.message;
   warning.hidden = false;
 });

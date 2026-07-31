@@ -669,17 +669,6 @@ function EventInspector(props: {
     <aside class="event-inspector" aria-label="Event details">
       <div class="inspector-heading">
         <h2>Event details</h2>
-        <div class="inspector-heading-actions">
-          <button
-            class="icon-button"
-            type="button"
-            data-copy-current-event
-            aria-label="Copy event JSON"
-            title="Copy event JSON"
-          >
-            ⧉
-          </button>
-        </div>
       </div>
       <div id="event-inspector-content" aria-live="polite">
         {props.event === undefined && (
@@ -799,15 +788,14 @@ function EventInspectorContent(props: {
       </InspectorSection>
       <InspectorSection title="Metadata" className={undefined}>
         {metadataEntries.length === 0 && <p class="inspector-muted">No metadata recorded.</p>}
-        {metadataEntries.length > 0 &&
-          metadataEntries.map(([key, value]) => (
-            <InspectorValue
-              label={key}
-              value={formatMetadataValue(value)}
-              className={undefined}
-              mono
-            />
-          ))}
+        {metadataEntries.map(([key, value]) => (
+          <InspectorValue
+            label={key}
+            value={formatMetadataValue(value)}
+            className={undefined}
+            mono
+          />
+        ))}
       </InspectorSection>
       {event.error !== null && (
         <InspectorSection title="Error" className={undefined}>
@@ -877,7 +865,7 @@ function LoadMore(props: {
   events: TPersistedBehaviorLogEvent[];
   hasMore: boolean;
 }) {
-  if (!props.hasMore || props.events.length === 0) {
+  if (!props.hasMore) {
     return (
       <div id="load-more" class="result-end">
         End of loaded results

@@ -961,23 +961,6 @@ pre,
   z-index: 3;
 }
 
-.icon-button {
-  display: grid;
-  width: 28px;
-  height: 28px;
-  border: 1px solid var(--border);
-  border-radius: 0;
-  color: var(--muted-foreground);
-  background: transparent;
-  cursor: pointer;
-  place-items: center;
-}
-
-.icon-button:hover {
-  color: var(--foreground);
-  background: var(--surface-raised);
-}
-
 #event-inspector-content {
   display: flex;
   min-height: 0;
