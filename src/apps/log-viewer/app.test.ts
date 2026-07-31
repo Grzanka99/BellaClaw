@@ -109,5 +109,7 @@ describe("log viewer", () => {
     expect(stylesCss).not.toContain("currentColor");
     expect(appJs).toContain("eventsList.scrollTop < 160");
     expect(appJs).not.toContain("window.scrollY");
+    expect(appJs).toContain('if (root.id === "app-shell")');
+    expect(appJs).toContain("delete document.documentElement.dataset.eventSelection");
   });
 });

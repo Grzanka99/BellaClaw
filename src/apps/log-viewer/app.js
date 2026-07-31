@@ -7,25 +7,47 @@ function getActiveTheme() {
     return selected;
   }
 
-  return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+  if (window.matchMedia("(prefers-color-scheme: light)").matches) {
+    return "light";
+  }
+
+  return "dark";
 }
 
 function updateThemeControls() {
   const activeTheme = getActiveTheme();
+  let labelText;
+  let controlText;
+
+  if (activeTheme === "dark") {
+    labelText = "Light mode";
+    controlText = "Use light mode";
+  } else {
+    labelText = "Dark mode";
+    controlText = "Use dark mode";
+  }
+
   document.documentElement.dataset.currentTheme = activeTheme;
 
   for (const label of document.querySelectorAll("[data-theme-label]")) {
-    label.textContent = activeTheme === "dark" ? "Light mode" : "Dark mode";
+    label.textContent = labelText;
   }
 
   for (const button of document.querySelectorAll("[data-theme-toggle]")) {
-    button.setAttribute("aria-label", activeTheme === "dark" ? "Use light mode" : "Use dark mode");
-    button.setAttribute("title", activeTheme === "dark" ? "Use light mode" : "Use dark mode");
+    button.setAttribute("aria-label", controlText);
+    button.setAttribute("title", controlText);
   }
 }
 
 function toggleTheme() {
-  const nextTheme = getActiveTheme() === "dark" ? "light" : "dark";
+  let nextTheme;
+
+  if (getActiveTheme() === "dark") {
+    nextTheme = "light";
+  } else {
+    nextTheme = "dark";
+  }
+
   document.documentElement.dataset.theme = nextTheme;
   localStorage.setItem(THEME_STORAGE_KEY, nextTheme);
   updateThemeControls();
@@ -187,6 +209,11 @@ async function copyText(value) {
 function handleUpdatedContent(root) {
   updateLocalTimes(root);
   updateThemeControls();
+
+  if (root.id === "app-shell") {
+    delete document.documentElement.dataset.eventSelection;
+  }
+
   const warning = document.querySelector("#transient-warning");
 
   if (warning) {
