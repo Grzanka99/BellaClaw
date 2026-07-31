@@ -228,6 +228,11 @@ document.addEventListener("DOMContentLoaded", () => handleUpdatedContent(documen
 document.body.addEventListener("htmx:afterSwap", (event) => handleUpdatedContent(event.target));
 document.body.addEventListener("logViewerWarning", (event) => {
   const warning = document.querySelector("#transient-warning");
+
+  if (!warning) {
+    return;
+  }
+
   warning.textContent = event.detail.message;
   warning.hidden = false;
 });
