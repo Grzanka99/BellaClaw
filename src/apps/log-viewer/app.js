@@ -234,10 +234,6 @@ function handleUpdatedContent(root) {
 
   const eventsList = document.querySelector("#events-list");
 
-  if (!(eventsList instanceof HTMLElement)) {
-    return;
-  }
-
   if (eventsList.scrollTop < 160 && document.querySelector("details[open]") === null) {
     const link = liveStatus.querySelector("a[href]");
 
