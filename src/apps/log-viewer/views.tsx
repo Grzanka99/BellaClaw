@@ -37,7 +37,7 @@ export function Document(props: PropsWithChildren) {
 }`,
           }}
         ></script>
-        <link rel="stylesheet" href="/assets/styles.css?v=log-viewer-redesign-4" />
+        <link rel="stylesheet" href="/assets/styles.css" />
         <script src="/assets/htmx.min.js" defer></script>
         <script src="/assets/app.js" defer></script>
       </head>
