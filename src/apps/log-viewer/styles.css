@@ -1242,7 +1242,7 @@ pre {
 @media (max-width: 1120px) {
   .workspace-grid {
     grid-template-columns: 250px minmax(0, 1fr);
-    grid-template-rows: minmax(280px, 1.15fr) minmax(240px, 0.85fr);
+    grid-template-rows: minmax(0, 1.15fr) minmax(0, 0.85fr);
     grid-template-areas:
       "turns events"
       "turns inspector";
