@@ -43,6 +43,13 @@
       "when": 1784970286370,
       "tag": "0005_pretty_toro",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1785843546416,
+      "tag": "0006_normal_sinister_six",
+      "breakpoints": true
     }
   ]
 }

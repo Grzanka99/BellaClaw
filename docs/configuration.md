@@ -51,6 +51,7 @@ OpenAI Codex uses stored OAuth credentials instead of an API key. See
 | `SIGNAL_ENABLED` | `false` | Enables Signal when set to `true`. |
 | `SIGNAL_PHONE_NUMBER` | — | Signal account phone number. Required when Signal is enabled. |
 | `SIGNAL_CLI_RPC_URL` | — | `signal-cli-rest-api` URL. Required when Signal is enabled. |
+| `BELLACLAW_ACTIVATION_TOKEN` | — | Shared activation token. Blank disables the gate. |
 
 See [Messaging](messaging.md) for setup steps.
 

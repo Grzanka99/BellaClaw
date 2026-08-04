@@ -1,6 +1,11 @@
-import { afterEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { ECronJobType, type TCronJobContext } from "../../lib/cron-engine";
 import { ERole } from "../ai/types";
+import {
+  AuthorizationService,
+  EAuthorizationDecision,
+  type TAuthorizationResult,
+} from "../authorization";
 import { Memory } from "../memory";
 import { EMemoryImportance } from "../memory/types";
 import { MessageHandler } from "../message-handler";
@@ -10,6 +15,9 @@ import { MessagingAdapter } from ".";
 import { EMessagePlatform, type TMessageTransport } from "./types";
 
 type TAdapterInternals = {
+  authorization: {
+    authorize: ReturnType<typeof mock>;
+  };
   ai: {
     completeText: ReturnType<typeof mock>;
     runScheduledTask: ReturnType<typeof mock>;
@@ -18,6 +26,15 @@ type TAdapterInternals = {
   runningCronTaskKeys: Set<string>;
   handleCronFire(ctx: TCronJobContext): Promise<void>;
 };
+
+const originalActivationToken = Bun.env.BELLACLAW_ACTIVATION_TOKEN;
+
+function authorizationResult(
+  decision: EAuthorizationDecision,
+  failedAttempts: number,
+): TAuthorizationResult {
+  return { decision, failedAttempts };
+}
 
 function cron(overrides: Partial<TCronJobContext> = {}): TCronJobContext {
   return {
@@ -40,14 +57,81 @@ function cron(overrides: Partial<TCronJobContext> = {}): TCronJobContext {
 }
 
 function reset() {
+  (AuthorizationService as unknown as { _instance: unknown })._instance = undefined;
   (MessagingAdapter as unknown as { _instance: unknown })._instance = undefined;
   (Memory as unknown as { _instance: unknown })._instance = undefined;
   (SettingsService as unknown as { _instance: unknown })._instance = undefined;
 }
 
-afterEach(reset);
+beforeEach(() => {
+  reset();
+  Bun.env.BELLACLAW_ACTIVATION_TOKEN = undefined;
+});
+
+afterEach(() => {
+  reset();
+  Bun.env.BELLACLAW_ACTIVATION_TOKEN = originalActivationToken;
+});
 
 describe("MessagingAdapter", () => {
+  test("silently rejects failures and handles activation without invoking the AI", async () => {
+    const originalGetInstance = MessageHandler.getInstance;
+    const handleMessage = mock(async () => "Root reply");
+    MessageHandler.getInstance = mock(() => ({
+      handleMessage,
+    })) as unknown as typeof MessageHandler.getInstance;
+    const sendText = mock(async () => undefined);
+    const adapter = MessagingAdapter.instance;
+    const internals = adapter as unknown as TAdapterInternals;
+    adapter.registerTransport({ platform: EMessagePlatform.Discord, sendText });
+    const authorizationResults = [
+      authorizationResult(EAuthorizationDecision.FailedAttempt, 1),
+      authorizationResult(EAuthorizationDecision.Activated, 0),
+      authorizationResult(EAuthorizationDecision.AlreadyActivated, 0),
+      authorizationResult(EAuthorizationDecision.Allow, 0),
+    ];
+    internals.authorization = {
+      authorize: mock(async () => {
+        const result = authorizationResults.shift();
+
+        if (result !== undefined) {
+          return result;
+        }
+
+        throw new Error("Missing authorization result fixture");
+      }),
+    };
+
+    const message = {
+      platform: EMessagePlatform.Discord,
+      chatId: "user-1",
+      author: { id: "user-1", username: "Owner" },
+      message: { type: "text" as const, content: "wrong" },
+    };
+
+    await adapter.handleInboundMessage(message);
+    expect(sendText).not.toHaveBeenCalled();
+    expect(handleMessage).not.toHaveBeenCalled();
+
+    message.message.content = "token";
+    await adapter.handleInboundMessage(message);
+    expect(sendText).toHaveBeenLastCalledWith("user-1", "Activated.");
+    expect(handleMessage).not.toHaveBeenCalled();
+
+    message.message.content = "token";
+    await adapter.handleInboundMessage(message);
+    expect(sendText).toHaveBeenLastCalledWith("user-1", "Already activated.");
+    expect(handleMessage).not.toHaveBeenCalled();
+
+    message.message.content = "hello";
+    await adapter.handleInboundMessage(message);
+    expect(handleMessage).toHaveBeenCalledTimes(1);
+    expect(sendText).toHaveBeenLastCalledWith("user-1", "Root reply");
+    expect(internals.authorization.authorize).toHaveBeenCalledWith("discord:user-1", "wrong");
+
+    MessageHandler.getInstance = originalGetInstance;
+  });
+
   test("delivers the sole MessageHandler result and absorbs transport failures", async () => {
     const originalGetInstance = MessageHandler.getInstance;
     const handleMessage = mock(async () => "Root reply");

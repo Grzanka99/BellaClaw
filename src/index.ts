@@ -1,4 +1,5 @@
 import { AppLogger, EBehaviorLogLevel } from "./services/app-logger";
+import { AuthorizationService } from "./services/authorization";
 import { CalendarService } from "./services/calendar";
 import { DiscordSingleton } from "./services/discord";
 import { MessagingAdapter } from "./services/messaging";
@@ -32,6 +33,7 @@ async function init(): Promise<void> {
   });
 
   try {
+    await AuthorizationService.instance.setup();
     await Promise.all([
       CalendarService.instance.setup(),
       DiscordSingleton.instance.setup(),

@@ -5,9 +5,6 @@ export class AsyncQueue {
   private queue: Array<[() => Promise<unknown>, (v: any) => void, (v: string) => void]> = [];
   private isRunning = false;
 
-  private resolver: (v: boolean) => void = (_) => {};
-  private rejecter: (v: boolean) => void = (_) => {};
-
   public async enqueue<T>(callback: () => Promise<T>, autostart = true): Promise<T> {
     return new Promise((res, rej) => {
       this.queue.push([callback, res, rej]);
@@ -32,23 +29,17 @@ export class AsyncQueue {
       })
       .catch((e) => {
         curr[2](e);
-        this.rejecter(e);
+        this.run();
       });
   }
 
   private done() {
-    this.resolver(true);
     this.isRunning = false;
   }
 
   public start() {
     this.isRunning = true;
     this.run();
-
-    new Promise((res, rej) => {
-      this.resolver = res;
-      this.rejecter = rej;
-    });
   }
 
   public get enqueued(): number {

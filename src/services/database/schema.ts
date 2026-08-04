@@ -74,6 +74,25 @@ export const calendarsTable = sqliteTable(
   ],
 );
 
+export const messageAuthorizationsTable = sqliteTable(
+  "message_authorizations",
+  {
+    chatId: text("chatId").primaryKey(),
+    status: text("status").notNull(),
+    failedAttempts: integer("failedAttempts").notNull().default(0),
+  },
+  (table) => [
+    check(
+      "message_authorizations_status_check",
+      sql`${table.status} in ('pending', 'authorized', 'locked')`,
+    ),
+    check(
+      "message_authorizations_failed_attempts_check",
+      sql`${table.failedAttempts} between 0 and 3`,
+    ),
+  ],
+);
+
 export type TInsertMemory = typeof memoriesTable.$inferInsert;
 export type TSelectMemory = typeof memoriesTable.$inferSelect;
 

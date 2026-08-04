@@ -16,6 +16,11 @@ import {
   type TBehaviorTraceContext,
 } from "../app-logger";
 import { sanitizeErrorMessage } from "../app-logger/sanitizers";
+import {
+  AuthorizationService,
+  EAuthorizationDecision,
+  type TAuthorizationResult,
+} from "../authorization";
 import { CronSingleton } from "../cron";
 import { Memory } from "../memory";
 import { EMemoryImportance } from "../memory/types";
@@ -30,6 +35,7 @@ export class MessagingAdapter {
   private logger: TLogger = createLogger("MESSAGING");
   private transports = new Map<EMessagePlatform, TMessageTransport>();
   private ai = AgentHarness.instance;
+  private authorization = AuthorizationService.instance;
   private cronListenerRegistered = false;
   private runningCronTaskKeys = new Set<string>();
 
@@ -61,7 +67,6 @@ export class MessagingAdapter {
       chatId: canonicalChatId,
       platform: message.platform,
     };
-    logMessageReceived(trace, message);
 
     try {
       const transport = this.transports.get(message.platform);
@@ -78,6 +83,62 @@ export class MessagingAdapter {
         );
         return;
       }
+
+      const authorizationResult = await this.authorization.authorize(
+        canonicalChatId,
+        message.message.content,
+      );
+
+      if (authorizationResult.decision !== EAuthorizationDecision.Allow) {
+        logAuthorizationDecision(trace, authorizationResult);
+      }
+
+      if (
+        authorizationResult.decision === EAuthorizationDecision.FailedAttempt ||
+        authorizationResult.decision === EAuthorizationDecision.Locked
+      ) {
+        return;
+      }
+
+      let authorizationReply: TOption<string>;
+
+      if (authorizationResult.decision === EAuthorizationDecision.Activated) {
+        authorizationReply = "Activated.";
+      } else if (authorizationResult.decision === EAuthorizationDecision.AlreadyActivated) {
+        authorizationReply = "Already activated.";
+      }
+
+      if (authorizationReply !== undefined) {
+        const sendStart = performance.now();
+
+        try {
+          await transport.sendText(message.chatId, authorizationReply);
+          logTransportSendCompleted(
+            trace,
+            sendStart,
+            message.platform,
+            true,
+            authorizationReply.length,
+            undefined,
+          );
+        } catch (error) {
+          this.logger.error(
+            `handleInboundMessage: failed to send authorization reply to ${message.platform} chat ${message.chatId}: ${String(error)}`,
+          );
+          logTransportSendCompleted(
+            trace,
+            sendStart,
+            message.platform,
+            false,
+            authorizationReply.length,
+            String(error),
+          );
+        }
+
+        return;
+      }
+
+      logMessageReceived(trace, message);
 
       const incomingMessage: TIncommingMessage = {
         chatId: canonicalChatId,
@@ -380,6 +441,32 @@ export class MessagingAdapter {
       undefined,
     );
   }
+}
+
+function logAuthorizationDecision(trace: TBehaviorTraceContext, result: TAuthorizationResult) {
+  let level = EBehaviorLogLevel.Info;
+
+  if (
+    result.decision === EAuthorizationDecision.FailedAttempt ||
+    result.decision === EAuthorizationDecision.Locked
+  ) {
+    level = EBehaviorLogLevel.Warning;
+  }
+
+  AppLogger.instance.record({
+    trace,
+    event: `authorization.${result.decision}`,
+    component: "authorization",
+    level,
+    success:
+      result.decision === EAuthorizationDecision.Activated ||
+      result.decision === EAuthorizationDecision.AlreadyActivated,
+    summary: `authorization ${result.decision}`,
+    metadata: {
+      decision: result.decision,
+      failedAttempts: result.failedAttempts,
+    },
+  });
 }
 
 function logMessageReceived(trace: TBehaviorTraceContext, message: TPlatformMessage) {

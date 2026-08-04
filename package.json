@@ -12,6 +12,7 @@
   },
   "private": true,
   "scripts": {
+    "auth:generate-token": "bun run scripts/generate-auth-token.ts",
     "auth:seed-local": "bun run scripts/seed-auth.ts",
     "dev": "bun run auth:seed-local && bun run --watch src/index.ts",
     "server:down": "podman compose --profile signal down",
