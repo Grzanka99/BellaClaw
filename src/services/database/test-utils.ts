@@ -21,3 +21,13 @@ export async function resetUserConfigsTable() {
 
   await db.run(sql`DELETE FROM user_configs`);
 }
+
+export async function resetMessageAuthorizationsTable() {
+  if (Bun.env.BELLACLAW_DATABASE_MODE !== "test" && Bun.env.NODE_ENV !== "test") {
+    throw new Error("resetMessageAuthorizationsTable can only run in test database mode");
+  }
+
+  const db = DatabaseConnector.instance.database;
+
+  await db.run(sql`DELETE FROM message_authorizations`);
+}

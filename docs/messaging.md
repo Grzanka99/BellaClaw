@@ -5,6 +5,15 @@ scheduled deliveries are scoped by platform and chat.
 
 At least one transport is needed to talk to BellaClaw.
 
+## Activation
+
+Set `BELLACLAW_ACTIVATION_TOKEN` to require each Discord or Signal sender to activate separately.
+To activate, send only the token; surrounding whitespace is allowed. Invalid messages get no reply.
+Three failures lock the sender.
+
+State is stored in `message_authorizations` and cached in memory. Manual database changes require
+a restart. A blank token disables the gate and logs a startup warning.
+
 ## Discord
 
 Discord is the easiest option and the default quick-start transport.
