@@ -3,6 +3,19 @@
 BellaClaw owns messaging, persistence, permissions, provider selection, credentials, limits, and
 behavior logging. Pi owns model streaming, tool execution, and agent lifecycle events.
 
+## Workspace Boundaries
+
+BellaClaw is a Bun workspace orchestrated by Turborepo:
+
+| Workspace | Ownership |
+| --- | --- |
+| `@bellaclaw/assistant` | Messaging, AI orchestration, authorization, scheduling, memory, settings, and the Turso/Drizzle database. |
+| `@bellaclaw/log-viewer` | Hono routes, query parsing, assets, and behavior-log rendering. |
+| `@bellaclaw/behavior-logs` | Behavior event types, SQLite schema, read/write access, and log CLI tools. |
+
+The apps do not import each other. Both depend on the behavior-log package and communicate through
+its shared SQLite contract.
+
 ## Message Flow
 
 1. A Discord or Signal transport receives a direct message.

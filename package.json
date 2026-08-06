@@ -1,46 +1,31 @@
 {
   "name": "bellaclaw",
-  "module": "src/index.ts",
+  "private": true,
+  "packageManager": "bun@1.3.14",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "auth:generate-token": "bun run --cwd apps/assistant auth:generate-token",
+    "auth:seed-local": "bun run --cwd apps/assistant auth:seed-local",
+    "check": "turbo run check && bunx @biomejs/biome check package.json turbo.json tsconfig.json biome.json",
+    "db": "bun run --cwd apps/assistant db",
+    "dev": "turbo run dev",
+    "logs:turn": "bun run --cwd packages/behavior-logs logs:turn",
+    "logs:ui": "bun run --cwd apps/log-viewer start",
+    "server:down": "podman compose --profile signal down",
+    "server:init": "bun run auth:seed-local && podman compose --profile signal build && podman compose --profile signal up -d",
+    "server:reset-auth": "bun run --cwd apps/assistant auth:reset-local",
+    "server:update": "bun run auth:seed-local && podman compose --profile signal build --no-cache && podman compose --profile signal up -d --force-recreate",
+    "start": "turbo run start",
+    "test": "turbo run test",
+    "typecheck": "turbo run typecheck"
+  },
   "devDependencies": {
     "@biomejs/biome": "^2.3.14",
     "@types/bun": "latest",
-    "@types/turndown": "^5.0.6",
-    "drizzle-kit": "^0.31.10"
-  },
-  "peerDependencies": {
+    "turbo": "2.10.8",
     "typescript": "^5"
-  },
-  "private": true,
-  "scripts": {
-    "auth:generate-token": "bun run scripts/generate-auth-token.ts",
-    "auth:seed-local": "bun run scripts/seed-auth.ts",
-    "dev": "bun run auth:seed-local && bun run --watch src/index.ts",
-    "server:down": "podman compose --profile signal down",
-    "server:init": "bun run auth:seed-local && podman compose --profile signal build && podman compose --profile signal up -d",
-    "server:reset-auth": "bun run scripts/seed-auth.ts --reset",
-    "server:update": "bun run auth:seed-local && podman compose --profile signal build --no-cache && podman compose --profile signal up -d --force-recreate",
-    "start": "bun run src/index.ts",
-    "logs:ui": "bun run src/apps/log-viewer/index.ts",
-    "logs:turn": "bun run scripts/logs-turn.ts",
-    "test": "bun test",
-    "db": "bun --bun drizzle-kit"
-  },
-  "type": "module",
-  "dependencies": {
-    "@earendil-works/pi-agent-core": "0.81.1",
-    "@earendil-works/pi-ai": "0.81.1",
-    "@googleworkspace/cli": "0.22.5",
-    "@libsql/client": "^0.17.3",
-    "croner": "^10.0.1",
-    "discord.js": "^14.25.1",
-    "drizzle-orm": "^0.45.2",
-    "hono": "^4.12.30",
-    "htmx.org": "^2.0.10",
-    "rrule": "2.8.1",
-    "turndown": "^7.2.4",
-    "zod": "^4.3.6"
-  },
-  "trustedDependencies": [
-    "@googleworkspace/cli"
-  ]
+  }
 }

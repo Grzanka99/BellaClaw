@@ -3,6 +3,9 @@
 BellaClaw includes a Podman Compose setup for the assistant, behavior-log viewer, and optional
 Signal sidecar.
 
+The repository builds one image. Compose starts the assistant and viewer as separate workspace
+commands while mounting the same behavior-log volume.
+
 ## First Deployment
 
 On the server:

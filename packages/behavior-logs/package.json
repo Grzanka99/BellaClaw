@@ -1,0 +1,17 @@
+{
+  "name": "@bellaclaw/behavior-logs",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "check": "bunx @biomejs/biome check .",
+    "logs:turn": "bun run scripts/logs-turn.ts",
+    "test": "bun test",
+    "typecheck": "bunx tsc --noEmit"
+  },
+  "dependencies": {
+    "zod": "^4.3.6"
+  }
+}

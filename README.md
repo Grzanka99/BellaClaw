@@ -46,7 +46,16 @@ Start BellaClaw:
 bun run start
 ```
 
-Then send the bot a Discord DM.
+This starts both the assistant and the behavior-log viewer. Then send the bot a Discord DM or open
+`http://127.0.0.1:8989` to inspect behavior logs.
+
+## Repository Layout
+
+- `apps/assistant` — messaging, AI runtime, scheduling, and the Turso/Drizzle database
+- `apps/log-viewer` — read-only behavior-log web interface
+- `packages/behavior-logs` — shared behavior-log SQLite contract and access APIs
+
+Bun workspaces own dependencies and Turborepo coordinates tasks from the repository root.
 
 ## Documentation
 

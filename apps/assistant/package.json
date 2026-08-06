@@ -1,0 +1,38 @@
+{
+  "name": "@bellaclaw/assistant",
+  "private": true,
+  "type": "module",
+  "module": "src/index.ts",
+  "scripts": {
+    "auth:generate-token": "bun run scripts/generate-auth-token.ts",
+    "auth:reset-local": "bun run scripts/seed-auth.ts --reset",
+    "auth:seed-local": "bun run scripts/seed-auth.ts",
+    "check": "bunx @biomejs/biome check src scripts package.json tsconfig.json drizzle.config.ts drizzle.test.config.ts",
+    "db": "bun --bun drizzle-kit",
+    "dev": "bun run auth:seed-local && bun run --watch src/index.ts",
+    "start": "bun run src/index.ts",
+    "test": "bun test",
+    "typecheck": "bunx tsc --noEmit"
+  },
+  "dependencies": {
+    "@bellaclaw/behavior-logs": "workspace:*",
+    "@earendil-works/pi-agent-core": "0.81.1",
+    "@earendil-works/pi-ai": "0.81.1",
+    "@googleworkspace/cli": "0.22.5",
+    "@libsql/client": "^0.17.3",
+    "croner": "^10.0.1",
+    "discord.js": "^14.25.1",
+    "drizzle-orm": "^0.45.2",
+    "rrule": "2.8.1",
+    "turndown": "^7.2.4",
+    "typebox": "1.1.38",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/turndown": "^5.0.6",
+    "drizzle-kit": "^0.31.10"
+  },
+  "trustedDependencies": [
+    "@googleworkspace/cli"
+  ]
+}

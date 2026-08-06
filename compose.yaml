@@ -12,6 +12,7 @@ services:
       - BELLACLAW_AI_CREDENTIALS_PATH=/app/.secrets/pi-auth.json
       - BELLACLAW_LOG_DB_ROOT=/app-data
       - SIGNAL_CLI_RPC_URL=http://signal-cli:8080
+    command: ["bun", "run", "--cwd", "apps/assistant", "start"]
     volumes:
       - bellaclaw-data:/app-data
       - ./.secrets:/app/.secrets
@@ -27,7 +28,7 @@ services:
       - BELLACLAW_LOG_DB_PATH=${BELLACLAW_LOG_DB_PATH:-/app-data/bellaclaw-logs.db}
       - BELLACLAW_LOG_DB_ROOT=/app-data
       - BELLACLAW_LOG_VIEWER_HOSTNAME=0.0.0.0
-    command: ["bun", "run", "logs:ui"]
+    command: ["bun", "run", "--cwd", "apps/log-viewer", "start"]
     ports:
       - "0.0.0.0:8989:8989"
     volumes:
