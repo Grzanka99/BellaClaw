@@ -1,4 +1,4 @@
-import type { TOption } from "../../types";
+import type { TOption } from "@bellaclaw/shared";
 
 export type TCalendarAccess = "read" | "write";
 export type TGoogleAccessRole = "freeBusyReader" | "reader" | "writer" | "owner";

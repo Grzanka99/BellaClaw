@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { AppLogger, type TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
+import type { TOption } from "@bellaclaw/shared";
 import {
   type Context,
   fauxAssistantMessage,
@@ -7,7 +8,6 @@ import {
   fauxToolCall,
   type Model,
 } from "@earendil-works/pi-ai";
-import type { TOption } from "../../../types";
 import { EMessagePlatform } from "../../messaging/types";
 import { DefaultConfigRecord, EConfigKey } from "../../settings/schema";
 import { aiModels } from "../providers/registry";

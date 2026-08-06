@@ -4,7 +4,7 @@ import { request as requestHttp } from "node:http";
 import { request as requestHttps } from "node:https";
 import { BlockList, isIP } from "node:net";
 import { Readable } from "node:stream";
-import type { TOption } from "../../types";
+import type { TOption } from "@bellaclaw/shared";
 
 export type TFetchWithLimitResult = {
   response: Response;

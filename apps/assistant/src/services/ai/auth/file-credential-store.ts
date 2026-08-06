@@ -1,13 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, open, rename, rm } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
+import { repositoryPath } from "@bellaclaw/shared";
 import type { Credential, CredentialInfo, CredentialStore } from "@earendil-works/pi-ai";
 import { z } from "zod";
 
-export const LOCAL_AI_CREDENTIALS_PATH = resolve(
-  import.meta.dir,
-  "../../../../../../.secrets/pi-auth.json",
-);
+export const LOCAL_AI_CREDENTIALS_PATH = repositoryPath(".secrets/pi-auth.json");
 let defaultAiCredentialsPath = LOCAL_AI_CREDENTIALS_PATH;
 const configuredAiCredentialsPath = Bun.env.BELLACLAW_AI_CREDENTIALS_PATH?.trim();
 

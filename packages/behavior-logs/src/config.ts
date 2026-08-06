@@ -1,10 +1,10 @@
 import { existsSync } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
+import { REPOSITORY_ROOT, repositoryPath } from "@bellaclaw/shared";
 import type { TBehaviorLogEvent } from "./types";
 
 export const APP_DATA_DIR = "/app-data";
 export const DEFAULT_LOG_DB_FILE = "bellaclaw-logs.db";
-const REPOSITORY_ROOT = resolve(import.meta.dir, "../../..");
 
 export function getDefaultLogDbPath(): string {
   const configuredPath = Bun.env.BELLACLAW_LOG_DB_PATH?.trim();
@@ -52,7 +52,7 @@ export function getDefaultLogDbPath(): string {
     return `${APP_DATA_DIR}/${DEFAULT_LOG_DB_FILE}`;
   }
 
-  return resolve(REPOSITORY_ROOT, DEFAULT_LOG_DB_FILE);
+  return repositoryPath(DEFAULT_LOG_DB_FILE);
 }
 
 export function formatBehaviorEventForStdout(event: TBehaviorLogEvent): string {

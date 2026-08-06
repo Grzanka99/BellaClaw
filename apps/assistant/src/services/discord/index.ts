@@ -1,6 +1,6 @@
+import type { TOption } from "@bellaclaw/shared";
+import { createLogger, type TLogger } from "@bellaclaw/shared";
 import { ChannelType, Client, Events, GatewayIntentBits, type Message, Partials } from "discord.js";
-import type { TOption } from "../../types";
-import { createLogger, type TLogger } from "../../utils/logger";
 import { MessagingAdapter } from "../messaging";
 import { EMessagePlatform, type TMessageTransport } from "../messaging/types";
 

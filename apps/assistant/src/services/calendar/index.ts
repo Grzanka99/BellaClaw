@@ -1,9 +1,7 @@
-import { resolve } from "node:path";
+import type { TOption } from "@bellaclaw/shared";
+import { AsyncQueue, createLogger, repositoryPath } from "@bellaclaw/shared";
 import { and, eq } from "drizzle-orm";
 import type { LibSQLDatabase } from "drizzle-orm/libsql";
-import type { TOption } from "../../types";
-import { AsyncQueue } from "../../utils/async-queue";
-import { createLogger } from "../../utils/logger";
 import { DatabaseConnector } from "../database";
 import { calendarsTable } from "../database/schema";
 import { calculateAvailability } from "./availability";
@@ -26,10 +24,7 @@ import type {
 } from "./types";
 
 const WRITE_CALENDAR_ID = Bun.env.BELLACLAW_GOOGLE_CALENDAR_WRITE_ID;
-const GOOGLE_CREDENTIALS_FILE = resolve(
-  import.meta.dir,
-  "../../../../../.secrets/google-calendar-service-account.json",
-);
+const GOOGLE_CREDENTIALS_FILE = repositoryPath(".secrets/google-calendar-service-account.json");
 
 type TCalendarStatus = {
   ready: boolean;

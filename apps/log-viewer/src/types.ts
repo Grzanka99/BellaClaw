@@ -1,18 +1,7 @@
-import {
-  EBehaviorLogLevel,
-  type TBehaviorLogSearchQuery,
-  type TLogFilterOptions,
-  type TLogPage,
-  type TLogReaderError,
-  type TPersistedBehaviorLogEvent,
-  type TRecentTurn,
-} from "@bellaclaw/behavior-logs";
+import { EBehaviorLogLevel } from "@bellaclaw/behavior-logs";
 import { z } from "zod";
 
-export type TOption<T> = T | undefined;
-
 export const SLogTimeRange = z.enum(["15m", "1h", "24h", "7d", "all"]);
-export type TLogTimeRange = z.infer<typeof SLogTimeRange>;
 
 export const SLogSearchQuery = z.object({
   q: z.string().optional().catch(undefined),
@@ -34,13 +23,3 @@ export const SLogSearchQuery = z.object({
   beforeId: z.coerce.number().int().positive().optional().catch(undefined),
   live: z.literal("1").optional().catch(undefined),
 });
-
-export type TLogSearchQuery = TBehaviorLogSearchQuery;
-
-export type {
-  TLogFilterOptions,
-  TLogPage,
-  TLogReaderError,
-  TPersistedBehaviorLogEvent,
-  TRecentTurn,
-};

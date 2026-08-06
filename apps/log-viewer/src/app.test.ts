@@ -3,8 +3,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AppLogger, EBehaviorLogLevel } from "@bellaclaw/behavior-logs";
+import type { TOption } from "@bellaclaw/shared";
 import { createLogViewerApp, type TLogViewerApplication } from "./app";
-import type { TOption } from "./types";
 
 let application: TOption<TLogViewerApplication>;
 let tempDir: TOption<string>;

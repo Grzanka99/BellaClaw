@@ -7,7 +7,7 @@
     "auth:generate-token": "bun run scripts/generate-auth-token.ts",
     "auth:reset-local": "bun run scripts/seed-auth.ts --reset",
     "auth:seed-local": "bun run scripts/seed-auth.ts",
-    "check": "bunx @biomejs/biome check src scripts package.json tsconfig.json drizzle.config.ts drizzle.test.config.ts",
+    "check": "bunx @biomejs/biome check .",
     "db": "bun --bun drizzle-kit",
     "dev": "bun run auth:seed-local && bun run --watch src/index.ts",
     "start": "bun run src/index.ts",
@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@bellaclaw/behavior-logs": "workspace:*",
+    "@bellaclaw/shared": "workspace:*",
     "@earendil-works/pi-agent-core": "0.81.1",
     "@earendil-works/pi-ai": "0.81.1",
     "@googleworkspace/cli": "0.22.5",

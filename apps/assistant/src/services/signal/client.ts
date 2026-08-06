@@ -1,6 +1,6 @@
+import type { TOption } from "@bellaclaw/shared";
+import { createLogger, type TLogger } from "@bellaclaw/shared";
 import { z } from "zod";
-import type { TOption } from "../../types";
-import { createLogger, type TLogger } from "../../utils/logger";
 
 const SSignalSendResponse = z.unknown();
 const RECONNECT_DELAY_MS = 5000;

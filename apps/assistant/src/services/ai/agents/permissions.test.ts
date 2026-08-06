@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import type { TOption } from "@bellaclaw/shared";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
-import type { TOption } from "../../../types";
 import { DefaultConfigRecord } from "../../settings/schema";
 import { AgentHarness, EAgentName } from "../agent-harness";
 import { EModelPurpose } from "../types";

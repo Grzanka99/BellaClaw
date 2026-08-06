@@ -1,5 +1,5 @@
+import { logger } from "@bellaclaw/shared";
 import { createLogViewerApp } from "./app";
-import { logger } from "./logger";
 
 const HOSTNAME = Bun.env.BELLACLAW_LOG_VIEWER_HOSTNAME ?? "127.0.0.1";
 const PORT = 8989;

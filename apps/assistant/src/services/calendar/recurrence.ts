@@ -1,5 +1,5 @@
+import type { TOption } from "@bellaclaw/shared";
 import { RRule } from "rrule";
-import type { TOption } from "../../types";
 import type { TEventDateTime } from "./types";
 
 export type TRecurrenceSplit = {

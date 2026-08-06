@@ -1,15 +1,17 @@
-import { SLogSearchQuery, type TLogSearchQuery, type TOption } from "./types";
+import type { TBehaviorLogSearchQuery } from "@bellaclaw/behavior-logs";
+import type { TOption } from "@bellaclaw/shared";
+import { SLogSearchQuery } from "./types";
 
-export function parseLogSearchQuery(raw: Record<string, string>): TLogSearchQuery {
+export function parseLogSearchQuery(raw: Record<string, string>): TBehaviorLogSearchQuery {
   const parsed = SLogSearchQuery.safeParse(raw);
 
   if (!parsed.success) {
     return createDefaultQuery();
   }
 
-  let range: TLogSearchQuery["range"] = "24h";
-  let level: TLogSearchQuery["level"];
-  let success: TLogSearchQuery["success"];
+  let range: TBehaviorLogSearchQuery["range"] = "24h";
+  let level: TBehaviorLogSearchQuery["level"];
+  let success: TBehaviorLogSearchQuery["success"];
   let until = Date.now();
   let live = false;
 
@@ -50,16 +52,16 @@ export function parseLogSearchQuery(raw: Record<string, string>): TLogSearchQuer
 }
 
 export function buildLogUrl(
-  query: TLogSearchQuery,
+  query: TBehaviorLogSearchQuery,
   options: {
     includeUntil: boolean;
     includeCursor: boolean;
     live: boolean;
     path?: string;
-    overrides?: Partial<TLogSearchQuery>;
+    overrides?: Partial<TBehaviorLogSearchQuery>;
   },
 ): string {
-  const merged: TLogSearchQuery = { ...query, ...options.overrides };
+  const merged: TBehaviorLogSearchQuery = { ...query, ...options.overrides };
   const params = new URLSearchParams();
   addValue(params, "q", merged.q);
   params.set("range", merged.range);
@@ -96,7 +98,7 @@ export function buildLogUrl(
   return `${path}?${params.toString()}`;
 }
 
-function createDefaultQuery(): TLogSearchQuery {
+function createDefaultQuery(): TBehaviorLogSearchQuery {
   return {
     q: undefined,
     range: "24h",

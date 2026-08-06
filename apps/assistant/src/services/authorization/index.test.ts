@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import type { TOption } from "../../types";
+import type { TOption } from "@bellaclaw/shared";
 import { resetMessageAuthorizationsTable } from "../database/test-utils";
 import { AuthorizationService, EAuthorizationDecision } from ".";
 

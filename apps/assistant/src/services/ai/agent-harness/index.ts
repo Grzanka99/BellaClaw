@@ -1,4 +1,5 @@
 import { AppLogger, EBehaviorLogLevel, type TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
+import type { TOption } from "@bellaclaw/shared";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { Agent } from "@earendil-works/pi-agent-core";
 import {
@@ -10,7 +11,6 @@ import {
   Type,
 } from "@earendil-works/pi-ai";
 import { Value } from "typebox/value";
-import type { TOption } from "../../../types";
 import {
   sanitizeErrorMessage,
   sanitizeToolCallArguments,

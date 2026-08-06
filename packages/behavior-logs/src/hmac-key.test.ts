@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { TOption } from "@bellaclaw/shared";
 import { AppLogger, EBehaviorLogLevel, type TBehaviorLogEvent } from ".";
-import type { TOption } from "./option";
 
 let tempDir: TOption<string>;
 let originalLogChatIdHmacKey: TOption<string>;

@@ -1,4 +1,4 @@
-import type { TOption } from "./option";
+import type { TOption } from "@bellaclaw/shared";
 import type { TBehaviorMetadata, TPersistedBehaviorLogEvent, TStoredBehaviorLogRow } from "./types";
 
 export function normalizeDurationMs(value: TOption<number>): TOption<number> {

@@ -1,6 +1,6 @@
+import type { TOption } from "@bellaclaw/shared";
 import { Config } from "../../config";
 import { CronScheduler } from "../../lib/cron-engine";
-import type { TOption } from "../../types";
 
 export class CronSingleton extends CronScheduler {
   private static _instance: TOption<CronSingleton>;

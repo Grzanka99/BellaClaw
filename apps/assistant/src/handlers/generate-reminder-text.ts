@@ -1,4 +1,6 @@
 import type { TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
+import type { TOption } from "@bellaclaw/shared";
+import { createLogger } from "@bellaclaw/shared";
 import { Config } from "../config";
 import type { TCronJobContext } from "../lib/cron-engine";
 import type { AgentHarness } from "../services/ai/agent-harness";
@@ -9,8 +11,6 @@ import { parseCanonicalChatKey } from "../services/messaging/chat-key";
 import type { EMessagePlatform } from "../services/messaging/types";
 import { SettingsService } from "../services/settings";
 import { DefaultConfigRecord, EConfigKey, type TConfigRecord } from "../services/settings/schema";
-import type { TOption } from "../types";
-import { createLogger } from "../utils/logger";
 
 type TReminderAi = Pick<AgentHarness, "completeText">;
 type TScheduledTaskAi = Pick<AgentHarness, "runScheduledTask">;

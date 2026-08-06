@@ -1,5 +1,5 @@
+import type { TOption } from "@bellaclaw/shared";
 import { z } from "zod";
-import type { TOption } from "./option";
 
 export enum EBehaviorLogLevel {
   Info = "info",

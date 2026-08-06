@@ -1,5 +1,5 @@
 import type { TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
-import type { TOption } from "../../../types";
+import type { TOption } from "@bellaclaw/shared";
 import type { EMessagePlatform } from "../../messaging/types";
 import type { TConfigRecord } from "../../settings/schema";
 import type { EModelPurpose, THistoryItem } from "../types";

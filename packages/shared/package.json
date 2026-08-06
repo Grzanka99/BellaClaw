@@ -1,5 +1,5 @@
 {
-  "name": "@bellaclaw/behavior-logs",
+  "name": "@bellaclaw/shared",
   "private": true,
   "type": "module",
   "exports": {
@@ -7,12 +7,7 @@
   },
   "scripts": {
     "check": "bunx @biomejs/biome check .",
-    "logs:turn": "bun run scripts/logs-turn.ts",
     "test": "bun test",
     "typecheck": "bunx tsc --noEmit"
-  },
-  "dependencies": {
-    "@bellaclaw/shared": "workspace:*",
-    "zod": "^4.3.6"
   }
 }

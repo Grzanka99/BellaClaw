@@ -1,10 +1,10 @@
 /** @jsxImportSource hono/jsx */
 
 import { getDefaultLogDbPath, LogReader } from "@bellaclaw/behavior-logs";
+import type { TOption } from "@bellaclaw/shared";
 import { type Context, Hono } from "hono";
 import { z } from "zod";
 import { parseLogSearchQuery } from "./query";
-import type { TOption } from "./types";
 import { Document, ErrorPage, EventPageFragment, HomePage, LivePoller } from "./views";
 
 type TLogViewerOptions = {

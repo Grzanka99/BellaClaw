@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, resolve } from "node:path";
+import { dirname } from "node:path";
+import { repositoryPath } from "@bellaclaw/shared";
 import { createGwsWorkingDirectory, GwsCalendarClient, gwsEnvironment } from "./gws";
 
 describe("gws environment", () => {
@@ -60,7 +61,7 @@ describe("gws environment", () => {
       expect(directory.startsWith(process.cwd())).toBe(false);
       expect(await Bun.file(`${directory}/.env`).text()).toBe("");
       expect(gwsEnvironment().GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE).toBe(
-        resolve(process.cwd(), "../..", ".secrets/google-calendar-service-account.json"),
+        repositoryPath(".secrets/google-calendar-service-account.json"),
       );
     } finally {
       await rm(directory, { recursive: true, force: true });

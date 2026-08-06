@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { mkdir } from "node:fs/promises";
-import { resolve } from "node:path";
+import { repositoryPath } from "@bellaclaw/shared";
 import type { LibSQLDatabase } from "drizzle-orm/libsql";
 import { CalendarService } from ".";
 import type { GwsCalendarClient } from "./gws";
@@ -19,15 +19,11 @@ describe("CalendarService mutation boundary", () => {
   const database = {} as unknown as LibSQLDatabase;
 
   test("setup accepts exact writer access and reconciles the write row", async () => {
-    const credentialsPath = resolve(
-      process.cwd(),
-      "../..",
-      ".secrets/google-calendar-service-account.json",
-    );
+    const credentialsPath = repositoryPath(".secrets/google-calendar-service-account.json");
     const credentials = Bun.file(credentialsPath);
     const existed = await credentials.exists();
     if (!existed) {
-      await mkdir(resolve(process.cwd(), "../..", ".secrets"), { recursive: true });
+      await mkdir(repositoryPath(".secrets"), { recursive: true });
       await Bun.write(credentialsPath, "{}");
     }
     let reconciled = 0;

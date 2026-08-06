@@ -15,6 +15,7 @@
       "name": "@bellaclaw/assistant",
       "dependencies": {
         "@bellaclaw/behavior-logs": "workspace:*",
+        "@bellaclaw/shared": "workspace:*",
         "@earendil-works/pi-agent-core": "0.81.1",
         "@earendil-works/pi-ai": "0.81.1",
         "@googleworkspace/cli": "0.22.5",
@@ -36,6 +37,7 @@
       "name": "@bellaclaw/log-viewer",
       "dependencies": {
         "@bellaclaw/behavior-logs": "workspace:*",
+        "@bellaclaw/shared": "workspace:*",
         "hono": "^4.12.30",
         "htmx.org": "^2.0.10",
         "zod": "^4.3.6",
@@ -44,8 +46,12 @@
     "packages/behavior-logs": {
       "name": "@bellaclaw/behavior-logs",
       "dependencies": {
+        "@bellaclaw/shared": "workspace:*",
         "zod": "^4.3.6",
       },
+    },
+    "packages/shared": {
+      "name": "@bellaclaw/shared",
     },
   },
   "trustedDependencies": [
@@ -109,6 +115,8 @@
     "@bellaclaw/behavior-logs": ["@bellaclaw/behavior-logs@workspace:packages/behavior-logs"],
 
     "@bellaclaw/log-viewer": ["@bellaclaw/log-viewer@workspace:apps/log-viewer"],
+
+    "@bellaclaw/shared": ["@bellaclaw/shared@workspace:packages/shared"],
 
     "@biomejs/biome": ["@biomejs/biome@2.3.14", "", { "optionalDependencies": { "@biomejs/cli-darwin-arm64": "2.3.14", "@biomejs/cli-darwin-x64": "2.3.14", "@biomejs/cli-linux-arm64": "2.3.14", "@biomejs/cli-linux-arm64-musl": "2.3.14", "@biomejs/cli-linux-x64": "2.3.14", "@biomejs/cli-linux-x64-musl": "2.3.14", "@biomejs/cli-win32-arm64": "2.3.14", "@biomejs/cli-win32-x64": "2.3.14" }, "bin": { "biome": "bin/biome" } }, "sha512-QMT6QviX0WqXJCaiqVMiBUCr5WRQ1iFSjvOLoTk6auKukJMvnMzWucXpwZB0e8F00/1/BsS9DzcKgWH+CLqVuA=="],
 

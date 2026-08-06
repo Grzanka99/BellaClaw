@@ -1,8 +1,8 @@
+import type { TOption } from "@bellaclaw/shared";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { Value } from "typebox/value";
 import { ECronJobType } from "../../../lib/cron-engine";
 import { fetchWeb, searchWeb } from "../../../lib/web";
-import type { TOption } from "../../../types";
 import { CalendarService } from "../../calendar";
 import { CronSingleton } from "../../cron";
 import { Memory } from "../../memory";

@@ -1,5 +1,5 @@
+import type { TOption } from "@bellaclaw/shared";
 import { z } from "zod";
-import type { TOption } from "../../types";
 import { getAiModel } from "../ai/providers/registry";
 import { EAiProvider, type EModelPurpose } from "../ai/types";
 import { EConfigKey, type TConfigRecord } from "../settings/schema";

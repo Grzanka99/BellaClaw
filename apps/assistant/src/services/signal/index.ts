@@ -1,5 +1,5 @@
-import type { TOption } from "../../types";
-import { createLogger, type TLogger } from "../../utils/logger";
+import type { TOption } from "@bellaclaw/shared";
+import { createLogger, type TLogger } from "@bellaclaw/shared";
 import { MessagingAdapter } from "../messaging";
 import { EMessagePlatform, type TMessageTransport } from "../messaging/types";
 import { SignalClient, type TSignalInboundMessage } from "./client";

@@ -1,4 +1,4 @@
-import type { TOption } from "./option";
+import type { TOption } from "@bellaclaw/shared";
 import type { EBehaviorLogLevel, TPersistedBehaviorLogEvent } from "./types";
 
 export type TLogTimeRange = "15m" | "1h" | "24h" | "7d" | "all";

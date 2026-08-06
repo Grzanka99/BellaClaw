@@ -1,5 +1,5 @@
+import { AsyncQueue } from "@bellaclaw/shared";
 import { and, eq } from "drizzle-orm";
-import { AsyncQueue } from "../../utils/async-queue";
 import { DatabaseConnector } from "../database";
 import { type TSelectUserConfig, userConfigsTable } from "../database/schema";
 import {

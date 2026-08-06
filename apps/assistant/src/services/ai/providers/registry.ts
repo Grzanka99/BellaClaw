@@ -1,3 +1,4 @@
+import type { TOption } from "@bellaclaw/shared";
 import {
   type Api,
   createModels,
@@ -9,7 +10,6 @@ import {
 import { openaiCodexProvider } from "@earendil-works/pi-ai/providers/openai-codex";
 import { opencodeGoProvider } from "@earendil-works/pi-ai/providers/opencode-go";
 import { openrouterProvider } from "@earendil-works/pi-ai/providers/openrouter";
-import type { TOption } from "../../../types";
 import { FileCredentialStore } from "../auth/file-credential-store";
 import { EAiProvider, EModelPurpose } from "../types";
 import { ollamaProvider } from "./ollama";

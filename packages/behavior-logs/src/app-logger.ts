@@ -2,11 +2,9 @@ import { Database } from "bun:sqlite";
 import { createHmac } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import { AsyncQueue } from "./async-queue";
+import { AsyncQueue, createLogger, type TOption, writeJsonLog } from "@bellaclaw/shared";
 import { getDefaultLogDbPath } from "./config";
 import { MEMORY_LOG_CHATID_HMAC_KEY, readOrCreateChatIdHmacKey } from "./hmac-key";
-import { createLogger, writeJsonLog } from "./logger";
-import type { TOption } from "./option";
 import { buildSearchableText } from "./searchable-text";
 import { booleanToSqlite, normalizeDurationMs, normalizeRowId, rowToEvent } from "./sqlite";
 import {

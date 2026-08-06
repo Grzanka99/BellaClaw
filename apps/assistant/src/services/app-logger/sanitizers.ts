@@ -1,5 +1,5 @@
 import type { TBehaviorMetadata } from "@bellaclaw/behavior-logs";
-import type { TOption } from "../../types";
+import type { TOption } from "@bellaclaw/shared";
 
 type TToolCall = {
   id: string;

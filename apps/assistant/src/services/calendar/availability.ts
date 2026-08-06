@@ -1,4 +1,4 @@
-import type { TOption } from "../../types";
+import type { TOption } from "@bellaclaw/shared";
 import type { TAvailabilityResult, TBusyInterval, TCalendarEvent, TCalendarFailure } from "./types";
 
 function localMidnight(date: string, timezone: string): number {

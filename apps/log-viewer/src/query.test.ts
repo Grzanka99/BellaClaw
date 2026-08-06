@@ -1,9 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { EBehaviorLogLevel } from "@bellaclaw/behavior-logs";
+import { EBehaviorLogLevel, type TBehaviorLogSearchQuery } from "@bellaclaw/behavior-logs";
 import { buildLogUrl } from "./query";
-import type { TLogSearchQuery } from "./types";
 
-function baseQuery(overrides: Partial<TLogSearchQuery> = {}): TLogSearchQuery {
+function baseQuery(overrides: Partial<TBehaviorLogSearchQuery> = {}): TBehaviorLogSearchQuery {
   return {
     q: undefined,
     range: "24h",

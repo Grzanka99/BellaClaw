@@ -1,7 +1,6 @@
 import { AppLogger, EBehaviorLogLevel, type TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
-import type { TOption } from "../../types";
-import { AsyncQueue } from "../../utils/async-queue";
-import { createLogger, type TLogger } from "../../utils/logger";
+import type { TOption } from "@bellaclaw/shared";
+import { AsyncQueue, createLogger, type TLogger } from "@bellaclaw/shared";
 import { AgentHarness } from "../ai/agent-harness";
 import { EModelPurpose, ERole, type THistoryItem } from "../ai/types";
 import { resolveAiBehaviorFields } from "../app-logger/ai";

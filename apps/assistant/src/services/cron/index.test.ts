@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import type { AsyncQueue } from "@bellaclaw/shared";
 import { eq } from "drizzle-orm";
 import { ECronJobType, type TCronJobContext } from "../../lib/cron-engine";
-import type { AsyncQueue } from "../../utils/async-queue";
 import { DatabaseConnector } from "../database";
 import { cronEngineJobsTable } from "../database/schema";
 import { resetCronEngineJobsTable } from "../database/test-utils";

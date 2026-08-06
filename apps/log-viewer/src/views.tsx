@@ -1,16 +1,17 @@
 /** @jsxImportSource hono/jsx */
 
-import { EBehaviorLogLevel, type TPersistedBehaviorLogEvent } from "@bellaclaw/behavior-logs";
+import {
+  EBehaviorLogLevel,
+  type TBehaviorLogSearchQuery,
+  type TLogFilterOptions,
+  type TLogPage,
+  type TLogReaderError,
+  type TPersistedBehaviorLogEvent,
+  type TRecentTurn,
+} from "@bellaclaw/behavior-logs";
+import type { TOption } from "@bellaclaw/shared";
 import type { PropsWithChildren } from "hono/jsx";
 import { buildLogUrl } from "./query";
-import type {
-  TLogFilterOptions,
-  TLogPage,
-  TLogReaderError,
-  TLogSearchQuery,
-  TOption,
-  TRecentTurn,
-} from "./types";
 
 const SLOW_EVENT_THRESHOLD_MS = 5_000;
 
@@ -43,7 +44,11 @@ export function Document(props: PropsWithChildren) {
   );
 }
 
-export function HomePage(props: { dbPath: string; query: TLogSearchQuery; page: TLogPage }) {
+export function HomePage(props: {
+  dbPath: string;
+  query: TBehaviorLogSearchQuery;
+  page: TLogPage;
+}) {
   const newest = props.page.events[0];
   let afterCreatedAt = props.query.until;
   let afterId = 0;
@@ -140,7 +145,7 @@ export function ErrorPage(props: { error: TLogReaderError; retryUrl: string }) {
 }
 
 export function EventPageFragment(props: {
-  query: TLogSearchQuery;
+  query: TBehaviorLogSearchQuery;
   events: TPersistedBehaviorLogEvent[];
   hasMore: boolean;
 }) {
@@ -153,7 +158,7 @@ export function EventPageFragment(props: {
 }
 
 export function LivePoller(props: {
-  query: TLogSearchQuery;
+  query: TBehaviorLogSearchQuery;
   afterCreatedAt: number;
   afterId: number;
   count: number;
@@ -200,7 +205,7 @@ export function LivePoller(props: {
   );
 }
 
-function PageHeader(props: { dbPath: string; query: TLogSearchQuery }) {
+function PageHeader(props: { dbPath: string; query: TBehaviorLogSearchQuery }) {
   const refreshUrl = buildLogUrl(props.query, {
     includeUntil: false,
     includeCursor: false,
@@ -243,7 +248,7 @@ function PageHeader(props: { dbPath: string; query: TLogSearchQuery }) {
   );
 }
 
-function SearchForm(props: { query: TLogSearchQuery; filters: TLogFilterOptions }) {
+function SearchForm(props: { query: TBehaviorLogSearchQuery; filters: TLogFilterOptions }) {
   return (
     <form
       class="search-panel"
@@ -354,8 +359,8 @@ function SearchForm(props: { query: TLogSearchQuery; filters: TLogFilterOptions 
   );
 }
 
-function ActiveFilters(props: { query: TLogSearchQuery }) {
-  const filters: Array<{ label: string; field: keyof TLogSearchQuery }> = [];
+function ActiveFilters(props: { query: TBehaviorLogSearchQuery }) {
+  const filters: Array<{ label: string; field: keyof TBehaviorLogSearchQuery }> = [];
 
   if (props.query.q !== undefined) {
     filters.push({ label: `search: ${props.query.q}`, field: "q" });
@@ -427,7 +432,7 @@ function FilterSelect(
   );
 }
 
-function RecentTurns(props: { turns: TRecentTurn[]; query: TLogSearchQuery }) {
+function RecentTurns(props: { turns: TRecentTurn[]; query: TBehaviorLogSearchQuery }) {
   return (
     <aside class="turn-sidebar">
       <div class="sidebar-heading">
@@ -438,7 +443,7 @@ function RecentTurns(props: { turns: TRecentTurn[]; query: TLogSearchQuery }) {
       <ol class="turn-list">
         {props.turns.map((turn) => {
           const selected = props.query.turnId === turn.turnId;
-          let range: TLogSearchQuery["range"] = "all";
+          let range: TBehaviorLogSearchQuery["range"] = "all";
           let turnId: TOption<string> = turn.turnId;
           let listClass: TOption<string>;
           let currentPage: TOption<string>;
@@ -507,7 +512,7 @@ function RecentTurns(props: { turns: TRecentTurn[]; query: TLogSearchQuery }) {
 
 function EventRows(props: {
   events: TPersistedBehaviorLogEvent[];
-  query: TLogSearchQuery;
+  query: TBehaviorLogSearchQuery;
   selectedEventId: TOption<number>;
 }) {
   if (props.events.length === 0) {
@@ -530,13 +535,13 @@ function EventRows(props: {
 
 function PivotLink(
   props: PropsWithChildren<{
-    query: TLogSearchQuery;
+    query: TBehaviorLogSearchQuery;
     field: "event" | "component" | "toolName";
     value: string;
   }>,
 ) {
   const active = props.query[props.field] === props.value;
-  const overrides: Partial<TLogSearchQuery> = {};
+  const overrides: Partial<TBehaviorLogSearchQuery> = {};
 
   if (active) {
     overrides[props.field] = undefined;
@@ -567,7 +572,7 @@ function PivotLink(
 
 function EventRow(props: {
   event: TPersistedBehaviorLogEvent;
-  query: TLogSearchQuery;
+  query: TBehaviorLogSearchQuery;
   selected: boolean;
 }) {
   const event = props.event;
@@ -660,7 +665,7 @@ function EventRow(props: {
 
 function EventInspector(props: {
   event: TOption<TPersistedBehaviorLogEvent>;
-  query: TLogSearchQuery;
+  query: TBehaviorLogSearchQuery;
 }) {
   return (
     <aside class="event-inspector" aria-label="Event details">
@@ -684,7 +689,7 @@ function EventInspector(props: {
 
 function EventInspectorContent(props: {
   event: TPersistedBehaviorLogEvent;
-  query: TLogSearchQuery;
+  query: TBehaviorLogSearchQuery;
 }) {
   const event = props.event;
   const status = eventStatus(event);
@@ -858,7 +863,7 @@ function InspectorValue(props: {
 }
 
 function LoadMore(props: {
-  query: TLogSearchQuery;
+  query: TBehaviorLogSearchQuery;
   events: TPersistedBehaviorLogEvent[];
   hasMore: boolean;
 }) {
@@ -876,7 +881,7 @@ function LoadMore(props: {
     return <div id="load-more"></div>;
   }
 
-  const nextQuery: TLogSearchQuery = {
+  const nextQuery: TBehaviorLogSearchQuery = {
     ...props.query,
     beforeCreatedAt: last.createdAtMs,
     beforeId: last.id,

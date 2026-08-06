@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@bellaclaw/behavior-logs": "workspace:*",
+    "@bellaclaw/shared": "workspace:*",
     "hono": "^4.12.30",
     "htmx.org": "^2.0.10",
     "zod": "^4.3.6"

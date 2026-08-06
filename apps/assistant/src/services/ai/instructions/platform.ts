@@ -1,4 +1,4 @@
-import type { TOption } from "../../../types";
+import type { TOption } from "@bellaclaw/shared";
 import { EMessagePlatform } from "../../messaging/types";
 
 export function createPlatformInstructions(platform: TOption<EMessagePlatform>): TOption<string> {

@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { resolve } from "node:path";
+import { repositoryPath, type TOption } from "@bellaclaw/shared";
 import { getDefaultLogDbPath } from "./config";
-import type { TOption } from "./option";
 
 const originalLogDbPath: TOption<string> = Bun.env.BELLACLAW_LOG_DB_PATH;
 const originalLogDbRoot: TOption<string> = Bun.env.BELLACLAW_LOG_DB_ROOT;
@@ -16,7 +15,7 @@ describe("behavior log configuration", () => {
     Bun.env.BELLACLAW_LOG_DB_PATH = "./tmp/behavior.db";
     delete Bun.env.BELLACLAW_LOG_DB_ROOT;
 
-    expect(getDefaultLogDbPath()).toBe(resolve(import.meta.dir, "../../..", "tmp/behavior.db"));
+    expect(getDefaultLogDbPath()).toBe(repositoryPath("tmp/behavior.db"));
   });
 });
 

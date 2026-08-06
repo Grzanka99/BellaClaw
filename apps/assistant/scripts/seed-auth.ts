@@ -1,13 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { link, open, rename, rm } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { dirname } from "node:path";
+import { repositoryPath } from "@bellaclaw/shared";
 import { z } from "zod";
 import {
   LOCAL_AI_CREDENTIALS_PATH,
   SCredentials,
 } from "../src/services/ai/auth/file-credential-store";
 
-const SOURCE_PATH = resolve(import.meta.dir, "../../../.secrets/auth.json");
+const SOURCE_PATH = repositoryPath(".secrets/auth.json");
 const OPENAI_CODEX_PROVIDER_ID = "openai-codex";
 
 const SCodexAuth = z.object({

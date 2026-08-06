@@ -1,4 +1,4 @@
-import type { TOption } from "../../types";
+import type { TOption } from "@bellaclaw/shared";
 import { EMessagePlatform } from "./types";
 
 export type TCanonicalChatKey = {

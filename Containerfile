@@ -10,6 +10,7 @@ COPY package.json bun.lock turbo.json ./
 COPY apps/assistant/package.json apps/assistant/package.json
 COPY apps/log-viewer/package.json apps/log-viewer/package.json
 COPY packages/behavior-logs/package.json packages/behavior-logs/package.json
+COPY packages/shared/package.json packages/shared/package.json
 RUN bun install --frozen-lockfile
 
 COPY . .

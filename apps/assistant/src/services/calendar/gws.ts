@@ -1,16 +1,16 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
-import type { TOption } from "../../types";
+import { join } from "node:path";
+import type { TOption } from "@bellaclaw/shared";
+import { repositoryPath } from "@bellaclaw/shared";
 
 const MAX_OUTPUT_BYTES = 4 * 1024 * 1024;
 const MAX_AGGREGATE_BYTES = 8 * 1024 * 1024;
 const TIMEOUT_MS = 30_000;
 const MAX_PAGES = 20;
 const MAX_ITEMS = 50_000;
-const REPOSITORY_ROOT = resolve(import.meta.dir, "../../../../..");
-const CREDENTIALS_FILE = `${REPOSITORY_ROOT}/.secrets/google-calendar-service-account.json`;
-const GWS_BINARY = `${REPOSITORY_ROOT}/node_modules/.bin/gws`;
+const CREDENTIALS_FILE = repositoryPath(".secrets/google-calendar-service-account.json");
+const GWS_BINARY = repositoryPath("node_modules/.bin/gws");
 
 export type TGwsRequest = {
   resource: "events";
