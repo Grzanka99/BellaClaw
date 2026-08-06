@@ -7,7 +7,7 @@
   },
   "scripts": {
     "check": "bunx @biomejs/biome check .",
-    "logs:turn": "bun run scripts/logs-turn.ts",
+    "logs:turn": "bun --env-file=../../.env run scripts/logs-turn.ts",
     "test": "bun test",
     "typecheck": "bunx tsc --noEmit"
   },

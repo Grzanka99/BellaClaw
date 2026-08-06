@@ -5,8 +5,8 @@
   "module": "src/index.ts",
   "scripts": {
     "check": "bunx @biomejs/biome check .",
-    "dev": "bun run --watch src/index.ts",
-    "start": "bun run src/index.ts",
+    "dev": "bun --env-file=../../.env run --watch src/index.ts",
+    "start": "bun --env-file=../../.env run src/index.ts",
     "test": "bun test",
     "typecheck": "bunx tsc --noEmit"
   },
