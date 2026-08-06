@@ -1,0 +1,20 @@
+{
+  "name": "@bellaclaw/log-viewer",
+  "private": true,
+  "type": "module",
+  "module": "src/index.ts",
+  "scripts": {
+    "check": "bunx @biomejs/biome check .",
+    "dev": "bun --env-file=../../.env run --watch src/index.ts",
+    "start": "bun --env-file=../../.env run src/index.ts",
+    "test": "bun test",
+    "typecheck": "bunx tsc --noEmit"
+  },
+  "dependencies": {
+    "@bellaclaw/behavior-logs": "workspace:*",
+    "@bellaclaw/shared": "workspace:*",
+    "hono": "^4.12.30",
+    "htmx.org": "^2.0.10",
+    "zod": "^4.3.6"
+  }
+}

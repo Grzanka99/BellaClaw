@@ -1,0 +1,13 @@
+{
+  "name": "@bellaclaw/shared",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "check": "bunx @biomejs/biome check .",
+    "test": "bun test",
+    "typecheck": "bunx tsc --noEmit"
+  }
+}

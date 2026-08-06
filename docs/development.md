@@ -11,13 +11,13 @@ Fill in `.env` as described in [Configuration](configuration.md).
 
 ## Run
 
-Start once:
+Start both apps once:
 
 ```bash
 bun run start
 ```
 
-Start with file watching:
+Start both apps with file watching:
 
 ```bash
 bun run dev
@@ -26,24 +26,31 @@ bun run dev
 Dev mode tries to seed `.secrets/pi-auth.json` from `.secrets/auth.json`. It skips this step when the
 source file is absent and preserves existing Pi credentials.
 
+Run one workspace from the repository root:
+
+```bash
+bunx turbo run dev --filter=@bellaclaw/assistant
+bunx turbo run dev --filter=@bellaclaw/log-viewer
+```
+
 ## Test
 
 Run everything:
 
 ```bash
-bun test
+bun run test
 ```
 
 Run one file:
 
 ```bash
-bun test src/services/memory/index.test.ts
+bun test --cwd apps/assistant src/services/memory/index.test.ts
 ```
 
 Run matching tests:
 
 ```bash
-bun test --test-name-pattern "my case"
+bun test --cwd apps/assistant --test-name-pattern "my case"
 ```
 
 ## Check Code
@@ -51,13 +58,13 @@ bun test --test-name-pattern "my case"
 Type-check:
 
 ```bash
-bunx tsc --noEmit
+bun run typecheck
 ```
 
 Check formatting and lint rules:
 
 ```bash
-bunx @biomejs/biome check .
+bun run check
 ```
 
 Apply safe formatting and lint fixes:
@@ -65,3 +72,6 @@ Apply safe formatting and lint fixes:
 ```bash
 bunx @biomejs/biome check . --write
 ```
+
+The assistant owns its Drizzle test preload. Behavior-log and viewer tests run independently and do
+not initialize the assistant database.

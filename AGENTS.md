@@ -60,19 +60,19 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 
 ## Purpose
 
-Small Bun + TypeScript Discord assistant. Prefer small, targeted changes that preserve the current structure and naming style.
+Small Bun + TypeScript assistant monorepo. Prefer small, targeted changes that preserve the current workspace boundaries and naming style.
 
 ## Commands
 
 - Install dependencies: `bun install`
-- Start once: `bun run src/index.ts`
-- Start via script: `bun run start`
-- Dev/watch mode: `bun run dev`
-- Run all tests: `bun test`
-- Run one test file: `bun test src/services/memory/index.test.ts`
-- Run tests by name: `bun test --test-name-pattern "my case"`
-- Typecheck: `bunx tsc --noEmit`
-- Biome check: `bunx @biomejs/biome check .`
+- Start both apps: `bun run start`
+- Dev/watch both apps: `bun run dev`
+- Run one app: `bunx turbo run dev --filter=@bellaclaw/assistant`
+- Run all tests: `bun run test`
+- Run one test file: `bun test --cwd apps/assistant src/services/memory/index.test.ts`
+- Run tests by name: `bun test --cwd apps/assistant --test-name-pattern "my case"`
+- Typecheck: `bun run typecheck`
+- Biome check: `bun run check`
 - Biome auto-fix: `bunx @biomejs/biome check . --write`
 - After edits, run Biome auto-fix and Biome check on changed files when possible, instead of whole repo.
 
@@ -109,10 +109,10 @@ Use `Bun.env.*` — never `process.env`.
 
 ## Tool Definitions Pattern
 
-Each tool lives in its own directory under `src/services/ai/tools/`:
+Each tool lives in its own directory under `apps/assistant/src/services/ai/tools/`:
 
 ```
-src/services/ai/tools/<tool-name>/
+apps/assistant/src/services/ai/tools/<tool-name>/
   definition.ts    — exports TypeBox schema and Pi tool metadata
   handler.ts       — typed execution and domain validation
   instructions.xml — detailed instructions for the AI on when/how to use the tool

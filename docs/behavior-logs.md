@@ -3,6 +3,9 @@
 BellaClaw writes structured behavior events to SQLite and standard output. The web viewer reads the
 SQLite database without modifying it.
 
+The shared schema and all SQLite access live in the `@bellaclaw/behavior-logs` workspace. The
+assistant writes events through it, while the viewer uses its read-only API.
+
 Behavior logs may contain sensitive operational details. Treat the viewer and database as private.
 
 ## Standalone Viewer
