@@ -10,7 +10,6 @@ describe("agent permissions", () => {
   test("matches the six-agent tool matrix without specialist delegation", () => {
     expect(AGENT_TOOL_NAMES[EAgentName.Calendar]).toEqual([
       "list-calendars",
-      "add-readonly-calendar",
       "remove-readonly-calendar",
       "list-calendar-events",
       "find-calendar-availability",
@@ -109,7 +108,6 @@ describe("agent permissions", () => {
         if (
           tool.name === "delegate-scheduling" ||
           tool.name === "delegate-calendar" ||
-          tool.name === "add-readonly-calendar" ||
           tool.name === "remove-readonly-calendar" ||
           tool.name === "create-calendar-event" ||
           tool.name === "update-calendar-event" ||

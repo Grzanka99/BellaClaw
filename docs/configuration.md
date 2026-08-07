@@ -60,7 +60,7 @@ See [Messaging](messaging.md) for setup steps.
 Calendar needs a service-account key at `.secrets/google-calendar-service-account.json`. Without it,
 BellaClaw starts with calendar features unavailable.
 
-The writable calendar is configured per chat with the `!write-calendar <calendarId>` command, not
+The writable calendar is configured per chat with the `!calendar_add-write <calendarId>` command, not
 through an environment variable.
 
 See [Google Calendar](google-calendar.md).

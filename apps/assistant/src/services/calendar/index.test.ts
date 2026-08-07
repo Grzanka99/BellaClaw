@@ -95,16 +95,41 @@ describe("CalendarService mutation boundary", () => {
     expect(calls).toHaveLength(0);
   });
 
-  test("read-only add accepts only the exact reader role", async () => {
+  test("read-only add rejects roles below reader", async () => {
     const client = {
-      probeCalendar: async () => ({ accessRole: "writer", summary: "Wrong role" }),
+      probeCalendar: async () => ({ accessRole: "freeBusyReader", summary: "Wrong role" }),
     } as unknown as GwsCalendarClient;
     const service = new CalendarService(selectingDatabase([]), client);
     Object.assign(service, { status: { ready: true, error: undefined } });
 
     expect(service.addReadonlyCalendar("user-1", "other-calendar")).rejects.toThrow(
-      "requires exact reader access",
+      "requires reader, writer, or owner access",
     );
+  });
+
+  test("read-only add stores another user's writable calendar as read", async () => {
+    const inserted: Record<string, unknown>[] = [];
+    const client = {
+      probeCalendar: async () => ({ accessRole: "writer", summary: "Housemate" }),
+    } as unknown as GwsCalendarClient;
+    const database = {
+      select: () => ({ from: () => ({ where: async () => [] }) }),
+      insert: () => ({
+        values: (values: Record<string, unknown>) => ({
+          onConflictDoUpdate: async () => {
+            inserted.push(values);
+          },
+        }),
+      }),
+    } as unknown as LibSQLDatabase;
+    const service = new CalendarService(database, client);
+    Object.assign(service, { status: { ready: true, error: undefined } });
+
+    const calendar = await service.addReadonlyCalendar("user-1", "housemate-calendar");
+
+    expect(calendar.access).toBe("read");
+    expect(inserted[0]?.access).toBe("read");
+    expect(inserted[0]?.userId).toBe("user-1");
   });
 
   test("create always targets the trusted writable calendar and uses default reminders", async () => {

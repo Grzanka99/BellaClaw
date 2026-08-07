@@ -1,43 +1,20 @@
 import type { TOption } from "@bellaclaw/shared";
-import { CalendarService } from "../../calendar";
+import { calendarAddReadCommand } from "./calendar-add-read";
+import { calendarAddWriteCommand } from "./calendar-add-write";
+import { COMMAND_PREFIX, type TCommand } from "./types";
 
-export const COMMAND_PREFIX = "!";
+export { COMMAND_PREFIX, type TCommand } from "./types";
 
-export type TCommand = {
-  description: string;
-  usage: string;
-  handler: (chatId: string, args: string) => Promise<string>;
-};
+const REGISTERED_COMMANDS: TCommand[] = [calendarAddWriteCommand, calendarAddReadCommand];
 
-export const COMMANDS = new Map<string, TCommand>([
-  [
-    "write-calendar",
-    {
-      description:
-        "Set the Google calendar the bot writes events to. The calendar must already be shared with the bot's service account with write access. Sending it again replaces the current one.",
-      usage: "!write-calendar <calendarId>",
-      handler: async (chatId, args) => {
-        const calendarId = args.trim();
-
-        if (calendarId.length === 0) {
-          return "Usage: !write-calendar <calendarId>";
-        }
-
-        try {
-          const calendar = await CalendarService.instance.setWriteCalendar(chatId, calendarId);
-          return `Write calendar set: ${calendar.summary ?? calendar.calendarId}`;
-        } catch (error) {
-          return `Can't use that calendar: ${String(error)}`;
-        }
-      },
-    },
-  ],
-]);
+export const COMMANDS = new Map<string, TCommand>(
+  REGISTERED_COMMANDS.map((command) => [command.name, command]),
+);
 
 export function formatCommandList(): string {
-  return Array.from(COMMANDS.values())
-    .map((command) => `- ${command.usage} — ${command.description}`)
-    .join("\n");
+  return REGISTERED_COMMANDS.map((command) => `- ${command.usage} — ${command.description}`).join(
+    "\n",
+  );
 }
 
 export async function runCommand(chatId: string, content: string): Promise<TOption<string>> {

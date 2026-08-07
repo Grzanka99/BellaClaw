@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
 import { Value } from "typebox/value";
-import { addReadonlyCalendarTool } from "./add-readonly-calendar/definition";
 import { createCalendarEventTool } from "./create-calendar-event/definition";
 import {
   SCreateCalendarEventArgs,
@@ -37,7 +36,6 @@ import { webFetchTool } from "./web-fetch/definition";
 import { webSearchTool } from "./web-search/definition";
 
 const ALL_TOOLS = [
-  addReadonlyCalendarTool,
   createCalendarEventTool,
   deleteCalendarEventTool,
   defineMessageImportanceTool,
@@ -60,8 +58,8 @@ const ALL_TOOLS = [
 
 describe("AI tool definitions", () => {
   test("expose Pi-native TypeBox parameter schemas", () => {
-    expect(ALL_TOOLS).toHaveLength(19);
-    expect(new Set(ALL_TOOLS.map((tool) => tool.name)).size).toBe(19);
+    expect(ALL_TOOLS).toHaveLength(18);
+    expect(new Set(ALL_TOOLS.map((tool) => tool.name)).size).toBe(18);
 
     for (const tool of ALL_TOOLS) {
       expect(tool.name.length).toBeGreaterThan(0);

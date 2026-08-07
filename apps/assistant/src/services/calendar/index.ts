@@ -25,7 +25,7 @@ import type {
 
 const GOOGLE_CREDENTIALS_FILE = repositoryPath(".secrets/google-calendar-service-account.json");
 const MISSING_WRITE_CALENDAR_MESSAGE =
-  "No writable calendar is configured for this chat. Share a Google calendar with the bot's service account granting write access, then send: !write-calendar <calendarId>";
+  "No writable calendar is configured for this chat. Share a Google calendar with the bot's service account granting write access, then send: !calendar_add-write <calendarId>";
 
 type TCalendarStatus = {
   ready: boolean;
@@ -556,9 +556,13 @@ export class CalendarService {
       throw new Error("Writable calendar cannot be added as read-only");
     }
     const live = await this.client.probeCalendar(calendarId, signal);
-    if (live.accessRole !== "reader") {
+    if (
+      live.accessRole !== "reader" &&
+      live.accessRole !== "writer" &&
+      live.accessRole !== "owner"
+    ) {
       throw new Error(
-        `Read-only calendar requires exact reader access, received ${live.accessRole ?? "none"}`,
+        `Read-only calendar requires reader, writer, or owner access, received ${live.accessRole ?? "none"}`,
       );
     }
     const addedAt = Date.now();

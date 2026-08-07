@@ -12,11 +12,6 @@ import { SettingsService } from "../../settings";
 import { ConfigValidators, EConfigKey, type TConfigRecord } from "../../settings/schema";
 import { getAiModelIds } from "../providers/registry";
 import { EAiProvider, EModelPurpose } from "../types";
-import { ADD_READONLY_CALENDAR_TOOL } from "./add-readonly-calendar/definition";
-import {
-  SAddReadonlyCalendarArgs,
-  type TAddReadonlyCalendarArgs,
-} from "./add-readonly-calendar/handler";
 import { CREATE_CALENDAR_EVENT_TOOL } from "./create-calendar-event/definition";
 import {
   SCreateCalendarEventArgs,
@@ -444,19 +439,6 @@ export function createCalendarTools(context: TToolExecutionContext) {
       execute: async (_toolCallId: string, args: unknown, signal?: AbortSignal) => {
         Value.Decode(SListCalendarsArgs, args);
         return textResult(await CalendarService.instance.listCalendars(userId, signal));
-      },
-    },
-    {
-      name: ADD_READONLY_CALENDAR_TOOL,
-      label: "Add read-only calendar",
-      description: "Add a Google calendar as a read-only source",
-      parameters: SAddReadonlyCalendarArgs,
-      executionMode: SEQUENTIAL,
-      execute: async (_toolCallId: string, args: unknown, signal?: AbortSignal) => {
-        const parsedArgs: TAddReadonlyCalendarArgs = Value.Decode(SAddReadonlyCalendarArgs, args);
-        return textResult(
-          await CalendarService.instance.addReadonlyCalendar(userId, parsedArgs.calendarId, signal),
-        );
       },
     },
     {
