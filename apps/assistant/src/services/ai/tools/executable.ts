@@ -433,6 +433,7 @@ export function createSchedulingTools(context: TToolExecutionContext) {
 
 export function createCalendarTools(context: TToolExecutionContext) {
   const ownerTimezone = context.settings[EConfigKey.AiInstructionsTimezone];
+  const userId = requireChatId(context.chatId);
 
   return [
     {
@@ -442,7 +443,7 @@ export function createCalendarTools(context: TToolExecutionContext) {
       parameters: SListCalendarsArgs,
       execute: async (_toolCallId: string, args: unknown, signal?: AbortSignal) => {
         Value.Decode(SListCalendarsArgs, args);
-        return textResult(await CalendarService.instance.listCalendars(signal));
+        return textResult(await CalendarService.instance.listCalendars(userId, signal));
       },
     },
     {
@@ -454,7 +455,7 @@ export function createCalendarTools(context: TToolExecutionContext) {
       execute: async (_toolCallId: string, args: unknown, signal?: AbortSignal) => {
         const parsedArgs: TAddReadonlyCalendarArgs = Value.Decode(SAddReadonlyCalendarArgs, args);
         return textResult(
-          await CalendarService.instance.addReadonlyCalendar(parsedArgs.calendarId, signal),
+          await CalendarService.instance.addReadonlyCalendar(userId, parsedArgs.calendarId, signal),
         );
       },
     },
@@ -469,7 +470,7 @@ export function createCalendarTools(context: TToolExecutionContext) {
           SRemoveReadonlyCalendarArgs,
           args,
         );
-        await CalendarService.instance.removeReadonlyCalendar(parsedArgs.calendarId);
+        await CalendarService.instance.removeReadonlyCalendar(userId, parsedArgs.calendarId);
         return textResult({ success: true });
       },
     },
@@ -481,7 +482,9 @@ export function createCalendarTools(context: TToolExecutionContext) {
       execute: async (_toolCallId: string, args: unknown, signal?: AbortSignal) => {
         const parsedArgs: TListCalendarEventsArgs = Value.Decode(SListCalendarEventsArgs, args);
         const validatedArgs = validateListCalendarEventsArgs(parsedArgs);
-        return textResult(await CalendarService.instance.listEvents({ ...validatedArgs, signal }));
+        return textResult(
+          await CalendarService.instance.listEvents({ ...validatedArgs, userId, signal }),
+        );
       },
     },
     {
@@ -498,6 +501,7 @@ export function createCalendarTools(context: TToolExecutionContext) {
         return textResult(
           await CalendarService.instance.findAvailability({
             ...validatedArgs,
+            userId,
             timezone: ownerTimezone,
             signal,
           }),
@@ -516,6 +520,7 @@ export function createCalendarTools(context: TToolExecutionContext) {
         return textResult(
           await CalendarService.instance.createEvent({
             ...validatedArgs,
+            userId,
             timezone: validatedArgs.timezone ?? ownerTimezone,
             signal,
           }),
@@ -534,6 +539,7 @@ export function createCalendarTools(context: TToolExecutionContext) {
 
         return textResult(
           await CalendarService.instance.updateEvent({
+            userId,
             eventId: parsedArgs.eventId,
             scope: parsedArgs.scope,
             patch,
@@ -550,7 +556,7 @@ export function createCalendarTools(context: TToolExecutionContext) {
       executionMode: SEQUENTIAL,
       execute: async (_toolCallId: string, args: unknown, signal?: AbortSignal) => {
         const parsedArgs: TDeleteCalendarEventArgs = Value.Decode(SDeleteCalendarEventArgs, args);
-        await CalendarService.instance.deleteEvent({ ...parsedArgs, signal });
+        await CalendarService.instance.deleteEvent({ ...parsedArgs, userId, signal });
         return textResult({ success: true });
       },
     },

@@ -28,6 +28,7 @@ import { MessageHandler } from "../message-handler";
 import { attachMessageTrace } from "../message-handler/trace";
 import type { TIncommingMessage } from "../message-handler/types";
 import { createCanonicalChatKey, parseCanonicalChatKey } from "./chat-key";
+import { runCommand } from "./commands";
 import type { EMessagePlatform, TMessageTransport, TPlatformMessage } from "./types";
 
 export class MessagingAdapter {
@@ -139,6 +140,38 @@ export class MessagingAdapter {
       }
 
       logMessageReceived(trace, message);
+
+      const commandReply = await runCommand(canonicalChatId, message.message.content);
+
+      if (commandReply !== undefined) {
+        const commandSendStart = performance.now();
+
+        try {
+          await transport.sendText(message.chatId, commandReply);
+          logTransportSendCompleted(
+            trace,
+            commandSendStart,
+            message.platform,
+            true,
+            commandReply.length,
+            undefined,
+          );
+        } catch (error) {
+          this.logger.error(
+            `handleInboundMessage: failed to send command reply to ${message.platform} chat ${message.chatId}: ${String(error)}`,
+          );
+          logTransportSendCompleted(
+            trace,
+            commandSendStart,
+            message.platform,
+            false,
+            commandReply.length,
+            String(error),
+          );
+        }
+
+        return;
+      }
 
       const incomingMessage: TIncommingMessage = {
         chatId: canonicalChatId,

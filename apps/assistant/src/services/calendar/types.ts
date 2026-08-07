@@ -74,6 +74,7 @@ export type TCalendarFailure = {
 };
 
 export type TListEventsArguments = {
+  userId: string;
   timeMin: string;
   timeMax: string;
   query?: string;
@@ -86,6 +87,7 @@ export type TListEventsResult = {
 };
 
 export type TCreateEventArguments = {
+  userId: string;
   summary: string;
   description?: string;
   location?: string;
@@ -111,6 +113,7 @@ export type TUpdateEventPatch = {
 };
 
 export type TUpdateEventArguments = {
+  userId: string;
   eventId: string;
   scope: TRecurrenceScope;
   patch: TUpdateEventPatch;
@@ -118,6 +121,7 @@ export type TUpdateEventArguments = {
 };
 
 export type TDeleteEventArguments = {
+  userId: string;
   eventId: string;
   scope: TRecurrenceScope;
   signal?: AbortSignal;
@@ -130,6 +134,7 @@ export type TBusyInterval = {
 };
 
 export type TAvailabilityArguments = {
+  userId: string;
   timeMin: string;
   timeMax: string;
   durationMinutes?: number;

@@ -62,14 +62,16 @@ export const userConfigsTable = sqliteTable(
 export const calendarsTable = sqliteTable(
   "calendars",
   {
-    calendarId: text("calendarId").primaryKey(),
+    userId: text("userId").notNull().default(""),
+    calendarId: text("calendarId").notNull(),
     access: text("access").notNull(),
     addedAt: integer("addedAt").notNull(),
   },
   (table) => [
+    primaryKey({ columns: [table.userId, table.calendarId] }),
     check("calendars_access_check", sql`${table.access} in ('read', 'write')`),
     uniqueIndex("calendars_single_write_unique")
-      .on(table.access)
+      .on(table.userId)
       .where(sql`${table.access} = 'write'`),
   ],
 );

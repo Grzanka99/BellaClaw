@@ -23,15 +23,14 @@ remain unavailable.
 
 5. Create or choose the calendar BellaClaw may modify.
 6. Share it with the service account's `client_email` using **Make changes to events**.
-7. Copy the calendar ID into `.env`:
+7. Send the calendar ID to BellaClaw as a chat command:
 
-   ```dotenv
-   BELLACLAW_GOOGLE_CALENDAR_WRITE_ID=your-calendar-id
+   ```text
+   !write-calendar your-calendar-id
    ```
 
-8. Restart BellaClaw.
-
-BellaClaw verifies that this calendar has exact `writer` access during startup.
+Each chat has its own writable calendar. BellaClaw verifies that the calendar has exact `writer`
+access before storing it, and sending the command again replaces the current one.
 
 ## Read-Only Calendars
 

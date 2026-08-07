@@ -23,8 +23,9 @@ import type {
   TUpdateEventPatch,
 } from "./types";
 
-const WRITE_CALENDAR_ID = Bun.env.BELLACLAW_GOOGLE_CALENDAR_WRITE_ID;
 const GOOGLE_CREDENTIALS_FILE = repositoryPath(".secrets/google-calendar-service-account.json");
+const MISSING_WRITE_CALENDAR_MESSAGE =
+  "No writable calendar is configured for this chat. Share a Google calendar with the bot's service account granting write access, then send: !write-calendar <calendarId>";
 
 type TCalendarStatus = {
   ready: boolean;
@@ -422,7 +423,6 @@ export class CalendarService {
   public constructor(
     private db: LibSQLDatabase = DatabaseConnector.instance.database,
     private client: GwsCalendarClient = new GwsCalendarClient(),
-    private writeCalendarId: TOption<string> = WRITE_CALENDAR_ID,
   ) {}
 
   public static get instance(): CalendarService {
@@ -436,46 +436,34 @@ export class CalendarService {
     return { ...this.status };
   }
 
-  private requireReady(): string {
-    if (!this.status.ready || this.writeCalendarId === undefined) {
+  private requireReady(): void {
+    if (!this.status.ready) {
       throw new Error(this.status.error ?? "Calendar is unavailable");
     }
-    return this.writeCalendarId;
+  }
+
+  private async requireWriteCalendarId(userId: string): Promise<string> {
+    this.requireReady();
+    const rows = await this.queue.enqueue(() =>
+      this.db
+        .select()
+        .from(calendarsTable)
+        .where(and(eq(calendarsTable.userId, userId), eq(calendarsTable.access, "write"))),
+    );
+    const row = rows[0];
+    if (row === undefined) {
+      throw new Error(MISSING_WRITE_CALENDAR_MESSAGE);
+    }
+    return row.calendarId;
   }
 
   public async setup(): Promise<void> {
     try {
-      if (this.writeCalendarId === undefined || this.writeCalendarId.trim().length === 0) {
-        throw new Error("BELLACLAW_GOOGLE_CALENDAR_WRITE_ID is not configured");
-      }
       if (!(await Bun.file(GOOGLE_CREDENTIALS_FILE).exists())) {
         throw new Error(
           `Google Calendar credentials are unavailable at ${GOOGLE_CREDENTIALS_FILE}`,
         );
       }
-      const response = await this.client.probeCalendar(this.writeCalendarId);
-      if (response.accessRole !== "writer") {
-        throw new Error(
-          `Writable calendar requires exact writer access, received ${response.accessRole ?? "none"}`,
-        );
-      }
-      const writeCalendarId = this.writeCalendarId;
-      await this.queue.enqueue(async () => {
-        await this.db.transaction(async (transaction) => {
-          await transaction.delete(calendarsTable).where(eq(calendarsTable.access, "write"));
-          await transaction
-            .insert(calendarsTable)
-            .values({
-              calendarId: writeCalendarId,
-              access: "write",
-              addedAt: Date.now(),
-            })
-            .onConflictDoUpdate({
-              target: calendarsTable.calendarId,
-              set: { access: "write" },
-            });
-        });
-      });
       this.status = { ready: true, error: undefined };
       this.logger.info("Calendar service is ready");
     } catch (error) {
@@ -484,9 +472,43 @@ export class CalendarService {
     }
   }
 
-  public async listCalendars(signal?: AbortSignal): Promise<TCalendar[]> {
+  public async setWriteCalendar(userId: string, calendarId: string): Promise<TCalendar> {
     this.requireReady();
-    const rows = await this.queue.enqueue(() => this.db.select().from(calendarsTable));
+    const live = await this.client.probeCalendar(calendarId);
+    if (live.accessRole !== "writer") {
+      throw new Error(
+        `Writable calendar requires exact writer access, received ${live.accessRole ?? "none"}`,
+      );
+    }
+    const addedAt = Date.now();
+    await this.queue.enqueue(async () => {
+      await this.db.transaction(async (transaction) => {
+        await transaction
+          .delete(calendarsTable)
+          .where(and(eq(calendarsTable.userId, userId), eq(calendarsTable.access, "write")));
+        await transaction
+          .insert(calendarsTable)
+          .values({ userId, calendarId, access: "write", addedAt })
+          .onConflictDoUpdate({
+            target: [calendarsTable.userId, calendarsTable.calendarId],
+            set: { access: "write", addedAt },
+          });
+      });
+    });
+    return {
+      calendarId,
+      access: "write",
+      addedAt,
+      summary: live.summary,
+      error: undefined,
+    };
+  }
+
+  public async listCalendars(userId: string, signal?: AbortSignal): Promise<TCalendar[]> {
+    this.requireReady();
+    const rows = await this.queue.enqueue(() =>
+      this.db.select().from(calendarsTable).where(eq(calendarsTable.userId, userId)),
+    );
     return Promise.all(
       rows.map(async (row) => {
         let access: TCalendarAccess = "read";
@@ -518,9 +540,19 @@ export class CalendarService {
     );
   }
 
-  public async addReadonlyCalendar(calendarId: string, signal?: AbortSignal): Promise<TCalendar> {
+  public async addReadonlyCalendar(
+    userId: string,
+    calendarId: string,
+    signal?: AbortSignal,
+  ): Promise<TCalendar> {
     this.requireReady();
-    if (calendarId === this.writeCalendarId) {
+    const existing = await this.queue.enqueue(() =>
+      this.db
+        .select()
+        .from(calendarsTable)
+        .where(and(eq(calendarsTable.userId, userId), eq(calendarsTable.calendarId, calendarId))),
+    );
+    if (existing[0]?.access === "write") {
       throw new Error("Writable calendar cannot be added as read-only");
     }
     const live = await this.client.probeCalendar(calendarId, signal);
@@ -533,9 +565,9 @@ export class CalendarService {
     await this.queue.enqueue(async () => {
       await this.db
         .insert(calendarsTable)
-        .values({ calendarId, access: "read", addedAt })
+        .values({ userId, calendarId, access: "read", addedAt })
         .onConflictDoUpdate({
-          target: calendarsTable.calendarId,
+          target: [calendarsTable.userId, calendarsTable.calendarId],
           set: { access: "read", addedAt },
         });
     });
@@ -548,12 +580,18 @@ export class CalendarService {
     };
   }
 
-  public async removeReadonlyCalendar(calendarId: string): Promise<void> {
+  public async removeReadonlyCalendar(userId: string, calendarId: string): Promise<void> {
     this.requireReady();
     const removed = await this.queue.enqueue(() =>
       this.db
         .delete(calendarsTable)
-        .where(and(eq(calendarsTable.calendarId, calendarId), eq(calendarsTable.access, "read")))
+        .where(
+          and(
+            eq(calendarsTable.userId, userId),
+            eq(calendarsTable.calendarId, calendarId),
+            eq(calendarsTable.access, "read"),
+          ),
+        )
         .returning(),
     );
     if (removed.length === 0) {
@@ -566,7 +604,9 @@ export class CalendarService {
     if (Date.parse(args.timeMin) >= Date.parse(args.timeMax)) {
       throw new Error("timeMax must be after timeMin");
     }
-    const rows = await this.queue.enqueue(() => this.db.select().from(calendarsTable));
+    const rows = await this.queue.enqueue(() =>
+      this.db.select().from(calendarsTable).where(eq(calendarsTable.userId, args.userId)),
+    );
     const events: TCalendarEvent[] = [];
     const failures: Array<{ calendarId: string; error: string }> = [];
     await Promise.all(
@@ -610,6 +650,7 @@ export class CalendarService {
 
   public async findAvailability(args: TAvailabilityArguments): Promise<TAvailabilityResult> {
     const result = await this.listEvents({
+      userId: args.userId,
       timeMin: args.timeMin,
       timeMax: args.timeMax,
       signal: args.signal,
@@ -625,7 +666,7 @@ export class CalendarService {
   }
 
   public async createEvent(args: TCreateEventArguments): Promise<TCalendarEvent> {
-    const calendarId = this.requireReady();
+    const calendarId = await this.requireWriteCalendarId(args.userId);
     const times = normalizeEventTimes(args.start, args.end, args.durationMinutes, args.timezone);
     const body: Record<string, unknown> = {
       summary: args.summary,
@@ -648,8 +689,11 @@ export class CalendarService {
     return mapEvent(calendarId, await this.client.insertEvent(calendarId, body, args.signal));
   }
 
-  private async resolveMutation(eventId: string, signal?: AbortSignal): Promise<TCalendarEvent> {
-    const calendarId = this.requireReady();
+  private async resolveMutation(
+    calendarId: string,
+    eventId: string,
+    signal?: AbortSignal,
+  ): Promise<TCalendarEvent> {
     const event = mapEvent(calendarId, await this.client.getEvent(calendarId, eventId, signal));
     if (event.id !== eventId) {
       throw new Error(`Google returned event ${event.id} while resolving ${eventId}`);
@@ -677,8 +721,8 @@ export class CalendarService {
   }
 
   public async updateEvent(args: TUpdateEventArguments): Promise<TCalendarEvent> {
-    const calendarId = this.requireReady();
-    const resolved = await this.resolveMutation(args.eventId, args.signal);
+    const calendarId = await this.requireWriteCalendarId(args.userId);
+    const resolved = await this.resolveMutation(calendarId, args.eventId, args.signal);
     if (args.scope === "occurrence") {
       const hasRecurringId = resolved.recurringEventId !== undefined;
       const hasOriginalStart = resolved.originalStartTime !== undefined;
@@ -696,7 +740,7 @@ export class CalendarService {
     }
 
     const masterId = resolved.recurringEventId ?? resolved.id;
-    const master = await this.resolveMutation(masterId, args.signal);
+    const master = await this.resolveMutation(calendarId, masterId, args.signal);
     if (args.scope === "series") {
       const body: Record<string, unknown> = {};
       applyPatch(body, args.patch, master);
@@ -779,8 +823,8 @@ export class CalendarService {
   }
 
   public async deleteEvent(args: TDeleteEventArguments): Promise<void> {
-    const calendarId = this.requireReady();
-    const resolved = await this.resolveMutation(args.eventId, args.signal);
+    const calendarId = await this.requireWriteCalendarId(args.userId);
+    const resolved = await this.resolveMutation(calendarId, args.eventId, args.signal);
     if (args.scope === "occurrence") {
       const hasRecurringId = resolved.recurringEventId !== undefined;
       const hasOriginalStart = resolved.originalStartTime !== undefined;
@@ -793,7 +837,7 @@ export class CalendarService {
       return;
     }
     const masterId = resolved.recurringEventId ?? resolved.id;
-    const master = await this.resolveMutation(masterId, args.signal);
+    const master = await this.resolveMutation(calendarId, masterId, args.signal);
     if (args.scope === "series") {
       await this.client.deleteEvent(calendarId, master.id, args.signal);
       return;
