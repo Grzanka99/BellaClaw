@@ -1,6 +1,6 @@
 import type { TOption } from "@bellaclaw/shared";
 import { AsyncQueue, createLogger, repositoryPath } from "@bellaclaw/shared";
-import { and, eq } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 import type { LibSQLDatabase } from "drizzle-orm/libsql";
 import { DatabaseConnector } from "../database";
 import { calendarsTable } from "../database/schema";
@@ -542,15 +542,6 @@ export class CalendarService {
 
   public async addReadonlyCalendar(userId: string, calendarId: string): Promise<TCalendar> {
     this.requireReady();
-    const existing = await this.queue.enqueue(() =>
-      this.db
-        .select()
-        .from(calendarsTable)
-        .where(and(eq(calendarsTable.userId, userId), eq(calendarsTable.calendarId, calendarId))),
-    );
-    if (existing[0]?.access === "write") {
-      throw new Error("Writable calendar cannot be added as read-only");
-    }
     const live = await this.client.probeCalendar(calendarId);
     if (
       live.accessRole !== "reader" &&
@@ -562,15 +553,20 @@ export class CalendarService {
       );
     }
     const addedAt = Date.now();
-    await this.queue.enqueue(async () => {
-      await this.db
+    const inserted = await this.queue.enqueue(() =>
+      this.db
         .insert(calendarsTable)
         .values({ userId, calendarId, access: "read", addedAt })
         .onConflictDoUpdate({
           target: [calendarsTable.userId, calendarsTable.calendarId],
           set: { access: "read", addedAt },
-        });
-    });
+          setWhere: ne(calendarsTable.access, "write"),
+        })
+        .returning(),
+    );
+    if (inserted.length === 0) {
+      throw new Error("Writable calendar cannot be added as read-only");
+    }
     return {
       calendarId,
       access: "read",

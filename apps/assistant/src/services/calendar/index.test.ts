@@ -116,9 +116,12 @@ describe("CalendarService mutation boundary", () => {
       select: () => ({ from: () => ({ where: async () => [] }) }),
       insert: () => ({
         values: (values: Record<string, unknown>) => ({
-          onConflictDoUpdate: async () => {
-            inserted.push(values);
-          },
+          onConflictDoUpdate: () => ({
+            returning: async () => {
+              inserted.push(values);
+              return [values];
+            },
+          }),
         }),
       }),
     } as unknown as LibSQLDatabase;
