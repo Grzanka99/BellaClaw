@@ -25,7 +25,7 @@ import type {
 
 const GOOGLE_CREDENTIALS_FILE = repositoryPath(".secrets/google-calendar-service-account.json");
 const MISSING_WRITE_CALENDAR_MESSAGE =
-  "No writable calendar is configured for this chat. Share a Google calendar with the bot's service account granting write access, then send: !calendar_add-write <calendarId>";
+  "No writable calendar is configured for this chat. Share a Google calendar with the bot's service account granting write access, then send: !calendar_add-write CALENDAR_ID";
 
 type TCalendarStatus = {
   ready: boolean;

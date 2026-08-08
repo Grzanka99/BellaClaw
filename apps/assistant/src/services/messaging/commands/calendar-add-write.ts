@@ -5,12 +5,12 @@ export const calendarAddWriteCommand: TCommand = {
   name: "calendar_add-write",
   description:
     "Set the Google calendar the bot writes events to. The calendar must already be shared with the bot's service account with write access. Sending it again replaces the current one.",
-  usage: "!calendar_add-write <calendarId>",
+  usage: "!calendar_add-write CALENDAR_ID",
   handler: async (chatId, args) => {
     const calendarId = args.trim();
 
     if (calendarId.length === 0) {
-      return "Usage: !calendar_add-write <calendarId>";
+      return "Usage: !calendar_add-write CALENDAR_ID";
     }
 
     try {
