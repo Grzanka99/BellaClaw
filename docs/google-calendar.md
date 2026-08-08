@@ -23,30 +23,34 @@ remain unavailable.
 
 5. Create or choose the calendar BellaClaw may modify.
 6. Share it with the service account's `client_email` using **Make changes to events**.
-7. Copy the calendar ID into `.env`:
+7. Send the calendar ID to BellaClaw as a chat command:
 
-   ```dotenv
-   BELLACLAW_GOOGLE_CALENDAR_WRITE_ID=your-calendar-id
+   ```text
+   !calendar_add-write your-calendar-id
    ```
 
-8. Restart BellaClaw.
-
-BellaClaw verifies that this calendar has exact `writer` access during startup.
+Each chat has its own writable calendar. BellaClaw verifies that the calendar has exact `writer`
+access before storing it, and sending the command again replaces the current one.
 
 ## Read-Only Calendars
 
 For each extra calendar:
 
 1. Share it with the same service account using **See all event details**.
-2. Ask BellaClaw in chat to add its calendar ID.
+2. Send the calendar ID to BellaClaw as a chat command:
 
-BellaClaw verifies exact `reader` access before saving it.
+   ```text
+   !calendar_add-read your-calendar-id
+   ```
+
+BellaClaw verifies `reader`, `writer`, or `owner` access before saving it, and always stores the
+calendar read-only for that chat. Two chats may add the same calendar; each gets its own row.
+
+Ask BellaClaw in chat to list or remove read-only calendars.
 
 ## Current Limits
 
-- One global writable calendar
-- One global set of read-only calendars
-- Calendar configuration is not separated by chat or user
+- One writable calendar per chat
 - Event reminders use the writable calendar's defaults
 
 The service-account key stays under `.secrets/`, which Git and the container build context exclude.

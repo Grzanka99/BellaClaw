@@ -3,7 +3,6 @@ import { EAgentName } from "../agent-harness";
 export const AGENT_TOOL_NAMES: Record<EAgentName, readonly string[]> = {
   [EAgentName.Calendar]: [
     "list-calendars",
-    "add-readonly-calendar",
     "remove-readonly-calendar",
     "list-calendar-events",
     "find-calendar-availability",

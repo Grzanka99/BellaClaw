@@ -50,6 +50,13 @@
       "when": 1785843546416,
       "tag": "0006_normal_sinister_six",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1786137839833,
+      "tag": "0007_demonic_rhino",
+      "breakpoints": true
     }
   ]
 }

@@ -45,7 +45,6 @@ const AGENT_INSTRUCTIONS: Record<EAgentName, string> = {
 };
 const TOOL_INSTRUCTIONS = {
   listCalendars: "./src/services/ai/tools/list-calendars/instructions.xml",
-  addReadonlyCalendar: "./src/services/ai/tools/add-readonly-calendar/instructions.xml",
   removeReadonlyCalendar: "./src/services/ai/tools/remove-readonly-calendar/instructions.xml",
   listCalendarEvents: "./src/services/ai/tools/list-calendar-events/instructions.xml",
   findCalendarAvailability: "./src/services/ai/tools/find-calendar-availability/instructions.xml",
@@ -542,7 +541,6 @@ export class AgentHarness {
       case EAgentName.Calendar:
         return [
           TOOL_INSTRUCTIONS.listCalendars,
-          TOOL_INSTRUCTIONS.addReadonlyCalendar,
           TOOL_INSTRUCTIONS.removeReadonlyCalendar,
           TOOL_INSTRUCTIONS.listCalendarEvents,
           TOOL_INSTRUCTIONS.findCalendarAvailability,

@@ -42,6 +42,7 @@ describe("production executable tools", () => {
     });
 
     expect(createEvent).toHaveBeenCalledWith({
+      userId: "discord:1",
       summary: "Meeting",
       start: "2026-08-01T10:00:00+02:00",
       timezone: "Europe/Warsaw",
@@ -63,6 +64,7 @@ describe("production executable tools", () => {
     });
 
     expect(updateEvent).toHaveBeenCalledWith({
+      userId: "discord:1",
       eventId: "event",
       scope: "occurrence",
       patch: {

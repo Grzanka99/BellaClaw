@@ -1,9 +1,0 @@
-<instructions>
-  <purpose>Add an explicitly identified Google calendar as a read-only source.</purpose>
-  <tool><name>add-readonly-calendar</name><description>Accepts an exact calendar ID and succeeds only when Google reports reader access.</description></tool>
-  <usage_rules>
-    <rule>Use only with a calendar ID explicitly pasted or confirmed by the user; never guess an ID.</rule>
-    <rule>Do not use this to change the writable calendar.</rule>
-  </usage_rules>
-  <examples><example><context>User pastes family@example.com and asks to add it.</context><toolCall><calendarId>family@example.com</calendarId></toolCall></example></examples>
-</instructions>

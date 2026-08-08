@@ -15,10 +15,26 @@ function googleEvent(id: string, extra: Record<string, unknown> = {}) {
   };
 }
 
-describe("CalendarService mutation boundary", () => {
-  const database = {} as unknown as LibSQLDatabase;
+function selectingDatabase(rows: Record<string, unknown>[]): LibSQLDatabase {
+  return {
+    select: () => ({
+      from: () => ({
+        where: async () => rows,
+      }),
+    }),
+  } as unknown as LibSQLDatabase;
+}
 
-  test("setup accepts exact writer access and reconciles the write row", async () => {
+function writeCalendarDatabase(): LibSQLDatabase {
+  return selectingDatabase([
+    { userId: "user-1", calendarId: "trusted-writer", access: "write", addedAt: 1 },
+  ]);
+}
+
+describe("CalendarService mutation boundary", () => {
+  const database = writeCalendarDatabase();
+
+  test("setup becomes ready from the credentials file alone", async () => {
     const credentialsPath = repositoryPath(".secrets/google-calendar-service-account.json");
     const credentials = Bun.file(credentialsPath);
     const existed = await credentials.exists();
@@ -26,30 +42,11 @@ describe("CalendarService mutation boundary", () => {
       await mkdir(repositoryPath(".secrets"), { recursive: true });
       await Bun.write(credentialsPath, "{}");
     }
-    let reconciled = 0;
-    const transaction = {
-      delete: () => ({ where: async () => undefined }),
-      insert: () => ({
-        values: () => ({
-          onConflictDoUpdate: async () => {
-            reconciled += 1;
-          },
-        }),
-      }),
-    };
-    const setupDatabase = {
-      transaction: async (callback: (value: typeof transaction) => Promise<void>) =>
-        callback(transaction),
-    } as unknown as LibSQLDatabase;
-    const client = {
-      probeCalendar: async () => ({ accessRole: "writer", summary: "Writer" }),
-    } as unknown as GwsCalendarClient;
-    const service = new CalendarService(setupDatabase, client, "trusted-writer");
+    const service = new CalendarService(database, {} as unknown as GwsCalendarClient);
 
     try {
       await service.setup();
       expect(service.getStatus()).toEqual({ ready: true, error: undefined });
-      expect(reconciled).toBe(1);
     } finally {
       if (!existed) {
         await credentials.delete();
@@ -57,16 +54,85 @@ describe("CalendarService mutation boundary", () => {
     }
   });
 
-  test("read-only add accepts only the exact reader role", async () => {
+  test("setting the write calendar accepts only the exact writer role", async () => {
     const client = {
-      probeCalendar: async () => ({ accessRole: "writer", summary: "Wrong role" }),
+      probeCalendar: async () => ({ accessRole: "reader", summary: "Wrong role" }),
     } as unknown as GwsCalendarClient;
-    const service = new CalendarService(database, client, "trusted-writer");
+    const service = new CalendarService(database, client);
     Object.assign(service, { status: { ready: true, error: undefined } });
 
-    expect(service.addReadonlyCalendar("other-calendar")).rejects.toThrow(
-      "requires exact reader access",
+    await expect(service.setWriteCalendar("user-1", "other-calendar")).rejects.toThrow(
+      "requires exact writer access",
     );
+  });
+
+  test("write calendars are resolved per user", async () => {
+    const calls: Array<{ calendarId: string }> = [];
+    const client = {
+      insertEvent: async (calendarId: string) => {
+        calls.push({ calendarId });
+        return googleEvent("created");
+      },
+    } as unknown as GwsCalendarClient;
+    const service = new CalendarService(selectingDatabase([]), client);
+    Object.assign(service, { status: { ready: true, error: undefined } });
+
+    await expect(
+      service.createEvent({
+        userId: "user-without-calendar",
+        summary: "Blocked",
+        description: undefined,
+        location: undefined,
+        start: "2026-07-25T09:00:00Z",
+        end: undefined,
+        durationMinutes: undefined,
+        timezone: "UTC",
+        transparency: undefined,
+        recurrence: undefined,
+        signal: undefined,
+      }),
+    ).rejects.toThrow("No writable calendar is configured");
+    expect(calls).toHaveLength(0);
+  });
+
+  test("read-only add rejects roles below reader", async () => {
+    const client = {
+      probeCalendar: async () => ({ accessRole: "freeBusyReader", summary: "Wrong role" }),
+    } as unknown as GwsCalendarClient;
+    const service = new CalendarService(selectingDatabase([]), client);
+    Object.assign(service, { status: { ready: true, error: undefined } });
+
+    await expect(service.addReadonlyCalendar("user-1", "other-calendar")).rejects.toThrow(
+      "requires reader, writer, or owner access",
+    );
+  });
+
+  test("read-only add stores another user's writable calendar as read", async () => {
+    const inserted: Record<string, unknown>[] = [];
+    const client = {
+      probeCalendar: async () => ({ accessRole: "writer", summary: "Housemate" }),
+    } as unknown as GwsCalendarClient;
+    const database = {
+      select: () => ({ from: () => ({ where: async () => [] }) }),
+      insert: () => ({
+        values: (values: Record<string, unknown>) => ({
+          onConflictDoUpdate: () => ({
+            returning: async () => {
+              inserted.push(values);
+              return [values];
+            },
+          }),
+        }),
+      }),
+    } as unknown as LibSQLDatabase;
+    const service = new CalendarService(database, client);
+    Object.assign(service, { status: { ready: true, error: undefined } });
+
+    const calendar = await service.addReadonlyCalendar("user-1", "housemate-calendar");
+
+    expect(calendar.access).toBe("read");
+    expect(inserted[0]?.access).toBe("read");
+    expect(inserted[0]?.userId).toBe("user-1");
   });
 
   test("create always targets the trusted writable calendar and uses default reminders", async () => {
@@ -77,10 +143,11 @@ describe("CalendarService mutation boundary", () => {
         return googleEvent("created");
       },
     } as unknown as GwsCalendarClient;
-    const service = new CalendarService(database, client, "trusted-writer");
+    const service = new CalendarService(database, client);
     Object.assign(service, { status: { ready: true, error: undefined } });
 
     await service.createEvent({
+      userId: "user-1",
       summary: "Safe",
       description: undefined,
       location: undefined,
@@ -110,10 +177,11 @@ describe("CalendarService mutation boundary", () => {
         return googleEvent("timed", body);
       },
     } as unknown as GwsCalendarClient;
-    const service = new CalendarService(database, client, "trusted-writer");
+    const service = new CalendarService(database, client);
     Object.assign(service, { status: { ready: true, error: undefined } });
 
     await service.updateEvent({
+      userId: "user-1",
       eventId: "timed",
       scope: "occurrence",
       patch: { start: "2026-07-26T12:00:00Z" },
@@ -142,10 +210,11 @@ describe("CalendarService mutation boundary", () => {
         return googleEvent("all-day", body);
       },
     } as unknown as GwsCalendarClient;
-    const service = new CalendarService(database, client, "trusted-writer");
+    const service = new CalendarService(database, client);
     Object.assign(service, { status: { ready: true, error: undefined } });
 
     await service.updateEvent({
+      userId: "user-1",
       eventId: "all-day",
       scope: "occurrence",
       patch: { start: "2026-08-10" },
@@ -156,11 +225,7 @@ describe("CalendarService mutation boundary", () => {
   });
 
   test("sorts timed events by their actual instants across UTC offsets", async () => {
-    const listDatabase = {
-      select: () => ({
-        from: async () => [{ calendarId: "trusted-writer", access: "write", addedAt: 1 }],
-      }),
-    } as unknown as LibSQLDatabase;
+    const listDatabase = writeCalendarDatabase();
     const client = {
       listEvents: async () => ({
         items: [
@@ -169,10 +234,11 @@ describe("CalendarService mutation boundary", () => {
         ],
       }),
     } as unknown as GwsCalendarClient;
-    const service = new CalendarService(listDatabase, client, "trusted-writer");
+    const service = new CalendarService(listDatabase, client);
     Object.assign(service, { status: { ready: true, error: undefined } });
 
     const result = await service.listEvents({
+      userId: "user-1",
       timeMin: "2026-07-25T00:00:00Z",
       timeMax: "2026-07-26T00:00:00Z",
     });
@@ -214,7 +280,7 @@ describe("CalendarService mutation boundary", () => {
         return googleEvent("successor", body);
       },
     } as unknown as GwsCalendarClient;
-    const service = new CalendarService(database, client, "trusted-writer");
+    const service = new CalendarService(database, client);
     Object.assign(service, { status: { ready: true, error: undefined } });
     const patch = {
       summary: "Changed",
@@ -229,13 +295,21 @@ describe("CalendarService mutation boundary", () => {
     };
 
     await service.updateEvent({
+      userId: "user-1",
       eventId: "instance",
       scope: "occurrence",
       patch,
       signal: undefined,
     });
-    await service.updateEvent({ eventId: "instance", scope: "series", patch, signal: undefined });
     await service.updateEvent({
+      userId: "user-1",
+      eventId: "instance",
+      scope: "series",
+      patch,
+      signal: undefined,
+    });
+    await service.updateEvent({
+      userId: "user-1",
       eventId: "instance",
       scope: "following",
       patch,
@@ -269,10 +343,11 @@ describe("CalendarService mutation boundary", () => {
           workingLocationProperties: { type: "homeOffice" },
         }),
     } as unknown as GwsCalendarClient;
-    const service = new CalendarService(database, client, "trusted-writer");
+    const service = new CalendarService(database, client);
     Object.assign(service, { status: { ready: true, error: undefined } });
 
     const result = await service.createEvent({
+      userId: "user-1",
       summary: "Read details",
       start: "2026-07-25T09:00:00Z",
       timezone: "UTC",
@@ -319,11 +394,12 @@ describe("CalendarService mutation boundary", () => {
         return googleEvent("master");
       },
     } as unknown as GwsCalendarClient;
-    const service = new CalendarService(database, client, "trusted-writer");
+    const service = new CalendarService(database, client);
     Object.assign(service, { status: { ready: true, error: undefined } });
 
     expect(
       service.updateEvent({
+        userId: "user-1",
         eventId: "instance",
         scope: "following",
         patch: { summary: "Changed" },
@@ -365,11 +441,12 @@ describe("CalendarService mutation boundary", () => {
           return googleEvent("master");
         },
       } as unknown as GwsCalendarClient;
-      const service = new CalendarService(database, client, "trusted-writer");
+      const service = new CalendarService(database, client);
       Object.assign(service, { status: { ready: true, error: undefined } });
 
       await expect(
         service.updateEvent({
+          userId: "user-1",
           eventId: "instance",
           scope: "following",
           patch: { summary: "Changed" },
@@ -409,11 +486,12 @@ describe("CalendarService mutation boundary", () => {
         return googleEvent("master");
       },
     } as unknown as GwsCalendarClient;
-    const service = new CalendarService(database, client, "trusted-writer");
+    const service = new CalendarService(database, client);
     Object.assign(service, { status: { ready: true, error: undefined } });
 
     await expect(
       service.updateEvent({
+        userId: "user-1",
         eventId: "instance",
         scope: "following",
         patch: { summary: "Changed" },
@@ -431,11 +509,12 @@ describe("CalendarService mutation boundary", () => {
         return googleEvent("birthday");
       },
     } as unknown as GwsCalendarClient;
-    const service = new CalendarService(database, client, "trusted-writer");
+    const service = new CalendarService(database, client);
     Object.assign(service, { status: { ready: true, error: undefined } });
 
     expect(
       service.updateEvent({
+        userId: "user-1",
         eventId: "birthday",
         scope: "occurrence",
         patch: {

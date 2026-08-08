@@ -57,13 +57,11 @@ See [Messaging](messaging.md) for setup steps.
 
 ## Google Calendar
 
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `BELLACLAW_GOOGLE_CALENDAR_WRITE_ID` | — | The one calendar BellaClaw may modify. |
+Calendar needs a service-account key at `.secrets/google-calendar-service-account.json`. Without it,
+BellaClaw starts with calendar features unavailable.
 
-Calendar also needs a service-account key at
-`.secrets/google-calendar-service-account.json`. Without both values, BellaClaw starts with calendar
-features unavailable.
+The writable calendar is configured per chat with the `!calendar_add-write CALENDAR_ID` command, not
+through an environment variable.
 
 See [Google Calendar](google-calendar.md).
 

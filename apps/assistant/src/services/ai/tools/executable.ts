@@ -12,11 +12,6 @@ import { SettingsService } from "../../settings";
 import { ConfigValidators, EConfigKey, type TConfigRecord } from "../../settings/schema";
 import { getAiModelIds } from "../providers/registry";
 import { EAiProvider, EModelPurpose } from "../types";
-import { ADD_READONLY_CALENDAR_TOOL } from "./add-readonly-calendar/definition";
-import {
-  SAddReadonlyCalendarArgs,
-  type TAddReadonlyCalendarArgs,
-} from "./add-readonly-calendar/handler";
 import { CREATE_CALENDAR_EVENT_TOOL } from "./create-calendar-event/definition";
 import {
   SCreateCalendarEventArgs,
@@ -433,6 +428,7 @@ export function createSchedulingTools(context: TToolExecutionContext) {
 
 export function createCalendarTools(context: TToolExecutionContext) {
   const ownerTimezone = context.settings[EConfigKey.AiInstructionsTimezone];
+  const userId = requireChatId(context.chatId);
 
   return [
     {
@@ -442,20 +438,7 @@ export function createCalendarTools(context: TToolExecutionContext) {
       parameters: SListCalendarsArgs,
       execute: async (_toolCallId: string, args: unknown, signal?: AbortSignal) => {
         Value.Decode(SListCalendarsArgs, args);
-        return textResult(await CalendarService.instance.listCalendars(signal));
-      },
-    },
-    {
-      name: ADD_READONLY_CALENDAR_TOOL,
-      label: "Add read-only calendar",
-      description: "Add a Google calendar as a read-only source",
-      parameters: SAddReadonlyCalendarArgs,
-      executionMode: SEQUENTIAL,
-      execute: async (_toolCallId: string, args: unknown, signal?: AbortSignal) => {
-        const parsedArgs: TAddReadonlyCalendarArgs = Value.Decode(SAddReadonlyCalendarArgs, args);
-        return textResult(
-          await CalendarService.instance.addReadonlyCalendar(parsedArgs.calendarId, signal),
-        );
+        return textResult(await CalendarService.instance.listCalendars(userId, signal));
       },
     },
     {
@@ -469,7 +452,7 @@ export function createCalendarTools(context: TToolExecutionContext) {
           SRemoveReadonlyCalendarArgs,
           args,
         );
-        await CalendarService.instance.removeReadonlyCalendar(parsedArgs.calendarId);
+        await CalendarService.instance.removeReadonlyCalendar(userId, parsedArgs.calendarId);
         return textResult({ success: true });
       },
     },
@@ -481,7 +464,9 @@ export function createCalendarTools(context: TToolExecutionContext) {
       execute: async (_toolCallId: string, args: unknown, signal?: AbortSignal) => {
         const parsedArgs: TListCalendarEventsArgs = Value.Decode(SListCalendarEventsArgs, args);
         const validatedArgs = validateListCalendarEventsArgs(parsedArgs);
-        return textResult(await CalendarService.instance.listEvents({ ...validatedArgs, signal }));
+        return textResult(
+          await CalendarService.instance.listEvents({ ...validatedArgs, userId, signal }),
+        );
       },
     },
     {
@@ -498,6 +483,7 @@ export function createCalendarTools(context: TToolExecutionContext) {
         return textResult(
           await CalendarService.instance.findAvailability({
             ...validatedArgs,
+            userId,
             timezone: ownerTimezone,
             signal,
           }),
@@ -516,6 +502,7 @@ export function createCalendarTools(context: TToolExecutionContext) {
         return textResult(
           await CalendarService.instance.createEvent({
             ...validatedArgs,
+            userId,
             timezone: validatedArgs.timezone ?? ownerTimezone,
             signal,
           }),
@@ -534,6 +521,7 @@ export function createCalendarTools(context: TToolExecutionContext) {
 
         return textResult(
           await CalendarService.instance.updateEvent({
+            userId,
             eventId: parsedArgs.eventId,
             scope: parsedArgs.scope,
             patch,
@@ -550,7 +538,7 @@ export function createCalendarTools(context: TToolExecutionContext) {
       executionMode: SEQUENTIAL,
       execute: async (_toolCallId: string, args: unknown, signal?: AbortSignal) => {
         const parsedArgs: TDeleteCalendarEventArgs = Value.Decode(SDeleteCalendarEventArgs, args);
-        await CalendarService.instance.deleteEvent({ ...parsedArgs, signal });
+        await CalendarService.instance.deleteEvent({ ...parsedArgs, userId, signal });
         return textResult({ success: true });
       },
     },
