@@ -61,7 +61,7 @@ describe("CalendarService mutation boundary", () => {
     const service = new CalendarService(database, client);
     Object.assign(service, { status: { ready: true, error: undefined } });
 
-    expect(service.setWriteCalendar("user-1", "other-calendar")).rejects.toThrow(
+    await expect(service.setWriteCalendar("user-1", "other-calendar")).rejects.toThrow(
       "requires exact writer access",
     );
   });
@@ -102,7 +102,7 @@ describe("CalendarService mutation boundary", () => {
     const service = new CalendarService(selectingDatabase([]), client);
     Object.assign(service, { status: { ready: true, error: undefined } });
 
-    expect(service.addReadonlyCalendar("user-1", "other-calendar")).rejects.toThrow(
+    await expect(service.addReadonlyCalendar("user-1", "other-calendar")).rejects.toThrow(
       "requires reader, writer, or owner access",
     );
   });

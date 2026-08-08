@@ -3,18 +3,20 @@ import { calendarAddReadCommand } from "./calendar-add-read";
 import { calendarAddWriteCommand } from "./calendar-add-write";
 import { COMMAND_PREFIX, type TCommand } from "./types";
 
-export { COMMAND_PREFIX, type TCommand } from "./types";
+function escapeXml(value: string): string {
+  return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+}
 
 const REGISTERED_COMMANDS: TCommand[] = [calendarAddWriteCommand, calendarAddReadCommand];
 
-export const COMMANDS = new Map<string, TCommand>(
+const COMMANDS = new Map<string, TCommand>(
   REGISTERED_COMMANDS.map((command) => [command.name, command]),
 );
 
 export function formatCommandList(): string {
-  return REGISTERED_COMMANDS.map((command) => `- ${command.usage} — ${command.description}`).join(
-    "\n",
-  );
+  return REGISTERED_COMMANDS.map(
+    (command) => `- ${escapeXml(command.usage)} — ${escapeXml(command.description)}`,
+  ).join("\n");
 }
 
 export async function runCommand(chatId: string, content: string): Promise<TOption<string>> {

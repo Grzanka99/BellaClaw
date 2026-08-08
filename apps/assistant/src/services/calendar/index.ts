@@ -540,11 +540,7 @@ export class CalendarService {
     );
   }
 
-  public async addReadonlyCalendar(
-    userId: string,
-    calendarId: string,
-    signal?: AbortSignal,
-  ): Promise<TCalendar> {
+  public async addReadonlyCalendar(userId: string, calendarId: string): Promise<TCalendar> {
     this.requireReady();
     const existing = await this.queue.enqueue(() =>
       this.db
@@ -555,7 +551,7 @@ export class CalendarService {
     if (existing[0]?.access === "write") {
       throw new Error("Writable calendar cannot be added as read-only");
     }
-    const live = await this.client.probeCalendar(calendarId, signal);
+    const live = await this.client.probeCalendar(calendarId);
     if (
       live.accessRole !== "reader" &&
       live.accessRole !== "writer" &&

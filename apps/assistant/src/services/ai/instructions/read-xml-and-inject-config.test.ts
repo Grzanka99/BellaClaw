@@ -150,6 +150,8 @@ describe("readXmlAndInjectConfig", () => {
     expect(result).toContain("Bellatrix");
     expect(result).toContain("Discord direct messages");
     expect(result).not.toContain("{{config.");
+    expect(result).not.toContain("{{commands}}");
+    expect(result).toContain("!calendar_add-write &lt;calendarId&gt;");
   });
 
   test("keeps the shared base instructions capability-neutral", async () => {
