@@ -615,15 +615,21 @@ export class AgentHarness {
 
     return delegates.map((delegate) => {
       let executionMode: typeof SEQUENTIAL | typeof PARALLEL = PARALLEL;
+      let description = `Run the ${delegate.target} specialist for this focused task`;
 
       if (delegate.target === EAgentName.Calendar || delegate.target === EAgentName.Scheduling) {
         executionMode = SEQUENTIAL;
       }
 
+      if (delegate.target === EAgentName.Memory) {
+        description =
+          "Required before answering questions that depend on personal user facts. Run the Memory specialist to retrieve the relevant facts.";
+      }
+
       return {
         name: delegate.name,
         label: delegate.label,
-        description: `Run the ${delegate.target} specialist for this focused task`,
+        description,
         parameters: schema,
         executionMode,
         execute: async (toolCallId: string, parameters: unknown, signal?: AbortSignal) => {

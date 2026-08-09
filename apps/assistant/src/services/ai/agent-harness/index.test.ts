@@ -135,6 +135,38 @@ describe("AgentHarness", () => {
     expect(systemPrompt).not.toContain("Discord mentions are supported");
   });
 
+  test("requires memory delegation for answers depending on personal user facts", async () => {
+    let systemPrompt = "";
+    let memoryDescription = "";
+    faux.setResponses([
+      (context) => {
+        systemPrompt = context.systemPrompt ?? "";
+        memoryDescription =
+          context.tools?.find((tool) => tool.name === "delegate-memory")?.description ?? "";
+        return fauxAssistantMessage("Memory-aware reply");
+      },
+    ]);
+
+    await AgentHarness.instance.runMain({
+      prompt: "What is my favorite restaurant?",
+      history: [],
+      chatId: "discord:1",
+      settings: {
+        ...DefaultConfigRecord,
+        [EConfigKey.AiProvider]: EAiProvider.Openrouter,
+      },
+      currentTimeContext: undefined,
+      platform: EMessagePlatform.Discord,
+      trace: undefined,
+      signal: undefined,
+    });
+
+    expect(systemPrompt).toContain("Delegate memory lookup");
+    expect(memoryDescription).toBe(
+      "Required before answering questions that depend on personal user facts. Run the Memory specialist to retrieve the relevant facts.",
+    );
+  });
+
   test("returns undefined for blank and provider-error final messages", async () => {
     faux.setResponses([
       fauxAssistantMessage("   "),

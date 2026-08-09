@@ -11,11 +11,21 @@ services:
     environment:
       - BELLACLAW_AI_CREDENTIALS_PATH=/app/.secrets/pi-auth.json
       - BELLACLAW_LOG_DB_ROOT=/app-data
+      - OLLAMA_BASE_URL=http://ollama:11434
       - SIGNAL_CLI_RPC_URL=http://signal-cli:8080
+    depends_on:
+      - ollama
     command: ["bun", "run", "--cwd", "apps/assistant", "start"]
     volumes:
       - bellaclaw-data:/app-data
       - ./.secrets:/app/.secrets
+
+  ollama:
+    image: docker.io/ollama/ollama:latest
+    container_name: bellaclaw-ollama
+    restart: unless-stopped
+    volumes:
+      - ollama-data:/root/.ollama
 
   log-viewer:
     image: bellaclaw:local
@@ -49,4 +59,5 @@ services:
 
 volumes:
   bellaclaw-data:
+  ollama-data:
   signal-cli-data:

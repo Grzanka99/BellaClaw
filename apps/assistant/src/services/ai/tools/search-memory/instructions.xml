@@ -1,71 +1,73 @@
 <instructions>
 
   <purpose>
-    Search through stored conversation memories to recall past messages, preferences,
-    or information shared by the user. Use this tool when the user asks about something
-    they previously mentioned, or when recalling past context would improve your response.
+    Search stored conversation memories semantically for facts, preferences, history,
+    or other personal information previously shared by the user.
   </purpose>
 
   <tool>
     <name>search-memory</name>
     <description>
       Queries the memory database for the current conversation. The chat context is handled
-      automatically - you only need to provide optional filters.
-      Results are sorted by importance (high first), then by last read date, then by creation date.
-      Returns the matching memories or an empty list if nothing is found.
+      automatically. Every call requires query as a natural-language semantic query; limit can
+      optionally cap the number of facts returned. Semantic matches are ranked by cosine distance:
+      a lower cosine distance means a closer semantic match. An empty result means the requested
+      information is unsupported by stored memory.
     </description>
   </tool>
 
   <response_handling>
-    If the search is not needed or no memories match the query, return an empty array or
-    do not call the tool. Do not fabricate memories.
+    Use only facts explicitly present in the returned facts array. An empty facts array means the
+    requested information is unsupported: report that it is unknown or not found. Never fill gaps
+    by guessing, inferring, or treating the query itself as evidence.
   </response_handling>
 
-  <filter_priority>
-    Prefer the following order of filters, but you do not need to use a previous filter
-    to use the next one:
-    1. searchString - partial text match on message content
-    2. timeRange - filter by creation date range (start and end in ISO 8601 format with explicit Z or numeric timezone offsets)
-    3. limit - cap the number of results
-    4. importance - filter by one or more importance levels (low, medium, high)
-  </filter_priority>
+  <arguments>
+    <query>Required. A complete natural-language question or description of the information sought, not keywords or a partial-text pattern.</query>
+    <limit>Optional. Caps the number of returned facts; prefer 5-10 and never exceed 25.</limit>
+  </arguments>
 
   <usage_rules>
-    <rule>Only call this tool when the user explicitly asks about past information or when recalling context is essential</rule>
-    <rule>Use searchString to narrow results when the user references a specific topic</rule>
-    <rule>Use timeRange when the user mentions a specific time period</rule>
-    <rule>Always include an explicit Z or numeric timezone offset in timeRange start and end values</rule>
+    <rule>Always provide query as a specific natural-language semantic query</rule>
+    <rule>Describe the meaning of the information sought instead of copying isolated keywords</rule>
     <rule>Use limit to avoid overwhelming context with too many results (prefer 5-10)</rule>
-    <rule>Use importance to prioritize high-value memories when the query is broad</rule>
-    <rule>When no filters are needed, simply return an empty array or do not call the tool</rule>
+    <rule>Prefer facts from results with lower distance because lower cosine distance means they are semantically closer</rule>
+    <rule>Do not claim that memory supports a fact unless a returned fact explicitly contains it</rule>
+    <rule>If the facts array is empty, treat the requested fact as unsupported and do not guess</rule>
   </usage_rules>
 
   <examples>
     <example>
-      <context>User says: "Przypomnij mi co mówiłem o moim ulubionym jedzeniu"</context>
+      <context>W pełni fikcyjny przykład po polsku. Użytkownik pyta: "Co pamiętasz o moim rowerze o imieniu Kometa?"</context>
       <toolCall>
-        <searchString>ulubion</searchString>
+        <query>Jakie informacje użytkownik wcześniej podał o swoim rowerze o imieniu Kometa?</query>
         <limit>5</limit>
       </toolCall>
-      <reasoning>Search for memories mentioning favorite food, limited to 5 results.</reasoning>
+      <fictionalResponse>
+        <facts>
+          <fact>
+            <text>Rower użytkownika nazywa się Kometa.</text>
+            <distance>0.08</distance>
+          </fact>
+          <fact>
+            <text>Kometa ma srebrny dzwonek.</text>
+            <distance>0.19</distance>
+          </fact>
+        </facts>
+      </fictionalResponse>
+      <reasoning>The query is a complete natural-language description. Both facts may be used because they are explicitly returned, and 0.08 is closer than 0.19 because lower cosine distance means greater semantic similarity.</reasoning>
     </example>
 
     <example>
-      <context>User says: "What did I tell you about my job last week?"</context>
+      <context>Fully fictional English-to-Polish example. The user asks in English: "Does my bicycle named Kometa have a basket?"</context>
       <toolCall>
-        <searchString>job</searchString>
-        <timeRange>
-          <start>2025-01-20T00:00:00+01:00</start>
-          <end>2025-01-27T23:59:59+01:00</end>
-        </timeRange>
-        <importance>["medium", "high"]</importance>
+        <query>Czy rower użytkownika o imieniu Kometa ma koszyk?</query>
+        <limit>5</limit>
       </toolCall>
-      <reasoning>User is asking about work-related information from last week. Search with text filter and time range. Date values are examples — always compute actual dates relative to the current time in the {{config.ai.instructions.timezone}} timezone.</reasoning>
-    </example>
-
-    <example>
-      <context>User says: "hey co tam?"</context>
-      <reasoning>Casual greeting with no need to search past memories. Do not call the search tool.</reasoning>
+      <fictionalResponse>
+        <facts>[]</facts>
+      </fictionalResponse>
+      <reasoning>The English request is expressed as a natural-language semantic query in Polish. The empty result does not support either yes or no, so the answer must say that memory does not establish whether Kometa has a basket.</reasoning>
     </example>
   </examples>
 

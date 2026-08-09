@@ -10,8 +10,11 @@ import { EMemoryImportance } from "./types";
 async function resetTestDatabase() {
   const db = DatabaseConnector.instance.database;
 
+  await db.run(sql`DROP TRIGGER IF EXISTS fail_live_checkpoint`);
+  await db.run(sql`DELETE FROM facts`);
+  await db.run(sql`DELETE FROM fact_distillation_state`);
   await db.run(sql`DELETE FROM memories`);
-  await db.run(sql`DELETE FROM sqlite_sequence WHERE name = 'memories'`);
+  await db.run(sql`DELETE FROM sqlite_sequence WHERE name IN ('facts', 'memories')`);
 }
 
 function resetMemoryInstance() {
@@ -19,6 +22,13 @@ function resetMemoryInstance() {
     _instance: unknown;
   };
   MemoryWithPrivate._instance = undefined;
+}
+
+function embedding(x: number, y = 0) {
+  const values = new Array<number>(768).fill(0);
+  values[0] = x;
+  values[1] = y;
+  return values;
 }
 
 describe("Memory", () => {
@@ -148,265 +158,292 @@ describe("Memory", () => {
     });
   });
 
-  describe("find", () => {
-    test("returns memories for a chat", async () => {
+  describe("fact persistence", () => {
+    test("round-trips vectors and searches live same-chat facts by distance and cutoff", async () => {
       const memory = Memory.instance;
-      await memory.save({
-        chatId: "chat-find",
-        author: ERole.User,
-        importance: EMemoryImportance.High,
-        message: "Test memory",
-      });
-
-      const result = await memory.find({ chatId: "chat-find" });
-
-      expect(result).not.toHaveProperty("operation");
-      // @ts-expect-error
-      expect(result.length).toBe(1);
-      // @ts-expect-error
-      expect(result[0].message).toBe("Test memory");
-    });
-
-    test("returns empty array when no memories match", async () => {
-      const memory = Memory.instance;
-      const result = await memory.find({ chatId: "nonexistent" });
-
-      expect(result).toEqual([]);
-    });
-
-    test("filters by author", async () => {
-      const memory = Memory.instance;
-      await memory.save({
-        chatId: "chat-author",
-        author: ERole.User,
-        importance: EMemoryImportance.Low,
-        message: "User message",
-      });
-      await memory.save({
-        chatId: "chat-author",
-        author: ERole.Assistant,
-        importance: EMemoryImportance.Low,
-        message: "Bot message",
-      });
-
-      const result = await memory.find({
-        chatId: "chat-author",
-        author: ERole.User,
-      });
-
-      // @ts-expect-error
-      expect(result.length).toBe(1);
-      // @ts-expect-error
-      expect(result[0].author).toBe(ERole.User);
-      // @ts-expect-error
-      expect(result[0].message).toBe("User message");
-    });
-
-    test("filters by importance levels", async () => {
-      const memory = Memory.instance;
-      await memory.save({
-        chatId: "chat-importance",
-        author: ERole.User,
-        importance: EMemoryImportance.Low,
-        message: "Low importance",
-      });
-      await memory.save({
-        chatId: "chat-importance",
-        author: ERole.User,
-        importance: EMemoryImportance.Medium,
-        message: "Medium importance",
-      });
-      await memory.save({
-        chatId: "chat-importance",
-        author: ERole.User,
-        importance: EMemoryImportance.High,
-        message: "High importance",
-      });
-
-      const result = await memory.find({
-        chatId: "chat-importance",
-        importance: [EMemoryImportance.Low, EMemoryImportance.High],
-      });
-
-      // @ts-expect-error
-      expect(result.length).toBe(2);
-      // @ts-expect-error
-      const messages = result.map((m) => m.message);
-      expect(messages).toContain("Low importance");
-      expect(messages).toContain("High importance");
-      expect(messages).not.toContain("Medium importance");
-    });
-
-    test("filters by searchString (partial match)", async () => {
-      const memory = Memory.instance;
-      await memory.save({
-        chatId: "chat-search",
-        author: ERole.User,
-        importance: EMemoryImportance.Low,
-        message: "Hello world",
-      });
-      await memory.save({
-        chatId: "chat-search",
-        author: ERole.User,
-        importance: EMemoryImportance.Low,
-        message: "Goodbye world",
-      });
-      await memory.save({
-        chatId: "chat-search",
-        author: ERole.User,
-        importance: EMemoryImportance.Low,
-        message: "Hello there",
-      });
-
-      const result = await memory.find({
-        chatId: "chat-search",
-        searchString: "Hello",
-      });
-
-      // @ts-expect-error
-      expect(result.length).toBe(2);
-      // @ts-expect-error
-      const messages = result.map((m) => m.message);
-      expect(messages).toContain("Hello world");
-      expect(messages).toContain("Hello there");
-      expect(messages).not.toContain("Goodbye world");
-    });
-
-    test("filters by timeRange", async () => {
-      const memory = Memory.instance;
-      const now = new Date();
-      const threeHoursAgo = new Date(now.getTime() - 3 * 60 * 60 * 1000);
-
-      await memory.save({
-        chatId: "chat-timerange",
-        author: ERole.User,
-        importance: EMemoryImportance.Low,
-        message: "Recent memory",
-      });
-
-      const result = await memory.find({
-        chatId: "chat-timerange",
-        timeRange: {
-          start: threeHoursAgo,
-          end: now,
-        },
-      });
-
-      // @ts-expect-error
-      expect(result.length).toBe(1);
-      // @ts-expect-error
-      expect(result[0].message).toBe("Recent memory");
-    });
-
-    test("excludes memories outside timeRange", async () => {
-      const memory = Memory.instance;
-      const now = new Date();
-      const oneHourAgo = new Date(now.getTime() - 1 * 60 * 60 * 1000);
-      const twoHoursAgo = new Date(now.getTime() - 2 * 60 * 60 * 1000);
-
-      await memory.save({
-        chatId: "chat-timerange-exclude",
-        author: ERole.User,
-        importance: EMemoryImportance.Low,
-        message: "Recent memory",
-      });
-
-      const result = await memory.find({
-        chatId: "chat-timerange-exclude",
-        timeRange: {
-          start: twoHoursAgo,
-          end: oneHourAgo,
-        },
-      });
-
-      // @ts-expect-error
-      expect(result.length).toBe(0);
-    });
-
-    test("applies limit", async () => {
-      const memory = Memory.instance;
-      for (let i = 0; i < 5; i++) {
+      for (let index = 1; index <= 3; index += 1) {
         await memory.save({
-          chatId: "chat-limit",
+          chatId: "chat-a",
           author: ERole.User,
-          importance: EMemoryImportance.Low,
-          message: `Memory ${i}`,
+          importance: EMemoryImportance.Medium,
+          message: `Fact source ${index}`,
         });
       }
-
-      const result = await memory.find({
-        chatId: "chat-limit",
-        limit: 3,
+      await memory.save({
+        chatId: "chat-b",
+        author: ERole.User,
+        importance: EMemoryImportance.Medium,
+        message: "Another chat fact source",
       });
 
-      // @ts-expect-error
-      expect(result.length).toBe(3);
+      const result = await memory.commitLiveFactWindow({
+        chatId: "chat-a",
+        expectedLastProcessedMessageId: 0,
+        lastProcessedMessageId: 3,
+        facts: [
+          {
+            text: "The bicycle is named Comet.",
+            embedding: embedding(1),
+            sourceMessageId: 1,
+            supersedesFactIds: [],
+          },
+          {
+            text: "Ceramics are on Tuesdays.",
+            embedding: embedding(0.8, 0.6),
+            sourceMessageId: 2,
+            supersedesFactIds: [],
+          },
+          {
+            text: "An unrelated detail.",
+            embedding: embedding(0.3, Math.sqrt(0.91)),
+            sourceMessageId: 3,
+            supersedesFactIds: [],
+          },
+        ],
+      });
+
+      expect(result.committed).toBe(true);
+      if (!result.committed) {
+        throw new Error("Expected facts to commit");
+      }
+      const savedFact = result.facts[0];
+      if (savedFact === undefined) {
+        throw new Error("Expected one saved fact");
+      }
+      expect(savedFact.embedding).toHaveLength(768);
+      const firstDimension = savedFact.embedding[0];
+      if (firstDimension === undefined) {
+        throw new Error("Expected a vector dimension");
+      }
+      expect(firstDimension).toBeCloseTo(1);
+
+      await memory.commitLiveFactWindow({
+        chatId: "chat-b",
+        expectedLastProcessedMessageId: 0,
+        lastProcessedMessageId: 4,
+        facts: [
+          {
+            text: "Another chat has a perfect match.",
+            embedding: embedding(1),
+            sourceMessageId: 4,
+            supersedesFactIds: [],
+          },
+        ],
+      });
+
+      const searchResults = await memory.searchFacts("chat-a", embedding(1), 10);
+      expect(searchResults.map((fact) => fact.text)).toEqual([
+        "The bicycle is named Comet.",
+        "Ceramics are on Tuesdays.",
+      ]);
+      const closestResult = searchResults[0];
+      const secondResult = searchResults[1];
+      if (closestResult === undefined || secondResult === undefined) {
+        throw new Error("Expected two ordered fact search results");
+      }
+      expect(closestResult.distance).toBeCloseTo(0);
+      expect(secondResult.distance).toBeCloseTo(0.2);
+
+      const candidates = await memory.findLiveFactCandidates("chat-a", embedding(1));
+      expect(candidates.map((fact) => fact.text)).toEqual([
+        "The bicycle is named Comet.",
+        "Ceramics are on Tuesdays.",
+      ]);
+      expect(await memory.searchFacts("chat-c", embedding(1), 10)).toEqual([]);
     });
 
-    test("combines multiple filters", async () => {
+    test("discovers chats and carries both transcript roles through ordered bounded windows", async () => {
+      const memory = Memory.instance;
+      for (let index = 1; index <= 8; index++) {
+        let author = ERole.User;
+        if (index % 2 === 0) {
+          author = ERole.Assistant;
+        }
+
+        await memory.save({
+          chatId: "chat-window",
+          author,
+          importance: EMemoryImportance.Medium,
+          message: `Window message ${index}`,
+        });
+      }
+      await memory.save({
+        chatId: "chat-other",
+        author: ERole.User,
+        importance: EMemoryImportance.Medium,
+        message: "Other chat message",
+      });
+
+      const firstWindow = await memory.loadLiveFactWindow("chat-window");
+      expect(firstWindow.state.lastProcessedMessageId).toBe(0);
+      expect(firstWindow.context).toEqual([]);
+      expect(firstWindow.messages.map((row) => row.id)).toEqual([1, 2, 3, 4, 5, 6]);
+      expect(firstWindow.messages.map((row) => row.author)).toEqual([
+        ERole.User,
+        ERole.Assistant,
+        ERole.User,
+        ERole.Assistant,
+        ERole.User,
+        ERole.Assistant,
+      ]);
+
+      const commit = await memory.commitLiveFactWindow({
+        chatId: "chat-window",
+        expectedLastProcessedMessageId: 0,
+        lastProcessedMessageId: 6,
+        facts: [],
+      });
+      expect(commit).toEqual({ committed: true, facts: [] });
+
+      const secondWindow = await memory.loadLiveFactWindow("chat-window");
+      expect(secondWindow.state.lastProcessedMessageId).toBe(6);
+      expect(secondWindow.context.map((row) => row.id)).toEqual([1, 2, 3, 4, 5, 6]);
+      expect(secondWindow.messages.map((row) => row.id)).toEqual([7, 8]);
+    });
+
+    test("commits supersessions atomically and rolls back failures", async () => {
       const memory = Memory.instance;
       await memory.save({
-        chatId: "chat-multi",
+        chatId: "chat-atomic",
         author: ERole.User,
-        importance: EMemoryImportance.High,
-        message: "Matching all filters",
+        importance: EMemoryImportance.Medium,
+        message: "The bicycle used to be called Spark.",
       });
+      const initial = await memory.commitLiveFactWindow({
+        chatId: "chat-atomic",
+        expectedLastProcessedMessageId: 0,
+        lastProcessedMessageId: 1,
+        facts: [
+          {
+            text: "The bicycle used to be called Spark.",
+            embedding: embedding(1),
+            sourceMessageId: 1,
+            supersedesFactIds: [],
+          },
+        ],
+      });
+      if (!initial.committed) {
+        throw new Error("Expected initial fact to commit");
+      }
+
+      const initialFact = initial.facts[0];
+      if (initialFact === undefined) {
+        throw new Error("Expected initial fact");
+      }
+
       await memory.save({
-        chatId: "chat-multi",
+        chatId: "chat-atomic",
+        author: ERole.User,
+        importance: EMemoryImportance.Medium,
+        message: "The bicycle is now called Comet.",
+      });
+      const replacement = await memory.commitLiveFactWindow({
+        chatId: "chat-atomic",
+        expectedLastProcessedMessageId: 1,
+        lastProcessedMessageId: 2,
+        facts: [
+          {
+            text: "The bicycle is now called Comet.",
+            embedding: embedding(1),
+            sourceMessageId: 2,
+            supersedesFactIds: [initialFact.id],
+          },
+        ],
+      });
+      expect(replacement.committed).toBe(true);
+      expect(
+        (await memory.searchFacts("chat-atomic", embedding(1), 10)).map((fact) => fact.text),
+      ).toEqual(["The bicycle is now called Comet."]);
+
+      await memory.save({
+        chatId: "chat-atomic",
+        author: ERole.User,
+        importance: EMemoryImportance.Medium,
+        message: "This transaction must roll back.",
+      });
+      await expect(
+        memory.commitLiveFactWindow({
+          chatId: "chat-atomic",
+          expectedLastProcessedMessageId: 2,
+          lastProcessedMessageId: 3,
+          facts: [
+            {
+              text: "This transaction must roll back.",
+              embedding: embedding(0, 1),
+              sourceMessageId: 3,
+              supersedesFactIds: [999],
+            },
+          ],
+        }),
+      ).rejects.toThrow("Failed to supersede every prepared same-chat live fact");
+
+      expect((await memory.loadLiveFactWindow("chat-atomic")).state.lastProcessedMessageId).toBe(2);
+      expect(await memory.searchFacts("chat-atomic", embedding(0, 1), 10)).toEqual([]);
+    });
+
+    test("rejects a stale live checkpoint without writing facts", async () => {
+      const memory = Memory.instance;
+      for (let index = 1; index <= 5; index += 1) {
+        await memory.save({
+          chatId: "chat-stale",
+          author: ERole.User,
+          importance: EMemoryImportance.Medium,
+          message: `Stale source ${index}`,
+        });
+      }
+      await memory.commitLiveFactWindow({
+        chatId: "chat-stale",
+        expectedLastProcessedMessageId: 0,
+        lastProcessedMessageId: 4,
+        facts: [],
+      });
+
+      const result = await memory.commitLiveFactWindow({
+        chatId: "chat-stale",
+        expectedLastProcessedMessageId: 0,
+        lastProcessedMessageId: 5,
+        facts: [
+          {
+            text: "A stale fact.",
+            embedding: embedding(1),
+            sourceMessageId: 5,
+            supersedesFactIds: [],
+          },
+        ],
+      });
+
+      expect(result).toEqual({ committed: false, reason: "stale-checkpoint" });
+      expect((await memory.loadLiveFactWindow("chat-stale")).state.lastProcessedMessageId).toBe(4);
+      expect(await memory.searchFacts("chat-stale", embedding(1), 10)).toEqual([]);
+    });
+
+    test("rejects fact provenance outside the current same-chat user window", async () => {
+      const memory = Memory.instance;
+      await memory.save({
+        chatId: "chat-provenance",
         author: ERole.Assistant,
-        importance: EMemoryImportance.High,
-        message: "Wrong author",
-      });
-      await memory.save({
-        chatId: "chat-multi",
-        author: ERole.User,
-        importance: EMemoryImportance.Low,
-        message: "Wrong importance",
+        importance: EMemoryImportance.Medium,
+        message: "Assistant context only",
       });
 
-      const result = await memory.find({
-        chatId: "chat-multi",
-        author: ERole.User,
-        importance: [EMemoryImportance.High],
-      });
-
-      // @ts-expect-error
-      expect(result.length).toBe(1);
-      // @ts-expect-error
-      expect(result[0].message).toBe("Matching all filters");
-    });
-
-    test("returns memories ordered by createdAt DESC", async () => {
-      const memory = Memory.instance;
-      await memory.save({
-        chatId: "chat-order",
-        author: ERole.User,
-        importance: EMemoryImportance.Low,
-        message: "First memory",
-      });
-      await new Promise((resolve) => setTimeout(resolve, 10));
-      await memory.save({
-        chatId: "chat-order",
-        author: ERole.User,
-        importance: EMemoryImportance.Low,
-        message: "Second memory",
-      });
-      await new Promise((resolve) => setTimeout(resolve, 10));
-      await memory.save({
-        chatId: "chat-order",
-        author: ERole.User,
-        importance: EMemoryImportance.Low,
-        message: "Third memory",
-      });
-
-      const result = await memory.find({ chatId: "chat-order" });
-
-      // @ts-expect-error
-      expect(result.length).toBe(3);
-      // @ts-expect-error
-      expect(result[0].message).toBe("Third memory");
-      // @ts-expect-error
-      expect(result[2].message).toBe("First memory");
+      await expect(
+        memory.commitLiveFactWindow({
+          chatId: "chat-provenance",
+          expectedLastProcessedMessageId: 0,
+          lastProcessedMessageId: 1,
+          facts: [
+            {
+              text: "Invalid assistant-authored fact.",
+              embedding: embedding(1),
+              sourceMessageId: 1,
+              supersedesFactIds: [],
+            },
+          ],
+        }),
+      ).rejects.toThrow("Every fact source must be a current-window user transcript row");
+      expect(
+        (await memory.loadLiveFactWindow("chat-provenance")).state.lastProcessedMessageId,
+      ).toBe(0);
     });
   });
 });
