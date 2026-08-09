@@ -24,7 +24,7 @@ export class MessageHandler {
   private memory = Memory.instance;
   private factDistiller = FactDistiller.instance;
 
-  constructor(chatId: string) {
+  constructor(private chatId: string) {
     this.logger = createLogger(`AbstractMessageHandler (cid: ${chatId})`);
     this.logger.info("created abstract message handler");
     this.logger.info("handler is up");
@@ -161,6 +161,27 @@ export class MessageHandler {
       );
       throw error;
     }
+  }
+
+  // NOTE: without this, facts stay empty until the first inbound message of the process, so the
+  // very first recall after a deploy answers from an unpopulated store
+  public static async scheduleFactDrainForAllChats(): Promise<void> {
+    const chatIds = await Memory.instance.findChatIds();
+
+    for (const chatId of chatIds) {
+      MessageHandler.getInstance(chatId).scheduleFactDrain();
+    }
+  }
+
+  public scheduleFactDrain(): void {
+    void this.factQueue
+      .enqueue(async () => {
+        const settings = await SettingsService.instance.getAll(this.chatId);
+        await this.drainLiveFactWindows(this.chatId, settings, undefined);
+      })
+      .catch((error) => {
+        this.logger.error(`scheduleFactDrain: fact drain failed: ${String(error)}`);
+      });
   }
 
   private async drainLiveFactWindows(

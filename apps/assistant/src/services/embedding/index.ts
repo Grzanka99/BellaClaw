@@ -14,7 +14,9 @@ const SEmbeddingResponse = z.object({
 export class EmbeddingClient {
   private static _instance: TOption<EmbeddingClient>;
   private logger = createLogger("EMBEDDING");
-  private baseUrl = (Bun.env.OLLAMA_BASE_URL ?? DEFAULT_BASE_URL).replace(/\/+$/, "");
+  // NOTE: deliberately not OLLAMA_BASE_URL — that one points at the Ollama LLM provider, which
+  // may be a different host that serves no embedding model
+  private baseUrl = (Bun.env.BELLACLAW_EMBEDDING_BASE_URL ?? DEFAULT_BASE_URL).replace(/\/+$/, "");
 
   private constructor() {}
 

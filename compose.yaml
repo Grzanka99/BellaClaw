@@ -11,7 +11,7 @@ services:
     environment:
       - BELLACLAW_AI_CREDENTIALS_PATH=/app/.secrets/pi-auth.json
       - BELLACLAW_LOG_DB_ROOT=/app-data
-      - OLLAMA_BASE_URL=http://ollama:11434
+      - BELLACLAW_EMBEDDING_BASE_URL=http://ollama:11434
       - SIGNAL_CLI_RPC_URL=http://signal-cli:8080
     depends_on:
       - ollama

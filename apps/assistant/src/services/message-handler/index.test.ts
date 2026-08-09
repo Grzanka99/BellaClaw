@@ -270,6 +270,20 @@ describe("MessageHandler", () => {
     expect(events).toEqual(["assistant-save-start", "assistant-save-end", "drain-load"]);
   });
 
+  test("scheduleFactDrain catches up chats without an inbound message", async () => {
+    const { handler, internals } = setupHandler("discord:boot");
+    const windows = [populatedWindow("discord:boot", 1), emptyWindow("discord:boot", 1)];
+    internals.memory.loadLiveFactWindow = mock(async () => windows.shift());
+
+    handler.scheduleFactDrain();
+    await waitForCall(internals.factDistiller.processWindow, 1);
+
+    expect(internals.factDistiller.processWindow.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({ window: populatedWindow("discord:boot", 1) }),
+    );
+    expect(internals.memory.save).not.toHaveBeenCalled();
+  });
+
   test("a stalled fact drain does not delay the next reply", async () => {
     const { handler, internals } = setupHandler("discord:stalled");
     internals.memory.loadLiveFactWindow = mock(() => new Promise(() => undefined));

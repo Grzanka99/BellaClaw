@@ -3,7 +3,7 @@ import type { TOption } from "@bellaclaw/shared";
 import { EmbeddingClient } from ".";
 
 const originalFetch = globalThis.fetch;
-const originalBaseUrl = Bun.env.OLLAMA_BASE_URL;
+const originalBaseUrl = Bun.env.BELLACLAW_EMBEDDING_BASE_URL;
 
 type TEmbeddingClientStatic = {
   _instance: TOption<EmbeddingClient>;
@@ -22,7 +22,7 @@ function embeddingResponse(embeddings: number[][]): Response {
 
 describe("EmbeddingClient", () => {
   beforeEach(() => {
-    Bun.env.OLLAMA_BASE_URL = "http://embedding.test:11434";
+    Bun.env.BELLACLAW_EMBEDDING_BASE_URL = "http://embedding.test:11434";
     EmbeddingClientWithInternals._instance = undefined;
   });
 
@@ -31,9 +31,9 @@ describe("EmbeddingClient", () => {
     EmbeddingClientWithInternals._instance = originalInstance;
 
     if (originalBaseUrl === undefined) {
-      delete Bun.env.OLLAMA_BASE_URL;
+      delete Bun.env.BELLACLAW_EMBEDDING_BASE_URL;
     } else {
-      Bun.env.OLLAMA_BASE_URL = originalBaseUrl;
+      Bun.env.BELLACLAW_EMBEDDING_BASE_URL = originalBaseUrl;
     }
   });
 

@@ -187,6 +187,22 @@ export class Memory {
     }
   }
 
+  public async findChatIds(): Promise<string[]> {
+    return this.queue.enqueue(async () => {
+      const rows = await this.db
+        .selectDistinct({ chatId: memoriesTable.chatId })
+        .from(memoriesTable)
+        .orderBy(asc(memoriesTable.chatId));
+      const parsed = z.array(z.object({ chatId: z.string() })).safeParse(rows);
+
+      if (!parsed.success) {
+        throw new Error("Failed to parse memory chat IDs");
+      }
+
+      return parsed.data.map((row) => row.chatId);
+    });
+  }
+
   public async loadLiveFactWindow(chatId: string): Promise<TLiveFactWindow> {
     return this.queue.enqueue(async () => {
       const state = await this.readLiveState(chatId);
