@@ -28,7 +28,7 @@ import {
 
 const FACT_WINDOW_SIZE = 6;
 const FACT_CONTEXT_SIZE = 6;
-const MAX_FACT_COSINE_DISTANCE = 0.6;
+const MAX_FACT_COSINE_DISTANCE = 0.7;
 // NOTE: contradictions are semantically distant, not near-duplicates: two timezone values
 // measured 0.45 apart, so a restatement-sized window never offered them as candidates
 const MAX_SUPERSESSION_COSINE_DISTANCE = 0.5;

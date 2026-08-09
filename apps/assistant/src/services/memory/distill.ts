@@ -7,7 +7,7 @@ import { EModelPurpose, ERole } from "../ai/types";
 import { EmbeddingClient } from "../embedding";
 import type { TConfigRecord } from "../settings/schema";
 import { Memory } from ".";
-import type { TFactSearchResult, TLiveFactWindow, TPreparedFact } from "./types";
+import type { TFactSearchResult, TLiveFactWindow, TMemory, TPreparedFact } from "./types";
 
 const SDistilledFact = z
   .object({
@@ -113,6 +113,8 @@ export class FactDistiller {
         "Prefer the durable preference behind a request over the request itself: 'remind me to drink",
         "water' is not a fact, but 'the user wants to drink more water' is.",
         "Prior context and assistant messages are context only and must never be cited.",
+        "Ground each complete fact claim in its cited eligible message.",
+        "Use context only to resolve references or wording.",
         "Every fact must cite one eligible current-window user message ID.",
         'Reply with only JSON in this exact shape: {"facts":[{"text":"...","sourceMessageId":123}]}.',
         'Most windows contain no durable fact; when that is the case reply with {"facts":[]}.',
@@ -144,21 +146,24 @@ export class FactDistiller {
 
     const eligibleSourceIds = new Set<number>();
     for (const message of window.messages) {
-      if (message.chatId === window.state.chatId && message.author === ERole.User) {
+      if (isEligibleFactSource(message, window.state.chatId)) {
         eligibleSourceIds.add(message.id);
       }
     }
 
+    const eligibleFacts: TDistilledFact[] = [];
     for (const fact of parsed.data.facts) {
       if (!eligibleSourceIds.has(fact.sourceMessageId)) {
         this.logger.error(
           `distill: response cited ineligible source ${fact.sourceMessageId}, eligible were [${[...eligibleSourceIds].join(",")}]`,
         );
-        return { success: false, retryable: false };
+        continue;
       }
+
+      eligibleFacts.push(fact);
     }
 
-    return { success: true, facts: parsed.data.facts };
+    return { success: true, facts: eligibleFacts };
   }
 
   public async processWindow(args: TProcessFactWindowArgs): Promise<TFactWindowProcessResult> {
@@ -328,7 +333,20 @@ export class FactDistiller {
   }
 
   private createDistillationPrompt(window: TLiveFactWindow): string {
-    const lines = ["PROCESSED CONTEXT — DO NOT CITE:"];
+    const lines = ["ELIGIBLE CURRENT USER SOURCES — EXTRACT FACTS ONLY FROM THESE:"];
+
+    const eligibleMessages = window.messages.filter((message) =>
+      isEligibleFactSource(message, window.state.chatId),
+    );
+    if (eligibleMessages.length === 0) {
+      lines.push("(none — return no facts)");
+    } else {
+      for (const message of eligibleMessages) {
+        lines.push(`[id=${message.id}][${message.author}][ELIGIBLE SOURCE] ${message.message}`);
+      }
+    }
+
+    lines.push("", "CONTEXT FOR WORDING — INELIGIBLE AS FACT SOURCES:");
 
     if (window.context.length === 0) {
       lines.push("(none)");
@@ -338,14 +356,12 @@ export class FactDistiller {
       }
     }
 
-    lines.push("", "CURRENT WINDOW:");
     for (const message of window.messages) {
-      let sourceLabel = "CONTEXT ONLY";
-      if (message.chatId === window.state.chatId && message.author === ERole.User) {
-        sourceLabel = "ELIGIBLE SOURCE";
+      if (isEligibleFactSource(message, window.state.chatId)) {
+        continue;
       }
 
-      lines.push(`[id=${message.id}][${message.author}][${sourceLabel}] ${message.message}`);
+      lines.push(`[id=${message.id}][${message.author}][CONTEXT ONLY] ${message.message}`);
     }
 
     return lines.join("\n");
@@ -407,4 +423,13 @@ export class FactDistiller {
       factIds: [...new Set(parsed.data.factIds)],
     };
   }
+}
+
+function isEligibleFactSource(message: TMemory, chatId: string): boolean {
+  if (message.chatId !== chatId || message.author !== ERole.User) {
+    return false;
+  }
+
+  const text = message.message.trim();
+  return !text.endsWith("?") && !text.endsWith("？");
 }

@@ -353,6 +353,21 @@ export class AgentHarness {
         stopReason = "aborted";
       } else {
         await agent.prompt(args.prompt);
+
+        const firstTerminalAssistant = agent.state.messages.toReversed().find((message) => {
+          return message.role === "assistant";
+        });
+        if (
+          firstTerminalAssistant !== undefined &&
+          isSerializedToolCall(contentText(firstTerminalAssistant.content), tools)
+        ) {
+          finalText = undefined;
+          await agent.prompt(
+            "Your previous response printed a tool call instead of invoking it. Try again now. " +
+              "Invoke any required registered tool through the native tool mechanism, keeping " +
+              "its arguments inside the native call.",
+          );
+        }
       }
     } catch (error) {
       stopReason = "error";
@@ -387,6 +402,9 @@ export class AgentHarness {
 
     if (args.signal?.aborted) {
       stopReason = "aborted";
+      finalText = undefined;
+    } else if (finalText !== undefined && isSerializedToolCall(finalText, tools)) {
+      stopReason = "serialized-tool-call";
       finalText = undefined;
     } else if (stopReason === "forced-finalization-failed") {
       finalText = undefined;
@@ -923,6 +941,15 @@ function canonicalize(value: unknown): unknown {
   }
 
   return value;
+}
+
+function isSerializedToolCall(text: string, tools: Array<{ name: string }>): boolean {
+  const trimmed = text.trim();
+  if (!trimmed.startsWith("{") && !trimmed.startsWith("```")) {
+    return false;
+  }
+
+  return tools.some((tool) => trimmed.includes(`"${tool.name}"`));
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

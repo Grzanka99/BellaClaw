@@ -29,6 +29,7 @@
 
   <usage_rules>
     <rule>Always provide query as a specific natural-language semantic query</rule>
+    <rule>Keep the query in the same language as the user's request</rule>
     <rule>Describe the meaning of the information sought instead of copying isolated keywords</rule>
     <rule>Keep the query short and about a single topic; a long query listing several topics matches nothing because it lands between all of them</rule>
     <rule>When you need several unrelated things, call the tool once per thing rather than combining them into one query</rule>
@@ -61,15 +62,15 @@
     </example>
 
     <example>
-      <context>Fully fictional English-to-Polish example. The user asks in English: "Does my bicycle named Kometa have a basket?"</context>
+      <context>Fully fictional English example. The user asks: "Does my bicycle named Kometa have a basket?"</context>
       <toolCall>
-        <query>Czy rower użytkownika o imieniu Kometa ma koszyk?</query>
+        <query>Does the user's bicycle named Kometa have a basket?</query>
         <limit>5</limit>
       </toolCall>
       <fictionalResponse>
         <facts>[]</facts>
       </fictionalResponse>
-      <reasoning>The English request is expressed as a natural-language semantic query in Polish. The empty result does not support either yes or no, so the answer must say that memory does not establish whether Kometa has a basket.</reasoning>
+      <reasoning>The English request remains a natural-language semantic query in English. The empty result does not support either yes or no, so the answer must say that memory does not establish whether Kometa has a basket.</reasoning>
     </example>
   </examples>
 

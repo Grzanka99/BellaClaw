@@ -88,12 +88,15 @@ afterEach(resetDistiller);
 describe("FactDistiller", () => {
   test("parses structured facts and marks only current user rows eligible", async () => {
     const { distiller, internals } = setupDistiller();
+    const window = makeWindow();
+    window.messages.push(makeMemory(13, ERole.User, "Where does the user live?"));
+    window.messages.push(makeMemory(14, ERole.User, "ユーザーはどこに住んでいますか？"));
     internals.ai.completeText = mock(
       async () =>
         '{"facts":[{"text":"The user attends ceramics on Tuesdays.","sourceMessageId":11}]}',
     );
 
-    const result = await distiller.distill(makeWindow(), DefaultConfigRecord, undefined);
+    const result = await distiller.distill(window, DefaultConfigRecord, undefined);
 
     expect(result).toEqual({
       success: true,
@@ -115,6 +118,8 @@ describe("FactDistiller", () => {
     expect(prompt).toContain("[id=9][user][CONTEXT ONLY] The ceramics club hosts workshops.");
     expect(prompt).toContain("[id=11][user][ELIGIBLE SOURCE] I attend on Tuesdays.");
     expect(prompt).toContain("[id=12][assistant][CONTEXT ONLY] I will remember that.");
+    expect(prompt).toContain("[id=13][user][CONTEXT ONLY] Where does the user live?");
+    expect(prompt).toContain("[id=14][user][CONTEXT ONLY] ユーザーはどこに住んでいますか？");
   });
 
   test("rejects invalid JSON", async () => {
@@ -141,7 +146,7 @@ describe("FactDistiller", () => {
     ["assistant", 12],
     ["prior context", 9],
     ["unknown", 999],
-  ])("rejects a %s source ID", async (_label, sourceMessageId) => {
+  ])("drops a %s source ID", async (_label, sourceMessageId) => {
     const { distiller, internals } = setupDistiller();
     internals.ai.completeText = mock(async () =>
       JSON.stringify({
@@ -150,12 +155,12 @@ describe("FactDistiller", () => {
     );
 
     await expect(distiller.distill(makeWindow(), DefaultConfigRecord, undefined)).resolves.toEqual({
-      success: false,
-      retryable: false,
+      success: true,
+      facts: [],
     });
   });
 
-  test("rejects a current user row from another chat as a source", async () => {
+  test("drops a current user row from another chat as a source", async () => {
     const { distiller, internals } = setupDistiller();
     const window = makeWindow();
     window.messages.push(makeMemory(13, ERole.User, "Other chat fact.", "chat-other"));
@@ -164,8 +169,8 @@ describe("FactDistiller", () => {
     );
 
     await expect(distiller.distill(window, DefaultConfigRecord, undefined)).resolves.toEqual({
-      success: false,
-      retryable: false,
+      success: true,
+      facts: [],
     });
   });
 

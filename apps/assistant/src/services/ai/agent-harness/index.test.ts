@@ -162,6 +162,7 @@ describe("AgentHarness", () => {
     });
 
     expect(systemPrompt).toContain("Delegate memory lookup");
+    expect(systemPrompt).toContain("Invoke registered tools through the native tool mechanism");
     expect(memoryDescription).toBe(
       "Required before answering questions that depend on personal user facts. Run the Memory specialist to retrieve the relevant facts.",
     );
