@@ -77,6 +77,8 @@ describe("AI tool definitions", () => {
     expect(Value.Check(SSearchMemoryArgs, { query: "facts" })).toBe(true);
     expect(Value.Check(SSearchMemoryArgs, { query: "" })).toBe(false);
     expect(Value.Check(SSearchMemoryArgs, { query: "   " })).toBe(false);
+    expect(Value.Check(SSearchMemoryArgs, { query: "a".repeat(120) })).toBe(true);
+    expect(Value.Check(SSearchMemoryArgs, { query: "a".repeat(121) })).toBe(false);
     expect(Value.Check(SSearchMemoryArgs, { query: "facts", limit: 25 })).toBe(true);
     expect(Value.Check(SSearchMemoryArgs, { query: "facts", limit: 26 })).toBe(false);
     expect(Value.Check(SSearchMemoryArgs, { query: "facts", searchString: "legacy" })).toBe(false);

@@ -29,7 +29,9 @@ import {
 const FACT_WINDOW_SIZE = 6;
 const FACT_CONTEXT_SIZE = 6;
 const MAX_FACT_COSINE_DISTANCE = 0.6;
-const MAX_SUPERSESSION_COSINE_DISTANCE = 0.25;
+// NOTE: contradictions are semantically distant, not near-duplicates: two timezone values
+// measured 0.45 apart, so a restatement-sized window never offered them as candidates
+const MAX_SUPERSESSION_COSINE_DISTANCE = 0.5;
 const SUPERSESSION_CANDIDATE_LIMIT = 10;
 const SQueryEmbedding = z.array(z.number()).length(EMBEDDING_DIMENSIONS);
 
@@ -316,13 +318,7 @@ export class Memory {
           distance,
         })
         .from(factsTable)
-        .where(
-          and(
-            eq(factsTable.chatId, chatId),
-            isNull(factsTable.supersededBy),
-            lte(distance, maximumDistance),
-          ),
-        )
+        .where(and(eq(factsTable.chatId, chatId), isNull(factsTable.supersededBy)))
         .orderBy(asc(distance))
         .limit(limit);
       const parsed = z.array(SFactSearchResult).safeParse(rows);
@@ -331,7 +327,18 @@ export class Memory {
         throw new Error("Failed to parse fact search results");
       }
 
-      return parsed.data;
+      // NOTE: the cutoff is applied here rather than in SQL so a miss can report how close it got;
+      // taking the nearest `limit` rows first is equivalent because the filter is on that ordering
+      const within = parsed.data.filter((fact) => fact.distance <= maximumDistance);
+
+      if (within.length === 0 && parsed.data.length > 0) {
+        const closest = parsed.data[0];
+        this.logger.info(
+          `findFactsByDistance: no fact within ${maximumDistance}, closest was ${closest?.distance.toFixed(4)} of ${parsed.data.length} live facts`,
+        );
+      }
+
+      return within;
     });
   }
 
@@ -349,17 +356,13 @@ export class Memory {
 
     const supersededFactIds = new Set<number>();
     for (const fact of parsedFacts.data) {
-      if (fact.supersedesFactId === undefined) {
-        continue;
-      }
+      for (const factId of fact.supersedesFactIds) {
+        if (supersededFactIds.has(factId)) {
+          throw new Error(`Fact ${factId} cannot be superseded more than once in one window`);
+        }
 
-      if (supersededFactIds.has(fact.supersedesFactId)) {
-        throw new Error(
-          `Fact ${fact.supersedesFactId} cannot be superseded more than once in one window`,
-        );
+        supersededFactIds.add(factId);
       }
-
-      supersededFactIds.add(fact.supersedesFactId);
     }
 
     return this.queue.enqueue(async () =>
@@ -439,20 +442,20 @@ export class Memory {
             throw new Error("Failed to parse inserted fact");
           }
 
-          if (preparedFact.supersedesFactId !== undefined) {
+          if (preparedFact.supersedesFactIds.length > 0) {
             const supersessionResult = await tx
               .update(factsTable)
               .set({ supersededBy: parsedInserted.data.id })
               .where(
                 and(
                   eq(factsTable.chatId, args.chatId),
-                  eq(factsTable.id, preparedFact.supersedesFactId),
+                  inArray(factsTable.id, preparedFact.supersedesFactIds),
                   isNull(factsTable.supersededBy),
                 ),
               );
 
-            if (supersessionResult.rowsAffected !== 1) {
-              throw new Error("Failed to supersede the prepared same-chat live fact");
+            if (supersessionResult.rowsAffected !== preparedFact.supersedesFactIds.length) {
+              throw new Error("Failed to supersede every prepared same-chat live fact");
             }
           }
 

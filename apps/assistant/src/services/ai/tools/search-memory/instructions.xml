@@ -23,13 +23,15 @@
   </response_handling>
 
   <arguments>
-    <query>Required. A complete natural-language question or description of the information sought, not keywords or a partial-text pattern.</query>
+    <query>Required. A short natural-language phrase naming ONE thing to recall, ideally under ten words and never over 120 characters. Not keywords, not a partial-text pattern, and not several topics at once.</query>
     <limit>Optional. Caps the number of returned facts; prefer 5-10 and never exceed 25.</limit>
   </arguments>
 
   <usage_rules>
     <rule>Always provide query as a specific natural-language semantic query</rule>
     <rule>Describe the meaning of the information sought instead of copying isolated keywords</rule>
+    <rule>Keep the query short and about a single topic; a long query listing several topics matches nothing because it lands between all of them</rule>
+    <rule>When you need several unrelated things, call the tool once per thing rather than combining them into one query</rule>
     <rule>Use limit to avoid overwhelming context with too many results (prefer 5-10)</rule>
     <rule>Prefer facts from results with lower distance because lower cosine distance means they are semantically closer</rule>
     <rule>Do not claim that memory supports a fact unless a returned fact explicitly contains it</rule>

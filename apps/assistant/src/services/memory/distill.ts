@@ -18,12 +18,24 @@ const SDistilledFact = z
 const SDistillationResponse = z.object({ facts: z.array(SDistilledFact) }).strict();
 const SSupersessionResponse = z
   .object({
-    factId: z.number().int().positive().nullable(),
+    factIds: z.array(z.number().int().positive()),
   })
   .strict();
 const MODEL_REQUEST_TIMEOUT_MS = 60_000;
 
 export type TDistilledFact = z.infer<typeof SDistilledFact>;
+
+// NOTE: retryable separates a transient model outage, which must not advance the checkpoint, from
+// output this window will always produce, which would otherwise block the drain loop forever
+export type TDistillationResult =
+  | {
+      success: true;
+      facts: TDistilledFact[];
+    }
+  | {
+      success: false;
+      retryable: boolean;
+    };
 
 export type TProcessFactWindowArgs = {
   window: TLiveFactWindow;
@@ -43,7 +55,7 @@ export type TFactWindowProcessResult =
 type TSupersessionSelection =
   | {
       success: true;
-      factId: TOption<number>;
+      factIds: number[];
     }
   | {
       success: false;
@@ -80,15 +92,30 @@ export class FactDistiller {
     window: TLiveFactWindow,
     settings: TConfigRecord,
     trace: TOption<TBehaviorTraceContext>,
-  ): Promise<TOption<TDistilledFact[]>> {
+  ): Promise<TDistillationResult> {
     const response = await this.ai.completeText({
       prompt: this.createDistillationPrompt(window),
       instructions: [
         "Extract durable facts explicitly stated by the user.",
+        "A durable fact is a stable attribute of the user or their world: identity, relationships,",
+        "possessions, preferences, habits, health, work, or long-lived plans.",
+        "Record only what stays true after this conversation ends.",
+        "Each fact must carry exactly one claim. Split anything joined by 'and' into separate facts:",
+        "a combined fact is retrieved and superseded far less reliably than its parts.",
+        "Write every fact as one complete sentence that names its subject explicitly, normally",
+        "starting with 'The user'. Never write a bare fragment such as 'Has a girlfriend named X':",
+        "retrieval compares whole sentences, and fragments are matched far less reliably.",
+        "Never record a request, instruction, or command the user gave the assistant.",
+        "Reminders, alarms, schedules, cron jobs, settings changes, and provider or model choices",
+        "are owned by other systems and must never become facts, even when the user states them.",
+        "Never record that the user asked a question, and never record the assistant's own actions",
+        "or state.",
+        "Prefer the durable preference behind a request over the request itself: 'remind me to drink",
+        "water' is not a fact, but 'the user wants to drink more water' is.",
         "Prior context and assistant messages are context only and must never be cited.",
         "Every fact must cite one eligible current-window user message ID.",
         'Reply with only JSON in this exact shape: {"facts":[{"text":"...","sourceMessageId":123}]}.',
-        'If there are no durable user facts, reply with {"facts":[]}.',
+        'Most windows contain no durable fact; when that is the case reply with {"facts":[]}.',
       ].join(" "),
       purpose: EModelPurpose.Utility,
       settings,
@@ -98,7 +125,7 @@ export class FactDistiller {
 
     if (response === undefined) {
       this.logger.error("distill: utility model returned no response");
-      return undefined;
+      return { success: false, retryable: true };
     }
 
     let responseJson: unknown;
@@ -106,13 +133,13 @@ export class FactDistiller {
       responseJson = JSON.parse(response);
     } catch (error) {
       this.logger.error(`distill: response was not valid JSON: ${String(error)}`);
-      return undefined;
+      return { success: false, retryable: false };
     }
 
     const parsed = SDistillationResponse.safeParse(responseJson);
     if (!parsed.success) {
       this.logger.error("distill: response did not match expected shape");
-      return undefined;
+      return { success: false, retryable: false };
     }
 
     const eligibleSourceIds = new Set<number>();
@@ -124,12 +151,14 @@ export class FactDistiller {
 
     for (const fact of parsed.data.facts) {
       if (!eligibleSourceIds.has(fact.sourceMessageId)) {
-        this.logger.error("distill: response cited an ineligible source message");
-        return undefined;
+        this.logger.error(
+          `distill: response cited ineligible source ${fact.sourceMessageId}, eligible were [${[...eligibleSourceIds].join(",")}]`,
+        );
+        return { success: false, retryable: false };
       }
     }
 
-    return parsed.data.facts;
+    return { success: true, facts: parsed.data.facts };
   }
 
   public async processWindow(args: TProcessFactWindowArgs): Promise<TFactWindowProcessResult> {
@@ -138,9 +167,9 @@ export class FactDistiller {
       return { success: true };
     }
 
-    let distilledFacts: TOption<TDistilledFact[]>;
+    let distillation: TDistillationResult;
     try {
-      distilledFacts = await this.distill(args.window, args.settings, args.trace);
+      distillation = await this.distill(args.window, args.settings, args.trace);
     } catch (error) {
       this.logger.error(`processWindow: distillation failed: ${String(error)}`);
       return {
@@ -149,11 +178,18 @@ export class FactDistiller {
       };
     }
 
-    if (distilledFacts === undefined) {
+    let distilledFacts: TDistilledFact[] = [];
+    if (distillation.success) {
+      distilledFacts = distillation.facts;
+    } else if (distillation.retryable) {
       return {
         success: false,
         reason: "distillation",
       };
+    } else {
+      this.logger.warning(
+        `processWindow: skipping window through ${finalMessage.id} after unusable distillation output`,
+      );
     }
 
     const prepared = await this.prepareFacts(distilledFacts, args);
@@ -245,11 +281,11 @@ export class FactDistiller {
       const candidates = searchResults.filter(
         (candidate) => !selectedSupersededFactIds.has(candidate.id),
       );
-      let supersedesFactId: TOption<number>;
+      let supersedesFactIds: number[] = [];
       if (candidates.length > 0) {
         let selection: TSupersessionSelection;
         try {
-          selection = await this.selectSupersededFactId(
+          selection = await this.selectSupersededFactIds(
             fact,
             candidates,
             args.settings,
@@ -270,17 +306,18 @@ export class FactDistiller {
           };
         }
 
-        if (selection.factId !== undefined) {
-          selectedSupersededFactIds.add(selection.factId);
-          supersedesFactId = selection.factId;
+        for (const factId of selection.factIds) {
+          selectedSupersededFactIds.add(factId);
         }
+
+        supersedesFactIds = selection.factIds;
       }
 
       facts.push({
         text: fact.text,
         sourceMessageId: fact.sourceMessageId,
         embedding,
-        supersedesFactId,
+        supersedesFactIds,
       });
     }
 
@@ -314,7 +351,7 @@ export class FactDistiller {
     return lines.join("\n");
   }
 
-  private async selectSupersededFactId(
+  private async selectSupersededFactIds(
     fact: TDistilledFact,
     candidates: TFactSearchResult[],
     settings: TConfigRecord,
@@ -325,9 +362,13 @@ export class FactDistiller {
     const response = await this.ai.completeText({
       prompt: [`NEW FACT: ${fact.text}`, "", "LIVE CANDIDATES:", ...candidateLines].join("\n"),
       instructions: [
-        "Decide whether the new fact replaces exactly one offered live fact.",
-        "Use null when it adds information, is compatible, or no offered fact is directly replaced.",
-        'Reply with only JSON in this exact shape: {"factId":123} or {"factId":null}.',
+        "Decide which of the offered live facts the new fact makes obsolete.",
+        "Return every offered fact that the new fact restates or directly contradicts.",
+        "Two facts contradict when they cannot both be true of the user at the same time, such as",
+        "two different values for the same attribute; return all of them, not just the closest one.",
+        "Return an empty list only when the new fact adds independent information that leaves every",
+        "offered fact still true.",
+        'Reply with only JSON in this exact shape: {"factIds":[123]} or {"factIds":[]}.',
       ].join(" "),
       purpose: EModelPurpose.Utility,
       settings,
@@ -336,7 +377,7 @@ export class FactDistiller {
     });
 
     if (response === undefined) {
-      this.logger.error("selectSupersededFactId: utility model returned no response");
+      this.logger.error("selectSupersededFactIds: utility model returned no response");
       return { success: false };
     }
 
@@ -344,31 +385,26 @@ export class FactDistiller {
     try {
       responseJson = JSON.parse(response);
     } catch (error) {
-      this.logger.error(`selectSupersededFactId: response was not valid JSON: ${String(error)}`);
+      this.logger.error(`selectSupersededFactIds: response was not valid JSON: ${String(error)}`);
       return { success: false };
     }
 
     const parsed = SSupersessionResponse.safeParse(responseJson);
     if (!parsed.success) {
-      this.logger.error("selectSupersededFactId: response did not match expected shape");
+      this.logger.error("selectSupersededFactIds: response did not match expected shape");
       return { success: false };
     }
 
-    if (parsed.data.factId === null) {
-      return {
-        success: true,
-        factId: undefined,
-      };
-    }
-
-    if (!offeredIds.has(parsed.data.factId)) {
-      this.logger.error("selectSupersededFactId: response selected an unoffered fact ID");
-      return { success: false };
+    for (const factId of parsed.data.factIds) {
+      if (!offeredIds.has(factId)) {
+        this.logger.error("selectSupersededFactIds: response selected an unoffered fact ID");
+        return { success: false };
+      }
     }
 
     return {
       success: true,
-      factId: parsed.data.factId,
+      factIds: [...new Set(parsed.data.factIds)],
     };
   }
 }

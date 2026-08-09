@@ -5,8 +5,10 @@ export const SSearchMemoryArgs = Type.Object(
   {
     query: Type.String({
       minLength: 1,
+      maxLength: 120,
       pattern: "\\S",
-      description: "Natural-language query describing the conversation facts to find",
+      description:
+        "Short natural-language query naming ONE thing to recall, ideally under ten words. Long multi-topic queries match nothing; issue several searches instead.",
     }),
     limit: Type.Optional(
       Type.Integer({
