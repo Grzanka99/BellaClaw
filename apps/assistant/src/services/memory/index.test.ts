@@ -411,6 +411,19 @@ describe("Memory", () => {
       expect(await memory.searchFacts("chat-stale", embedding(1), 10)).toEqual([]);
     });
 
+    test("rejects a commit that would not advance the checkpoint", async () => {
+      const memory = Memory.instance;
+
+      await expect(
+        memory.commitLiveFactWindow({
+          chatId: "chat-no-advance",
+          expectedLastProcessedMessageId: 4,
+          lastProcessedMessageId: 4,
+          facts: [],
+        }),
+      ).rejects.toThrow("A committed fact window must advance the checkpoint");
+    });
+
     test("rejects fact provenance outside the current same-chat user window", async () => {
       const memory = Memory.instance;
       await memory.save({

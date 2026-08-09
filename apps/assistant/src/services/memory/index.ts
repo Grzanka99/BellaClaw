@@ -320,6 +320,11 @@ export class Memory {
   }
 
   public async commitLiveFactWindow(args: TFactCommitArgs): Promise<TFactCommitResult> {
+    // NOTE: the drain loop terminates only because every commit advances the checkpoint
+    if (args.lastProcessedMessageId <= args.expectedLastProcessedMessageId) {
+      throw new Error("A committed fact window must advance the checkpoint");
+    }
+
     const parsedFacts = z.array(SPreparedFact).safeParse(args.facts);
 
     if (!parsedFacts.success) {
