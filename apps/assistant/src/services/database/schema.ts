@@ -166,12 +166,6 @@ export const messageAuthorizationsTable = sqliteTable(
 export type TInsertMemory = typeof memoriesTable.$inferInsert;
 export type TSelectMemory = typeof memoriesTable.$inferSelect;
 
-export type TInsertFact = typeof factsTable.$inferInsert;
-export type TSelectFact = typeof factsTable.$inferSelect;
-
-export type TInsertFactDistillationState = typeof factDistillationStateTable.$inferInsert;
-export type TSelectFactDistillationState = typeof factDistillationStateTable.$inferSelect;
-
 export type TInsertCronJob = typeof cronEngineJobsTable.$inferInsert;
 export type TSelectCronJob = typeof cronEngineJobsTable.$inferSelect;
 
