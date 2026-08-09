@@ -1,6 +1,6 @@
 import { AppLogger, EBehaviorLogLevel, type TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
 import type { TOption } from "@bellaclaw/shared";
-import { AsyncQueue, createLogger, type TLogger } from "@bellaclaw/shared";
+import { AsyncQueue, createLogger, logger, type TLogger } from "@bellaclaw/shared";
 import { AgentHarness } from "../ai/agent-harness";
 import { ERole, type THistoryItem } from "../ai/types";
 import { sanitizeErrorMessage } from "../app-logger/sanitizers";
@@ -164,20 +164,29 @@ export class MessageHandler {
   }
 
   // NOTE: without this, facts stay empty until the first inbound message of the process, so the
-  // very first recall after a deploy answers from an unpopulated store
-  public static async scheduleFactDrainForAllChats(): Promise<void> {
-    const chatIds = await Memory.instance.findChatIds();
+  // very first recall after a deploy answers from an unpopulated store. Catching up is best-effort
+  // and must never fail boot — messaging works fine against a partially distilled store.
+  public static async scheduleFactDrainForAllChats(turnId: string): Promise<void> {
+    try {
+      const chatIds = await Memory.instance.findChatIds();
 
-    for (const chatId of chatIds) {
-      MessageHandler.getInstance(chatId).scheduleFactDrain();
+      for (const chatId of chatIds) {
+        MessageHandler.getInstance(chatId).scheduleFactDrain({
+          turnId,
+          chatId,
+          platform: undefined,
+        });
+      }
+    } catch (error) {
+      logger.error(`scheduleFactDrainForAllChats: boot fact drain failed: ${String(error)}`);
     }
   }
 
-  public scheduleFactDrain(): void {
+  public scheduleFactDrain(trace: TOption<TBehaviorTraceContext>): void {
     void this.factQueue
       .enqueue(async () => {
         const settings = await SettingsService.instance.getAll(this.chatId);
-        await this.drainLiveFactWindows(this.chatId, settings, undefined);
+        await this.drainLiveFactWindows(this.chatId, settings, trace);
       })
       .catch((error) => {
         this.logger.error(`scheduleFactDrain: fact drain failed: ${String(error)}`);

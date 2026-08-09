@@ -41,7 +41,7 @@ async function init(): Promise<void> {
       SignalSingleton.instance.setup(),
     ]);
     await MessagingAdapter.instance.setup();
-    await MessageHandler.scheduleFactDrainForAllChats();
+    await MessageHandler.scheduleFactDrainForAllChats(turnId);
 
     AppLogger.instance.record({
       trace: {

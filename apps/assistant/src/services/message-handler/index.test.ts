@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
 import type { TLogger } from "@bellaclaw/shared";
 import { ERole } from "../ai/types";
+import { Memory } from "../memory";
 import { EMemoryImportance } from "../memory/types";
 import { EMessagePlatform } from "../messaging/types";
 import { SettingsService } from "../settings";
@@ -275,13 +276,27 @@ describe("MessageHandler", () => {
     const windows = [populatedWindow("discord:boot", 1), emptyWindow("discord:boot", 1)];
     internals.memory.loadLiveFactWindow = mock(async () => windows.shift());
 
-    handler.scheduleFactDrain();
+    handler.scheduleFactDrain(undefined);
     await waitForCall(internals.factDistiller.processWindow, 1);
 
     expect(internals.factDistiller.processWindow.mock.calls[0]?.[0]).toEqual(
       expect.objectContaining({ window: populatedWindow("discord:boot", 1) }),
     );
     expect(internals.memory.save).not.toHaveBeenCalled();
+  });
+
+  test("a boot fact drain sweep never rejects when chat discovery fails", async () => {
+    const memoryStatics = Memory as unknown as { _instance: unknown };
+    const originalMemory = memoryStatics._instance;
+    memoryStatics._instance = {
+      findChatIds: mock(async () => {
+        throw new Error("turso unreachable");
+      }),
+    };
+
+    await expect(MessageHandler.scheduleFactDrainForAllChats("boot:1")).resolves.toBeUndefined();
+
+    memoryStatics._instance = originalMemory;
   });
 
   test("a stalled fact drain does not delay the next reply", async () => {
