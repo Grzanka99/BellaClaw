@@ -328,13 +328,17 @@ export class Memory {
 
     const supersededFactIds = new Set<number>();
     for (const fact of parsedFacts.data) {
-      for (const factId of fact.supersedesFactIds) {
-        if (supersededFactIds.has(factId)) {
-          throw new Error(`Fact ${factId} cannot be superseded more than once in one window`);
-        }
-
-        supersededFactIds.add(factId);
+      if (fact.supersedesFactId === undefined) {
+        continue;
       }
+
+      if (supersededFactIds.has(fact.supersedesFactId)) {
+        throw new Error(
+          `Fact ${fact.supersedesFactId} cannot be superseded more than once in one window`,
+        );
+      }
+
+      supersededFactIds.add(fact.supersedesFactId);
     }
 
     return this.queue.enqueue(async () =>
@@ -414,20 +418,20 @@ export class Memory {
             throw new Error("Failed to parse inserted fact");
           }
 
-          if (preparedFact.supersedesFactIds.length > 0) {
+          if (preparedFact.supersedesFactId !== undefined) {
             const supersessionResult = await tx
               .update(factsTable)
               .set({ supersededBy: parsedInserted.data.id })
               .where(
                 and(
                   eq(factsTable.chatId, args.chatId),
-                  inArray(factsTable.id, preparedFact.supersedesFactIds),
+                  eq(factsTable.id, preparedFact.supersedesFactId),
                   isNull(factsTable.supersededBy),
                 ),
               );
 
-            if (supersessionResult.rowsAffected !== preparedFact.supersedesFactIds.length) {
-              throw new Error("Failed to supersede every prepared same-chat live fact");
+            if (supersessionResult.rowsAffected !== 1) {
+              throw new Error("Failed to supersede the prepared same-chat live fact");
             }
           }
 

@@ -185,19 +185,16 @@ describe("Memory", () => {
             text: "The bicycle is named Comet.",
             embedding: embedding(1),
             sourceMessageId: 1,
-            supersedesFactIds: [],
           },
           {
             text: "Ceramics are on Tuesdays.",
             embedding: embedding(0.8, 0.6),
             sourceMessageId: 2,
-            supersedesFactIds: [],
           },
           {
             text: "An unrelated detail.",
             embedding: embedding(0.3, Math.sqrt(0.91)),
             sourceMessageId: 3,
-            supersedesFactIds: [],
           },
         ],
       });
@@ -226,7 +223,6 @@ describe("Memory", () => {
             text: "Another chat has a perfect match.",
             embedding: embedding(1),
             sourceMessageId: 4,
-            supersedesFactIds: [],
           },
         ],
       });
@@ -318,7 +314,6 @@ describe("Memory", () => {
             text: "The bicycle used to be called Spark.",
             embedding: embedding(1),
             sourceMessageId: 1,
-            supersedesFactIds: [],
           },
         ],
       });
@@ -346,7 +341,7 @@ describe("Memory", () => {
             text: "The bicycle is now called Comet.",
             embedding: embedding(1),
             sourceMessageId: 2,
-            supersedesFactIds: [initialFact.id],
+            supersedesFactId: initialFact.id,
           },
         ],
       });
@@ -371,11 +366,11 @@ describe("Memory", () => {
               text: "This transaction must roll back.",
               embedding: embedding(0, 1),
               sourceMessageId: 3,
-              supersedesFactIds: [999],
+              supersedesFactId: 999,
             },
           ],
         }),
-      ).rejects.toThrow("Failed to supersede every prepared same-chat live fact");
+      ).rejects.toThrow("Failed to supersede the prepared same-chat live fact");
 
       expect((await memory.loadLiveFactWindow("chat-atomic")).state.lastProcessedMessageId).toBe(2);
       expect(await memory.searchFacts("chat-atomic", embedding(0, 1), 10)).toEqual([]);
@@ -407,7 +402,6 @@ describe("Memory", () => {
             text: "A stale fact.",
             embedding: embedding(1),
             sourceMessageId: 5,
-            supersedesFactIds: [],
           },
         ],
       });
@@ -436,7 +430,6 @@ describe("Memory", () => {
               text: "Invalid assistant-authored fact.",
               embedding: embedding(1),
               sourceMessageId: 1,
-              supersedesFactIds: [],
             },
           ],
         }),

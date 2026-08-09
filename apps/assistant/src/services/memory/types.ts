@@ -51,7 +51,7 @@ export const SPreparedFact = SFact.omit({
   createdAt: true,
   supersededBy: true,
 }).extend({
-  supersedesFactIds: z.array(z.number().int().positive()),
+  supersedesFactId: z.number().int().positive().optional(),
 });
 
 export type TFact = z.infer<typeof SFact>;

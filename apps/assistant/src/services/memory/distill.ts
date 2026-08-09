@@ -245,7 +245,7 @@ export class FactDistiller {
       const candidates = searchResults.filter(
         (candidate) => !selectedSupersededFactIds.has(candidate.id),
       );
-      let supersedesFactIds: number[] = [];
+      let supersedesFactId: TOption<number>;
       if (candidates.length > 0) {
         let selection: TSupersessionSelection;
         try {
@@ -272,7 +272,7 @@ export class FactDistiller {
 
         if (selection.factId !== undefined) {
           selectedSupersededFactIds.add(selection.factId);
-          supersedesFactIds = [selection.factId];
+          supersedesFactId = selection.factId;
         }
       }
 
@@ -280,7 +280,7 @@ export class FactDistiller {
         text: fact.text,
         sourceMessageId: fact.sourceMessageId,
         embedding,
-        supersedesFactIds,
+        supersedesFactId,
       });
     }
 

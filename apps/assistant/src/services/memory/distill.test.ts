@@ -234,7 +234,6 @@ describe("FactDistiller", () => {
           text: "The bicycle is named Comet.",
           sourceMessageId: 11,
           embedding: vector,
-          supersedesFactIds: [],
         },
       ],
     });
@@ -273,7 +272,7 @@ describe("FactDistiller", () => {
     );
     expect(commit).toHaveBeenCalledWith(
       expect.objectContaining({
-        facts: [expect.objectContaining({ supersedesFactIds: [44] })],
+        facts: [expect.objectContaining({ supersedesFactId: 44 })],
       }),
     );
   });
@@ -341,8 +340,8 @@ describe("FactDistiller", () => {
     expect(commit).toHaveBeenCalledWith(
       expect.objectContaining({
         facts: [
-          expect.objectContaining({ supersedesFactIds: [44] }),
-          expect.objectContaining({ supersedesFactIds: [] }),
+          expect.objectContaining({ supersedesFactId: 44 }),
+          expect.objectContaining({ supersedesFactId: undefined }),
         ],
       }),
     );
