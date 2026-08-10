@@ -22,6 +22,9 @@ const SSupersessionResponse = z
   })
   .strict();
 const MODEL_REQUEST_TIMEOUT_MS = 60_000;
+// NOTE: model formatting is nondeterministic, so a malformed reply often parses on a second try.
+// Only skip the window once retries are exhausted, otherwise its facts are discarded for good.
+const DISTILLATION_ATTEMPTS = 2;
 
 export type TDistilledFact = z.infer<typeof SDistilledFact>;
 
@@ -172,15 +175,27 @@ export class FactDistiller {
       return { success: true };
     }
 
-    let distillation: TDistillationResult;
-    try {
-      distillation = await this.distill(args.window, args.settings, args.trace);
-    } catch (error) {
-      this.logger.error(`processWindow: distillation failed: ${String(error)}`);
-      return {
-        success: false,
-        reason: "distillation",
-      };
+    let distillation: TDistillationResult = { success: false, retryable: false };
+    for (let attempt = 1; attempt <= DISTILLATION_ATTEMPTS; attempt += 1) {
+      try {
+        distillation = await this.distill(args.window, args.settings, args.trace);
+      } catch (error) {
+        this.logger.error(`processWindow: distillation failed: ${String(error)}`);
+        return {
+          success: false,
+          reason: "distillation",
+        };
+      }
+
+      if (distillation.success || distillation.retryable) {
+        break;
+      }
+
+      if (attempt < DISTILLATION_ATTEMPTS) {
+        this.logger.warning(
+          `processWindow: retrying window through ${finalMessage.id} after unusable distillation output`,
+        );
+      }
     }
 
     let distilledFacts: TDistilledFact[] = [];
@@ -193,7 +208,7 @@ export class FactDistiller {
       };
     } else {
       this.logger.warning(
-        `processWindow: skipping window through ${finalMessage.id} after unusable distillation output`,
+        `processWindow: skipping window through ${finalMessage.id} after ${DISTILLATION_ATTEMPTS} unusable distillation responses`,
       );
     }
 
@@ -430,6 +445,13 @@ function isEligibleFactSource(message: TMemory, chatId: string): boolean {
     return false;
   }
 
-  const text = message.message.trim();
-  return !text.endsWith("?") && !text.endsWith("？");
+  // NOTE: a message that is only a question carries no durable claim, but one that states something
+  // before asking still does. Judging the whole row by its final punctuation drops the claim, and
+  // the checkpoint then advances past it for good.
+  const clauses = message.message
+    .split(/(?<=[.!?？;])\s+/)
+    .map((clause) => clause.trim())
+    .filter((clause) => clause.length > 0);
+
+  return clauses.some((clause) => !clause.endsWith("?") && !clause.endsWith("？"));
 }

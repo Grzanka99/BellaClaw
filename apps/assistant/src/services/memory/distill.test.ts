@@ -160,6 +160,37 @@ describe("FactDistiller", () => {
     });
   });
 
+  test("keeps a user row eligible when a claim precedes a question", async () => {
+    const { distiller, internals } = setupDistiller();
+    const window = makeWindow();
+    window.messages = [makeMemory(11, ERole.User, "Mam rower o imieniu Kometa; co o nim myslisz?")];
+    internals.ai.completeText = mock(
+      async () =>
+        '{"facts":[{"text":"The user has a bicycle named Kometa.","sourceMessageId":11}]}',
+    );
+
+    const result = await distiller.distill(window, DefaultConfigRecord, undefined);
+
+    expect(result).toEqual({
+      success: true,
+      facts: [{ text: "The user has a bicycle named Kometa.", sourceMessageId: 11 }],
+    });
+  });
+
+  test("treats a question-only user row as an ineligible source", async () => {
+    const { distiller, internals } = setupDistiller();
+    const window = makeWindow();
+    window.messages = [makeMemory(11, ERole.User, "Czy jestem w zwiazku?")];
+    internals.ai.completeText = mock(
+      async () =>
+        '{"facts":[{"text":"The user asked about a relationship.","sourceMessageId":11}]}',
+    );
+
+    const result = await distiller.distill(window, DefaultConfigRecord, undefined);
+
+    expect(result).toEqual({ success: true, facts: [] });
+  });
+
   test("drops a current user row from another chat as a source", async () => {
     const { distiller, internals } = setupDistiller();
     const window = makeWindow();
@@ -197,11 +228,39 @@ describe("FactDistiller", () => {
     });
   });
 
-  test("advances past a window whose distillation output is permanently unusable", async () => {
+  test("retries once before skipping a window with unusable distillation output", async () => {
     const { distiller, internals } = setupDistiller();
-    internals.ai.completeText = mock(
-      async () => '{"facts":[{"text":"Cited the assistant row.","sourceMessageId":12}]}',
+    let calls = 0;
+    internals.ai.completeText = mock(async () => {
+      calls += 1;
+      if (calls === 1) {
+        return "not-json";
+      }
+
+      return '{"facts":[{"text":"The user attends ceramics on Tuesdays.","sourceMessageId":11}]}';
+    });
+    const commit = mock(async () => ({ committed: true as const, facts: [] }));
+    internals.memory.commitLiveFactWindow = commit;
+    internals.embedding.embedMany = mock(async () => [makeEmbedding(0.25)]);
+
+    const result = await distiller.processWindow({
+      window: makeWindow(),
+      settings: DefaultConfigRecord,
+      trace: undefined,
+    });
+
+    expect(result).toEqual({ success: true });
+    expect(calls).toBe(2);
+    expect(commit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        facts: [expect.objectContaining({ text: "The user attends ceramics on Tuesdays." })],
+      }),
     );
+  });
+
+  test("advances past a window whose distillation output is unusable on every attempt", async () => {
+    const { distiller, internals } = setupDistiller();
+    internals.ai.completeText = mock(async () => "not-json");
     const commit = mock(async () => ({ committed: true as const, facts: [] }));
     internals.memory.commitLiveFactWindow = commit;
 

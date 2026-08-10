@@ -943,13 +943,47 @@ function canonicalize(value: unknown): unknown {
   return value;
 }
 
-function isSerializedToolCall(text: string, tools: Array<{ name: string }>): boolean {
-  const trimmed = text.trim();
-  if (!trimmed.startsWith("{") && !trimmed.startsWith("```")) {
+// NOTE: matching a quoted tool name anywhere would also catch a legitimate answer that merely shows
+// JSON or documents a tool, and the caller discards that answer entirely. Require the payload to
+// parse and to actually carry a registered tool name in a call-shaped field.
+export function isSerializedToolCall(text: string, tools: Array<{ name: string }>): boolean {
+  let payload = text.trim();
+
+  if (payload.startsWith("```")) {
+    const fence = payload.match(/^```[a-zA-Z]*\s*\n([\s\S]*?)\n?```$/);
+
+    if (fence?.[1] === undefined) {
+      return false;
+    }
+
+    payload = fence[1].trim();
+  }
+
+  if (!payload.startsWith("{") && !payload.startsWith("[")) {
     return false;
   }
 
-  return tools.some((tool) => trimmed.includes(`"${tool.name}"`));
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(payload);
+  } catch {
+    return false;
+  }
+
+  const names = new Set(tools.map((tool) => tool.name));
+  const candidates: unknown[] = Array.isArray(parsed) ? parsed : [parsed];
+
+  return candidates.some((candidate) => {
+    if (!isRecord(candidate)) {
+      return false;
+    }
+
+    const called = candidate.name ?? candidate.tool ?? candidate.tool_name ?? candidate.function;
+    const hasArguments =
+      "arguments" in candidate || "parameters" in candidate || "input" in candidate;
+
+    return typeof called === "string" && names.has(called) && hasArguments;
+  });
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

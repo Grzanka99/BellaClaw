@@ -12,7 +12,7 @@ import { EMessagePlatform } from "../../messaging/types";
 import { DefaultConfigRecord, EConfigKey } from "../../settings/schema";
 import { aiModels } from "../providers/registry";
 import { EAiProvider, EModelPurpose, ERole, type THistoryItem } from "../types";
-import { AgentHarness, EAgentName } from ".";
+import { AgentHarness, EAgentName, isSerializedToolCall } from ".";
 
 const OPENROUTER_MODELS = [
   "openai/gpt-5.4-nano",
@@ -767,5 +767,29 @@ describe("AgentHarness", () => {
 
     await appLogger.close();
     (AppLogger as unknown as { _instance: undefined })._instance = undefined;
+  });
+});
+
+describe("isSerializedToolCall", () => {
+  const tools = [{ name: "search-memory" }, { name: "web-search" }];
+
+  test("detects a serialized call, fenced or bare", () => {
+    expect(isSerializedToolCall('{"name":"search-memory","arguments":{"query":"x"}}', tools)).toBe(
+      true,
+    );
+    expect(
+      isSerializedToolCall(
+        '```json\n{"name":"search-memory","arguments":{"query":"x"}}\n```',
+        tools,
+      ),
+    ).toBe(true);
+  });
+
+  test("keeps a fenced code sample that merely mentions a tool name", () => {
+    expect(isSerializedToolCall('```ts\nconst name = "search-memory";\n```', tools)).toBe(false);
+  });
+
+  test("keeps JSON that documents tools without calling one", () => {
+    expect(isSerializedToolCall('{"tools":["search-memory","web-search"]}', tools)).toBe(false);
   });
 });
