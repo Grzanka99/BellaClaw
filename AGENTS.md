@@ -62,6 +62,9 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 
 Small Bun + TypeScript assistant monorepo. Prefer small, targeted changes that preserve the current workspace boundaries and naming style.
 
+BellaClaw is designed for a single human user interacting at normal conversational pace. Evaluate
+concurrency and background processing under this human usage model.
+
 ## Commands
 
 - Install dependencies: `bun install`
