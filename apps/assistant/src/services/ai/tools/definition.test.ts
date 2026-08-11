@@ -5,7 +5,6 @@ import {
   SCreateCalendarEventArgs,
   validateCreateCalendarEventArgs,
 } from "./create-calendar-event/handler";
-import { defineMessageImportanceTool } from "./define-message-importance/definition";
 import { deleteCalendarEventTool } from "./delete-calendar-event/definition";
 import { SDeleteCalendarEventArgs } from "./delete-calendar-event/handler";
 import { findCalendarAvailabilityTool } from "./find-calendar-availability/definition";
@@ -21,8 +20,7 @@ import {
   SScheduleRecurringArgs,
   validateScheduleRecurringArgs,
 } from "./schedule-recurring/handler";
-import { searchMemoryTool } from "./search-memory/definition";
-import { convertSearchMemoryArgs, SSearchMemoryArgs } from "./search-memory/handler";
+import { SSearchMemoryArgs, searchMemoryTool } from "./search-memory/definition";
 import { unscheduleCronJobTool } from "./unschedule-cron-job/definition";
 import { updateCalendarEventTool } from "./update-calendar-event/definition";
 import {
@@ -38,7 +36,6 @@ import { webSearchTool } from "./web-search/definition";
 const ALL_TOOLS = [
   createCalendarEventTool,
   deleteCalendarEventTool,
-  defineMessageImportanceTool,
   findCalendarAvailabilityTool,
   getSettingsTool,
   listCalendarEventsTool,
@@ -58,8 +55,8 @@ const ALL_TOOLS = [
 
 describe("AI tool definitions", () => {
   test("expose Pi-native TypeBox parameter schemas", () => {
-    expect(ALL_TOOLS).toHaveLength(18);
-    expect(new Set(ALL_TOOLS.map((tool) => tool.name)).size).toBe(18);
+    expect(ALL_TOOLS).toHaveLength(17);
+    expect(new Set(ALL_TOOLS.map((tool) => tool.name)).size).toBe(17);
 
     for (const tool of ALL_TOOLS) {
       expect(tool.name.length).toBeGreaterThan(0);
@@ -72,36 +69,30 @@ describe("AI tool definitions", () => {
   test("enforce structural constraints", () => {
     expect(Value.Check(SScheduleOnceArgs, { name: "x", fireAt: "invalid" })).toBe(false);
     expect(Value.Check(SScheduleRecurringArgs, { name: "x", pattern: "0 8 * * *" })).toBe(true);
-    expect(Value.Check(SSearchMemoryArgs, { limit: 0 })).toBe(false);
+    expect(Value.Check(SSearchMemoryArgs, { query: "facts", limit: 0 })).toBe(false);
     expect(Value.Check(SUpdateCronJobArgs, { name: "x", unknown: true })).toBe(false);
   });
 
-  test("uses a Google-compatible string enum for memory importance", () => {
-    const importanceSchema = SSearchMemoryArgs.properties.importance;
-    const serialized = JSON.stringify(importanceSchema);
-
-    expect(serialized).toContain('"enum":["low","medium","high"]');
-    expect(serialized).not.toContain('"anyOf"');
-    expect(serialized).not.toContain('"const"');
-    expect(Value.Check(SSearchMemoryArgs, { importance: ["high"] })).toBe(true);
-    expect(Value.Check(SSearchMemoryArgs, { importance: ["urgent"] })).toBe(false);
+  test("uses the semantic memory search schema", () => {
+    expect(Value.Check(SSearchMemoryArgs, { query: "facts" })).toBe(true);
+    expect(Value.Check(SSearchMemoryArgs, { query: "" })).toBe(false);
+    expect(Value.Check(SSearchMemoryArgs, { query: "   " })).toBe(false);
+    expect(Value.Check(SSearchMemoryArgs, { query: "a".repeat(120) })).toBe(true);
+    expect(Value.Check(SSearchMemoryArgs, { query: "a".repeat(121) })).toBe(false);
+    expect(Value.Check(SSearchMemoryArgs, { query: "facts", limit: 25 })).toBe(true);
+    expect(Value.Check(SSearchMemoryArgs, { query: "facts", limit: 26 })).toBe(false);
+    expect(Value.Check(SSearchMemoryArgs, { query: "facts", searchString: "legacy" })).toBe(false);
+    expect(Value.Check(SSearchMemoryArgs, { query: "facts", timeRange: {} })).toBe(false);
+    expect(Value.Check(SSearchMemoryArgs, { query: "facts", importance: ["high"] })).toBe(false);
   });
 
-  test("convert explicit-offset transport dates", () => {
+  test("converts explicit-offset schedule dates", () => {
     const once = validateScheduleOnceArgs({
       name: "offset-reminder",
       fireAt: "2026-07-13T12:00:00+02:00",
       reminderText: "Reminder",
     });
     expect(once.fireAt).toEqual(new Date("2026-07-13T10:00:00.000Z"));
-
-    const memory = convertSearchMemoryArgs({
-      timeRange: {
-        start: "2026-07-13T10:00:00Z",
-        end: "2026-07-13T12:00:00+02:00",
-      },
-    });
-    expect(memory.timeRange?.start).toEqual(new Date("2026-07-13T10:00:00.000Z"));
   });
 
   test("enforce cron domain constraints", () => {

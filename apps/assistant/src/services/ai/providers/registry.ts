@@ -29,7 +29,7 @@ const AI_PROVIDER_REGISTRY: Record<EAiProvider, TAiProviderRegistration> = {
   [EAiProvider.OpenaiCodex]: {
     createProvider: openaiCodexProvider,
     modelByPurpose: {
-      [EModelPurpose.Utility]: { model: "gpt-5.6-luna", effort: "low" },
+      [EModelPurpose.Utility]: { model: "gpt-5.6-luna", effort: "medium" },
       [EModelPurpose.Main]: { model: "gpt-5.6-sol", effort: "medium" },
       [EModelPurpose.Specialist]: { model: "gpt-5.6-luna", effort: "max" },
       [EModelPurpose.SpecialistAccurate]: { model: "gpt-5.6-luna", effort: "max" },
@@ -40,7 +40,7 @@ const AI_PROVIDER_REGISTRY: Record<EAiProvider, TAiProviderRegistration> = {
   [EAiProvider.Openrouter]: {
     createProvider: openrouterProvider,
     modelByPurpose: {
-      [EModelPurpose.Utility]: { model: "openai/gpt-5.4-nano", effort: "low" },
+      [EModelPurpose.Utility]: { model: "openai/gpt-5.4-nano", effort: "medium" },
       [EModelPurpose.Main]: {
         model: "google/gemini-3.1-pro-preview",
         effort: "medium",
@@ -82,7 +82,7 @@ const AI_PROVIDER_REGISTRY: Record<EAiProvider, TAiProviderRegistration> = {
   [EAiProvider.OpencodeGo]: {
     createProvider: opencodeGoProvider,
     modelByPurpose: {
-      [EModelPurpose.Utility]: { model: "deepseek-v4-flash" },
+      [EModelPurpose.Utility]: { model: "deepseek-v4-pro" },
       [EModelPurpose.Main]: { model: "grok-4.5", effort: "high" },
       [EModelPurpose.Specialist]: { model: "deepseek-v4-pro", effort: "high" },
       [EModelPurpose.SpecialistAccurate]: {

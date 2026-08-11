@@ -1,12 +1,9 @@
 import type { TOption } from "@bellaclaw/shared";
-import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { Value } from "typebox/value";
 import { ECronJobType } from "../../../lib/cron-engine";
 import { fetchWeb, searchWeb } from "../../../lib/web";
 import { CalendarService } from "../../calendar";
 import { CronSingleton } from "../../cron";
-import { Memory } from "../../memory";
-import { sortByImportanceAndDates } from "../../memory/sort";
 import { invalidateMessageHandlerInstructions } from "../../message-handler/instructions";
 import { SettingsService } from "../../settings";
 import { ConfigValidators, EConfigKey, type TConfigRecord } from "../../settings/schema";
@@ -18,8 +15,6 @@ import {
   type TCreateCalendarEventArgs,
   validateCreateCalendarEventArgs,
 } from "./create-calendar-event/handler";
-import { DEFINE_MESSAGE_IMPORTANCE_TOOL } from "./define-message-importance/definition";
-import { SDefineMessageImportance } from "./define-message-importance/handler";
 import { DELETE_CALENDAR_EVENT_TOOL } from "./delete-calendar-event/definition";
 import {
   SDeleteCalendarEventArgs,
@@ -60,12 +55,12 @@ import {
   type TScheduleRecurringArgs,
   validateScheduleRecurringArgs,
 } from "./schedule-recurring/handler";
-import { SEARCH_MEMORY_TOOL } from "./search-memory/definition";
 import {
-  convertSearchMemoryArgs,
+  SEARCH_MEMORY_TOOL,
   SSearchMemoryArgs,
   type TSearchMemoryArgs,
-} from "./search-memory/handler";
+} from "./search-memory/definition";
+import { handleSearchMemory } from "./search-memory/handler";
 import { UNSCHEDULE_CRON_JOB_TOOL } from "./unschedule-cron-job/definition";
 import { SUnscheduleCronJobArgs } from "./unschedule-cron-job/handler";
 import { UPDATE_CALENDAR_EVENT_TOOL } from "./update-calendar-event/definition";
@@ -110,17 +105,6 @@ function requireChatId(chatId: TOption<string>): string {
   return chatId;
 }
 
-export function createImportanceTool(): AgentTool<typeof SDefineMessageImportance> {
-  return {
-    name: DEFINE_MESSAGE_IMPORTANCE_TOOL,
-    label: "Define message importance",
-    description: "Assign an importance level to the supplied message",
-    parameters: SDefineMessageImportance,
-    execute: async (_toolCallId: string, args: unknown) =>
-      textResult(Value.Decode(SDefineMessageImportance, args)),
-  };
-}
-
 export function createMemoryTools(context: TToolExecutionContext) {
   return [
     {
@@ -130,19 +114,8 @@ export function createMemoryTools(context: TToolExecutionContext) {
       parameters: SSearchMemoryArgs,
       execute: async (_toolCallId: string, args: unknown) => {
         const parsedArgs: TSearchMemoryArgs = Value.Decode(SSearchMemoryArgs, args);
-        const convertedArgs = convertSearchMemoryArgs(parsedArgs);
-
-        const result = await Memory.instance.find({
-          chatId: requireChatId(context.chatId),
-          ...convertedArgs,
-        });
-
-        if ("operation" in result) {
-          throw new Error(`Memory ${result.operation} failed: ${String(result.error)}`);
-        }
-
-        result.sort(sortByImportanceAndDates);
-        return textResult({ memories: result });
+        const result = await handleSearchMemory(requireChatId(context.chatId), parsedArgs);
+        return textResult(result);
       },
     },
   ];

@@ -1,6 +1,8 @@
 import { sql } from "drizzle-orm";
 import {
   check,
+  customType,
+  index,
   integer,
   primaryKey,
   sqliteTable,
@@ -8,14 +10,80 @@ import {
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 
-export const memoriesTable = sqliteTable("memories", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  chatId: text("chatId").notNull(),
-  author: text("author").notNull(),
-  importance: text("importance").notNull(),
-  message: text("message").notNull(),
-  createdAt: integer("createdAt").notNull(),
-  lastReadAt: integer("lastReadAt").notNull(),
+export const EMBEDDING_DIMENSIONS = 768;
+
+export const f32Blob = customType<{
+  data: number[];
+  driverData: ArrayBuffer | Uint8Array;
+}>({
+  dataType() {
+    return `F32_BLOB(${EMBEDDING_DIMENSIONS})`;
+  },
+  toDriver(value) {
+    if (value.length !== EMBEDDING_DIMENSIONS) {
+      throw new Error(`Fact embeddings must have ${EMBEDDING_DIMENSIONS} dimensions`);
+    }
+
+    return new Float32Array(value).buffer;
+  },
+  fromDriver(value) {
+    // NOTE: selects hand back an ArrayBuffer, but insert .returning() hands back a Uint8Array
+    let embedding: number[];
+    if (value instanceof Uint8Array) {
+      embedding = Array.from(
+        new Float32Array(
+          value.buffer,
+          value.byteOffset,
+          value.byteLength / Float32Array.BYTES_PER_ELEMENT,
+        ),
+      );
+    } else {
+      embedding = Array.from(new Float32Array(value));
+    }
+
+    if (embedding.length !== EMBEDDING_DIMENSIONS) {
+      throw new Error(`Stored fact embeddings must have ${EMBEDDING_DIMENSIONS} dimensions`);
+    }
+
+    return embedding;
+  },
+});
+
+export const memoriesTable = sqliteTable(
+  "memories",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    chatId: text("chatId").notNull(),
+    author: text("author").notNull(),
+    importance: text("importance").notNull(),
+    message: text("message").notNull(),
+    createdAt: integer("createdAt").notNull(),
+    lastReadAt: integer("lastReadAt").notNull(),
+  },
+  (table) => [index("memories_chat_id_idx").on(table.chatId, table.id)],
+);
+
+export const factsTable = sqliteTable(
+  "facts",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    chatId: text("chatId").notNull(),
+    text: text("text").notNull(),
+    embedding: f32Blob("embedding").notNull(),
+    createdAt: integer("createdAt").notNull(),
+    supersededBy: integer("supersededBy"),
+    sourceMessageId: integer("sourceMessageId").notNull(),
+  },
+  (table) => [
+    index("facts_chat_live_idx").on(table.chatId, table.supersededBy),
+    index("facts_source_message_idx").on(table.sourceMessageId),
+  ],
+);
+
+export const factDistillationStateTable = sqliteTable("fact_distillation_state", {
+  chatId: text("chatId").primaryKey(),
+  lastProcessedMessageId: integer("lastProcessedMessageId").notNull(),
+  updatedAt: integer("updatedAt").notNull(),
 });
 
 export const cronEngineJobsTable = sqliteTable(

@@ -1,11 +1,11 @@
 import { AppLogger, EBehaviorLogLevel, type TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
 import type { TOption } from "@bellaclaw/shared";
-import { AsyncQueue, createLogger, type TLogger } from "@bellaclaw/shared";
+import { AsyncQueue, createLogger, logger, type TLogger } from "@bellaclaw/shared";
 import { AgentHarness } from "../ai/agent-harness";
-import { EModelPurpose, ERole, type THistoryItem } from "../ai/types";
-import { resolveAiBehaviorFields } from "../app-logger/ai";
+import { ERole, type THistoryItem } from "../ai/types";
 import { sanitizeErrorMessage } from "../app-logger/sanitizers";
 import { Memory } from "../memory";
+import { FactDistiller } from "../memory/distill";
 import { EMemoryImportance, type TMemory } from "../memory/types";
 import type { EMessagePlatform } from "../messaging/types";
 import { SettingsService } from "../settings";
@@ -18,9 +18,13 @@ export class MessageHandler {
   private logger: TLogger;
   private ai = AgentHarness.instance;
   private queue = new AsyncQueue();
+  // NOTE: fact drains get their own queue so a slow distillation run never delays the
+  // transcript saves that the reply path awaits on this.queue
+  private factQueue = new AsyncQueue();
   private memory = Memory.instance;
+  private factDistiller = FactDistiller.instance;
 
-  constructor(chatId: string) {
+  constructor(private chatId: string) {
     this.logger = createLogger(`AbstractMessageHandler (cid: ${chatId})`);
     this.logger.info("created abstract message handler");
     this.logger.info("handler is up");
@@ -50,16 +54,15 @@ export class MessageHandler {
 
     try {
       const settings = structuredClone(await SettingsService.instance.getAll(message.chatId));
-      const parallelStart = performance.now();
-      const [importance, last30] = await Promise.all([
-        this.defineMessageImportance(message.message.content, settings, trace, ERole.User),
-        this.retrieveMemory(message.chatId, trace),
-      ]);
-      this.logger.info(
-        `handleMessage: parallel ops completed (${(performance.now() - parallelStart).toFixed(0)}ms) — importance: ${importance}, recent: ${last30.length}`,
-      );
+      const last30 = await this.retrieveMemory(message.chatId, trace);
 
-      this.queue.enqueue(() => this.saveMessageToDatabase(message, importance, trace));
+      const userSaved = await this.queue.enqueue(() =>
+        this.saveMessageToDatabase(message, EMemoryImportance.Medium, trace),
+      );
+      if (!userSaved) {
+        this.logger.error("handleMessage: user transcript save failed");
+        throw new Error("Failed to save user transcript");
+      }
 
       const history: THistoryItem[] = [];
 
@@ -101,33 +104,37 @@ export class MessageHandler {
 
       const finalResponse = aiRes.text;
 
-      this.queue.enqueue(async () => {
-        const respImpStart = performance.now();
-        const responseImportance = await this.defineMessageImportance(
-          finalResponse,
-          settings,
-          trace,
-          ERole.Assistant,
-        );
-        this.logger.info(
-          `handleMessage: response importance: ${responseImportance} (${(performance.now() - respImpStart).toFixed(0)}ms)`,
-        );
+      void this.queue
+        .enqueue(async () => {
+          const saved = await this.saveMessageToDatabase(
+            {
+              chatId: message.chatId,
+              message: {
+                type: "text",
+                content: finalResponse,
+              },
+              author: {
+                type: ERole.Assistant,
+              },
+            },
+            EMemoryImportance.Medium,
+            trace,
+          );
 
-        await this.saveMessageToDatabase(
-          {
-            chatId: message.chatId,
-            message: {
-              type: "text",
-              content: finalResponse,
-            },
-            author: {
-              type: ERole.Assistant,
-            },
-          },
-          responseImportance,
-          trace,
-        );
-      });
+          if (!saved) {
+            this.logger.error("handleMessage: assistant transcript save failed");
+            return;
+          }
+
+          void this.factQueue
+            .enqueue(() => this.drainLiveFactWindows(message.chatId, settings, trace))
+            .catch((error) => {
+              this.logger.error(`handleMessage: fact drain failed: ${String(error)}`);
+            });
+        })
+        .catch((error) => {
+          this.logger.error(`handleMessage: assistant transcript save failed: ${String(error)}`);
+        });
 
       this.logger.info(
         `handleMessage: done (${(performance.now() - handleMessageStart).toFixed(0)}ms)`,
@@ -156,48 +163,54 @@ export class MessageHandler {
     }
   }
 
-  private async defineMessageImportance(
-    message: string,
+  // NOTE: without this, facts stay empty until the first inbound message of the process, so the
+  // very first recall after a deploy answers from an unpopulated store. Catching up is best-effort
+  // and must never fail boot — messaging works fine against a partially distilled store.
+  public static async scheduleFactDrainForAllChats(turnId: string): Promise<void> {
+    try {
+      const chatIds = await Memory.instance.findChatIds();
+
+      for (const chatId of chatIds) {
+        MessageHandler.getInstance(chatId).scheduleFactDrain({
+          turnId,
+          chatId,
+          platform: undefined,
+        });
+      }
+    } catch (error) {
+      logger.error(`scheduleFactDrainForAllChats: boot fact drain failed: ${String(error)}`);
+    }
+  }
+
+  public scheduleFactDrain(trace: TOption<TBehaviorTraceContext>): void {
+    void this.factQueue
+      .enqueue(async () => {
+        const settings = await SettingsService.instance.getAll(this.chatId);
+        await this.drainLiveFactWindows(this.chatId, settings, trace);
+      })
+      .catch((error) => {
+        this.logger.error(`scheduleFactDrain: fact drain failed: ${String(error)}`);
+      });
+  }
+
+  private async drainLiveFactWindows(
+    chatId: string,
     settings: TConfigRecord,
     trace: TOption<TBehaviorTraceContext>,
-    author: ERole,
-  ): Promise<EMemoryImportance> {
-    const start = performance.now();
+  ): Promise<void> {
+    while (true) {
+      const window = await this.memory.loadLiveFactWindow(chatId);
+      if (window.messages.length === 0) {
+        return;
+      }
 
-    const response = await this.ai.completeText({
-      prompt: `Classify this ${author} message as low, medium, or high importance. Reply with only one word.\n\n${message}`,
-      instructions:
-        "Classify message importance for conversational memory. Reply only with low, medium, or high.",
-      purpose: EModelPurpose.Utility,
-      settings,
-      trace,
-    });
+      const result = await this.factDistiller.processWindow({ window, settings, trace });
 
-    if (response === undefined) {
-      this.logger.error(
-        `defineMessageImportance: failed, defaulting to low (${(performance.now() - start).toFixed(0)}ms)`,
-      );
-      logImportanceCompleted(trace, settings, start, false, author, EMemoryImportance.Low);
-      return EMemoryImportance.Low;
+      if (!result.success) {
+        this.logger.error(`drainLiveFactWindows: stopped after ${result.reason} failure`);
+        return;
+      }
     }
-
-    const importance = response.trim().toLowerCase();
-
-    if (
-      importance !== EMemoryImportance.Low &&
-      importance !== EMemoryImportance.Medium &&
-      importance !== EMemoryImportance.High
-    ) {
-      this.logger.error(
-        `defineMessageImportance: invalid tool result, defaulting to low (${(performance.now() - start).toFixed(0)}ms)`,
-      );
-      logImportanceCompleted(trace, settings, start, false, author, EMemoryImportance.Low);
-      return EMemoryImportance.Low;
-    }
-
-    this.logger.info(`defineMessageImportance: done (${(performance.now() - start).toFixed(0)}ms)`);
-    logImportanceCompleted(trace, settings, start, true, author, importance);
-    return importance;
   }
 
   private async saveMessageToDatabase(
@@ -316,43 +329,6 @@ function logHandlerCompleted(
       replyChars,
     },
     error: sanitizeErrorMessage(error),
-  });
-}
-
-function logImportanceCompleted(
-  trace: TOption<TBehaviorTraceContext>,
-  settings: TConfigRecord,
-  start: number,
-  success: boolean,
-  author: ERole,
-  importance: EMemoryImportance,
-) {
-  if (trace === undefined) {
-    return;
-  }
-
-  const fields = resolveAiBehaviorFields(settings, EModelPurpose.Utility);
-  let level = EBehaviorLogLevel.Info;
-
-  if (!success) {
-    level = EBehaviorLogLevel.Warning;
-  }
-
-  AppLogger.instance.record({
-    trace,
-    event: "importance.completed",
-    component: "message-handler",
-    level,
-    provider: fields?.provider,
-    model: fields?.model,
-    purpose: EModelPurpose.Utility,
-    success,
-    durationMs: performance.now() - start,
-    summary: `importance completed author=${author} importance=${importance}`,
-    metadata: {
-      author,
-      importance,
-    },
   });
 }
 

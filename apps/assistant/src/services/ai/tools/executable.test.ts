@@ -2,6 +2,7 @@ import { afterEach, describe, expect, mock, test } from "bun:test";
 import { ECronJobStatus, ECronJobType } from "../../../lib/cron-engine";
 import { CalendarService } from "../../calendar";
 import { CronSingleton } from "../../cron";
+import { EmbeddingClient } from "../../embedding";
 import { Memory } from "../../memory";
 import { SettingsService } from "../../settings";
 import { DefaultConfigRecord, EConfigKey } from "../../settings/schema";
@@ -22,6 +23,7 @@ const context = {
 function reset() {
   (CalendarService as unknown as { _instance: unknown })._instance = undefined;
   (CronSingleton as unknown as { _instance: unknown })._instance = undefined;
+  (EmbeddingClient as unknown as { _instance: unknown })._instance = undefined;
   (Memory as unknown as { _instance: unknown })._instance = undefined;
   (SettingsService as unknown as { _instance: unknown })._instance = undefined;
 }
@@ -227,26 +229,38 @@ describe("production executable tools", () => {
     );
   });
 
-  test("uses the memory handler converter and propagates memory failures", async () => {
-    const find = mock(async () => ({ operation: "find", error: "database unavailable" }));
-    (Memory as unknown as { _instance: unknown })._instance = { find };
+  test("decodes semantic memory arguments and returns facts", async () => {
+    const vector = [0.1, 0.2];
+    const facts = [
+      {
+        id: 1,
+        text: "The user likes tea",
+        createdAt: new Date("2026-08-01T10:00:00.000Z"),
+        sourceMessageId: 2,
+        distance: 0.1,
+      },
+    ];
+    const embed = mock(async () => vector);
+    const searchFacts = mock(async () => facts);
+    (EmbeddingClient as unknown as { _instance: unknown })._instance = { embed };
+    (Memory as unknown as { _instance: unknown })._instance = { searchFacts };
     const tool = createMemoryTools(context)[0];
 
-    await expect(
-      tool?.execute("call", {
-        timeRange: {
-          start: "2026-08-01T10:00:00+02:00",
-          end: "2026-08-01T11:00:00+02:00",
-        },
-      }),
-    ).rejects.toThrow("Memory find failed: database unavailable");
-    expect(find).toHaveBeenCalledWith(
-      expect.objectContaining({
-        timeRange: {
-          start: new Date("2026-08-01T08:00:00.000Z"),
-          end: new Date("2026-08-01T09:00:00.000Z"),
-        },
-      }),
+    const result = await tool?.execute("call", { query: "What does the user drink?", limit: 4 });
+
+    expect(embed).toHaveBeenCalledWith("What does the user drink?");
+    expect(searchFacts).toHaveBeenCalledWith("discord:1", vector, 4);
+    expect(result?.details).toEqual({ facts });
+  });
+
+  test("requires a chat owner before searching memory", async () => {
+    const embed = mock(async () => [0.1]);
+    (EmbeddingClient as unknown as { _instance: unknown })._instance = { embed };
+    const tool = createMemoryTools({ ...context, chatId: undefined })[0];
+
+    await expect(tool?.execute("call", { query: "preferences" })).rejects.toThrow(
+      "This tool requires a chat owner",
     );
+    expect(embed).not.toHaveBeenCalled();
   });
 });

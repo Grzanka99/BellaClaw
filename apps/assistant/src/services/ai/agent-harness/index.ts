@@ -353,6 +353,21 @@ export class AgentHarness {
         stopReason = "aborted";
       } else {
         await agent.prompt(args.prompt);
+
+        const firstTerminalAssistant = agent.state.messages.toReversed().find((message) => {
+          return message.role === "assistant";
+        });
+        if (
+          firstTerminalAssistant !== undefined &&
+          isSerializedToolCall(contentText(firstTerminalAssistant.content), tools)
+        ) {
+          finalText = undefined;
+          await agent.prompt(
+            "Your previous response printed a tool call instead of invoking it. Try again now. " +
+              "Invoke any required registered tool through the native tool mechanism, keeping " +
+              "its arguments inside the native call.",
+          );
+        }
       }
     } catch (error) {
       stopReason = "error";
@@ -387,6 +402,9 @@ export class AgentHarness {
 
     if (args.signal?.aborted) {
       stopReason = "aborted";
+      finalText = undefined;
+    } else if (finalText !== undefined && isSerializedToolCall(finalText, tools)) {
+      stopReason = "serialized-tool-call";
       finalText = undefined;
     } else if (stopReason === "forced-finalization-failed") {
       finalText = undefined;
@@ -615,15 +633,21 @@ export class AgentHarness {
 
     return delegates.map((delegate) => {
       let executionMode: typeof SEQUENTIAL | typeof PARALLEL = PARALLEL;
+      let description = `Run the ${delegate.target} specialist for this focused task`;
 
       if (delegate.target === EAgentName.Calendar || delegate.target === EAgentName.Scheduling) {
         executionMode = SEQUENTIAL;
       }
 
+      if (delegate.target === EAgentName.Memory) {
+        description =
+          "Required before answering questions that depend on personal user facts. Run the Memory specialist to retrieve the relevant facts.";
+      }
+
       return {
         name: delegate.name,
         label: delegate.label,
-        description: `Run the ${delegate.target} specialist for this focused task`,
+        description,
         parameters: schema,
         executionMode,
         execute: async (toolCallId: string, parameters: unknown, signal?: AbortSignal) => {
@@ -917,6 +941,49 @@ function canonicalize(value: unknown): unknown {
   }
 
   return value;
+}
+
+// NOTE: matching a quoted tool name anywhere would also catch a legitimate answer that merely shows
+// JSON or documents a tool, and the caller discards that answer entirely. Require the payload to
+// parse and to actually carry a registered tool name in a call-shaped field.
+export function isSerializedToolCall(text: string, tools: Array<{ name: string }>): boolean {
+  let payload = text.trim();
+
+  if (payload.startsWith("```")) {
+    const fence = payload.match(/^```[a-zA-Z]*\s*\n([\s\S]*?)\n?```$/);
+
+    if (fence?.[1] === undefined) {
+      return false;
+    }
+
+    payload = fence[1].trim();
+  }
+
+  if (!payload.startsWith("{") && !payload.startsWith("[")) {
+    return false;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(payload);
+  } catch {
+    return false;
+  }
+
+  const names = new Set(tools.map((tool) => tool.name));
+  const candidates: unknown[] = Array.isArray(parsed) ? parsed : [parsed];
+
+  return candidates.some((candidate) => {
+    if (!isRecord(candidate)) {
+      return false;
+    }
+
+    const called = candidate.name ?? candidate.tool ?? candidate.tool_name ?? candidate.function;
+    const hasArguments =
+      "arguments" in candidate || "parameters" in candidate || "input" in candidate;
+
+    return typeof called === "string" && names.has(called) && hasArguments;
+  });
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

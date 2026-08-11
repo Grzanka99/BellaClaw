@@ -10,7 +10,6 @@ export type TMessageHandlerInstructions = {
   updateCronJob: string;
   webSearch: string;
   webFetch: string;
-  defineMessageImportance: string;
 };
 
 const instructionsCache = new Map<string, TMessageHandlerInstructions>();
@@ -24,7 +23,6 @@ const INSTRUCTION_SOURCES = {
   updateCronJob: "./src/services/ai/tools/update-cron-job/instructions.xml",
   webSearch: "./src/services/ai/tools/web-search/instructions.xml",
   webFetch: "./src/services/ai/tools/web-fetch/instructions.xml",
-  defineMessageImportance: "./src/services/ai/tools/define-message-importance/instructions.xml",
 } as const;
 
 async function loadMessageHandlerInstructions(
@@ -39,7 +37,6 @@ async function loadMessageHandlerInstructions(
     updateCronJob,
     webSearch,
     webFetch,
-    defineMessageImportance,
   ] = await Promise.all([
     readXmlAndInjectConfig(INSTRUCTION_SOURCES.searchMemory, settings),
     readXmlAndInjectConfig(INSTRUCTION_SOURCES.listCronJobs, settings),
@@ -49,7 +46,6 @@ async function loadMessageHandlerInstructions(
     readXmlAndInjectConfig(INSTRUCTION_SOURCES.updateCronJob, settings),
     readXmlAndInjectConfig(INSTRUCTION_SOURCES.webSearch, settings),
     readXmlAndInjectConfig(INSTRUCTION_SOURCES.webFetch, settings),
-    readXmlAndInjectConfig(INSTRUCTION_SOURCES.defineMessageImportance, settings),
   ]);
 
   return {
@@ -61,7 +57,6 @@ async function loadMessageHandlerInstructions(
     updateCronJob,
     webSearch,
     webFetch,
-    defineMessageImportance,
   };
 }
 

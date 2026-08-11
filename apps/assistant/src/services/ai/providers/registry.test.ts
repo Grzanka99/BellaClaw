@@ -47,7 +47,7 @@ describe("AI provider registry", () => {
       [EModelPurpose.ScheduledTask]: "google/gemini-3.1-pro-preview",
     });
     expect(getAiModelIds(EAiProvider.OpencodeGo)).toEqual({
-      [EModelPurpose.Utility]: "deepseek-v4-flash",
+      [EModelPurpose.Utility]: "deepseek-v4-pro",
       [EModelPurpose.Main]: "grok-4.5",
       [EModelPurpose.Specialist]: "deepseek-v4-pro",
       [EModelPurpose.SpecialistAccurate]: "grok-4.5",
@@ -63,7 +63,7 @@ describe("AI provider registry", () => {
   });
 
   test("pairs each model purpose with its reasoning effort", () => {
-    expect(getAiModelConfig(EAiProvider.OpenaiCodex, EModelPurpose.Utility).effort).toBe("low");
+    expect(getAiModelConfig(EAiProvider.OpenaiCodex, EModelPurpose.Utility).effort).toBe("medium");
     expect(getAiModelConfig(EAiProvider.OpenaiCodex, EModelPurpose.Main).effort).toBe("medium");
 
     for (const purpose of [
@@ -74,7 +74,7 @@ describe("AI provider registry", () => {
       expect(getAiModelConfig(EAiProvider.OpenaiCodex, purpose).effort).toBe("max");
     }
 
-    expect(getAiModelConfig(EAiProvider.Openrouter, EModelPurpose.Utility).effort).toBe("low");
+    expect(getAiModelConfig(EAiProvider.Openrouter, EModelPurpose.Utility).effort).toBe("medium");
     expect(getAiModelConfig(EAiProvider.Openrouter, EModelPurpose.Specialist).effort).toBe("high");
 
     for (const purpose of [

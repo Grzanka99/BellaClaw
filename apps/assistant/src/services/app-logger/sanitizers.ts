@@ -230,25 +230,20 @@ function sanitizeCronToolArguments(
 }
 
 function sanitizeSearchMemoryArguments(args: Record<string, unknown>): TSanitizedLogDetails {
-  const searchString = readString(args, "searchString");
-  const importance = readStringArray(args, "importance");
+  const query = readString(args, "query");
   const limit = readNumber(args, "limit");
   const metadata: TBehaviorMetadata = {
     argumentsValid: true,
   };
 
-  addLength(metadata, "searchStringChars", searchString);
-
-  if (importance.length > 0) {
-    metadata.importance = importance;
-  }
+  addLength(metadata, "queryChars", query);
 
   if (limit !== undefined) {
     metadata.limit = limit;
   }
 
   return {
-    summary: `search-memory args searchChars=${searchString?.length ?? 0}`,
+    summary: `search-memory args queryChars=${query?.length ?? 0}`,
     metadata,
   };
 }
@@ -466,15 +461,15 @@ function sanitizeSearchMemoryResult(data: unknown): TSanitizedLogDetails {
   let resultCount = 0;
 
   if (isRecord(data)) {
-    const memories = data.memories;
+    const facts = data.facts;
 
-    if (Array.isArray(memories)) {
-      resultCount = memories.length;
+    if (Array.isArray(facts)) {
+      resultCount = facts.length;
     }
   }
 
   return {
-    summary: `search-memory returned ${resultCount} memories`,
+    summary: `search-memory returned ${resultCount} facts`,
     metadata: {
       status: "completed",
       resultCount,
@@ -706,23 +701,6 @@ function readBoolean(record: Record<string, unknown>, key: string): TOption<bool
   }
 
   return undefined;
-}
-
-function readStringArray(record: Record<string, unknown>, key: string): string[] {
-  const value = record[key];
-  const strings: string[] = [];
-
-  if (!Array.isArray(value)) {
-    return strings;
-  }
-
-  for (const item of value) {
-    if (typeof item === "string") {
-      strings.push(item);
-    }
-  }
-
-  return strings;
 }
 
 function readDateLike(record: Record<string, unknown>, key: string): TOption<string> {

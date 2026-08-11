@@ -2,6 +2,7 @@ import { AppLogger, EBehaviorLogLevel } from "@bellaclaw/behavior-logs";
 import { AuthorizationService } from "./services/authorization";
 import { CalendarService } from "./services/calendar";
 import { DiscordSingleton } from "./services/discord";
+import { MessageHandler } from "./services/message-handler";
 import { MessagingAdapter } from "./services/messaging";
 import { SignalSingleton } from "./services/signal";
 
@@ -40,6 +41,7 @@ async function init(): Promise<void> {
       SignalSingleton.instance.setup(),
     ]);
     await MessagingAdapter.instance.setup();
+    await MessageHandler.scheduleFactDrainForAllChats(turnId);
 
     AppLogger.instance.record({
       trace: {
