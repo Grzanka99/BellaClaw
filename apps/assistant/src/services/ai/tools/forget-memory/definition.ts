@@ -14,7 +14,7 @@ export const SForgetMemoryArgs = Type.Object(
 
 export type TForgetMemoryArgs = Static<typeof SForgetMemoryArgs>;
 
-export const FORGET_MEMORY_TOOL = "forget-memory" as const;
+export const FORGET_MEMORY_TOOL = "forget-memory";
 
 export const forgetMemoryTool = createToolDefinition(
   FORGET_MEMORY_TOOL,

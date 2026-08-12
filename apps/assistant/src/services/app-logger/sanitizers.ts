@@ -80,12 +80,20 @@ export function sanitizeToolCallArguments(toolCall: TToolCall): TSanitizedLogDet
     }
     case "forget-memory": {
       let factCount = 0;
+      let argumentsValid = false;
       if (Array.isArray(args.factIds)) {
         factCount = args.factIds.length;
+        argumentsValid =
+          Object.keys(args).length === 1 &&
+          factCount > 0 &&
+          args.factIds.every(
+            (factId) => typeof factId === "number" && Number.isInteger(factId) && factId > 0,
+          ) &&
+          new Set(args.factIds).size === factCount;
       }
       return {
         summary: `forget-memory args factCount=${factCount}`,
-        metadata: { argumentsValid: true, factCount },
+        metadata: { argumentsValid, factCount },
       };
     }
     case "web-search": {
