@@ -243,7 +243,14 @@ describe("production executable tools", () => {
     const embed = mock(async () => vector);
     const searchFacts = mock(async () => facts);
     (EmbeddingClient as unknown as { _instance: unknown })._instance = { embed };
-    (Memory as unknown as { _instance: unknown })._instance = { searchFacts };
+    (Memory as unknown as { _instance: unknown })._instance = {
+      searchFacts,
+      loadLiveFactWindow: async () => ({
+        state: { chatId: "discord:1", lastProcessedMessageId: 0, updatedAt: undefined },
+        context: [],
+        messages: [],
+      }),
+    };
     const tool = createMemoryTools(context)[0];
 
     const result = await tool?.execute("call", { query: "What does the user drink?", limit: 4 });

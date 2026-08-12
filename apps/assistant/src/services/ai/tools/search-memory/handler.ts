@@ -1,7 +1,6 @@
 import { EmbeddingClient } from "../../../embedding";
 import { Memory } from "../../../memory";
 import type { TFactSearchResult } from "../../../memory/types";
-import { MessageHandler } from "../../../message-handler";
 import type { TSearchMemoryArgs } from "./definition";
 
 const DEFAULT_LIMIT = 10;
@@ -14,7 +13,6 @@ export async function handleSearchMemory(
   chatId: string,
   args: TSearchMemoryArgs,
 ): Promise<TSearchMemoryResult> {
-  await MessageHandler.getInstance(chatId).waitForFactDrain();
   const embedding = await EmbeddingClient.instance.embed(args.query);
   if (embedding === undefined) {
     throw new Error("Embedding service unavailable");

@@ -4,6 +4,7 @@ import { ECronJobType } from "../../../lib/cron-engine";
 import { fetchWeb, searchWeb } from "../../../lib/web";
 import { CalendarService } from "../../calendar";
 import { CronSingleton } from "../../cron";
+import { MessageHandler } from "../../message-handler";
 import { invalidateMessageHandlerInstructions } from "../../message-handler/instructions";
 import { SettingsService } from "../../settings";
 import { ConfigValidators, EConfigKey, type TConfigRecord } from "../../settings/schema";
@@ -120,7 +121,9 @@ export function createMemoryTools(context: TToolExecutionContext) {
       parameters: SSearchMemoryArgs,
       execute: async (_toolCallId: string, args: unknown) => {
         const parsedArgs: TSearchMemoryArgs = Value.Decode(SSearchMemoryArgs, args);
-        const result = await handleSearchMemory(requireChatId(context.chatId), parsedArgs);
+        const chatId = requireChatId(context.chatId);
+        await MessageHandler.getInstance(chatId).ensureFactsCurrent();
+        const result = await handleSearchMemory(chatId, parsedArgs);
         return textResult(result);
       },
     },
