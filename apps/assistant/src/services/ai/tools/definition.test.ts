@@ -13,6 +13,7 @@ import { getSettingsTool } from "./get-settings/definition";
 import { listCalendarEventsTool } from "./list-calendar-events/definition";
 import { listCalendarsTool } from "./list-calendars/definition";
 import { listCronJobsTool } from "./list-cron-jobs/definition";
+import { rememberMemoryTool, SRememberMemoryArgs } from "./remember-memory/definition";
 import { removeReadonlyCalendarTool } from "./remove-readonly-calendar/definition";
 import { scheduleOnceTool } from "./schedule-once/definition";
 import { SScheduleOnceArgs, validateScheduleOnceArgs } from "./schedule-once/handler";
@@ -44,6 +45,7 @@ const ALL_TOOLS = [
   listCalendarsTool,
   listCronJobsTool,
   removeReadonlyCalendarTool,
+  rememberMemoryTool,
   scheduleOnceTool,
   scheduleRecurringTool,
   searchMemoryTool,
@@ -57,8 +59,8 @@ const ALL_TOOLS = [
 
 describe("AI tool definitions", () => {
   test("expose Pi-native TypeBox parameter schemas", () => {
-    expect(ALL_TOOLS).toHaveLength(18);
-    expect(new Set(ALL_TOOLS.map((tool) => tool.name)).size).toBe(18);
+    expect(ALL_TOOLS).toHaveLength(19);
+    expect(new Set(ALL_TOOLS.map((tool) => tool.name)).size).toBe(19);
 
     for (const tool of ALL_TOOLS) {
       expect(tool.name.length).toBeGreaterThan(0);
@@ -72,6 +74,7 @@ describe("AI tool definitions", () => {
     expect(Value.Check(SScheduleOnceArgs, { name: "x", fireAt: "invalid" })).toBe(false);
     expect(Value.Check(SScheduleRecurringArgs, { name: "x", pattern: "0 8 * * *" })).toBe(true);
     expect(Value.Check(SSearchMemoryArgs, { query: "facts", limit: 0 })).toBe(false);
+    expect(Value.Check(SRememberMemoryArgs, { fact: "The user likes tea." })).toBe(true);
     expect(Value.Check(SForgetMemoryArgs, { factIds: [1, 2] })).toBe(true);
     for (const factIds of [[], [1, 1], [0], [1.5]]) {
       expect(Value.Check(SForgetMemoryArgs, { factIds })).toBe(false);

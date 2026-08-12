@@ -45,6 +45,12 @@ import { LIST_CALENDARS_TOOL } from "./list-calendars/definition";
 import { SListCalendarsArgs } from "./list-calendars/handler";
 import { LIST_CRON_JOBS_TOOL } from "./list-cron-jobs/definition";
 import { SListCronJobsArgs } from "./list-cron-jobs/handler";
+import {
+  REMEMBER_MEMORY_TOOL,
+  SRememberMemoryArgs,
+  type TRememberMemoryArgs,
+} from "./remember-memory/definition";
+import { handleRememberMemory } from "./remember-memory/handler";
 import { REMOVE_READONLY_CALENDAR_TOOL } from "./remove-readonly-calendar/definition";
 import {
   SRemoveReadonlyCalendarArgs,
@@ -124,6 +130,18 @@ export function createMemoryTools(context: TToolExecutionContext) {
         const chatId = requireChatId(context.chatId);
         await MessageHandler.getInstance(chatId).ensureFactsCurrent();
         const result = await handleSearchMemory(chatId, parsedArgs);
+        return textResult(result);
+      },
+    },
+    {
+      name: REMEMBER_MEMORY_TOOL,
+      label: "Remember memory",
+      description: "Store one explicit durable conversation fact",
+      parameters: SRememberMemoryArgs,
+      executionMode: SEQUENTIAL,
+      execute: async (_toolCallId: string, args: unknown) => {
+        const parsedArgs: TRememberMemoryArgs = Value.Decode(SRememberMemoryArgs, args);
+        const result = await handleRememberMemory(requireChatId(context.chatId), parsedArgs);
         return textResult(result);
       },
     },

@@ -52,6 +52,7 @@ const TOOL_INSTRUCTIONS = {
   updateCalendarEvent: "./src/services/ai/tools/update-calendar-event/instructions.xml",
   deleteCalendarEvent: "./src/services/ai/tools/delete-calendar-event/instructions.xml",
   searchMemory: "./src/services/ai/tools/search-memory/instructions.xml",
+  rememberMemory: "./src/services/ai/tools/remember-memory/instructions.xml",
   forgetMemory: "./src/services/ai/tools/forget-memory/instructions.xml",
   getSettings: "./src/services/ai/tools/get-settings/instructions.xml",
   updateSettings: "./src/services/ai/tools/update-settings/instructions.xml",
@@ -572,7 +573,11 @@ export class AgentHarness {
       case EAgentName.Main:
         return [TOOL_INSTRUCTIONS.webSearch, TOOL_INSTRUCTIONS.webFetch];
       case EAgentName.Memory:
-        return [TOOL_INSTRUCTIONS.searchMemory, TOOL_INSTRUCTIONS.forgetMemory];
+        return [
+          TOOL_INSTRUCTIONS.searchMemory,
+          TOOL_INSTRUCTIONS.rememberMemory,
+          TOOL_INSTRUCTIONS.forgetMemory,
+        ];
       case EAgentName.Settings:
         return [TOOL_INSTRUCTIONS.getSettings, TOOL_INSTRUCTIONS.updateSettings];
       case EAgentName.Scheduling:

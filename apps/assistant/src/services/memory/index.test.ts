@@ -236,19 +236,7 @@ describe("Memory", () => {
         importance: EMemoryImportance.Medium,
         message: "The bicycle is named Comet again.",
       });
-      await memory.commitLiveFactWindow({
-        chatId: "chat-a",
-        expectedLastProcessedMessageId: 3,
-        lastProcessedMessageId: 5,
-        facts: [
-          {
-            text: "The bicycle is named Comet again.",
-            embedding: embedding(1),
-            sourceMessageId: 5,
-            supersedesFactIds: [],
-          },
-        ],
-      });
+      await memory.rememberFact("chat-a", "The bicycle is named Comet again.", embedding(1), []);
       expect((await memory.searchFacts("chat-a", embedding(1), 10))[0]?.text).toBe(
         "The bicycle is named Comet again.",
       );
