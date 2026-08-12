@@ -80,6 +80,7 @@ export function sanitizeToolCallArguments(toolCall: TToolCall): TSanitizedLogDet
     }
     case "remember-memory": {
       const fact = readString(args, "fact");
+      const sourceMessage = readString(args, "sourceMessage");
       let supersedesFactCount = 0;
       let supersedesValid = false;
       if (Array.isArray(args.supersedesFactIds)) {
@@ -90,14 +91,17 @@ export function sanitizeToolCallArguments(toolCall: TToolCall): TSanitizedLogDet
           ) && new Set(args.supersedesFactIds).size === supersedesFactCount;
       }
       return {
-        summary: `remember-memory args factChars=${fact?.length ?? 0} supersedes=${supersedesFactCount}`,
+        summary: `remember-memory args factChars=${fact?.length ?? 0} sourceChars=${sourceMessage?.length ?? 0} supersedes=${supersedesFactCount}`,
         metadata: {
           argumentsValid:
-            Object.keys(args).length === 2 &&
+            Object.keys(args).length === 3 &&
             fact !== undefined &&
             fact.trim().length > 0 &&
+            sourceMessage !== undefined &&
+            sourceMessage.trim().length > 0 &&
             supersedesValid,
           factChars: fact?.length ?? 0,
+          sourceMessageChars: sourceMessage?.length ?? 0,
           supersedesFactCount,
         },
       };

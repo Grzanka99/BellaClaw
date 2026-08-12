@@ -17,6 +17,7 @@ export async function handleRememberMemory(chatId: string, args: TRememberMemory
     const remembered = await Memory.instance.rememberFact(
       chatId,
       fact,
+      args.sourceMessage,
       embedding,
       args.supersedesFactIds,
     );

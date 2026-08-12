@@ -229,39 +229,19 @@ export class Memory {
   public async rememberFact(
     chatId: string,
     text: string,
+    sourceMessage: string,
     embedding: number[],
     supersedesFactIds: number[],
   ): Promise<TFact> {
     return this.queue.enqueue(async () =>
       this.db.transaction(async (tx) => {
-        const source = await tx
-          .select({ id: memoriesTable.id })
-          .from(memoriesTable)
-          .where(and(eq(memoriesTable.chatId, chatId), eq(memoriesTable.author, ERole.User)))
-          .orderBy(desc(memoriesTable.id))
-          .limit(1)
-          .get();
-        if (source === undefined) {
-          throw new Error("A remembered fact requires a same-chat user transcript source");
-        }
-
-        const prepared = SPreparedFact.safeParse({
-          text,
-          embedding,
-          sourceMessageId: source.id,
-          supersedesFactIds,
-        });
-        if (!prepared.success) {
-          throw new Error("Failed to validate remembered fact");
-        }
-
         const existing = await tx
           .select()
           .from(factsTable)
           .where(
             and(
               eq(factsTable.chatId, chatId),
-              eq(factsTable.text, prepared.data.text),
+              eq(factsTable.text, text),
               isNull(factsTable.supersededBy),
               isNull(factsTable.forgottenAt),
             ),
@@ -274,6 +254,33 @@ export class Memory {
           }
 
           return parsedExisting.data;
+        }
+
+        const source = await tx
+          .select({ id: memoriesTable.id })
+          .from(memoriesTable)
+          .where(
+            and(
+              eq(memoriesTable.chatId, chatId),
+              eq(memoriesTable.author, ERole.User),
+              eq(memoriesTable.message, sourceMessage),
+            ),
+          )
+          .orderBy(desc(memoriesTable.id))
+          .limit(1)
+          .get();
+        if (source === undefined) {
+          throw new Error("A remembered fact requires its exact same-chat user transcript source");
+        }
+
+        const prepared = SPreparedFact.safeParse({
+          text,
+          embedding,
+          sourceMessageId: source.id,
+          supersedesFactIds,
+        });
+        if (!prepared.success) {
+          throw new Error("Failed to validate remembered fact");
         }
 
         const inserted = await tx

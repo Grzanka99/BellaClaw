@@ -8,6 +8,11 @@ export const SRememberMemoryArgs = Type.Object(
       pattern: "\\S",
       description: "One durable fact to remember",
     }),
+    sourceMessage: Type.String({
+      minLength: 1,
+      pattern: "\\S",
+      description: "Exact user transcript message that stated the fact",
+    }),
     supersedesFactIds: Type.Array(Type.Integer({ minimum: 1 }), {
       uniqueItems: true,
       description: "Live fact IDs this fact replaces; empty when it replaces none",
