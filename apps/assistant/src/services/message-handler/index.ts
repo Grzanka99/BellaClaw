@@ -193,6 +193,10 @@ export class MessageHandler {
       });
   }
 
+  public async waitForFactDrain(): Promise<void> {
+    await this.factQueue.enqueue(() => Promise.resolve());
+  }
+
   private async drainLiveFactWindows(
     chatId: string,
     settings: TConfigRecord,
