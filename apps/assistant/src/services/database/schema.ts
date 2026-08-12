@@ -72,6 +72,7 @@ export const factsTable = sqliteTable(
     embedding: f32Blob("embedding").notNull(),
     createdAt: integer("createdAt").notNull(),
     supersededBy: integer("supersededBy"),
+    forgottenAt: integer("forgottenAt"),
     sourceMessageId: integer("sourceMessageId").notNull(),
   },
   (table) => [

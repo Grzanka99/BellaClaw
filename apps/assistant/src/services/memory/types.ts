@@ -34,7 +34,6 @@ const SOptionalFactId = z
 
     return value;
   });
-
 export const SFact = z.object({
   id: z.number(),
   chatId: z.string(),
@@ -42,6 +41,16 @@ export const SFact = z.object({
   embedding: SFactEmbedding,
   createdAt: z.coerce.date(),
   supersededBy: SOptionalFactId,
+  forgottenAt: z
+    .number()
+    .nullable()
+    .transform((value) => {
+      if (value === null) {
+        return undefined;
+      }
+
+      return new Date(value);
+    }),
   sourceMessageId: z.number(),
 });
 
@@ -50,6 +59,7 @@ export const SPreparedFact = SFact.omit({
   chatId: true,
   createdAt: true,
   supersededBy: true,
+  forgottenAt: true,
 }).extend({
   supersedesFactIds: z.array(z.number().int().positive()),
 });

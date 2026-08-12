@@ -52,6 +52,7 @@ const TOOL_INSTRUCTIONS = {
   updateCalendarEvent: "./src/services/ai/tools/update-calendar-event/instructions.xml",
   deleteCalendarEvent: "./src/services/ai/tools/delete-calendar-event/instructions.xml",
   searchMemory: "./src/services/ai/tools/search-memory/instructions.xml",
+  forgetMemory: "./src/services/ai/tools/forget-memory/instructions.xml",
   getSettings: "./src/services/ai/tools/get-settings/instructions.xml",
   updateSettings: "./src/services/ai/tools/update-settings/instructions.xml",
   listCronJobs: "./src/services/ai/tools/list-cron-jobs/instructions.xml",
@@ -543,7 +544,7 @@ export class AgentHarness {
         return [...createSchedulingTools(context), ...createWebTools()];
       case EAgentName.ScheduledTask:
         return [
-          ...createMemoryTools(context),
+          ...createMemoryTools(context).filter((tool) => tool.name === "search-memory"),
           ...createWebTools(),
           ...createCalendarTools(context).filter((tool) => {
             return (
@@ -571,7 +572,7 @@ export class AgentHarness {
       case EAgentName.Main:
         return [TOOL_INSTRUCTIONS.webSearch, TOOL_INSTRUCTIONS.webFetch];
       case EAgentName.Memory:
-        return [TOOL_INSTRUCTIONS.searchMemory];
+        return [TOOL_INSTRUCTIONS.searchMemory, TOOL_INSTRUCTIONS.forgetMemory];
       case EAgentName.Settings:
         return [TOOL_INSTRUCTIONS.getSettings, TOOL_INSTRUCTIONS.updateSettings];
       case EAgentName.Scheduling:
@@ -641,7 +642,7 @@ export class AgentHarness {
 
       if (delegate.target === EAgentName.Memory) {
         description =
-          "Required before answering questions that depend on personal user facts. Run the Memory specialist to retrieve the relevant facts.";
+          "Required for personal user facts and forget requests. Run the Memory specialist to retrieve or forget the relevant facts.";
       }
 
       return {

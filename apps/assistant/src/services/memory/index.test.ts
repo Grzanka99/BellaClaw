@@ -91,39 +91,6 @@ describe("Memory", () => {
     });
   });
 
-  describe("remove", () => {
-    test("removes a memory and returns it", async () => {
-      const memory = Memory.instance;
-      await memory.save({
-        chatId: "chat-remove",
-        author: ERole.User,
-        importance: EMemoryImportance.Medium,
-        message: "Memory to remove",
-      });
-
-      const result = await memory.remove("1");
-
-      expect(result).not.toHaveProperty("operation");
-      expect(result).toEqual({
-        id: 1,
-        chatId: "chat-remove",
-        author: ERole.User,
-        importance: EMemoryImportance.Medium,
-        message: "Memory to remove",
-        createdAt: expect.any(Date),
-        lastReadAt: expect.any(Date),
-      });
-    });
-
-    test("returns error when memory not found", async () => {
-      const memory = Memory.instance;
-      const result = await memory.remove("999");
-
-      expect(result).toHaveProperty("operation", "delete");
-      expect(result).toHaveProperty("error", "No memory found with the given id");
-    });
-  });
-
   describe("findRecent", () => {
     test("returns limited memories ordered by createdAt DESC", async () => {
       const memory = Memory.instance;
@@ -217,7 +184,7 @@ describe("Memory", () => {
       }
       expect(firstDimension).toBeCloseTo(1);
 
-      await memory.commitLiveFactWindow({
+      const other = await memory.commitLiveFactWindow({
         chatId: "chat-b",
         expectedLastProcessedMessageId: 0,
         lastProcessedMessageId: 4,
@@ -247,6 +214,44 @@ describe("Memory", () => {
       const candidates = await memory.findLiveFactCandidates("chat-a", embedding(1));
       expect(candidates.map((fact) => fact.text)).toEqual(["The bicycle is named Comet."]);
       expect(await memory.searchFacts("chat-c", embedding(1), 10)).toEqual([]);
+
+      const forgottenIds = searchResults.map((fact) => fact.id);
+      await memory.forgetFacts("chat-a", forgottenIds);
+      expect(await memory.searchFacts("chat-a", embedding(1), 10)).toEqual([]);
+      expect(await memory.findLiveFactCandidates("chat-a", embedding(1))).toEqual([]);
+
+      const survivor = result.facts[2];
+      const crossChatFact = other.committed && other.facts[0];
+      if (survivor === undefined || !crossChatFact) {
+        throw new Error("Expected rejection facts");
+      }
+      await expect(memory.forgetFacts("chat-a", [survivor.id, crossChatFact.id])).rejects.toThrow(
+        "Every fact ID must identify a same-chat live fact",
+      );
+      expect((await memory.searchFacts("chat-a", survivor.embedding, 10))[0]?.id).toBe(survivor.id);
+
+      await memory.save({
+        chatId: "chat-a",
+        author: ERole.User,
+        importance: EMemoryImportance.Medium,
+        message: "The bicycle is named Comet again.",
+      });
+      await memory.commitLiveFactWindow({
+        chatId: "chat-a",
+        expectedLastProcessedMessageId: 3,
+        lastProcessedMessageId: 5,
+        facts: [
+          {
+            text: "The bicycle is named Comet again.",
+            embedding: embedding(1),
+            sourceMessageId: 5,
+            supersedesFactIds: [],
+          },
+        ],
+      });
+      expect((await memory.searchFacts("chat-a", embedding(1), 10))[0]?.text).toBe(
+        "The bicycle is named Comet again.",
+      );
     });
 
     test("discovers chats and carries both transcript roles through ordered bounded windows", async () => {

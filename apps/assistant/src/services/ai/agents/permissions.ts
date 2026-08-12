@@ -20,7 +20,7 @@ export const AGENT_TOOL_NAMES: Record<EAgentName, readonly string[]> = {
     "delegate-settings",
     "delegate-scheduling",
   ],
-  [EAgentName.Memory]: ["search-memory"],
+  [EAgentName.Memory]: ["search-memory", "forget-memory"],
   [EAgentName.Settings]: ["get-settings", "update-settings"],
   [EAgentName.Scheduling]: [
     "list-cron-jobs",

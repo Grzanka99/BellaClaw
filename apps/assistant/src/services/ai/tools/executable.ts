@@ -26,6 +26,12 @@ import {
   type TFindCalendarAvailabilityArgs,
   validateFindCalendarAvailabilityArgs,
 } from "./find-calendar-availability/handler";
+import {
+  FORGET_MEMORY_TOOL,
+  SForgetMemoryArgs,
+  type TForgetMemoryArgs,
+} from "./forget-memory/definition";
+import { handleForgetMemory } from "./forget-memory/handler";
 import { GET_SETTINGS_TOOL } from "./get-settings/definition";
 import { SGetSettingsArgs } from "./get-settings/handler";
 import { LIST_CALENDAR_EVENTS_TOOL } from "./list-calendar-events/definition";
@@ -115,6 +121,18 @@ export function createMemoryTools(context: TToolExecutionContext) {
       execute: async (_toolCallId: string, args: unknown) => {
         const parsedArgs: TSearchMemoryArgs = Value.Decode(SSearchMemoryArgs, args);
         const result = await handleSearchMemory(requireChatId(context.chatId), parsedArgs);
+        return textResult(result);
+      },
+    },
+    {
+      name: FORGET_MEMORY_TOOL,
+      label: "Forget memory",
+      description: "Forget resolved conversation facts",
+      parameters: SForgetMemoryArgs,
+      executionMode: SEQUENTIAL,
+      execute: async (_toolCallId: string, args: unknown) => {
+        const parsedArgs: TForgetMemoryArgs = Value.Decode(SForgetMemoryArgs, args);
+        const result = await handleForgetMemory(requireChatId(context.chatId), parsedArgs);
         return textResult(result);
       },
     },

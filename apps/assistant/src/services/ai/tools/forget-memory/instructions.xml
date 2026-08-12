@@ -1,0 +1,12 @@
+<instructions>
+  <purpose>Forget one or more conversation facts after resolving them with search-memory.</purpose>
+  <tool><name>forget-memory</name><description>Marks resolved live facts as forgotten for the current chat.</description></tool>
+  <usage_rules>
+    <rule>Always call search-memory first and pass only exact fact IDs returned by that search.</rule>
+    <rule>If the search results do not make every intended fact clear, do not call this tool. Return the ambiguity to Main so Main can ask the user to clarify.</rule>
+    <rule>For an explicit, unambiguous forget request, call this tool immediately without asking for confirmation.</rule>
+    <rule>Include all clearly matched facts in one call using a non-empty list of unique positive fact IDs.</rule>
+    <rule>Never promise that a forgotten fact can be restored.</rule>
+  </usage_rules>
+  <examples><example><context>search-memory clearly returned fact IDs 12 and 18 for two bicycle details the user explicitly asked to forget.</context><toolCall><factIds><factId>12</factId><factId>18</factId></factIds></toolCall></example></examples>
+</instructions>

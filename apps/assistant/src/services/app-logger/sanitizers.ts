@@ -78,6 +78,16 @@ export function sanitizeToolCallArguments(toolCall: TToolCall): TSanitizedLogDet
     case "search-memory": {
       return sanitizeSearchMemoryArguments(args);
     }
+    case "forget-memory": {
+      let factCount = 0;
+      if (Array.isArray(args.factIds)) {
+        factCount = args.factIds.length;
+      }
+      return {
+        summary: `forget-memory args factCount=${factCount}`,
+        metadata: { argumentsValid: true, factCount },
+      };
+    }
     case "web-search": {
       return sanitizeWebSearchArguments(args);
     }
@@ -138,6 +148,16 @@ export function sanitizeToolResult(result: TNormalizedToolResult): TSanitizedLog
   switch (result.toolName) {
     case "search-memory": {
       return sanitizeSearchMemoryResult(data);
+    }
+    case "forget-memory": {
+      let forgottenFactCount = 0;
+      if (isRecord(data) && Array.isArray(data.forgottenFactIds)) {
+        forgottenFactCount = data.forgottenFactIds.length;
+      }
+      return {
+        summary: `forget-memory forgot ${forgottenFactCount} facts`,
+        metadata: { status: "completed", forgottenFactCount },
+      };
     }
     case "web-search": {
       return sanitizeWebSearchResult(data);

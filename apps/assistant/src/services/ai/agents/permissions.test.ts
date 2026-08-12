@@ -27,7 +27,7 @@ describe("agent permissions", () => {
       "delegate-settings",
       "delegate-scheduling",
     ]);
-    expect(AGENT_TOOL_NAMES[EAgentName.Memory]).toEqual(["search-memory"]);
+    expect(AGENT_TOOL_NAMES[EAgentName.Memory]).toEqual(["search-memory", "forget-memory"]);
     expect(AGENT_TOOL_NAMES[EAgentName.Settings]).toEqual(["get-settings", "update-settings"]);
     expect(AGENT_TOOL_NAMES[EAgentName.Scheduling]).toEqual([
       "list-cron-jobs",
@@ -107,6 +107,7 @@ describe("agent permissions", () => {
       for (const tool of tools) {
         if (
           tool.name === "delegate-scheduling" ||
+          tool.name === "forget-memory" ||
           tool.name === "delegate-calendar" ||
           tool.name === "remove-readonly-calendar" ||
           tool.name === "create-calendar-event" ||
