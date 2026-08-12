@@ -1,20 +1,5 @@
 import { AsyncQueue, createLogger, type TLogger } from "@bellaclaw/shared";
-import {
-  and,
-  asc,
-  desc,
-  eq,
-  gt,
-  inArray,
-  isNotNull,
-  isNull,
-  lt,
-  lte,
-  notExists,
-  or,
-  sql,
-} from "drizzle-orm";
-import { alias } from "drizzle-orm/sqlite-core";
+import { and, asc, desc, eq, gt, inArray, isNull, lte, sql } from "drizzle-orm";
 import { z } from "zod";
 import { ERole } from "../ai/types";
 import { DatabaseConnector } from "../database";
@@ -49,7 +34,6 @@ const MAX_FACT_COSINE_DISTANCE = 0.7;
 const MAX_SUPERSESSION_COSINE_DISTANCE = 0.5;
 const SUPERSESSION_CANDIDATE_LIMIT = 10;
 const SQueryEmbedding = z.array(z.number()).length(EMBEDDING_DIMENSIONS);
-const priorMemoriesTable = alias(memoriesTable, "priorMemories");
 
 type TMemoryError = {
   operation: "write" | "read" | "update";
@@ -88,41 +72,7 @@ export class Memory {
       const results = await this.db
         .select()
         .from(memoriesTable)
-        .where(
-          and(
-            eq(memoriesTable.chatId, chatId),
-            notExists(
-              this.db
-                .select({ id: factsTable.id })
-                .from(factsTable)
-                .where(
-                  and(
-                    eq(factsTable.chatId, chatId),
-                    isNotNull(factsTable.forgottenAt),
-                    or(
-                      eq(factsTable.sourceMessageId, memoriesTable.id),
-                      and(
-                        eq(memoriesTable.author, ERole.Assistant),
-                        lt(factsTable.sourceMessageId, memoriesTable.id),
-                        notExists(
-                          this.db
-                            .select({ id: priorMemoriesTable.id })
-                            .from(priorMemoriesTable)
-                            .where(
-                              and(
-                                eq(priorMemoriesTable.chatId, chatId),
-                                gt(priorMemoriesTable.id, factsTable.sourceMessageId),
-                                lt(priorMemoriesTable.id, memoriesTable.id),
-                              ),
-                            ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-            ),
-          ),
-        )
+        .where(eq(memoriesTable.chatId, chatId))
         .orderBy(desc(memoriesTable.createdAt))
         .limit(limit);
 
@@ -309,42 +259,7 @@ export class Memory {
     const contextRows = await this.db
       .select()
       .from(memoriesTable)
-      .where(
-        and(
-          eq(memoriesTable.chatId, chatId),
-          lte(memoriesTable.id, lastProcessedMessageId),
-          notExists(
-            this.db
-              .select({ id: factsTable.id })
-              .from(factsTable)
-              .where(
-                and(
-                  eq(factsTable.chatId, chatId),
-                  isNotNull(factsTable.forgottenAt),
-                  or(
-                    eq(factsTable.sourceMessageId, memoriesTable.id),
-                    and(
-                      eq(memoriesTable.author, ERole.Assistant),
-                      lt(factsTable.sourceMessageId, memoriesTable.id),
-                      notExists(
-                        this.db
-                          .select({ id: priorMemoriesTable.id })
-                          .from(priorMemoriesTable)
-                          .where(
-                            and(
-                              eq(priorMemoriesTable.chatId, chatId),
-                              gt(priorMemoriesTable.id, factsTable.sourceMessageId),
-                              lt(priorMemoriesTable.id, memoriesTable.id),
-                            ),
-                          ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-          ),
-        ),
-      )
+      .where(and(eq(memoriesTable.chatId, chatId), lte(memoriesTable.id, lastProcessedMessageId)))
       .orderBy(desc(memoriesTable.id))
       .limit(FACT_CONTEXT_SIZE);
     const messageRows = await this.db
