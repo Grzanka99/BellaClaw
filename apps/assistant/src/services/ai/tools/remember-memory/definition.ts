@@ -8,12 +8,10 @@ export const SRememberMemoryArgs = Type.Object(
       pattern: "\\S",
       description: "One durable fact to remember",
     }),
-    supersedesFactIds: Type.Optional(
-      Type.Array(Type.Integer({ minimum: 1 }), {
-        uniqueItems: true,
-        description: "Live fact IDs this fact replaces",
-      }),
-    ),
+    supersedesFactIds: Type.Array(Type.Integer({ minimum: 1 }), {
+      uniqueItems: true,
+      description: "Live fact IDs this fact replaces; empty when it replaces none",
+    }),
   },
   { additionalProperties: false },
 );

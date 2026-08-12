@@ -18,7 +18,7 @@ export async function handleRememberMemory(chatId: string, args: TRememberMemory
       chatId,
       fact,
       embedding,
-      args.supersedesFactIds ?? [],
+      args.supersedesFactIds,
     );
     return { rememberedFactId: remembered.id };
   } catch (error) {

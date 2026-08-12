@@ -81,22 +81,19 @@ export function sanitizeToolCallArguments(toolCall: TToolCall): TSanitizedLogDet
     case "remember-memory": {
       const fact = readString(args, "fact");
       let supersedesFactCount = 0;
-      let supersedesValid = true;
-      if (args.supersedesFactIds !== undefined) {
-        supersedesValid = false;
-        if (Array.isArray(args.supersedesFactIds)) {
-          supersedesFactCount = args.supersedesFactIds.length;
-          supersedesValid =
-            args.supersedesFactIds.every(
-              (factId) => typeof factId === "number" && Number.isInteger(factId) && factId > 0,
-            ) && new Set(args.supersedesFactIds).size === supersedesFactCount;
-        }
+      let supersedesValid = false;
+      if (Array.isArray(args.supersedesFactIds)) {
+        supersedesFactCount = args.supersedesFactIds.length;
+        supersedesValid =
+          args.supersedesFactIds.every(
+            (factId) => typeof factId === "number" && Number.isInteger(factId) && factId > 0,
+          ) && new Set(args.supersedesFactIds).size === supersedesFactCount;
       }
       return {
         summary: `remember-memory args factChars=${fact?.length ?? 0} supersedes=${supersedesFactCount}`,
         metadata: {
           argumentsValid:
-            Object.keys(args).every((key) => key === "fact" || key === "supersedesFactIds") &&
+            Object.keys(args).length === 2 &&
             fact !== undefined &&
             fact.trim().length > 0 &&
             supersedesValid,

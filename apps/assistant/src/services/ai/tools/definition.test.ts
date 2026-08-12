@@ -74,7 +74,9 @@ describe("AI tool definitions", () => {
     expect(Value.Check(SScheduleOnceArgs, { name: "x", fireAt: "invalid" })).toBe(false);
     expect(Value.Check(SScheduleRecurringArgs, { name: "x", pattern: "0 8 * * *" })).toBe(true);
     expect(Value.Check(SSearchMemoryArgs, { query: "facts", limit: 0 })).toBe(false);
-    expect(Value.Check(SRememberMemoryArgs, { fact: "The user likes tea." })).toBe(true);
+    expect(
+      Value.Check(SRememberMemoryArgs, { fact: "The user likes tea.", supersedesFactIds: [] }),
+    ).toBe(true);
     expect(Value.Check(SForgetMemoryArgs, { factIds: [1, 2] })).toBe(true);
     for (const factIds of [[], [1, 1], [0], [1.5]]) {
       expect(Value.Check(SForgetMemoryArgs, { factIds })).toBe(false);

@@ -5,9 +5,9 @@
     <rule>Always call search-memory first for the same subject.</rule>
     <rule>Use one complete sentence with one durable claim and an explicit subject.</rule>
     <rule>If the same fact is already live, report that it is already remembered and do not call this tool.</rule>
-    <rule>When the new fact replaces clearly matched live facts, pass all their IDs in supersedesFactIds.</rule>
+    <rule>Pass every clearly replaced live fact ID in supersedesFactIds, or an empty list when none are replaced.</rule>
     <rule>If the user's intended fact is ambiguous, return the ambiguity to Main so Main can ask for clarification.</rule>
     <rule>Remembering creates a new fact. Never claim that a forgotten row was restored.</rule>
   </usage_rules>
-  <examples><example><context>The user explicitly says their bicycle is named Comet, and search-memory finds no live bicycle-name fact.</context><toolCall><fact>The user's bicycle is named Comet.</fact></toolCall></example></examples>
+  <examples><example><context>The user explicitly says their bicycle is named Comet, and search-memory finds no live bicycle-name fact.</context><toolCall><fact>The user's bicycle is named Comet.</fact><supersedesFactIds /></toolCall></example></examples>
 </instructions>
