@@ -237,9 +237,10 @@ describe("Memory", () => {
         message: "The bicycle is named Comet again.",
       });
       await memory.rememberFact("chat-a", "The bicycle is named Comet again.", embedding(1), []);
-      expect((await memory.searchFacts("chat-a", embedding(1), 10))[0]?.text).toBe(
-        "The bicycle is named Comet again.",
-      );
+      await memory.rememberFact("chat-a", "The bicycle is named Comet again.", embedding(1), []);
+      expect(
+        (await memory.searchFacts("chat-a", embedding(1), 10)).map((fact) => fact.text),
+      ).toEqual(["The bicycle is named Comet again."]);
     });
 
     test("discovers chats and carries both transcript roles through ordered bounded windows", async () => {

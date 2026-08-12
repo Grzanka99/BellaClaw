@@ -255,6 +255,27 @@ export class Memory {
           throw new Error("Failed to validate remembered fact");
         }
 
+        const existing = await tx
+          .select()
+          .from(factsTable)
+          .where(
+            and(
+              eq(factsTable.chatId, chatId),
+              eq(factsTable.text, prepared.data.text),
+              isNull(factsTable.supersededBy),
+              isNull(factsTable.forgottenAt),
+            ),
+          )
+          .get();
+        if (existing !== undefined) {
+          const parsedExisting = SFact.safeParse(existing);
+          if (!parsedExisting.success) {
+            throw new Error("Failed to parse existing remembered fact");
+          }
+
+          return parsedExisting.data;
+        }
+
         const inserted = await tx
           .insert(factsTable)
           .values({
