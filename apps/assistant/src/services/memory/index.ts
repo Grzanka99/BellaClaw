@@ -1,5 +1,17 @@
 import { AsyncQueue, createLogger, type TLogger } from "@bellaclaw/shared";
-import { and, asc, desc, eq, gt, inArray, isNull, lte, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  inArray,
+  isNotNull,
+  isNull,
+  lte,
+  notExists,
+  sql,
+} from "drizzle-orm";
 import { z } from "zod";
 import { ERole } from "../ai/types";
 import { DatabaseConnector } from "../database";
@@ -72,7 +84,23 @@ export class Memory {
       const results = await this.db
         .select()
         .from(memoriesTable)
-        .where(eq(memoriesTable.chatId, chatId))
+        .where(
+          and(
+            eq(memoriesTable.chatId, chatId),
+            notExists(
+              this.db
+                .select({ id: factsTable.id })
+                .from(factsTable)
+                .where(
+                  and(
+                    eq(factsTable.chatId, chatId),
+                    eq(factsTable.sourceMessageId, memoriesTable.id),
+                    isNotNull(factsTable.forgottenAt),
+                  ),
+                ),
+            ),
+          ),
+        )
         .orderBy(desc(memoriesTable.createdAt))
         .limit(limit);
 
