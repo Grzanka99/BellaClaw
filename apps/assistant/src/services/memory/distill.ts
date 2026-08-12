@@ -109,6 +109,7 @@ export class FactDistiller {
         "starting with 'The user'. Never write a bare fragment such as 'Has a girlfriend named X':",
         "retrieval compares whole sentences, and fragments are matched far less reliably.",
         "Never record a request, instruction, or command the user gave the assistant.",
+        "Never extract a restated fact when that same message asks the assistant to forget it.",
         "Reminders, alarms, schedules, cron jobs, settings changes, and provider or model choices",
         "are owned by other systems and must never become facts, even when the user states them.",
         "Never record that the user asked a question, and never record the assistant's own actions",
