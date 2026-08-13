@@ -1,5 +1,10 @@
 import { type Static, Type } from "@earendil-works/pi-ai";
 import type { TCronJob } from "../../../../lib/cron-engine";
+import {
+  countCronContentModes,
+  normalizeCronContentFields,
+  validateCronFallbackPairing,
+} from "../cron-content";
 
 export const SUpdateCronJobArgs = Type.Object(
   {
@@ -35,38 +40,20 @@ type TValidatedUpdateCronJobArgs = Omit<TUpdateCronJobArgs, "fireAt"> & {
   fireAt?: Date;
 };
 
-export function validateUpdateCronJobArgs(args: TUpdateCronJobArgs): TValidatedUpdateCronJobArgs {
+export function validateUpdateCronJobArgs(
+  rawArgs: TUpdateCronJobArgs,
+): TValidatedUpdateCronJobArgs {
+  const args = { ...rawArgs, ...normalizeCronContentFields(rawArgs) };
+
   if (args.pattern !== undefined && args.fireAt !== undefined) {
     throw new Error("Provide either pattern or fireAt, not both");
   }
 
-  const contentModeCount = [args.reminderText, args.reminderPromptData, args.taskPrompt].filter(
-    (field) => field !== undefined,
-  ).length;
-
-  if (contentModeCount > 1) {
+  if (countCronContentModes(args) > 1) {
     throw new Error("Provide only one of reminderText, reminderPromptData, or taskPrompt");
   }
 
-  if (args.reminderPromptData !== undefined && args.reminderFallbackText === undefined) {
-    throw new Error("reminderFallbackText is required when reminderPromptData is set");
-  }
-
-  if (
-    args.reminderFallbackText !== undefined &&
-    args.reminderText === undefined &&
-    args.reminderPromptData === undefined
-  ) {
-    throw new Error("reminderFallbackText requires reminderText or reminderPromptData");
-  }
-
-  if (args.taskPrompt !== undefined && args.taskFallbackText === undefined) {
-    throw new Error("taskFallbackText is required when taskPrompt is set");
-  }
-
-  if (args.taskFallbackText !== undefined && args.taskPrompt === undefined) {
-    throw new Error("taskFallbackText requires taskPrompt");
-  }
+  validateCronFallbackPairing(args);
 
   const { fireAt, ...rest } = args;
 

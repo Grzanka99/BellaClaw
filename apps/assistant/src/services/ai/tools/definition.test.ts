@@ -110,6 +110,49 @@ describe("AI tool definitions", () => {
     expect(once.fireAt).toEqual(new Date("2026-07-13T10:00:00.000Z"));
   });
 
+  test("does not count blank schedule content as a second content mode", () => {
+    const blanks = {
+      reminderPromptData: "",
+      reminderFallbackText: "   ",
+      taskPrompt: "",
+      taskFallbackText: "   ",
+    };
+
+    const once = validateScheduleOnceArgs({
+      name: "blank-fields-reminder",
+      fireAt: "2026-07-13T12:00:00+02:00",
+      reminderText: "Reminder",
+      ...blanks,
+    });
+    expect(once.reminderText).toBe("Reminder");
+    expect(once.taskPrompt).toBeUndefined();
+
+    const recurring = validateScheduleRecurringArgs({
+      name: "blank-fields-recurring",
+      pattern: "0 8 * * *",
+      reminderText: "Reminder",
+      ...blanks,
+    });
+    expect(recurring.reminderText).toBe("Reminder");
+    expect(recurring.taskPrompt).toBeUndefined();
+  });
+
+  test("treats blank cron job updates as absent instead of content edits", () => {
+    const update = validateUpdateCronJobArgs({
+      name: "daily-news",
+      group: "",
+      reminderText: "   ",
+      reminderPromptData: "",
+      reminderFallbackText: "",
+      taskPrompt: "",
+      taskFallbackText: "",
+    });
+
+    expect(update.group).toBeUndefined();
+    expect(update.reminderText).toBeUndefined();
+    expect(update.taskPrompt).toBeUndefined();
+  });
+
   test("enforce cron domain constraints", () => {
     expect(() =>
       validateScheduleRecurringArgs({
