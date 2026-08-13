@@ -9,18 +9,26 @@ type TCronContentFields = {
   taskFallbackText?: TOption<string>;
 };
 
+function absentIfBlank(value: TOption<string>): TOption<string> {
+  if (value === undefined || value.trim() === "") {
+    return undefined;
+  }
+
+  return value;
+}
+
 /**
- * Models routinely send "" for optional content fields they mean to omit.
- * Blank values must be treated as absent so they neither trip the
+ * Models routinely send "" or whitespace for optional content fields they mean
+ * to omit. Blank values must be treated as absent so they neither trip the
  * one-content-mode checks nor overwrite stored job content.
  */
 export function normalizeCronContentFields(args: TCronContentFields): TCronContentFields {
   return {
-    group: args.group || undefined,
-    reminderText: args.reminderText || undefined,
-    reminderPromptData: args.reminderPromptData || undefined,
-    reminderFallbackText: args.reminderFallbackText || undefined,
-    taskPrompt: args.taskPrompt || undefined,
-    taskFallbackText: args.taskFallbackText || undefined,
+    group: absentIfBlank(args.group),
+    reminderText: absentIfBlank(args.reminderText),
+    reminderPromptData: absentIfBlank(args.reminderPromptData),
+    reminderFallbackText: absentIfBlank(args.reminderFallbackText),
+    taskPrompt: absentIfBlank(args.taskPrompt),
+    taskFallbackText: absentIfBlank(args.taskFallbackText),
   };
 }
