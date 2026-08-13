@@ -39,9 +39,19 @@ export type TScheduleOnceArgs = Static<typeof SScheduleOnceArgs>;
 export type TScheduleOnceResult = TCronJob;
 
 export function validateScheduleOnceArgs(args: TScheduleOnceArgs) {
-  const contentModeCount = [args.reminderText, args.reminderPromptData, args.taskPrompt].filter(
-    (field) => field !== undefined,
-  ).length;
+  const normalizedArgs = {
+    ...args,
+    reminderText: args.reminderText || undefined,
+    reminderPromptData: args.reminderPromptData || undefined,
+    reminderFallbackText: args.reminderFallbackText || undefined,
+    taskPrompt: args.taskPrompt || undefined,
+    taskFallbackText: args.taskFallbackText || undefined,
+  };
+  const contentModeCount = [
+    normalizedArgs.reminderText,
+    normalizedArgs.reminderPromptData,
+    normalizedArgs.taskPrompt,
+  ].filter((field) => field !== undefined).length;
 
   if (contentModeCount === 0) {
     throw new Error("Provide reminderText, reminderPromptData, or taskPrompt");
@@ -51,10 +61,10 @@ export function validateScheduleOnceArgs(args: TScheduleOnceArgs) {
     throw new Error("Provide only one of reminderText, reminderPromptData, or taskPrompt");
   }
 
-  validateFallbackPairing(args);
+  validateFallbackPairing(normalizedArgs);
 
   return {
-    ...args,
+    ...normalizedArgs,
     fireAt: new Date(args.fireAt),
   };
 }

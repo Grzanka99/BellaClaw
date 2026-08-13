@@ -110,6 +110,24 @@ describe("AI tool definitions", () => {
     expect(once.fireAt).toEqual(new Date("2026-07-13T10:00:00.000Z"));
   });
 
+  test("treats blank optional one-time schedule content as omitted", () => {
+    const once = validateScheduleOnceArgs({
+      name: "blank-fields-reminder",
+      fireAt: "2026-07-13T12:00:00+02:00",
+      reminderText: "Reminder",
+      reminderPromptData: "",
+      reminderFallbackText: "",
+      taskPrompt: "",
+      taskFallbackText: "",
+    });
+
+    expect(once.reminderText).toBe("Reminder");
+    expect(once.reminderPromptData).toBeUndefined();
+    expect(once.reminderFallbackText).toBeUndefined();
+    expect(once.taskPrompt).toBeUndefined();
+    expect(once.taskFallbackText).toBeUndefined();
+  });
+
   test("enforce cron domain constraints", () => {
     expect(() =>
       validateScheduleRecurringArgs({
