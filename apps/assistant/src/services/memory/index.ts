@@ -36,7 +36,7 @@ const SUPERSESSION_CANDIDATE_LIMIT = 10;
 const SQueryEmbedding = z.array(z.number()).length(EMBEDDING_DIMENSIONS);
 
 type TMemoryError = {
-  operation: "write" | "read" | "update" | "delete";
+  operation: "write" | "read" | "update";
   error: unknown;
 };
 
@@ -155,40 +155,6 @@ export class Memory {
     }
   }
 
-  public async remove(id: string): Promise<TMemory | TMemoryError> {
-    try {
-      const memoryId = Number(id);
-      const res = await this.queue.enqueue(async () =>
-        this.db.delete(memoriesTable).where(eq(memoriesTable.id, memoryId)).returning().get(),
-      );
-
-      if (!res) {
-        return {
-          operation: "delete",
-          error: "No memory found with the given id",
-        };
-      }
-
-      const parsed = SMemory.safeParse(res);
-
-      if (!parsed.success) {
-        this.logger.error("Failed to parse removed memory result");
-        return {
-          operation: "delete",
-          error: parsed.error,
-        };
-      }
-
-      return parsed.data;
-    } catch (error) {
-      this.logger.error(`Something went wrong while removing memory: ${String(error)}`);
-      return {
-        operation: "delete",
-        error,
-      };
-    }
-  }
-
   public async findChatIds(): Promise<string[]> {
     return this.queue.enqueue(async () => {
       const rows = await this.db
@@ -234,6 +200,127 @@ export class Memory {
     limit: number,
   ): Promise<TFactSearchResult[]> {
     return this.findFactsByDistance(chatId, embedding, limit, MAX_FACT_COSINE_DISTANCE);
+  }
+
+  public async forgetFacts(chatId: string, factIds: number[]): Promise<number[]> {
+    return this.queue.enqueue(async () =>
+      this.db.transaction(async (tx) => {
+        const result = await tx
+          .update(factsTable)
+          .set({ forgottenAt: Date.now() })
+          .where(
+            and(
+              eq(factsTable.chatId, chatId),
+              inArray(factsTable.id, factIds),
+              isNull(factsTable.supersededBy),
+              isNull(factsTable.forgottenAt),
+            ),
+          );
+
+        if (result.rowsAffected !== factIds.length) {
+          throw new Error("Every fact ID must identify a same-chat live fact");
+        }
+
+        return factIds;
+      }),
+    );
+  }
+
+  public async rememberFact(
+    chatId: string,
+    text: string,
+    sourceMessage: string,
+    embedding: number[],
+    supersedesFactIds: number[],
+  ): Promise<TFact> {
+    return this.queue.enqueue(async () =>
+      this.db.transaction(async (tx) => {
+        const existing = await tx
+          .select()
+          .from(factsTable)
+          .where(
+            and(
+              eq(factsTable.chatId, chatId),
+              eq(factsTable.text, text),
+              isNull(factsTable.supersededBy),
+              isNull(factsTable.forgottenAt),
+            ),
+          )
+          .get();
+        if (existing !== undefined) {
+          const parsedExisting = SFact.safeParse(existing);
+          if (!parsedExisting.success) {
+            throw new Error("Failed to parse existing remembered fact");
+          }
+
+          return parsedExisting.data;
+        }
+
+        const source = await tx
+          .select({ id: memoriesTable.id })
+          .from(memoriesTable)
+          .where(
+            and(
+              eq(memoriesTable.chatId, chatId),
+              eq(memoriesTable.author, ERole.User),
+              eq(memoriesTable.message, sourceMessage),
+            ),
+          )
+          .orderBy(desc(memoriesTable.id))
+          .limit(1)
+          .get();
+        if (source === undefined) {
+          throw new Error("A remembered fact requires its exact same-chat user transcript source");
+        }
+
+        const prepared = SPreparedFact.safeParse({
+          text,
+          embedding,
+          sourceMessageId: source.id,
+          supersedesFactIds,
+        });
+        if (!prepared.success) {
+          throw new Error("Failed to validate remembered fact");
+        }
+
+        const inserted = await tx
+          .insert(factsTable)
+          .values({
+            chatId,
+            text: prepared.data.text,
+            embedding: prepared.data.embedding,
+            createdAt: Date.now(),
+            supersededBy: null,
+            forgottenAt: null,
+            sourceMessageId: prepared.data.sourceMessageId,
+          })
+          .returning()
+          .get();
+        const parsed = SFact.safeParse(inserted);
+        if (!parsed.success) {
+          throw new Error("Failed to parse remembered fact");
+        }
+
+        if (prepared.data.supersedesFactIds.length > 0) {
+          const result = await tx
+            .update(factsTable)
+            .set({ supersededBy: parsed.data.id })
+            .where(
+              and(
+                eq(factsTable.chatId, chatId),
+                inArray(factsTable.id, prepared.data.supersedesFactIds),
+                isNull(factsTable.supersededBy),
+                isNull(factsTable.forgottenAt),
+              ),
+            );
+          if (result.rowsAffected !== prepared.data.supersedesFactIds.length) {
+            throw new Error("Failed to supersede every remembered same-chat live fact");
+          }
+        }
+
+        return parsed.data;
+      }),
+    );
   }
 
   // readLiveState and readTranscriptWindow are queue-free by design: they run
@@ -318,7 +405,13 @@ export class Memory {
           distance,
         })
         .from(factsTable)
-        .where(and(eq(factsTable.chatId, chatId), isNull(factsTable.supersededBy)))
+        .where(
+          and(
+            eq(factsTable.chatId, chatId),
+            isNull(factsTable.supersededBy),
+            isNull(factsTable.forgottenAt),
+          ),
+        )
         .orderBy(asc(distance))
         .limit(limit);
       const parsed = z.array(SFactSearchResult).safeParse(rows);
@@ -451,6 +544,7 @@ export class Memory {
                   eq(factsTable.chatId, args.chatId),
                   inArray(factsTable.id, preparedFact.supersedesFactIds),
                   isNull(factsTable.supersededBy),
+                  isNull(factsTable.forgottenAt),
                 ),
               );
 

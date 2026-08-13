@@ -4,6 +4,7 @@ import { ECronJobType } from "../../../lib/cron-engine";
 import { fetchWeb, searchWeb } from "../../../lib/web";
 import { CalendarService } from "../../calendar";
 import { CronSingleton } from "../../cron";
+import { MessageHandler } from "../../message-handler";
 import { invalidateMessageHandlerInstructions } from "../../message-handler/instructions";
 import { SettingsService } from "../../settings";
 import { ConfigValidators, EConfigKey, type TConfigRecord } from "../../settings/schema";
@@ -26,6 +27,12 @@ import {
   type TFindCalendarAvailabilityArgs,
   validateFindCalendarAvailabilityArgs,
 } from "./find-calendar-availability/handler";
+import {
+  FORGET_MEMORY_TOOL,
+  SForgetMemoryArgs,
+  type TForgetMemoryArgs,
+} from "./forget-memory/definition";
+import { handleForgetMemory } from "./forget-memory/handler";
 import { GET_SETTINGS_TOOL } from "./get-settings/definition";
 import { SGetSettingsArgs } from "./get-settings/handler";
 import { LIST_CALENDAR_EVENTS_TOOL } from "./list-calendar-events/definition";
@@ -38,6 +45,12 @@ import { LIST_CALENDARS_TOOL } from "./list-calendars/definition";
 import { SListCalendarsArgs } from "./list-calendars/handler";
 import { LIST_CRON_JOBS_TOOL } from "./list-cron-jobs/definition";
 import { SListCronJobsArgs } from "./list-cron-jobs/handler";
+import {
+  REMEMBER_MEMORY_TOOL,
+  SRememberMemoryArgs,
+  type TRememberMemoryArgs,
+} from "./remember-memory/definition";
+import { handleRememberMemory } from "./remember-memory/handler";
 import { REMOVE_READONLY_CALENDAR_TOOL } from "./remove-readonly-calendar/definition";
 import {
   SRemoveReadonlyCalendarArgs,
@@ -114,7 +127,33 @@ export function createMemoryTools(context: TToolExecutionContext) {
       parameters: SSearchMemoryArgs,
       execute: async (_toolCallId: string, args: unknown) => {
         const parsedArgs: TSearchMemoryArgs = Value.Decode(SSearchMemoryArgs, args);
-        const result = await handleSearchMemory(requireChatId(context.chatId), parsedArgs);
+        const chatId = requireChatId(context.chatId);
+        await MessageHandler.getInstance(chatId).ensureFactsCurrent();
+        const result = await handleSearchMemory(chatId, parsedArgs);
+        return textResult(result);
+      },
+    },
+    {
+      name: REMEMBER_MEMORY_TOOL,
+      label: "Remember memory",
+      description: "Store one explicit durable conversation fact",
+      parameters: SRememberMemoryArgs,
+      executionMode: SEQUENTIAL,
+      execute: async (_toolCallId: string, args: unknown) => {
+        const parsedArgs: TRememberMemoryArgs = Value.Decode(SRememberMemoryArgs, args);
+        const result = await handleRememberMemory(requireChatId(context.chatId), parsedArgs);
+        return textResult(result);
+      },
+    },
+    {
+      name: FORGET_MEMORY_TOOL,
+      label: "Forget memory",
+      description: "Forget resolved conversation facts",
+      parameters: SForgetMemoryArgs,
+      executionMode: SEQUENTIAL,
+      execute: async (_toolCallId: string, args: unknown) => {
+        const parsedArgs: TForgetMemoryArgs = Value.Decode(SForgetMemoryArgs, args);
+        const result = await handleForgetMemory(requireChatId(context.chatId), parsedArgs);
         return textResult(result);
       },
     },

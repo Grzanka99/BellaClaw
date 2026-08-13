@@ -193,22 +193,32 @@ export class MessageHandler {
       });
   }
 
+  public async ensureFactsCurrent(): Promise<void> {
+    const settings = await SettingsService.instance.getAll(this.chatId);
+    const success = await this.factQueue.enqueue(() =>
+      this.drainLiveFactWindows(this.chatId, settings, undefined),
+    );
+    if (!success) {
+      throw new Error("Pending fact distillation failed");
+    }
+  }
+
   private async drainLiveFactWindows(
     chatId: string,
     settings: TConfigRecord,
     trace: TOption<TBehaviorTraceContext>,
-  ): Promise<void> {
+  ): Promise<boolean> {
     while (true) {
       const window = await this.memory.loadLiveFactWindow(chatId);
       if (window.messages.length === 0) {
-        return;
+        return true;
       }
 
       const result = await this.factDistiller.processWindow({ window, settings, trace });
 
       if (!result.success) {
         this.logger.error(`drainLiveFactWindows: stopped after ${result.reason} failure`);
-        return;
+        return false;
       }
     }
   }

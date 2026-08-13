@@ -43,12 +43,12 @@ Main can use web tools and delegate to:
 | Specialist | Responsibility |
 | --- | --- |
 | Calendar | Read and manage Google Calendar events and calendar access. |
-| Memory | Search stored conversation memory. |
+| Memory | Search and manage stored conversation facts. |
 | Settings | Read and update per-chat settings. |
 | Scheduling | Create, update, list, and remove reminders or recurring tasks. |
 
-Specialists receive only role-specific tools and cannot delegate again. They do not write
-conversation memory.
+Specialists receive only role-specific tools and cannot delegate again. Only the Memory specialist
+can write conversation facts; other specialists do not write conversation memory.
 
 ## Scheduled Work
 

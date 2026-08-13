@@ -78,6 +78,52 @@ export function sanitizeToolCallArguments(toolCall: TToolCall): TSanitizedLogDet
     case "search-memory": {
       return sanitizeSearchMemoryArguments(args);
     }
+    case "remember-memory": {
+      const fact = readString(args, "fact");
+      const sourceMessage = readString(args, "sourceMessage");
+      let supersedesFactCount = 0;
+      let supersedesValid = false;
+      if (Array.isArray(args.supersedesFactIds)) {
+        supersedesFactCount = args.supersedesFactIds.length;
+        supersedesValid =
+          args.supersedesFactIds.every(
+            (factId) => typeof factId === "number" && Number.isInteger(factId) && factId > 0,
+          ) && new Set(args.supersedesFactIds).size === supersedesFactCount;
+      }
+      return {
+        summary: `remember-memory args factChars=${fact?.length ?? 0} sourceChars=${sourceMessage?.length ?? 0} supersedes=${supersedesFactCount}`,
+        metadata: {
+          argumentsValid:
+            Object.keys(args).length === 3 &&
+            fact !== undefined &&
+            fact.trim().length > 0 &&
+            sourceMessage !== undefined &&
+            sourceMessage.trim().length > 0 &&
+            supersedesValid,
+          factChars: fact?.length ?? 0,
+          sourceMessageChars: sourceMessage?.length ?? 0,
+          supersedesFactCount,
+        },
+      };
+    }
+    case "forget-memory": {
+      let factCount = 0;
+      let argumentsValid = false;
+      if (Array.isArray(args.factIds)) {
+        factCount = args.factIds.length;
+        argumentsValid =
+          Object.keys(args).length === 1 &&
+          factCount > 0 &&
+          args.factIds.every(
+            (factId) => typeof factId === "number" && Number.isInteger(factId) && factId > 0,
+          ) &&
+          new Set(args.factIds).size === factCount;
+      }
+      return {
+        summary: `forget-memory args factCount=${factCount}`,
+        metadata: { argumentsValid, factCount },
+      };
+    }
     case "web-search": {
       return sanitizeWebSearchArguments(args);
     }
@@ -138,6 +184,26 @@ export function sanitizeToolResult(result: TNormalizedToolResult): TSanitizedLog
   switch (result.toolName) {
     case "search-memory": {
       return sanitizeSearchMemoryResult(data);
+    }
+    case "remember-memory": {
+      let rememberedFactCount = 0;
+      if (isRecord(data) && typeof data.rememberedFactId === "number") {
+        rememberedFactCount = 1;
+      }
+      return {
+        summary: `remember-memory stored ${rememberedFactCount} facts`,
+        metadata: { status: "completed", rememberedFactCount },
+      };
+    }
+    case "forget-memory": {
+      let forgottenFactCount = 0;
+      if (isRecord(data) && Array.isArray(data.forgottenFactIds)) {
+        forgottenFactCount = data.forgottenFactIds.length;
+      }
+      return {
+        summary: `forget-memory forgot ${forgottenFactCount} facts`,
+        metadata: { status: "completed", forgottenFactCount },
+      };
     }
     case "web-search": {
       return sanitizeWebSearchResult(data);
