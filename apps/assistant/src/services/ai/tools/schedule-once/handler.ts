@@ -1,5 +1,6 @@
 import { type Static, Type } from "@earendil-works/pi-ai";
 import type { TCronJob } from "../../../../lib/cron-engine";
+import { normalizeCronContentFields } from "../cron-content";
 
 export const SScheduleOnceArgs = Type.Object(
   {
@@ -39,14 +40,7 @@ export type TScheduleOnceArgs = Static<typeof SScheduleOnceArgs>;
 export type TScheduleOnceResult = TCronJob;
 
 export function validateScheduleOnceArgs(args: TScheduleOnceArgs) {
-  const normalizedArgs = {
-    ...args,
-    reminderText: args.reminderText || undefined,
-    reminderPromptData: args.reminderPromptData || undefined,
-    reminderFallbackText: args.reminderFallbackText || undefined,
-    taskPrompt: args.taskPrompt || undefined,
-    taskFallbackText: args.taskFallbackText || undefined,
-  };
+  const normalizedArgs = { ...args, ...normalizeCronContentFields(args) };
   const contentModeCount = [
     normalizedArgs.reminderText,
     normalizedArgs.reminderPromptData,

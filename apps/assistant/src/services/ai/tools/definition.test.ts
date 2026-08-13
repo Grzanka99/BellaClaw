@@ -128,6 +128,45 @@ describe("AI tool definitions", () => {
     expect(once.taskFallbackText).toBeUndefined();
   });
 
+  test("treats blank optional recurring schedule content as omitted", () => {
+    const recurring = validateScheduleRecurringArgs({
+      name: "blank-fields-recurring",
+      pattern: "0 8 * * *",
+      group: "",
+      reminderText: "Reminder",
+      reminderPromptData: "",
+      reminderFallbackText: "",
+      taskPrompt: "",
+      taskFallbackText: "",
+    });
+
+    expect(recurring.reminderText).toBe("Reminder");
+    expect(recurring.group).toBeUndefined();
+    expect(recurring.reminderPromptData).toBeUndefined();
+    expect(recurring.reminderFallbackText).toBeUndefined();
+    expect(recurring.taskPrompt).toBeUndefined();
+    expect(recurring.taskFallbackText).toBeUndefined();
+  });
+
+  test("treats blank cron job updates as absent instead of content edits", () => {
+    const update = validateUpdateCronJobArgs({
+      name: "daily-news",
+      group: "",
+      reminderText: "",
+      reminderPromptData: "",
+      reminderFallbackText: "",
+      taskPrompt: "",
+      taskFallbackText: "",
+    });
+
+    expect(update.group).toBeUndefined();
+    expect(update.reminderText).toBeUndefined();
+    expect(update.reminderPromptData).toBeUndefined();
+    expect(update.reminderFallbackText).toBeUndefined();
+    expect(update.taskPrompt).toBeUndefined();
+    expect(update.taskFallbackText).toBeUndefined();
+  });
+
   test("enforce cron domain constraints", () => {
     expect(() =>
       validateScheduleRecurringArgs({
