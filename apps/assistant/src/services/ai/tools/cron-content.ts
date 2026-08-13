@@ -1,15 +1,15 @@
 import type { TOption } from "@bellaclaw/shared";
 
 type TCronContentFields = {
-  group?: TOption<string>;
-  reminderText?: TOption<string>;
-  reminderPromptData?: TOption<string>;
-  reminderFallbackText?: TOption<string>;
-  taskPrompt?: TOption<string>;
-  taskFallbackText?: TOption<string>;
+  group?: string;
+  reminderText?: string;
+  reminderPromptData?: string;
+  reminderFallbackText?: string;
+  taskPrompt?: string;
+  taskFallbackText?: string;
 };
 
-function absentIfBlank(value: TOption<string>): TOption<string> {
+function absentIfBlank(value?: string): TOption<string> {
   if (value === undefined || value.trim() === "") {
     return undefined;
   }
@@ -31,4 +31,32 @@ export function normalizeCronContentFields(args: TCronContentFields): TCronConte
     taskPrompt: absentIfBlank(args.taskPrompt),
     taskFallbackText: absentIfBlank(args.taskFallbackText),
   };
+}
+
+export function countCronContentModes(args: TCronContentFields): number {
+  return [args.reminderText, args.reminderPromptData, args.taskPrompt].filter(
+    (field) => field !== undefined,
+  ).length;
+}
+
+export function validateCronFallbackPairing(args: TCronContentFields): void {
+  if (args.reminderPromptData !== undefined && args.reminderFallbackText === undefined) {
+    throw new Error("reminderFallbackText is required when reminderPromptData is set");
+  }
+
+  if (
+    args.reminderFallbackText !== undefined &&
+    args.reminderText === undefined &&
+    args.reminderPromptData === undefined
+  ) {
+    throw new Error("reminderFallbackText requires reminderText or reminderPromptData");
+  }
+
+  if (args.taskPrompt !== undefined && args.taskFallbackText === undefined) {
+    throw new Error("taskFallbackText is required when taskPrompt is set");
+  }
+
+  if (args.taskFallbackText !== undefined && args.taskPrompt === undefined) {
+    throw new Error("taskFallbackText requires taskPrompt");
+  }
 }

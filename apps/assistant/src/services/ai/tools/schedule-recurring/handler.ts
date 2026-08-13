@@ -1,6 +1,10 @@
 import { type Static, Type } from "@earendil-works/pi-ai";
 import type { TCronJob } from "../../../../lib/cron-engine";
-import { normalizeCronContentFields } from "../cron-content";
+import {
+  countCronContentModes,
+  normalizeCronContentFields,
+  validateCronFallbackPairing,
+} from "../cron-content";
 
 export const SScheduleRecurringArgs = Type.Object(
   {
@@ -37,14 +41,10 @@ export type TScheduleRecurringArgs = Static<typeof SScheduleRecurringArgs>;
 export type TScheduleRecurringResult = TCronJob;
 
 export function validateScheduleRecurringArgs(
-  args: TScheduleRecurringArgs,
+  rawArgs: TScheduleRecurringArgs,
 ): TScheduleRecurringArgs {
-  const normalizedArgs = { ...args, ...normalizeCronContentFields(args) };
-  const contentModeCount = [
-    normalizedArgs.reminderText,
-    normalizedArgs.reminderPromptData,
-    normalizedArgs.taskPrompt,
-  ].filter((field) => field !== undefined).length;
+  const args = { ...rawArgs, ...normalizeCronContentFields(rawArgs) };
+  const contentModeCount = countCronContentModes(args);
 
   if (contentModeCount === 0) {
     throw new Error("Provide reminderText, reminderPromptData, or taskPrompt");
@@ -54,28 +54,7 @@ export function validateScheduleRecurringArgs(
     throw new Error("Provide only one of reminderText, reminderPromptData, or taskPrompt");
   }
 
-  if (
-    normalizedArgs.reminderPromptData !== undefined &&
-    normalizedArgs.reminderFallbackText === undefined
-  ) {
-    throw new Error("reminderFallbackText is required when reminderPromptData is set");
-  }
+  validateCronFallbackPairing(args);
 
-  if (
-    normalizedArgs.reminderFallbackText !== undefined &&
-    normalizedArgs.reminderText === undefined &&
-    normalizedArgs.reminderPromptData === undefined
-  ) {
-    throw new Error("reminderFallbackText requires reminderText or reminderPromptData");
-  }
-
-  if (normalizedArgs.taskPrompt !== undefined && normalizedArgs.taskFallbackText === undefined) {
-    throw new Error("taskFallbackText is required when taskPrompt is set");
-  }
-
-  if (normalizedArgs.taskFallbackText !== undefined && normalizedArgs.taskPrompt === undefined) {
-    throw new Error("taskFallbackText requires taskPrompt");
-  }
-
-  return normalizedArgs;
+  return args;
 }

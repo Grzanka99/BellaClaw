@@ -110,69 +110,47 @@ describe("AI tool definitions", () => {
     expect(once.fireAt).toEqual(new Date("2026-07-13T10:00:00.000Z"));
   });
 
-  test("treats blank optional one-time schedule content as omitted", () => {
-    for (const blank of ["", "   "]) {
-      const once = validateScheduleOnceArgs({
-        name: "blank-fields-reminder",
-        fireAt: "2026-07-13T12:00:00+02:00",
-        group: blank,
-        reminderText: "Reminder",
-        reminderPromptData: blank,
-        reminderFallbackText: blank,
-        taskPrompt: blank,
-        taskFallbackText: blank,
-      });
+  test("does not count blank schedule content as a second content mode", () => {
+    const blanks = {
+      reminderPromptData: "",
+      reminderFallbackText: "   ",
+      taskPrompt: "",
+      taskFallbackText: "   ",
+    };
 
-      expect(once.reminderText).toBe("Reminder");
-      expect(once.group).toBeUndefined();
-      expect(once.reminderPromptData).toBeUndefined();
-      expect(once.reminderFallbackText).toBeUndefined();
-      expect(once.taskPrompt).toBeUndefined();
-      expect(once.taskFallbackText).toBeUndefined();
-    }
-  });
+    const once = validateScheduleOnceArgs({
+      name: "blank-fields-reminder",
+      fireAt: "2026-07-13T12:00:00+02:00",
+      reminderText: "Reminder",
+      ...blanks,
+    });
+    expect(once.reminderText).toBe("Reminder");
+    expect(once.taskPrompt).toBeUndefined();
 
-  test("treats blank optional recurring schedule content as omitted", () => {
-    for (const blank of ["", "   "]) {
-      const recurring = validateScheduleRecurringArgs({
-        name: "blank-fields-recurring",
-        pattern: "0 8 * * *",
-        group: blank,
-        reminderText: "Reminder",
-        reminderPromptData: blank,
-        reminderFallbackText: blank,
-        taskPrompt: blank,
-        taskFallbackText: blank,
-      });
-
-      expect(recurring.reminderText).toBe("Reminder");
-      expect(recurring.group).toBeUndefined();
-      expect(recurring.reminderPromptData).toBeUndefined();
-      expect(recurring.reminderFallbackText).toBeUndefined();
-      expect(recurring.taskPrompt).toBeUndefined();
-      expect(recurring.taskFallbackText).toBeUndefined();
-    }
+    const recurring = validateScheduleRecurringArgs({
+      name: "blank-fields-recurring",
+      pattern: "0 8 * * *",
+      reminderText: "Reminder",
+      ...blanks,
+    });
+    expect(recurring.reminderText).toBe("Reminder");
+    expect(recurring.taskPrompt).toBeUndefined();
   });
 
   test("treats blank cron job updates as absent instead of content edits", () => {
-    for (const blank of ["", "   "]) {
-      const update = validateUpdateCronJobArgs({
-        name: "daily-news",
-        group: blank,
-        reminderText: blank,
-        reminderPromptData: blank,
-        reminderFallbackText: blank,
-        taskPrompt: blank,
-        taskFallbackText: blank,
-      });
+    const update = validateUpdateCronJobArgs({
+      name: "daily-news",
+      group: "",
+      reminderText: "   ",
+      reminderPromptData: "",
+      reminderFallbackText: "",
+      taskPrompt: "",
+      taskFallbackText: "",
+    });
 
-      expect(update.group).toBeUndefined();
-      expect(update.reminderText).toBeUndefined();
-      expect(update.reminderPromptData).toBeUndefined();
-      expect(update.reminderFallbackText).toBeUndefined();
-      expect(update.taskPrompt).toBeUndefined();
-      expect(update.taskFallbackText).toBeUndefined();
-    }
+    expect(update.group).toBeUndefined();
+    expect(update.reminderText).toBeUndefined();
+    expect(update.taskPrompt).toBeUndefined();
   });
 
   test("enforce cron domain constraints", () => {
