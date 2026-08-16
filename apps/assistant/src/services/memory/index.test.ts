@@ -64,7 +64,6 @@ describe("Memory", () => {
         message: "Test memory",
       });
 
-      expect(result).not.toHaveProperty("operation");
       expect(result).toEqual({
         chatId: "chat-123",
         author: ERole.User,

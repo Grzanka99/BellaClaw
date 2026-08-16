@@ -35,13 +35,13 @@ async function forceJobNextRunAt(id: number, nextRunAt: Date) {
     .where(eq(cronEngineJobsTable.id, id));
 }
 
-async function insertLegacyRecurringJob() {
+async function insertRecurringJobWithoutTimezone() {
   const db = DatabaseConnector.instance.database;
 
   const row = await db
     .insert(cronEngineJobsTable)
     .values({
-      name: "legacy-recurring",
+      name: "default-tz-recurring",
       scope: "scope-a",
       group: null,
       type: ECronJobType.Recurring,
@@ -134,15 +134,15 @@ describe("CronScheduler per-job timezone", () => {
     expect(ctx.nextRunAt.getTime()).toBe(fireAt.getTime());
   });
 
-  test("existing rows with null timezone still fire using scheduler default timezone", async () => {
+  test("rows with null timezone fire using scheduler default timezone", async () => {
     const tzScheduler = new CronScheduler({ timezone: "Europe/Warsaw" });
 
     try {
-      const id = await insertLegacyRecurringJob();
+      const id = await insertRecurringJobWithoutTimezone();
 
       const fired = new Promise<TFiredContext>((resolve) => {
         tzScheduler.onFire((ctx) => {
-          if (ctx.name === "legacy-recurring") {
+          if (ctx.name === "default-tz-recurring") {
             resolve({ timezone: ctx.timezone, nextRunAt: ctx.nextRunAt });
           }
         });
@@ -153,7 +153,7 @@ describe("CronScheduler per-job timezone", () => {
       const ctx = await fired;
       expect(ctx.timezone).toBe("Europe/Warsaw");
 
-      const job = await tzScheduler.get("legacy-recurring", "scope-a");
+      const job = await tzScheduler.get("default-tz-recurring", "scope-a");
 
       if (!job) {
         throw new Error("Expected job after fire");

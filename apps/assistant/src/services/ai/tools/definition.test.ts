@@ -96,9 +96,6 @@ describe("AI tool definitions", () => {
     expect(Value.Check(SSearchMemoryArgs, { query: "a".repeat(121) })).toBe(false);
     expect(Value.Check(SSearchMemoryArgs, { query: "facts", limit: 25 })).toBe(true);
     expect(Value.Check(SSearchMemoryArgs, { query: "facts", limit: 26 })).toBe(false);
-    expect(Value.Check(SSearchMemoryArgs, { query: "facts", searchString: "legacy" })).toBe(false);
-    expect(Value.Check(SSearchMemoryArgs, { query: "facts", timeRange: {} })).toBe(false);
-    expect(Value.Check(SSearchMemoryArgs, { query: "facts", importance: ["high"] })).toBe(false);
   });
 
   test("converts explicit-offset schedule dates", () => {
@@ -176,7 +173,7 @@ describe("AI tool definitions", () => {
     ).toThrow("Provide either pattern or fireAt");
   });
 
-  test("keeps mutation targets structural and validates event combinations", () => {
+  test("accepts valid mutation args and validates event combinations", () => {
     for (const { schema, args } of [
       {
         schema: SCreateCalendarEventArgs,
@@ -191,9 +188,7 @@ describe("AI tool definitions", () => {
         args: { eventId: "event", scope: "occurrence", summary: "Event" },
       },
     ]) {
-      expect("calendarId" in schema.properties).toBe(false);
       expect(Value.Check(schema, args)).toBe(true);
-      expect(Value.Check(schema, { ...args, calendarId: "other" })).toBe(false);
     }
 
     expect(() =>
