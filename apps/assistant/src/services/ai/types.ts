@@ -16,29 +16,10 @@ export type THistoryItem = {
   role: ERole;
 };
 
-export type TPrompt = {
-  role: ERole;
-  content: Array<{
-    type: "text";
-    text: string;
-  }>;
-};
-
-export type TToolEntry = {
-  definition: TToolDefinition;
-  instructions?: string;
-};
-
 export type TToolCall = {
   id: string;
   name: string;
   arguments: unknown;
-};
-
-export type TToolDefinition = {
-  name: string;
-  description: string;
-  parameters: TSchema;
 };
 
 export enum EModelPurpose {
@@ -48,5 +29,3 @@ export enum EModelPurpose {
   SpecialistAccurate = "SpecialistAccurate",
   ScheduledTask = "ScheduledTask",
 }
-
-import type { TSchema } from "@earendil-works/pi-ai";

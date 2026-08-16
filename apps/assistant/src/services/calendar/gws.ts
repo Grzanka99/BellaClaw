@@ -311,7 +311,3 @@ export class GwsCalendarClient {
     });
   }
 }
-
-export const gwsStructuredOutput = {
-  decode: decodeStructuredOutput,
-};
