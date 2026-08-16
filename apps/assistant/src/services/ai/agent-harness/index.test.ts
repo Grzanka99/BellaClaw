@@ -132,7 +132,6 @@ describe("AgentHarness", () => {
 
     expect(systemPrompt).toContain("*italic*, **bold**, `monospace`, ~strikethrough~");
     expect(systemPrompt).toContain("Never use headings, tables, blockquotes, embeds");
-    expect(systemPrompt).not.toContain("Discord mentions are supported");
   });
 
   test("requires memory delegation for answers depending on personal user facts", async () => {

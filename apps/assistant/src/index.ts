@@ -6,13 +6,9 @@ import { MessageHandler } from "./services/message-handler";
 import { MessagingAdapter } from "./services/messaging";
 import { SignalSingleton } from "./services/signal";
 
-function createBootTurnId(): string {
-  return `boot:${crypto.randomUUID()}`;
-}
-
 async function init(): Promise<void> {
   const start = performance.now();
-  const turnId = createBootTurnId();
+  const turnId = `boot:${crypto.randomUUID()}`;
 
   console.time("init");
 

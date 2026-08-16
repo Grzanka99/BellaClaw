@@ -60,13 +60,6 @@ export const ConfigValidators: { [key in EConfigKey]: z.ZodType<string> } = {
   [EConfigKey.AiInstructionsMemoryRetentionHigh]: SNonEmptyString,
 };
 
-export function createStableAiRuntimeSettings(settings: TConfigRecord): TConfigRecord {
-  const runtimeSettings = { ...settings };
-  runtimeSettings[EConfigKey.AiProvider] = DefaultConfigRecord[EConfigKey.AiProvider];
-
-  return runtimeSettings;
-}
-
 const KNOWN_CONFIG_KEYS = new Set<string>(Object.values(EConfigKey));
 
 export function isConfigKey(key: string): key is EConfigKey {

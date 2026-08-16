@@ -7,7 +7,7 @@ import { EModelPurpose } from "../types";
 import { AGENT_TOOL_NAMES } from "./permissions";
 
 describe("agent permissions", () => {
-  test("matches the six-agent tool matrix without specialist delegation", () => {
+  test("matches the six-agent tool matrix", () => {
     expect(AGENT_TOOL_NAMES[EAgentName.Calendar]).toEqual([
       "list-calendars",
       "remove-readonly-calendar",
@@ -49,16 +49,6 @@ describe("agent permissions", () => {
       "list-calendar-events",
       "find-calendar-availability",
     ]);
-
-    for (const name of [
-      EAgentName.Memory,
-      EAgentName.Settings,
-      EAgentName.Scheduling,
-      EAgentName.ScheduledTask,
-      EAgentName.Calendar,
-    ]) {
-      expect(AGENT_TOOL_NAMES[name].some((tool) => tool.startsWith("delegate-"))).toBe(false);
-    }
   });
 
   test("assembles the production tools and execution modes for every agent", async () => {

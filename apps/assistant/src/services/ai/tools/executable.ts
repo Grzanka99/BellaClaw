@@ -5,7 +5,6 @@ import { fetchWeb, searchWeb } from "../../../lib/web";
 import { CalendarService } from "../../calendar";
 import { CronSingleton } from "../../cron";
 import { MessageHandler } from "../../message-handler";
-import { invalidateMessageHandlerInstructions } from "../../message-handler/instructions";
 import { SettingsService } from "../../settings";
 import { ConfigValidators, EConfigKey, type TConfigRecord } from "../../settings/schema";
 import { getAiModelIds } from "../providers/registry";
@@ -247,7 +246,6 @@ export function createSettingsTools(context: TToolExecutionContext) {
           await SettingsService.instance.set(chatId, update.key, update.value);
         }
 
-        invalidateMessageHandlerInstructions(chatId);
         return textResult({ settings: await SettingsService.instance.getAll(chatId) });
       },
     },
