@@ -273,86 +273,95 @@ function SearchForm(props: { query: TBehaviorLogSearchQuery; filters: TLogFilter
             placeholder="Search events, turns, tools, metadata…"
           />
         </label>
-        <FilterSelect label="Time range" name="range" compact>
-          <option value="15m" selected={props.query.range === "15m"}>
-            Last 15 minutes
-          </option>
-          <option value="1h" selected={props.query.range === "1h"}>
-            Last hour
-          </option>
-          <option value="24h" selected={props.query.range === "24h"}>
-            Last 24 hours
-          </option>
-          <option value="7d" selected={props.query.range === "7d"}>
-            Last 7 days
-          </option>
-          <option value="all" selected={props.query.range === "all"}>
-            All history
-          </option>
-        </FilterSelect>
-        <FilterSelect label="Level" name="level" compact>
-          <option value="" selected={props.query.level === undefined}>
-            All levels
-          </option>
-          {Object.values(EBehaviorLogLevel).map((level) => (
-            <option value={level} selected={props.query.level === level}>
-              {level}
-            </option>
-          ))}
-        </FilterSelect>
-        <FilterSelect label="Result" name="success" compact>
-          <option value="" selected={props.query.success === undefined}>
-            All results
-          </option>
-          <option value="success" selected={props.query.success === "success"}>
-            Success
-          </option>
-          <option value="failure" selected={props.query.success === "failure"}>
-            Failure
-          </option>
-        </FilterSelect>
-        <details class="advanced-filters">
-          <summary>+ More filters</summary>
-          <div class="advanced-filter-grid">
-            <FilterSelect label="Event" name="event" compact={undefined}>
-              <option value="" selected={props.query.event === undefined}>
-                Any event
+        <details class="filter-drawer" data-mobile-collapse open>
+          <summary>Filters</summary>
+          <div class="filter-drawer-body">
+            <FilterSelect label="Time range" name="range" compact>
+              <option value="15m" selected={props.query.range === "15m"}>
+                Last 15 minutes
               </option>
-              {props.filters.events.map((event) => (
-                <option value={event} selected={props.query.event === event}>
-                  {event}
+              <option value="1h" selected={props.query.range === "1h"}>
+                Last hour
+              </option>
+              <option value="24h" selected={props.query.range === "24h"}>
+                Last 24 hours
+              </option>
+              <option value="7d" selected={props.query.range === "7d"}>
+                Last 7 days
+              </option>
+              <option value="all" selected={props.query.range === "all"}>
+                All history
+              </option>
+            </FilterSelect>
+            <FilterSelect label="Level" name="level" compact>
+              <option value="" selected={props.query.level === undefined}>
+                All levels
+              </option>
+              {Object.values(EBehaviorLogLevel).map((level) => (
+                <option value={level} selected={props.query.level === level}>
+                  {level}
                 </option>
               ))}
             </FilterSelect>
-            <FilterSelect label="Component" name="component" compact={undefined}>
-              <option value="" selected={props.query.component === undefined}>
-                Any component
+            <FilterSelect label="Result" name="success" compact>
+              <option value="" selected={props.query.success === undefined}>
+                All results
               </option>
-              {props.filters.components.map((component) => (
-                <option value={component} selected={props.query.component === component}>
-                  {component}
-                </option>
-              ))}
-            </FilterSelect>
-            <FilterSelect label="Tool" name="toolName" compact={undefined}>
-              <option value="" selected={props.query.toolName === undefined}>
-                Any tool
+              <option value="success" selected={props.query.success === "success"}>
+                Success
               </option>
-              {props.filters.toolNames.map((toolName) => (
-                <option value={toolName} selected={props.query.toolName === toolName}>
-                  {toolName}
-                </option>
-              ))}
+              <option value="failure" selected={props.query.success === "failure"}>
+                Failure
+              </option>
             </FilterSelect>
-            <label class="filter-field">
-              <span>Turn ID</span>
-              <input name="turnId" value={props.query.turnId ?? ""} placeholder="Exact turn ID" />
-            </label>
+            <details class="advanced-filters">
+              <summary>+ More filters</summary>
+              <div class="advanced-filter-grid">
+                <FilterSelect label="Event" name="event" compact={undefined}>
+                  <option value="" selected={props.query.event === undefined}>
+                    Any event
+                  </option>
+                  {props.filters.events.map((event) => (
+                    <option value={event} selected={props.query.event === event}>
+                      {event}
+                    </option>
+                  ))}
+                </FilterSelect>
+                <FilterSelect label="Component" name="component" compact={undefined}>
+                  <option value="" selected={props.query.component === undefined}>
+                    Any component
+                  </option>
+                  {props.filters.components.map((component) => (
+                    <option value={component} selected={props.query.component === component}>
+                      {component}
+                    </option>
+                  ))}
+                </FilterSelect>
+                <FilterSelect label="Tool" name="toolName" compact={undefined}>
+                  <option value="" selected={props.query.toolName === undefined}>
+                    Any tool
+                  </option>
+                  {props.filters.toolNames.map((toolName) => (
+                    <option value={toolName} selected={props.query.toolName === toolName}>
+                      {toolName}
+                    </option>
+                  ))}
+                </FilterSelect>
+                <label class="filter-field">
+                  <span>Turn ID</span>
+                  <input
+                    name="turnId"
+                    value={props.query.turnId ?? ""}
+                    placeholder="Exact turn ID"
+                  />
+                </label>
+              </div>
+            </details>
+            <button class="button apply-button" type="submit">
+              Apply filters
+            </button>
           </div>
         </details>
-        <button class="button apply-button" type="submit">
-          Apply filters
-        </button>
       </div>
       <ActiveFilters query={props.query} />
     </form>
@@ -434,11 +443,11 @@ function FilterSelect(
 
 function RecentTurns(props: { turns: TRecentTurn[]; query: TBehaviorLogSearchQuery }) {
   return (
-    <aside class="turn-sidebar">
-      <div class="sidebar-heading">
+    <details class="turn-sidebar" data-mobile-collapse open>
+      <summary class="sidebar-heading">
         <h2>Recent turns</h2>
         <span>{props.turns.length} turns</span>
-      </div>
+      </summary>
       {props.turns.length === 0 && <p class="muted">No turns recorded.</p>}
       <ol class="turn-list">
         {props.turns.map((turn) => {
@@ -506,7 +515,7 @@ function RecentTurns(props: { turns: TRecentTurn[]; query: TBehaviorLogSearchQue
           );
         })}
       </ol>
-    </aside>
+    </details>
   );
 }
 
@@ -671,6 +680,9 @@ function EventInspector(props: {
     <aside class="event-inspector" aria-label="Event details">
       <div class="inspector-heading">
         <h2>Event details</h2>
+        <button class="button secondary small inspector-close" type="button" data-inspector-close>
+          Close
+        </button>
       </div>
       <div id="event-inspector-content" aria-live="polite">
         {props.event === undefined && (
