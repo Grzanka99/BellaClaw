@@ -228,7 +228,8 @@ pre,
 }
 
 .button,
-.advanced-filters > summary {
+.advanced-filters > summary,
+.filter-drawer > summary {
   display: inline-flex;
   min-height: 34px;
   align-items: center;
@@ -252,14 +253,16 @@ pre,
 }
 
 .button.secondary,
-.advanced-filters > summary {
+.advanced-filters > summary,
+.filter-drawer > summary {
   border-color: var(--border-strong);
   color: var(--foreground);
   background: var(--surface);
 }
 
 .button.secondary:hover,
-.advanced-filters > summary:hover {
+.advanced-filters > summary:hover,
+.filter-drawer > summary:hover {
   background: var(--surface-raised);
 }
 
@@ -301,6 +304,25 @@ pre,
     ) auto auto;
   gap: 8px;
   align-items: start;
+}
+
+/* The drawer is a passthrough on desktop; it only collapses below 760px. */
+.filter-drawer,
+.filter-drawer-body {
+  display: contents;
+}
+
+.filter-drawer[open]::details-content {
+  display: contents;
+}
+
+.filter-drawer > summary {
+  display: none;
+  list-style: none;
+}
+
+.filter-drawer > summary::-webkit-details-marker {
+  display: none;
 }
 
 .search-box,
@@ -515,6 +537,22 @@ pre,
 .inspector-heading h2 {
   font-size: 13px;
   font-weight: 650;
+}
+
+.turn-sidebar > summary::-webkit-details-marker {
+  display: none;
+}
+
+/* Browsers with ::details-content need the wrapper re-flexed to keep the list scrollable. */
+.turn-sidebar[open]::details-content {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.inspector-close {
+  display: none;
 }
 
 .sidebar-heading > span,
@@ -1101,23 +1139,23 @@ pre {
   color: var(--danger);
 }
 
+/*
+ * min-height stays auto here: these must grow with the payload rather than
+ * shrink below it, or the pre paints outside its box over the action bar.
+ */
 .inspector-raw-section {
   display: flex;
-  min-height: 0;
   flex: 1;
   flex-direction: column;
 }
 
 .inspector-raw-section .inspector-section-body {
   display: flex;
-  min-height: 0;
   flex: 1;
   flex-direction: column;
 }
 
 .raw-event {
-  min-height: 180px;
-  flex: 1;
   max-height: none;
   overflow: visible;
   white-space: pre-wrap;
@@ -1281,133 +1319,263 @@ pre {
   }
 }
 
+/*
+ * Phone layout. Vertical space is the scarce resource here, so the chrome is
+ * squeezed into a fixed ~110px header and everything below it is one scroller
+ * for the event list. The inspector becomes a bottom sheet instead of a third
+ * stacked pane.
+ */
 @media (max-width: 760px) {
+  .log-viewer-shell {
+    height: 100dvh;
+  }
+
   .topbar {
-    align-items: flex-start;
+    align-items: stretch;
     flex-direction: column;
-    padding: 14px 16px 10px;
+    min-height: 0;
+    gap: 8px;
+    padding: 8px 12px;
+  }
+
+  .topbar .eyebrow,
+  .topbar .db-path,
+  .filter-summary {
+    display: none;
   }
 
   .topbar h1 {
-    font-size: 22px;
+    margin-top: 0;
+    font-size: 19px;
   }
 
   .header-actions {
     width: 100%;
-    flex-wrap: wrap;
   }
 
   .header-actions > * {
     flex: 1;
+    min-height: 40px;
   }
 
   .search-panel {
-    padding: 0 16px 10px;
+    padding: 0 12px 8px;
   }
 
   .primary-filters {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: minmax(0, 1fr);
   }
 
-  .search-box {
-    grid-column: 1 / -1;
+  .search-panel input,
+  .search-panel select {
+    height: 40px;
+    font-size: 14px;
   }
 
-  .advanced-filters,
-  .apply-button {
-    grid-row: auto;
+  .search-icon {
+    top: 11px;
   }
 
-  .advanced-filter-grid {
-    right: auto;
-    left: 0;
-    width: calc(100vw - 32px);
-    grid-template-columns: 1fr;
-  }
-
-  .workspace-grid {
+  .filter-drawer {
     display: block;
-    overflow-y: auto;
-    overscroll-behavior: contain;
-    padding: 10px 16px 18px;
   }
 
-  .turn-sidebar,
-  .event-workspace,
-  .event-inspector {
-    height: auto;
-    margin-bottom: 10px;
-    border: 1px solid var(--border);
-    border-radius: 0;
+  .filter-drawer[open]::details-content {
+    display: block;
   }
 
-  .event-workspace {
-    height: min(62vh, 560px);
-    min-height: 400px;
-  }
-
-  .turn-list {
+  .filter-drawer > summary {
     display: flex;
-    max-height: none;
-    overflow-x: auto;
+    width: 100%;
+    min-height: 40px;
   }
 
-  .turn-list li {
-    min-width: 245px;
-    border-right: 1px solid var(--border);
-    border-bottom: 0;
+  .filter-drawer-body {
+    display: grid;
+    gap: 8px;
+    padding-top: 8px;
   }
 
-  .timeline-list {
-    padding-left: 40px;
-  }
-
-  .timeline-list::before {
-    left: 21px;
-  }
-
-  .timeline-dot {
-    left: -25px;
-  }
-
-  .event-main {
-    grid-template-columns: minmax(0, 1fr) 62px 120px 10px;
-  }
-
-  .event-component {
-    display: none;
-  }
-}
-
-@media (max-width: 480px) {
-  .primary-filters {
-    grid-template-columns: 1fr;
-  }
-
-  .search-box {
-    grid-column: auto;
+  .advanced-filters {
+    position: static;
   }
 
   .advanced-filters > summary,
   .apply-button {
     width: 100%;
+    min-height: 40px;
   }
 
-  .event-main {
-    grid-template-columns: minmax(0, 1fr) 54px 10px;
+  .advanced-filter-grid {
+    position: static;
+    width: auto;
+    margin-top: 8px;
+    grid-template-columns: 1fr;
+    box-shadow: none;
   }
 
-  .event-main > .local-time {
-    display: none;
+  .workspace-grid {
+    display: flex;
+    min-height: 0;
+    flex: 1;
+    flex-direction: column;
+    overflow: hidden;
+    padding: 0;
+  }
+
+  .turn-sidebar,
+  .event-workspace {
+    border-right: 0;
+    border-left: 0;
+  }
+
+  .turn-sidebar {
+    max-height: 45%;
+    flex: 0 0 auto;
+  }
+
+  .turn-sidebar > summary {
+    cursor: pointer;
+  }
+
+  .event-workspace {
+    min-height: 0;
+    height: auto;
+    flex: 1;
   }
 
   .results-heading {
-    align-items: flex-start;
-    flex-direction: column;
+    min-height: 40px;
+    padding: 7px 12px;
+  }
+
+  /* The rail costs ~40px of a 412px viewport; the row border carries status instead. */
+  .timeline-list {
+    padding: 0;
+  }
+
+  .timeline-list::before,
+  .timeline-dot,
+  .event-chevron {
+    display: none;
+  }
+
+  .timeline-list .event-row {
+    margin-bottom: 0;
+    border-top: 0;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+    border-left: 3px solid var(--border-strong);
+    background: var(--surface);
+  }
+
+  .timeline-list .event-success {
+    border-left-color: var(--success);
+  }
+
+  .timeline-list .event-slow {
+    border-left-color: var(--warning);
+  }
+
+  .timeline-list .event-failed,
+  .timeline-list .event-level-error {
+    border-left-color: var(--danger);
+  }
+
+  .timeline-list .event-level-message {
+    border-left-color: var(--message);
+  }
+
+  .event-main {
+    min-height: 0;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 2px 10px;
+    align-items: start;
+    padding: 10px 12px;
+  }
+
+  .event-component {
+    display: none;
+  }
+
+  /* Spanning both rows keeps the row pair as short as the text block itself. */
+  .event-copy {
+    grid-area: 1 / 1 / 3 / 2;
+  }
+
+  .event-duration {
+    grid-area: 1 / 2;
+    font-size: 13px;
+  }
+
+  .event-main > .local-time {
+    grid-area: 2 / 2;
+    text-align: right;
+  }
+
+  .event-title strong {
+    font-size: 14px;
+  }
+
+  .event-summary,
+  .event-error {
+    display: -webkit-box;
+    font-size: 12px;
+    line-height: 1.35;
+    white-space: normal;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+  }
+
+  .event-turn,
+  .local-time {
+    font-size: 11px;
+  }
+
+  .event-title .badge {
+    height: 18px;
+    font-size: 9px;
+  }
+
+  .event-inspector {
+    position: fixed;
+    z-index: 60;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    max-height: 82dvh;
+    border-right: 0;
+    border-bottom: 0;
+    border-left: 0;
+    box-shadow: 0 -12px 40px var(--shadow);
+    transform: translateY(101%);
+    transition: transform 0.18s ease;
+  }
+
+  :root[data-inspector-open="1"] .event-inspector {
+    transform: none;
+  }
+
+  .inspector-close {
+    display: inline-flex;
   }
 
   .inspector-value {
     grid-template-columns: 1fr;
     gap: 1px;
+    font-size: 11px;
+  }
+}
+
+@media (hover: none) {
+  .copy-icon {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .event-inspector {
+    transition: none;
   }
 }
