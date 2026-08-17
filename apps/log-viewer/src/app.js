@@ -1,4 +1,16 @@
 const THEME_STORAGE_KEY = "bellaclaw-log-viewer-theme";
+const PHONE_QUERY = window.matchMedia("(max-width: 760px)");
+
+/* Rendered open so desktop and no-JS clients keep the full layout. */
+function syncMobileCollapse() {
+  for (const element of document.querySelectorAll("details[data-mobile-collapse]")) {
+    element.open = !PHONE_QUERY.matches;
+  }
+}
+
+function closeInspector() {
+  delete document.documentElement.dataset.inspectorOpen;
+}
 
 function getActiveTheme() {
   const selected = document.documentElement.dataset.theme;
@@ -111,12 +123,19 @@ function selectEvent(row) {
   }
 
   inspector.replaceChildren(template.content.cloneNode(true));
+  inspector.scrollTop = 0;
   updateLocalTimes(inspector);
   document.documentElement.dataset.eventSelection = "manual";
+  document.documentElement.dataset.inspectorOpen = "1";
 }
 
 setInterval(() => updateLocalTimes(), 30_000);
 updateThemeControls();
+
+PHONE_QUERY.addEventListener("change", () => {
+  syncMobileCollapse();
+  closeInspector();
+});
 
 window.matchMedia("(prefers-color-scheme: light)").addEventListener("change", () => {
   if (document.documentElement.dataset.theme === undefined) {
@@ -129,6 +148,11 @@ document.addEventListener("click", async (event) => {
 
   if (themeToggle) {
     toggleTheme();
+    return;
+  }
+
+  if (event.target.closest("[data-inspector-close]")) {
+    closeInspector();
     return;
   }
 
@@ -157,6 +181,11 @@ document.addEventListener("click", async (event) => {
 });
 
 document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    closeInspector();
+    return;
+  }
+
   if (event.key !== "Enter" && event.key !== " ") {
     return;
   }
@@ -192,6 +221,8 @@ function handleUpdatedContent(root) {
 
   if (root.id === "app-shell") {
     delete document.documentElement.dataset.eventSelection;
+    syncMobileCollapse();
+    closeInspector();
   }
 
   const warning = document.querySelector("#transient-warning");
@@ -224,7 +255,10 @@ function handleUpdatedContent(root) {
   }
 }
 
-document.addEventListener("DOMContentLoaded", () => handleUpdatedContent(document));
+document.addEventListener("DOMContentLoaded", () => {
+  syncMobileCollapse();
+  handleUpdatedContent(document);
+});
 document.body.addEventListener("htmx:afterSwap", (event) => handleUpdatedContent(event.target));
 document.body.addEventListener("logViewerWarning", (event) => {
   const warning = document.querySelector("#transient-warning");
