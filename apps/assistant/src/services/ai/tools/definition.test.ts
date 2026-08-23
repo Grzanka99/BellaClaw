@@ -255,11 +255,12 @@ describe("AI tool definitions", () => {
 
 describe("decodeToolArguments", () => {
   test("names the offending path instead of throwing a bare Decode error", () => {
-    const cases: Array<{ schema: TSchema; args: unknown; expected: string }> = [
+    const cases: Array<{ schema: TSchema; args: unknown; path: string; reason: string }> = [
       {
         schema: SScheduleOnceArgs,
         args: { name: "x", fireAt: "tomorrow at 5pm", reminderText: "Reminder" },
-        expected: "/fireAt",
+        path: "/fireAt",
+        reason: 'must match format "date-time"',
       },
       {
         schema: SScheduleOnceArgs,
@@ -269,23 +270,27 @@ describe("decodeToolArguments", () => {
           reminderText: "Reminder",
           group: null,
         },
-        expected: "/group",
+        path: "/group",
+        reason: "must be string",
       },
       {
         schema: SSearchMemoryArgs,
         args: { query: "facts", limit: 99 },
-        expected: "/limit",
+        path: "/limit",
+        reason: "must be <= 25",
       },
       {
         schema: SSearchMemoryArgs,
         args: {},
-        expected: "(root)",
+        path: "(root)",
+        reason: "must have required properties query",
       },
     ];
 
-    for (const { schema, args, expected } of cases) {
-      expect(() => decodeToolArguments(schema, args)).toThrow("Invalid tool arguments");
-      expect(() => decodeToolArguments(schema, args)).toThrow(expected);
+    for (const { schema, args, path, reason } of cases) {
+      expect(() => decodeToolArguments(schema, args)).toThrow(
+        `Invalid tool arguments: ${path}: ${reason}`,
+      );
     }
   });
 
