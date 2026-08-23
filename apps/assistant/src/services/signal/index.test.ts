@@ -10,6 +10,7 @@ type TSignalSingletonStatic = {
 
 type TSignalSingletonInternals = {
   retryDelayMs: number;
+  setupBootGraceMs: number;
   client: Pick<SignalClient, "sendReadReceipt" | "showTyping" | "hideTyping"> | undefined;
   handleInboundMessage: (message: {
     sourceNumber: string;
@@ -181,5 +182,36 @@ describe("SignalSingleton", () => {
 
     expect(result).toBe("handled");
     expect(handleInboundMessageMock).toHaveBeenCalledTimes(1);
+  });
+
+  test("resolves setup and keeps retrying when signal-cli never becomes ready", async () => {
+    Bun.env.SIGNAL_ENABLED = "true";
+    Bun.env.SIGNAL_PHONE_NUMBER = "+100";
+    Bun.env.SIGNAL_CLI_RPC_URL = "http://127.0.0.1:8080";
+
+    const readinessMock = mock(async () => false);
+    const subscribeMock = mock(async () => () => {});
+    SignalClient.prototype.checkReadiness = readinessMock;
+    SignalClient.prototype.subscribe = subscribeMock;
+
+    const signal = SignalSingleton.instance as unknown as TSignalSingletonInternals;
+    signal.retryDelayMs = 1;
+    signal.setupBootGraceMs = 5;
+
+    const result = await Promise.race([
+      SignalSingleton.instance.setup().then(() => "resolved"),
+      Bun.sleep(2_000).then(() => "blocked"),
+    ]);
+
+    expect(result).toBe("resolved");
+    expect(signal.client).toBeUndefined();
+    expect(subscribeMock).toHaveBeenCalledTimes(0);
+
+    const callsAtBoot = readinessMock.mock.calls.length;
+    await Bun.sleep(20);
+    expect(readinessMock.mock.calls.length).toBeGreaterThan(callsAtBoot);
+
+    signal.client = {} as never;
+    await Bun.sleep(20);
   });
 });

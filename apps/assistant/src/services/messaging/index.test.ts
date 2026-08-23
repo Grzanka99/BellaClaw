@@ -24,6 +24,8 @@ type TAdapterInternals = {
   };
   transports: Map<EMessagePlatform, TMessageTransport>;
   runningCronTaskKeys: Set<string>;
+  transportWaitAttempts: number;
+  transportWaitIntervalMs: number;
   handleCronFire(ctx: TCronJobContext): Promise<void>;
 };
 
@@ -237,5 +239,25 @@ describe("MessagingAdapter", () => {
       }),
     );
     expect(internals.runningCronTaskKeys.size).toBe(0);
+  });
+
+  test("waits for a still-connecting transport before giving up on a cron delivery", async () => {
+    const adapter = MessagingAdapter.instance as unknown as TAdapterInternals;
+    const sendTextMock = mock(async () => {});
+
+    adapter.transportWaitAttempts = 20;
+    adapter.transportWaitIntervalMs = 1;
+    adapter.transports.clear();
+
+    setTimeout(() => {
+      adapter.transports.set(EMessagePlatform.Signal, {
+        platform: EMessagePlatform.Signal,
+        sendText: sendTextMock,
+      });
+    }, 5);
+
+    await adapter.handleCronFire(cron({ reminderText: "Take a break." }));
+
+    expect(sendTextMock).toHaveBeenCalledWith("+100", "Take a break.");
   });
 });

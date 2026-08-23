@@ -39,6 +39,8 @@ export class MessagingAdapter {
   private authorization = AuthorizationService.instance;
   private cronListenerRegistered = false;
   private runningCronTaskKeys = new Set<string>();
+  private transportWaitAttempts = 60;
+  private transportWaitIntervalMs = 1000;
 
   private constructor() {}
 
@@ -252,6 +254,20 @@ export class MessagingAdapter {
     this.cronListenerRegistered = true;
   }
 
+  private async waitForTransport(platform: EMessagePlatform): Promise<TOption<TMessageTransport>> {
+    for (let attempt = 0; attempt < this.transportWaitAttempts; attempt += 1) {
+      const transport = this.transports.get(platform);
+
+      if (transport !== undefined) {
+        return transport;
+      }
+
+      await Bun.sleep(this.transportWaitIntervalMs);
+    }
+
+    return this.transports.get(platform);
+  }
+
   private async handleCronFire(ctx: TCronJobContext) {
     const trace: TBehaviorTraceContext = {
       turnId: createCronTurnId(),
@@ -279,7 +295,7 @@ export class MessagingAdapter {
 
     trace.platform = parsedScope.platform;
 
-    const transport = this.transports.get(parsedScope.platform);
+    const transport = await this.waitForTransport(parsedScope.platform);
     if (transport === undefined) {
       this.logger.warning(
         `handleCronFire: no ${parsedScope.platform} transport for reminder "${ctx.name}", skipping delivery`,

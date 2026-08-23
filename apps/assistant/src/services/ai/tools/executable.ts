@@ -1,5 +1,4 @@
 import type { TOption } from "@bellaclaw/shared";
-import { Value } from "typebox/value";
 import { ECronJobType } from "../../../lib/cron-engine";
 import { fetchWeb, searchWeb } from "../../../lib/web";
 import { CalendarService } from "../../calendar";
@@ -15,6 +14,7 @@ import {
   type TCreateCalendarEventArgs,
   validateCreateCalendarEventArgs,
 } from "./create-calendar-event/handler";
+import { decodeToolArguments } from "./definition";
 import { DELETE_CALENDAR_EVENT_TOOL } from "./delete-calendar-event/definition";
 import {
   SDeleteCalendarEventArgs,
@@ -125,7 +125,7 @@ export function createMemoryTools(context: TToolExecutionContext) {
       description: "Search stored conversation memory",
       parameters: SSearchMemoryArgs,
       execute: async (_toolCallId: string, args: unknown) => {
-        const parsedArgs: TSearchMemoryArgs = Value.Decode(SSearchMemoryArgs, args);
+        const parsedArgs: TSearchMemoryArgs = decodeToolArguments(SSearchMemoryArgs, args);
         const chatId = requireChatId(context.chatId);
         await MessageHandler.getInstance(chatId).ensureFactsCurrent();
         const result = await handleSearchMemory(chatId, parsedArgs);
@@ -139,7 +139,7 @@ export function createMemoryTools(context: TToolExecutionContext) {
       parameters: SRememberMemoryArgs,
       executionMode: SEQUENTIAL,
       execute: async (_toolCallId: string, args: unknown) => {
-        const parsedArgs: TRememberMemoryArgs = Value.Decode(SRememberMemoryArgs, args);
+        const parsedArgs: TRememberMemoryArgs = decodeToolArguments(SRememberMemoryArgs, args);
         const result = await handleRememberMemory(requireChatId(context.chatId), parsedArgs);
         return textResult(result);
       },
@@ -151,7 +151,7 @@ export function createMemoryTools(context: TToolExecutionContext) {
       parameters: SForgetMemoryArgs,
       executionMode: SEQUENTIAL,
       execute: async (_toolCallId: string, args: unknown) => {
-        const parsedArgs: TForgetMemoryArgs = Value.Decode(SForgetMemoryArgs, args);
+        const parsedArgs: TForgetMemoryArgs = decodeToolArguments(SForgetMemoryArgs, args);
         const result = await handleForgetMemory(requireChatId(context.chatId), parsedArgs);
         return textResult(result);
       },
@@ -191,7 +191,7 @@ export function createSettingsTools(context: TToolExecutionContext) {
       parameters: SUpdateSettingsArgs,
       executionMode: SEQUENTIAL,
       execute: async (_toolCallId: string, args: unknown) => {
-        const parsedArgs: TUpdateSettingsArgs = Value.Decode(SUpdateSettingsArgs, args);
+        const parsedArgs: TUpdateSettingsArgs = decodeToolArguments(SUpdateSettingsArgs, args);
         const updates: Array<{ field: keyof TUpdateSettingsArgs; key: EConfigKey; value: string }> =
           [];
         const fields: Array<{ field: keyof TUpdateSettingsArgs; key: EConfigKey }> = [
@@ -271,7 +271,7 @@ export function createSchedulingTools(context: TToolExecutionContext) {
       parameters: SScheduleOnceArgs,
       executionMode: SEQUENTIAL,
       execute: async (_toolCallId: string, args: unknown) => {
-        const parsedArgs: TScheduleOnceArgs = Value.Decode(SScheduleOnceArgs, args);
+        const parsedArgs: TScheduleOnceArgs = decodeToolArguments(SScheduleOnceArgs, args);
         const validatedArgs = validateScheduleOnceArgs(parsedArgs);
         const result = await CronSingleton.instance.createOnce({
           ...validatedArgs,
@@ -293,7 +293,10 @@ export function createSchedulingTools(context: TToolExecutionContext) {
       parameters: SScheduleRecurringArgs,
       executionMode: SEQUENTIAL,
       execute: async (_toolCallId: string, args: unknown) => {
-        const parsedArgs: TScheduleRecurringArgs = Value.Decode(SScheduleRecurringArgs, args);
+        const parsedArgs: TScheduleRecurringArgs = decodeToolArguments(
+          SScheduleRecurringArgs,
+          args,
+        );
         const validatedArgs = validateScheduleRecurringArgs(parsedArgs);
         const result = await CronSingleton.instance.createRecurring({
           ...validatedArgs,
@@ -315,7 +318,7 @@ export function createSchedulingTools(context: TToolExecutionContext) {
       parameters: SUpdateCronJobArgs,
       executionMode: SEQUENTIAL,
       execute: async (_toolCallId: string, args: unknown) => {
-        const parsedArgs: TUpdateCronJobArgs = Value.Decode(SUpdateCronJobArgs, args);
+        const parsedArgs: TUpdateCronJobArgs = decodeToolArguments(SUpdateCronJobArgs, args);
         const validatedArgs = validateUpdateCronJobArgs(parsedArgs);
         const chatId = requireChatId(context.chatId);
         const existing = await CronSingleton.instance.get(validatedArgs.name, chatId);
@@ -420,7 +423,7 @@ export function createSchedulingTools(context: TToolExecutionContext) {
       parameters: SUnscheduleCronJobArgs,
       executionMode: SEQUENTIAL,
       execute: async (_toolCallId: string, args: unknown) => {
-        const parsedArgs = Value.Decode(SUnscheduleCronJobArgs, args);
+        const parsedArgs = decodeToolArguments(SUnscheduleCronJobArgs, args);
         const result = await CronSingleton.instance.cancel(
           parsedArgs.name,
           requireChatId(context.chatId),
@@ -447,7 +450,7 @@ export function createCalendarTools(context: TToolExecutionContext) {
       description: "List configured calendars and their live status",
       parameters: SListCalendarsArgs,
       execute: async (_toolCallId: string, args: unknown, signal?: AbortSignal) => {
-        Value.Decode(SListCalendarsArgs, args);
+        decodeToolArguments(SListCalendarsArgs, args);
         return textResult(await CalendarService.instance.listCalendars(userId, signal));
       },
     },
@@ -458,7 +461,7 @@ export function createCalendarTools(context: TToolExecutionContext) {
       parameters: SRemoveReadonlyCalendarArgs,
       executionMode: SEQUENTIAL,
       execute: async (_toolCallId: string, args: unknown) => {
-        const parsedArgs: TRemoveReadonlyCalendarArgs = Value.Decode(
+        const parsedArgs: TRemoveReadonlyCalendarArgs = decodeToolArguments(
           SRemoveReadonlyCalendarArgs,
           args,
         );
@@ -472,7 +475,10 @@ export function createCalendarTools(context: TToolExecutionContext) {
       description: "List events across all configured calendars",
       parameters: SListCalendarEventsArgs,
       execute: async (_toolCallId: string, args: unknown, signal?: AbortSignal) => {
-        const parsedArgs: TListCalendarEventsArgs = Value.Decode(SListCalendarEventsArgs, args);
+        const parsedArgs: TListCalendarEventsArgs = decodeToolArguments(
+          SListCalendarEventsArgs,
+          args,
+        );
         const validatedArgs = validateListCalendarEventsArgs(parsedArgs);
         return textResult(
           await CalendarService.instance.listEvents({ ...validatedArgs, userId, signal }),
@@ -485,7 +491,7 @@ export function createCalendarTools(context: TToolExecutionContext) {
       description: "Check conflicts or find free slots across all configured calendars",
       parameters: SFindCalendarAvailabilityArgs,
       execute: async (_toolCallId: string, args: unknown, signal?: AbortSignal) => {
-        const parsedArgs: TFindCalendarAvailabilityArgs = Value.Decode(
+        const parsedArgs: TFindCalendarAvailabilityArgs = decodeToolArguments(
           SFindCalendarAvailabilityArgs,
           args,
         );
@@ -507,7 +513,10 @@ export function createCalendarTools(context: TToolExecutionContext) {
       parameters: SCreateCalendarEventArgs,
       executionMode: SEQUENTIAL,
       execute: async (_toolCallId: string, args: unknown, signal?: AbortSignal) => {
-        const parsedArgs: TCreateCalendarEventArgs = Value.Decode(SCreateCalendarEventArgs, args);
+        const parsedArgs: TCreateCalendarEventArgs = decodeToolArguments(
+          SCreateCalendarEventArgs,
+          args,
+        );
         const validatedArgs = validateCreateCalendarEventArgs(parsedArgs);
         return textResult(
           await CalendarService.instance.createEvent({
@@ -526,7 +535,10 @@ export function createCalendarTools(context: TToolExecutionContext) {
       parameters: SUpdateCalendarEventArgs,
       executionMode: SEQUENTIAL,
       execute: async (_toolCallId: string, args: unknown, signal?: AbortSignal) => {
-        const parsedArgs: TUpdateCalendarEventArgs = Value.Decode(SUpdateCalendarEventArgs, args);
+        const parsedArgs: TUpdateCalendarEventArgs = decodeToolArguments(
+          SUpdateCalendarEventArgs,
+          args,
+        );
         const patch = validateUpdateCalendarEventArgs(parsedArgs);
 
         return textResult(
@@ -547,7 +559,10 @@ export function createCalendarTools(context: TToolExecutionContext) {
       parameters: SDeleteCalendarEventArgs,
       executionMode: SEQUENTIAL,
       execute: async (_toolCallId: string, args: unknown, signal?: AbortSignal) => {
-        const parsedArgs: TDeleteCalendarEventArgs = Value.Decode(SDeleteCalendarEventArgs, args);
+        const parsedArgs: TDeleteCalendarEventArgs = decodeToolArguments(
+          SDeleteCalendarEventArgs,
+          args,
+        );
         await CalendarService.instance.deleteEvent({ ...parsedArgs, userId, signal });
         return textResult({ success: true });
       },
@@ -563,7 +578,7 @@ export function createWebTools() {
       description: "Search the public web for current information",
       parameters: SWebSearchArgs,
       execute: async (_toolCallId: string, args: unknown, signal?: AbortSignal) => {
-        const parsedArgs = Value.Decode(SWebSearchArgs, args);
+        const parsedArgs = decodeToolArguments(SWebSearchArgs, args);
         return textResult({
           query: parsedArgs.query,
           results: await searchWeb(parsedArgs, signal),
@@ -576,7 +591,7 @@ export function createWebTools() {
       description: "Fetch a public HTTP or HTTPS URL",
       parameters: SWebFetchArgs,
       execute: async (_toolCallId: string, args: unknown, signal?: AbortSignal) => {
-        const parsedArgs = validateWebFetchArgs(Value.Decode(SWebFetchArgs, args));
+        const parsedArgs = validateWebFetchArgs(decodeToolArguments(SWebFetchArgs, args));
         return textResult(await fetchWeb(parsedArgs, signal));
       },
     },

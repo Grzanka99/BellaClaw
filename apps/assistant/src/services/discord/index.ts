@@ -50,18 +50,22 @@ export class DiscordSingleton implements TMessageTransport {
       return;
     }
 
-    await MessagingAdapter.instance.handleInboundMessage({
-      platform: EMessagePlatform.Discord,
-      chatId: message.author.id,
-      author: {
-        username: message.author.username,
-        id: message.author.id,
-      },
-      message: {
-        type: "text",
-        content: message.content,
-      },
-    });
+    try {
+      await MessagingAdapter.instance.handleInboundMessage({
+        platform: EMessagePlatform.Discord,
+        chatId: message.author.id,
+        author: {
+          username: message.author.username,
+          id: message.author.id,
+        },
+        message: {
+          type: "text",
+          content: message.content,
+        },
+      });
+    } catch (error) {
+      this.logger.error(`handleMessage: inbound Discord message failed: ${String(error)}`);
+    }
   }
 
   private async onReady(c: Client<true>) {

@@ -10,7 +10,6 @@ import {
   type Static,
   Type,
 } from "@earendil-works/pi-ai";
-import { Value } from "typebox/value";
 import {
   sanitizeErrorMessage,
   sanitizeToolCallArguments,
@@ -21,6 +20,7 @@ import { EConfigKey, type TConfigRecord } from "../../settings/schema";
 import { createPlatformInstructions } from "../instructions/platform";
 import { readXmlAndInjectConfig } from "../instructions/read-xml-and-inject-config";
 import { aiModels, getAiApiKey, getAiModelConfig } from "../providers/registry";
+import { decodeToolArguments } from "../tools/definition";
 import {
   createCalendarTools,
   createMemoryTools,
@@ -661,7 +661,7 @@ export class AgentHarness {
             throw new Error("Specialists cannot delegate");
           }
 
-          const parsedParameters: Static<typeof schema> = Value.Decode(schema, parameters);
+          const parsedParameters: Static<typeof schema> = decodeToolArguments(schema, parameters);
           args.delegationCount();
           let delegationSignal = args.signal;
 
