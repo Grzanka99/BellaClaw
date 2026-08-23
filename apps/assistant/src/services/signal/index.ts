@@ -10,6 +10,7 @@ export class SignalSingleton implements TMessageTransport {
   private client: TOption<SignalClient>;
   private setupPromise: TOption<Promise<void>>;
   private retryDelayMs = 2000;
+  private setupBootGraceMs = 30_000;
   public platform = EMessagePlatform.Signal;
 
   private constructor() {}
@@ -36,13 +37,21 @@ export class SignalSingleton implements TMessageTransport {
       return;
     }
 
-    this.setupPromise = this.setupWithRetries();
-    try {
-      await this.setupPromise;
-    } finally {
-      if (this.client === undefined) {
-        this.setupPromise = undefined;
-      }
+    this.setupPromise = this.setupWithRetries().catch((error) => {
+      this.logger.error(`Signal setup failed: ${String(error)}`);
+    });
+
+    // NOTE: setupWithRetries only returns once it connects, and boot starts the cron scheduler
+    // after every transport resolves. Awaiting it outright means an unreachable
+    // signal-cli-rest-api leaves every scheduled job without a timer, so no reminder ever fires.
+    // Wait only long enough to cover the usual container-start race, then keep retrying behind
+    // boot.
+    await Promise.race([this.setupPromise, Bun.sleep(this.setupBootGraceMs)]);
+
+    if (this.client === undefined) {
+      this.logger.warning(
+        `Signal is not connected after ${this.setupBootGraceMs}ms; continuing boot and retrying in the background`,
+      );
     }
   }
 
