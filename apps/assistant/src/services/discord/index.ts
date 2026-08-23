@@ -50,8 +50,6 @@ export class DiscordSingleton implements TMessageTransport {
       return;
     }
 
-    // NOTE: discord.js turns a rejected listener into an unhandled 'error' event, and no
-    // 'error' listener is registered, so anything escaping here takes the process down.
     try {
       await MessagingAdapter.instance.handleInboundMessage({
         platform: EMessagePlatform.Discord,

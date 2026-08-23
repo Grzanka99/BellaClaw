@@ -41,10 +41,6 @@ export class SignalSingleton implements TMessageTransport {
       this.logger.error(`Signal setup failed: ${String(error)}`);
     });
 
-    // NOTE: setupWithRetries only returns once it connects, and boot runs CronScheduler.setup()
-    // after every transport resolves, so awaiting it outright leaves every scheduled job without
-    // a timer whenever signal-cli-rest-api is unreachable. Cover the usual container-start race,
-    // then keep retrying behind boot.
     await Promise.race([this.setupPromise, Bun.sleep(this.setupBootGraceMs)]);
 
     if (this.client === undefined) {

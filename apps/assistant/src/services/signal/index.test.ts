@@ -184,8 +184,6 @@ describe("SignalSingleton", () => {
     expect(handleInboundMessageMock).toHaveBeenCalledTimes(1);
   });
 
-  // NOTE: boot calls CronScheduler.setup() only after every transport resolves, so a setup that
-  // waits out an unreachable signal-cli-rest-api leaves every scheduled job without a timer.
   test("resolves setup and keeps retrying when signal-cli never becomes ready", async () => {
     Bun.env.SIGNAL_ENABLED = "true";
     Bun.env.SIGNAL_PHONE_NUMBER = "+100";
@@ -213,8 +211,6 @@ describe("SignalSingleton", () => {
     await Bun.sleep(20);
     expect(readinessMock.mock.calls.length).toBeGreaterThan(callsAtBoot);
 
-    // NOTE: the retry loop only exits once a client is set, and it would otherwise keep polling
-    // for the rest of the test process.
     signal.client = {} as never;
     await Bun.sleep(20);
   });

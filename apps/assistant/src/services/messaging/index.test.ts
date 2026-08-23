@@ -241,8 +241,6 @@ describe("MessagingAdapter", () => {
     expect(internals.runningCronTaskKeys.size).toBe(0);
   });
 
-  // NOTE: CronScheduler.fire() marks a one-time job completed before it emits, so a transport
-  // that is still connecting at boot would otherwise destroy the reminder outright.
   test("waits for a still-connecting transport before giving up on a cron delivery", async () => {
     const adapter = MessagingAdapter.instance as unknown as TAdapterInternals;
     const sendTextMock = mock(async () => {});

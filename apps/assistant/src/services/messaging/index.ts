@@ -254,9 +254,6 @@ export class MessagingAdapter {
     this.cronListenerRegistered = true;
   }
 
-  // NOTE: CronScheduler.fire() marks a one-time job completed before it emits, so dropping a
-  // reminder here destroys it. A transport can still be connecting at boot, so give it longer
-  // than the transport's own boot grace before giving up.
   private async waitForTransport(platform: EMessagePlatform): Promise<TOption<TMessageTransport>> {
     for (let attempt = 0; attempt < this.transportWaitAttempts; attempt += 1) {
       const transport = this.transports.get(platform);

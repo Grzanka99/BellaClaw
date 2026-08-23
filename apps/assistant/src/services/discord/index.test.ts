@@ -138,8 +138,6 @@ describe("DiscordSingleton", () => {
     });
   });
 
-  // NOTE: discord.js turns a rejected listener into an unhandled 'error' event and nothing
-  // listens for it, so a message that reaches the adapter and throws would kill the process.
   test("swallows and logs an inbound message failure instead of rejecting", async () => {
     const discord = DiscordSingleton.instance as unknown as TDiscordSingletonInternals;
     const adapter = MessagingAdapter.instance as unknown as {
