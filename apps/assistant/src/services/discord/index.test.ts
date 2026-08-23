@@ -22,6 +22,7 @@ type TDiscordSingletonInternals = {
     content: string;
   }) => Promise<void>;
   onReady: (client: { user: { tag: string } }) => Promise<void>;
+  logger: { error: (message: string) => void };
 };
 
 type TDiscordSingletonStatic = {
@@ -135,5 +136,32 @@ describe("DiscordSingleton", () => {
         content: "hello",
       },
     });
+  });
+
+  // NOTE: discord.js turns a rejected listener into an unhandled 'error' event and nothing
+  // listens for it, so a message that reaches the adapter and throws would kill the process.
+  test("swallows and logs an inbound message failure instead of rejecting", async () => {
+    const discord = DiscordSingleton.instance as unknown as TDiscordSingletonInternals;
+    const adapter = MessagingAdapter.instance as unknown as {
+      handleInboundMessage: typeof MessagingAdapter.prototype.handleInboundMessage;
+    };
+    const errorMock = mock(() => undefined);
+
+    adapter.handleInboundMessage = mock(async () => {
+      throw new Error("Failed to save user transcript");
+    });
+    discord.logger = { error: errorMock };
+    discord.client = { user: { id: "bot-1" } } as never;
+
+    expect(
+      await discord.handleMessage({
+        author: { id: "user-1", username: "TestUser" },
+        channel: { type: ChannelType.DM },
+        content: "hello",
+      }),
+    ).toBeUndefined();
+    expect(errorMock).toHaveBeenCalledWith(
+      expect.stringContaining("Failed to save user transcript"),
+    );
   });
 });
