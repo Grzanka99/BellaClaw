@@ -1,10 +1,12 @@
 import { describe, expect, test } from "bun:test";
+import type { TSchema } from "@earendil-works/pi-ai";
 import { Value } from "typebox/value";
 import { createCalendarEventTool } from "./create-calendar-event/definition";
 import {
   SCreateCalendarEventArgs,
   validateCreateCalendarEventArgs,
 } from "./create-calendar-event/handler";
+import { decodeToolArguments } from "./definition";
 import { deleteCalendarEventTool } from "./delete-calendar-event/definition";
 import { SDeleteCalendarEventArgs } from "./delete-calendar-event/handler";
 import { findCalendarAvailabilityTool } from "./find-calendar-availability/definition";
@@ -248,5 +250,49 @@ describe("AI tool definitions", () => {
         timezone: "Europe/Warsaw",
       }),
     ).toThrow("requires start");
+  });
+});
+
+describe("decodeToolArguments", () => {
+  test("names the offending path instead of throwing a bare Decode error", () => {
+    const cases: Array<{ schema: TSchema; args: unknown; expected: string }> = [
+      {
+        schema: SScheduleOnceArgs,
+        args: { name: "x", fireAt: "tomorrow at 5pm", reminderText: "Reminder" },
+        expected: "/fireAt",
+      },
+      {
+        schema: SScheduleOnceArgs,
+        args: {
+          name: "x",
+          fireAt: "2026-09-01T10:00:00Z",
+          reminderText: "Reminder",
+          group: null,
+        },
+        expected: "/group",
+      },
+      {
+        schema: SSearchMemoryArgs,
+        args: { query: "facts", limit: 99 },
+        expected: "/limit",
+      },
+      {
+        schema: SSearchMemoryArgs,
+        args: {},
+        expected: "(root)",
+      },
+    ];
+
+    for (const { schema, args, expected } of cases) {
+      expect(() => decodeToolArguments(schema, args)).toThrow("Invalid tool arguments");
+      expect(() => decodeToolArguments(schema, args)).toThrow(expected);
+    }
+  });
+
+  test("returns the decoded arguments for a valid payload", () => {
+    expect(decodeToolArguments(SSearchMemoryArgs, { query: "tea", limit: 3 })).toEqual({
+      query: "tea",
+      limit: 3,
+    });
   });
 });
