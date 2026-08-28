@@ -240,10 +240,15 @@ describe("production executable tools", () => {
     expect(settingsMock.setMany).not.toHaveBeenCalled();
   });
 
-  test("updates one purpose's model and effort", async () => {
+  test("preserves and resets effort without returning the model catalog", async () => {
     const settingsMock = installSettingsMock({
       ...DefaultConfigRecord,
       [EConfigKey.AiProvider]: EAiProvider.OpenaiCodex,
+      [EConfigKey.AiModelPreferences]: JSON.stringify({
+        [EAiProvider.OpenaiCodex]: {
+          [EModelPurpose.Specialist]: { model: "gpt-5.6-sol", effort: "high" },
+        },
+      }),
     });
     const verifySettings = mock(
       async (_candidate: TConfigRecord, _purposes: EModelPurpose[]) => undefined,
@@ -255,7 +260,6 @@ describe("production executable tools", () => {
     const result = await tool?.execute("call", {
       aiModel: "gpt-5.6-terra",
       aiModelPurpose: EModelPurpose.Specialist,
-      aiReasoningEffort: "high",
     });
     expect(result?.details).toMatchObject({
       aiRuntime: {
@@ -264,9 +268,20 @@ describe("production executable tools", () => {
         },
       },
     });
-
-    expect(verifySettings).toHaveBeenCalledTimes(1);
-    expect(settingsMock.setMany).toHaveBeenCalledTimes(1);
+    const resetResult = await tool?.execute("call", {
+      aiModelPurpose: EModelPurpose.Specialist,
+      resetAiReasoningEffort: true,
+    });
+    expect(resetResult?.details).toMatchObject({
+      aiRuntime: {
+        models: {
+          [EModelPurpose.Specialist]: { model: "gpt-5.6-terra", effort: "default" },
+        },
+      },
+    });
+    expect(JSON.stringify(resetResult?.details)).not.toContain("availableModels");
+    expect(verifySettings).toHaveBeenCalledTimes(2);
+    expect(settingsMock.setMany).toHaveBeenCalledTimes(2);
   });
 
   test("decodes semantic memory arguments and returns facts", async () => {

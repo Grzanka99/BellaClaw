@@ -31,7 +31,8 @@
     - aiRuntime.models — the effective model ID and reasoning effort for Utility, Main, Specialist, SpecialistAccurate, and ScheduledTask
     - aiRuntime.availableModels — Pi catalog entries for the active provider, each with name, exact ID, and supportedEfforts
 
-    Present effective selections from aiRuntime.models. Do not expose the raw ai.modelPreferences JSON unless the user explicitly asks for it.
+    An effort value of default means the model/provider default. Present effective selections from aiRuntime.models.
+    Do not expose the raw ai.modelPreferences JSON unless the user explicitly asks for it.
   </result_fields>
 
   <examples>

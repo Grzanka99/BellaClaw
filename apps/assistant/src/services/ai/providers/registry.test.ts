@@ -65,6 +65,11 @@ describe("AI provider registry", () => {
   test("pairs each model purpose with its reasoning effort", () => {
     expect(getAiModelConfig(EAiProvider.OpenaiCodex, EModelPurpose.Utility).effort).toBe("medium");
     expect(getAiModelConfig(EAiProvider.OpenaiCodex, EModelPurpose.Main).effort).toBe("medium");
+    expect(
+      getAiModelConfig(EAiProvider.OpenaiCodex, EModelPurpose.Main, {
+        model: "gpt-5.6-sol",
+      }).effort,
+    ).toBe("medium");
 
     for (const purpose of [
       EModelPurpose.Specialist,

@@ -149,7 +149,12 @@ export function getAiModelConfig(
 
     if (selectedModel !== undefined) {
       modelId = preference.model;
-      effort = preference.effort;
+
+      if (preference.effort !== undefined) {
+        effort = preference.effort;
+      } else if (preference.model !== registration.model) {
+        effort = undefined;
+      }
 
       if (effort !== undefined && !getSupportedThinkingLevels(selectedModel).includes(effort)) {
         effort = undefined;
@@ -172,20 +177,19 @@ function getAiModelRuntimeConfig(
   provider: EAiProvider,
   purpose: EModelPurpose,
   preferences: TAiModelPreferences,
-) {
+): { model: string; effort: ModelThinkingLevel | "default" } {
   const config = getAiModelConfig(
     provider,
     purpose,
     getAiModelPreference(preferences, provider, purpose),
   );
-
-  return { model: config.model.id, effort: config.effort };
+  return { model: config.model.id, effort: config.effort ?? "default" };
 }
 
 export function getAiModelConfigs(
   provider: EAiProvider,
   preferences: TAiModelPreferences,
-): Readonly<Record<EModelPurpose, { model: string; effort: TOption<ModelThinkingLevel> }>> {
+): Readonly<Record<EModelPurpose, { model: string; effort: ModelThinkingLevel | "default" }>> {
   return {
     [EModelPurpose.Utility]: getAiModelRuntimeConfig(provider, EModelPurpose.Utility, preferences),
     [EModelPurpose.Main]: getAiModelRuntimeConfig(provider, EModelPurpose.Main, preferences),

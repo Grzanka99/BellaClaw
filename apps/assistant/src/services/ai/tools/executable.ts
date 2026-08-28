@@ -143,19 +143,26 @@ function resolveAiProvider(settings: TConfigRecord): EAiProvider {
   }
 }
 
-function createAiRuntime(settings: TConfigRecord) {
+function createAiRuntime(settings: TConfigRecord, includeAvailableModels: boolean) {
   const provider = resolveAiProvider(settings);
   const preferences = decodeAiModelPreferences(settings[EConfigKey.AiModelPreferences]);
-
-  return {
+  const runtime = {
     provider,
     models: getAiModelConfigs(provider, preferences),
-    availableModels: aiModels.getModels(provider).map((model) => ({
-      name: model.name,
-      id: model.id,
-      supportedEfforts: getSupportedThinkingLevels(model),
-    })),
   };
+
+  if (includeAvailableModels) {
+    return {
+      ...runtime,
+      availableModels: aiModels.getModels(provider).map((model) => ({
+        name: model.name,
+        id: model.id,
+        supportedEfforts: getSupportedThinkingLevels(model),
+      })),
+    };
+  }
+
+  return runtime;
 }
 
 function normalizeProviderPreferences(provider: EAiProvider, preferences: TAiModelPreferences) {
@@ -243,7 +250,7 @@ export function createSettingsTools(context: TToolExecutionContext) {
       execute: async () => {
         const settings = await SettingsService.instance.getAll(requireChatId(context.chatId));
 
-        return textResult({ settings, aiRuntime: createAiRuntime(settings) });
+        return textResult({ settings, aiRuntime: createAiRuntime(settings, true) });
       },
     },
     {
@@ -308,8 +315,11 @@ export function createSettingsTools(context: TToolExecutionContext) {
           if (parsedArgs.resetAiModel === true) {
             setAiModelPreference(preferences, provider, purpose, undefined);
           } else {
-            const currentPreference = getAiModelPreference(preferences, provider, purpose);
-            const currentConfig = getAiModelConfig(provider, purpose, currentPreference);
+            const currentConfig = getAiModelConfig(
+              provider,
+              purpose,
+              getAiModelPreference(preferences, provider, purpose),
+            );
             let modelId = currentConfig.model.id;
 
             if (parsedArgs.aiModel !== undefined) {
@@ -322,27 +332,28 @@ export function createSettingsTools(context: TToolExecutionContext) {
               throw new Error(`Model "${modelId}" is not available from provider "${provider}"`);
             }
 
-            if (
-              parsedArgs.resetAiReasoningEffort === true &&
-              parsedArgs.aiModel === undefined &&
-              currentPreference === undefined
-            ) {
+            let effort = currentConfig.effort;
+
+            if (parsedArgs.resetAiReasoningEffort === true) {
+              effort = getAiModelConfig(provider, purpose, { model: modelId }).effort;
+            } else if (parsedArgs.aiReasoningEffort !== undefined) {
+              effort = parsedArgs.aiReasoningEffort;
+            }
+
+            if (effort !== undefined && !getSupportedThinkingLevels(model).includes(effort)) {
+              fallbacks.push({
+                purpose,
+                reason: `Effort ${effort} is unsupported by ${modelId}; using the model default`,
+              });
+              effort = getAiModelConfig(provider, purpose, { model: modelId }).effort;
+            }
+
+            const defaultConfig = getAiModelConfig(provider, purpose);
+
+            if (modelId === defaultConfig.model.id && effort === defaultConfig.effort) {
               setAiModelPreference(preferences, provider, purpose, undefined);
             } else {
-              let effort = parsedArgs.aiReasoningEffort;
-
-              if (effort !== undefined && !getSupportedThinkingLevels(model).includes(effort)) {
-                fallbacks.push({
-                  purpose,
-                  reason: `Effort ${effort} is unsupported by ${modelId}; using the model default`,
-                });
-                effort = undefined;
-              }
-
-              setAiModelPreference(preferences, provider, purpose, {
-                model: modelId,
-                effort,
-              });
+              setAiModelPreference(preferences, provider, purpose, { model: modelId, effort });
             }
           }
         }
@@ -420,7 +431,7 @@ export function createSettingsTools(context: TToolExecutionContext) {
 
         return textResult({
           settings: savedSettings,
-          aiRuntime: createAiRuntime(savedSettings),
+          aiRuntime: createAiRuntime(savedSettings, false),
           change: {
             purpose,
             fallbacks,

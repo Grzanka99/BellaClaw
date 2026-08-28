@@ -4,8 +4,10 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { Agent } from "@earendil-works/pi-agent-core";
 import {
   type Api,
+  type Context,
   contentText,
   createAssistantMessageEventStream,
+  hasApi,
   type Model,
   type Static,
   type ThinkingLevel,
@@ -136,19 +138,27 @@ export class AgentHarness {
     }
 
     try {
-      result = await aiModels.completeSimple(
-        modelConfig.model,
-        {
-          systemPrompt: args.instructions,
-          messages: [{ role: "user", content: args.prompt, timestamp: Date.now() }],
-          tools: [],
-        },
-        {
-          apiKey: this.resolveApiKey(modelConfig.model.provider),
+      const context: Context = {
+        systemPrompt: args.instructions,
+        messages: [{ role: "user", content: args.prompt, timestamp: Date.now() }],
+        tools: [],
+      };
+      const options = {
+        apiKey: this.resolveApiKey(modelConfig.model.provider),
+        signal: args.signal,
+      };
+
+      if (modelConfig.effort === "off" && hasApi(modelConfig.model, "openai-codex-responses")) {
+        result = await aiModels.complete(modelConfig.model, context, {
+          ...options,
+          reasoningEffort: "none",
+        });
+      } else {
+        result = await aiModels.completeSimple(modelConfig.model, context, {
+          ...options,
           reasoning,
-          signal: args.signal,
-        },
-      );
+        });
+      }
     } catch (error) {
       this.logDirectCompletionCompleted(
         args.trace,
@@ -221,6 +231,7 @@ export class AgentHarness {
         settings,
         purpose,
         trace: undefined,
+        signal: AbortSignal.timeout(60_000),
       });
 
       if (response === undefined) {
@@ -268,6 +279,11 @@ export class AgentHarness {
         }
 
         providerCallCount += 1;
+
+        if (modelConfig.effort === "off" && hasApi(model, "openai-codex-responses")) {
+          return aiModels.stream(model, context, { ...options, reasoningEffort: "none" });
+        }
+
         return aiModels.streamSimple(model, context, options);
       },
       getApiKey: (provider) => this.resolveApiKey(provider),
