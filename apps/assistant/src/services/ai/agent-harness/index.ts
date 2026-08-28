@@ -8,6 +8,7 @@ import {
   createAssistantMessageEventStream,
   type Model,
   type Static,
+  type ThinkingLevel,
   Type,
 } from "@earendil-works/pi-ai";
 import {
@@ -19,6 +20,7 @@ import {
 import { EConfigKey, type TConfigRecord } from "../../settings/schema";
 import { createPlatformInstructions } from "../instructions/platform";
 import { readXmlAndInjectConfig } from "../instructions/read-xml-and-inject-config";
+import { decodeAiModelPreferences, getAiModelPreference } from "../model-preferences";
 import { aiModels, getAiApiKey, getAiModelConfig } from "../providers/registry";
 import { decodeToolArguments } from "../tools/definition";
 import {
@@ -127,6 +129,11 @@ export class AgentHarness {
       args.purpose,
     );
     let result: Awaited<ReturnType<typeof aiModels.completeSimple>>;
+    let reasoning: TOption<ThinkingLevel>;
+
+    if (modelConfig.effort !== "off") {
+      reasoning = modelConfig.effort;
+    }
 
     try {
       result = await aiModels.completeSimple(
@@ -138,7 +145,7 @@ export class AgentHarness {
         },
         {
           apiKey: this.resolveApiKey(modelConfig.model.provider),
-          reasoning: modelConfig.effort,
+          reasoning,
           signal: args.signal,
         },
       );
@@ -432,13 +439,18 @@ export class AgentHarness {
 
   private resolveModel(settings: TConfigRecord, purpose: EModelPurpose) {
     const provider = settings[EConfigKey.AiProvider];
+    const preferences = decodeAiModelPreferences(settings[EConfigKey.AiModelPreferences]);
 
     switch (provider) {
       case EAiProvider.OpenaiCodex:
       case EAiProvider.Openrouter:
       case EAiProvider.Ollama:
       case EAiProvider.OpencodeGo:
-        return getAiModelConfig(provider, purpose);
+        return getAiModelConfig(
+          provider,
+          purpose,
+          getAiModelPreference(preferences, provider, purpose),
+        );
       default:
         throw new Error(`Unknown AI provider: ${provider}`);
     }

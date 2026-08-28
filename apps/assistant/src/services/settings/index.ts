@@ -10,6 +10,11 @@ import {
   type TConfigRecord,
 } from "./schema";
 
+export type TConfigUpdate = {
+  key: EConfigKey;
+  value: string;
+};
+
 export class SettingsService {
   private static _instance: SettingsService;
 
@@ -61,18 +66,58 @@ export class SettingsService {
       throw new Error(`Unknown config key: "${key}"`);
     }
 
-    const validator = ConfigValidators[key];
-    const parsed = validator.safeParse(value);
+    return this.setMany(ownerKey, [{ key, value }]);
+  }
 
-    if (!parsed.success) {
-      throw new Error(`Invalid value for config key "${key}": ${JSON.stringify(value)}`);
+  public async setMany(ownerKey: string, updates: TConfigUpdate[]): Promise<TConfigRecord> {
+    if (updates.length === 0) {
+      throw new Error("Provide at least one config update");
     }
 
-    if (parsed.data === DefaultConfigRecord[key]) {
-      await this.deleteRow(ownerKey, key);
-    } else {
-      await this.upsertRow(ownerKey, key, parsed.data);
+    const validatedUpdates: TConfigUpdate[] = [];
+
+    for (const update of updates) {
+      const validator = ConfigValidators[update.key];
+      const parsed = validator.safeParse(update.value);
+
+      if (!parsed.success) {
+        throw new Error(
+          `Invalid value for config key "${update.key}": ${JSON.stringify(update.value)}`,
+        );
+      }
+
+      validatedUpdates.push({ key: update.key, value: parsed.data });
     }
+
+    const now = Date.now();
+
+    await this.queue.enqueue(async () => {
+      await this.db.transaction(async (tx) => {
+        for (const update of validatedUpdates) {
+          if (update.value === DefaultConfigRecord[update.key]) {
+            await tx
+              .delete(userConfigsTable)
+              .where(
+                and(eq(userConfigsTable.ownerKey, ownerKey), eq(userConfigsTable.key, update.key)),
+              );
+          } else {
+            await tx
+              .insert(userConfigsTable)
+              .values({
+                ownerKey,
+                key: update.key,
+                value: update.value,
+                createdAt: now,
+                updatedAt: now,
+              })
+              .onConflictDoUpdate({
+                target: [userConfigsTable.ownerKey, userConfigsTable.key],
+                set: { value: update.value, updatedAt: now },
+              });
+          }
+        }
+      });
+    });
 
     this.cache.delete(ownerKey);
 
@@ -110,34 +155,6 @@ export class SettingsService {
   private async selectOwnerRows(ownerKey: string): Promise<TSelectUserConfig[]> {
     return this.queue.enqueue(async () => {
       return this.db.select().from(userConfigsTable).where(eq(userConfigsTable.ownerKey, ownerKey));
-    });
-  }
-
-  private async deleteRow(ownerKey: string, key: EConfigKey): Promise<void> {
-    await this.queue.enqueue(async () => {
-      await this.db
-        .delete(userConfigsTable)
-        .where(and(eq(userConfigsTable.ownerKey, ownerKey), eq(userConfigsTable.key, key)));
-    });
-  }
-
-  private async upsertRow(ownerKey: string, key: EConfigKey, value: string): Promise<void> {
-    const now = Date.now();
-
-    await this.queue.enqueue(async () => {
-      await this.db
-        .insert(userConfigsTable)
-        .values({
-          ownerKey,
-          key,
-          value,
-          createdAt: now,
-          updatedAt: now,
-        })
-        .onConflictDoUpdate({
-          target: [userConfigsTable.ownerKey, userConfigsTable.key],
-          set: { value, updatedAt: now },
-        });
     });
   }
 }

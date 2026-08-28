@@ -1,7 +1,7 @@
 <instructions>
 
   <purpose>
-    Read and display the user's current effective assistant settings and computed AI runtime.
+    Read and display the user's current effective assistant settings, AI runtime, and available models.
     Use this whenever the user asks to view, check, or inspect any configured preference
     (timezone, language, assistant name, address style, reply length, AI provider, or chat model).
   </purpose>
@@ -9,7 +9,8 @@
   <tool>
     <name>get-settings</name>
     <description>
-      Returns the full effective settings record and computed provider/model-purpose mapping for the current user. Takes no arguments.
+      Returns the full effective settings record, provider/model-purpose mapping, and the active
+      provider's Pi model catalog for the current user. Takes no arguments.
       The owner is resolved automatically from the chat context — never ask the user for an owner key.
     </description>
   </tool>
@@ -19,15 +20,18 @@
     <rule>This tool takes no arguments. Always pass an empty object.</rule>
     <rule>After receiving the settings, present them to the user in a clear, human-readable way in the user's language.</rule>
     <rule>Do not invent settings that are not present in the returned record.</rule>
+    <rule>When listing models, use aiRuntime.availableModels. Include the name, exact ID, and supportedEfforts.</rule>
+    <rule>Only the active provider's models are returned. Do not claim this is a live provider API refresh.</rule>
   </usage_rules>
 
   <result_fields>
     The result contains two objects:
-    - settings — the effective flat settings map, including ai.provider and ai.instructions.* preferences
+    - settings — the effective flat settings map, including ai.provider, internal ai.modelPreferences, and ai.instructions.* preferences
     - aiRuntime.provider — the active provider resolved from settings
-    - aiRuntime.models — the computed code-registry model IDs for Utility, Main, Specialist, SpecialistAccurate, and ScheduledTask
+    - aiRuntime.models — the effective model ID and reasoning effort for Utility, Main, Specialist, SpecialistAccurate, and ScheduledTask
+    - aiRuntime.availableModels — Pi catalog entries for the active provider, each with name, exact ID, and supportedEfforts
 
-    Model IDs are computed runtime values. They are not stored settings and cannot be edited through settings tools.
+    Present effective selections from aiRuntime.models. Do not expose the raw ai.modelPreferences JSON unless the user explicitly asks for it.
   </result_fields>
 
   <examples>
@@ -40,8 +44,9 @@
     <example>
       <message>"what model are you running on?"</message>
       <action>Call get-settings with an empty object.</action>
-      <response>"Your active provider is opencode-go and the chat model is glm-5.2."</response>
+      <response>"Your active provider is opencode-go and the Main model is grok-4.5 at high effort."</response>
     </example>
+
   </examples>
 
 </instructions>

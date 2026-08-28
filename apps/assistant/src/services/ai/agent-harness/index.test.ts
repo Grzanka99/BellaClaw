@@ -83,6 +83,11 @@ describe("AgentHarness", () => {
       signal: undefined,
     });
     settings[EConfigKey.AiInstructionsTimezone] = "Asia/Tokyo";
+    settings[EConfigKey.AiModelPreferences] = JSON.stringify({
+      [EAiProvider.Openrouter]: {
+        [EModelPurpose.Main]: { model: "openai/gpt-5.4-mini", effort: "high" },
+      },
+    });
     const second = await harness.runMain({
       prompt: "second prompt",
       history: [],
@@ -98,7 +103,7 @@ describe("AgentHarness", () => {
     expect(second.text).toBe("second");
     expect(models.map((model) => model.id)).toEqual([
       "google/gemini-3.1-pro-preview",
-      "google/gemini-3.1-pro-preview",
+      "openai/gpt-5.4-mini",
     ]);
     expect(sessionIds).toEqual([undefined, undefined]);
     expect(contexts[0]?.messages.filter((message) => message.role === "user")).toHaveLength(2);

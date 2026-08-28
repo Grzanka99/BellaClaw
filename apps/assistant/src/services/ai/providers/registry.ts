@@ -4,19 +4,21 @@ import {
   createModels,
   getSupportedThinkingLevels,
   type Model,
+  type ModelThinkingLevel,
   type Provider,
-  type ThinkingLevel,
 } from "@earendil-works/pi-ai";
 import { openaiCodexProvider } from "@earendil-works/pi-ai/providers/openai-codex";
 import { opencodeGoProvider } from "@earendil-works/pi-ai/providers/opencode-go";
 import { openrouterProvider } from "@earendil-works/pi-ai/providers/openrouter";
 import { FileCredentialStore } from "../auth/file-credential-store";
+import type { TAiModelPreference, TAiModelPreferences } from "../model-preferences";
+import { getAiModelPreference } from "../model-preferences";
 import { EAiProvider, EModelPurpose } from "../types";
 import { ollamaProvider } from "./ollama";
 
 type TAiModelPurposeRegistration = {
   model: string;
-  effort?: ThinkingLevel;
+  effort?: ModelThinkingLevel;
 };
 
 type TAiProviderRegistration = {
@@ -133,17 +135,76 @@ export function getAiModel(provider: EAiProvider, purpose: EModelPurpose): Model
   return getAiModelConfig(provider, purpose).model;
 }
 
-export function getAiModelConfig(provider: EAiProvider, purpose: EModelPurpose) {
+export function getAiModelConfig(
+  provider: EAiProvider,
+  purpose: EModelPurpose,
+  preference?: TAiModelPreference,
+) {
   const registration = AI_PROVIDER_REGISTRY[provider].modelByPurpose[purpose];
-  const model = aiModels.getModel(provider, registration.model);
+  let modelId = registration.model;
+  let effort = registration.effort;
+
+  if (preference !== undefined) {
+    const selectedModel = aiModels.getModel(provider, preference.model);
+
+    if (selectedModel !== undefined) {
+      modelId = preference.model;
+      effort = preference.effort;
+
+      if (effort !== undefined && !getSupportedThinkingLevels(selectedModel).includes(effort)) {
+        effort = undefined;
+      }
+    }
+  }
+
+  const model = aiModels.getModel(provider, modelId);
 
   if (model === undefined) {
     throw new Error(
-      `AI registry model not found: provider=${provider}, purpose=${purpose}, model=${registration.model}`,
+      `AI registry model not found: provider=${provider}, purpose=${purpose}, model=${modelId}`,
     );
   }
 
-  return { model, effort: registration.effort };
+  return { model, effort };
+}
+
+function getAiModelRuntimeConfig(
+  provider: EAiProvider,
+  purpose: EModelPurpose,
+  preferences: TAiModelPreferences,
+) {
+  const config = getAiModelConfig(
+    provider,
+    purpose,
+    getAiModelPreference(preferences, provider, purpose),
+  );
+
+  return { model: config.model.id, effort: config.effort };
+}
+
+export function getAiModelConfigs(
+  provider: EAiProvider,
+  preferences: TAiModelPreferences,
+): Readonly<Record<EModelPurpose, { model: string; effort: TOption<ModelThinkingLevel> }>> {
+  return {
+    [EModelPurpose.Utility]: getAiModelRuntimeConfig(provider, EModelPurpose.Utility, preferences),
+    [EModelPurpose.Main]: getAiModelRuntimeConfig(provider, EModelPurpose.Main, preferences),
+    [EModelPurpose.Specialist]: getAiModelRuntimeConfig(
+      provider,
+      EModelPurpose.Specialist,
+      preferences,
+    ),
+    [EModelPurpose.SpecialistAccurate]: getAiModelRuntimeConfig(
+      provider,
+      EModelPurpose.SpecialistAccurate,
+      preferences,
+    ),
+    [EModelPurpose.ScheduledTask]: getAiModelRuntimeConfig(
+      provider,
+      EModelPurpose.ScheduledTask,
+      preferences,
+    ),
+  };
 }
 
 export function getAiModelIds(provider: EAiProvider): Readonly<Record<EModelPurpose, string>> {
