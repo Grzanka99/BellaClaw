@@ -4,19 +4,21 @@ import {
   createModels,
   getSupportedThinkingLevels,
   type Model,
+  type ModelThinkingLevel,
   type Provider,
-  type ThinkingLevel,
 } from "@earendil-works/pi-ai";
 import { openaiCodexProvider } from "@earendil-works/pi-ai/providers/openai-codex";
 import { opencodeGoProvider } from "@earendil-works/pi-ai/providers/opencode-go";
 import { openrouterProvider } from "@earendil-works/pi-ai/providers/openrouter";
 import { FileCredentialStore } from "../auth/file-credential-store";
+import type { TAiModelPreference, TAiModelPreferences } from "../model-preferences";
+import { getAiModelPreference } from "../model-preferences";
 import { EAiProvider, EModelPurpose } from "../types";
 import { ollamaProvider } from "./ollama";
 
 type TAiModelPurposeRegistration = {
   model: string;
-  effort?: ThinkingLevel;
+  effort?: ModelThinkingLevel;
 };
 
 type TAiProviderRegistration = {
@@ -83,10 +85,10 @@ const AI_PROVIDER_REGISTRY: Record<EAiProvider, TAiProviderRegistration> = {
     createProvider: opencodeGoProvider,
     modelByPurpose: {
       [EModelPurpose.Utility]: { model: "deepseek-v4-pro" },
-      [EModelPurpose.Main]: { model: "grok-4.5", effort: "high" },
+      [EModelPurpose.Main]: { model: "grok-4.6", effort: "high" },
       [EModelPurpose.Specialist]: { model: "deepseek-v4-pro", effort: "high" },
       [EModelPurpose.SpecialistAccurate]: {
-        model: "grok-4.5",
+        model: "grok-4.6",
         effort: "medium",
       },
       [EModelPurpose.ScheduledTask]: { model: "deepseek-v4-pro", effort: "high" },
@@ -133,17 +135,80 @@ export function getAiModel(provider: EAiProvider, purpose: EModelPurpose): Model
   return getAiModelConfig(provider, purpose).model;
 }
 
-export function getAiModelConfig(provider: EAiProvider, purpose: EModelPurpose) {
+export function getAiModelConfig(
+  provider: EAiProvider,
+  purpose: EModelPurpose,
+  preference?: TAiModelPreference,
+) {
   const registration = AI_PROVIDER_REGISTRY[provider].modelByPurpose[purpose];
-  const model = aiModels.getModel(provider, registration.model);
+  let modelId = registration.model;
+  let effort = registration.effort;
+
+  if (preference !== undefined) {
+    const selectedModel = aiModels.getModel(provider, preference.model);
+
+    if (selectedModel !== undefined) {
+      modelId = preference.model;
+
+      if (preference.effort !== undefined) {
+        effort = preference.effort;
+      } else if (preference.model !== registration.model) {
+        effort = undefined;
+      }
+
+      if (effort !== undefined && !getSupportedThinkingLevels(selectedModel).includes(effort)) {
+        effort = undefined;
+      }
+    }
+  }
+
+  const model = aiModels.getModel(provider, modelId);
 
   if (model === undefined) {
     throw new Error(
-      `AI registry model not found: provider=${provider}, purpose=${purpose}, model=${registration.model}`,
+      `AI registry model not found: provider=${provider}, purpose=${purpose}, model=${modelId}`,
     );
   }
 
-  return { model, effort: registration.effort };
+  return { model, effort };
+}
+
+function getAiModelRuntimeConfig(
+  provider: EAiProvider,
+  purpose: EModelPurpose,
+  preferences: TAiModelPreferences,
+): { model: string; effort: ModelThinkingLevel | "default" } {
+  const config = getAiModelConfig(
+    provider,
+    purpose,
+    getAiModelPreference(preferences, provider, purpose),
+  );
+  return { model: config.model.id, effort: config.effort ?? "default" };
+}
+
+export function getAiModelConfigs(
+  provider: EAiProvider,
+  preferences: TAiModelPreferences,
+): Readonly<Record<EModelPurpose, { model: string; effort: ModelThinkingLevel | "default" }>> {
+  return {
+    [EModelPurpose.Utility]: getAiModelRuntimeConfig(provider, EModelPurpose.Utility, preferences),
+    [EModelPurpose.Main]: getAiModelRuntimeConfig(provider, EModelPurpose.Main, preferences),
+    [EModelPurpose.Specialist]: getAiModelRuntimeConfig(
+      provider,
+      EModelPurpose.Specialist,
+      preferences,
+    ),
+    [EModelPurpose.SpecialistAccurate]: getAiModelRuntimeConfig(
+      provider,
+      EModelPurpose.SpecialistAccurate,
+      preferences,
+    ),
+    [EModelPurpose.ScheduledTask]: getAiModelRuntimeConfig(
+      provider,
+      EModelPurpose.ScheduledTask,
+      preferences,
+    ),
+  };
 }
 
 export function getAiModelIds(provider: EAiProvider): Readonly<Record<EModelPurpose, string>> {

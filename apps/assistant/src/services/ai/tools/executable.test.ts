@@ -4,8 +4,8 @@ import { CalendarService } from "../../calendar";
 import { CronSingleton } from "../../cron";
 import { EmbeddingClient } from "../../embedding";
 import { Memory } from "../../memory";
-import { SettingsService } from "../../settings";
-import { DefaultConfigRecord, EConfigKey } from "../../settings/schema";
+import { SettingsService, type TConfigUpdate } from "../../settings";
+import { DefaultConfigRecord, EConfigKey, type TConfigRecord } from "../../settings/schema";
 import { EAiProvider, EModelPurpose } from "../types";
 import {
   createCalendarTools,
@@ -26,6 +26,21 @@ function reset() {
   (EmbeddingClient as unknown as { _instance: unknown })._instance = undefined;
   (Memory as unknown as { _instance: unknown })._instance = undefined;
   (SettingsService as unknown as { _instance: unknown })._instance = undefined;
+}
+
+function installSettingsMock(initial: TConfigRecord) {
+  const current = { ...initial };
+  const getAll = mock(async () => ({ ...current }));
+  const setMany = mock(async (_ownerKey: string, updates: TConfigUpdate[]) => {
+    for (const update of updates) {
+      current[update.key] = update.value;
+    }
+
+    return { ...current };
+  });
+  (SettingsService as unknown as { _instance: unknown })._instance = { getAll, setMany };
+
+  return { getAll, setMany };
 }
 
 afterEach(reset);
@@ -203,30 +218,70 @@ describe("production executable tools", () => {
     );
   });
 
-  test("verifies every model purpose used by the harness before changing providers", async () => {
+  test("does not persist a provider when its first model verification fails", async () => {
     const verifySettings = mock(async () => "verification failed");
-    (SettingsService as unknown as { _instance: unknown })._instance = {
-      getAll: mock(async () => DefaultConfigRecord),
-    };
+    const settingsMock = installSettingsMock(DefaultConfigRecord);
     const tool = createSettingsTools({ ...context, verifySettings }).find(
       (candidate) => candidate.name === "update-settings",
     );
 
-    await expect(tool?.execute("call", { aiProvider: EAiProvider.Openrouter })).rejects.toThrow(
-      "verification failed",
-    );
+    await expect(
+      tool?.execute("call", {
+        aiProvider: EAiProvider.Openrouter,
+        aiModel: "openai/gpt-5.4-mini",
+      }),
+    ).rejects.toThrow("verification failed");
     expect(verifySettings).toHaveBeenCalledWith(
       expect.objectContaining({
         [EConfigKey.AiProvider]: EAiProvider.Openrouter,
       }),
-      [
-        EModelPurpose.Utility,
-        EModelPurpose.Main,
-        EModelPurpose.Specialist,
-        EModelPurpose.SpecialistAccurate,
-        EModelPurpose.ScheduledTask,
-      ],
+      [EModelPurpose.Utility],
     );
+    expect(settingsMock.setMany).not.toHaveBeenCalled();
+  });
+
+  test("preserves and resets effort without returning the model catalog", async () => {
+    const settingsMock = installSettingsMock({
+      ...DefaultConfigRecord,
+      [EConfigKey.AiProvider]: EAiProvider.OpenaiCodex,
+      [EConfigKey.AiModelPreferences]: JSON.stringify({
+        [EAiProvider.OpenaiCodex]: {
+          [EModelPurpose.Specialist]: { model: "gpt-5.6-sol", effort: "high" },
+        },
+      }),
+    });
+    const verifySettings = mock(
+      async (_candidate: TConfigRecord, _purposes: EModelPurpose[]) => undefined,
+    );
+    const tool = createSettingsTools({ ...context, verifySettings }).find(
+      (candidate) => candidate.name === "update-settings",
+    );
+
+    const result = await tool?.execute("call", {
+      aiModel: "gpt-5.6-terra",
+      aiModelPurpose: EModelPurpose.Specialist,
+    });
+    expect(result?.details).toMatchObject({
+      aiRuntime: {
+        models: {
+          [EModelPurpose.Specialist]: { model: "gpt-5.6-terra", effort: "high" },
+        },
+      },
+    });
+    const resetResult = await tool?.execute("call", {
+      aiModelPurpose: EModelPurpose.Specialist,
+      resetAiReasoningEffort: true,
+    });
+    expect(resetResult?.details).toMatchObject({
+      aiRuntime: {
+        models: {
+          [EModelPurpose.Specialist]: { model: "gpt-5.6-terra", effort: "default" },
+        },
+      },
+    });
+    expect(JSON.stringify(resetResult?.details)).not.toContain("availableModels");
+    expect(verifySettings).toHaveBeenCalledTimes(2);
+    expect(settingsMock.setMany).toHaveBeenCalledTimes(2);
   });
 
   test("decodes semantic memory arguments and returns facts", async () => {

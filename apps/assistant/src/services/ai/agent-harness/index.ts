@@ -4,10 +4,13 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { Agent } from "@earendil-works/pi-agent-core";
 import {
   type Api,
+  type Context,
   contentText,
   createAssistantMessageEventStream,
+  hasApi,
   type Model,
   type Static,
+  type ThinkingLevel,
   Type,
 } from "@earendil-works/pi-ai";
 import {
@@ -19,6 +22,7 @@ import {
 import { EConfigKey, type TConfigRecord } from "../../settings/schema";
 import { createPlatformInstructions } from "../instructions/platform";
 import { readXmlAndInjectConfig } from "../instructions/read-xml-and-inject-config";
+import { decodeAiModelPreferences, getAiModelPreference } from "../model-preferences";
 import { aiModels, getAiApiKey, getAiModelConfig } from "../providers/registry";
 import { decodeToolArguments } from "../tools/definition";
 import {
@@ -127,21 +131,34 @@ export class AgentHarness {
       args.purpose,
     );
     let result: Awaited<ReturnType<typeof aiModels.completeSimple>>;
+    let reasoning: TOption<ThinkingLevel>;
+
+    if (modelConfig.effort !== "off") {
+      reasoning = modelConfig.effort;
+    }
 
     try {
-      result = await aiModels.completeSimple(
-        modelConfig.model,
-        {
-          systemPrompt: args.instructions,
-          messages: [{ role: "user", content: args.prompt, timestamp: Date.now() }],
-          tools: [],
-        },
-        {
-          apiKey: this.resolveApiKey(modelConfig.model.provider),
-          reasoning: modelConfig.effort,
-          signal: args.signal,
-        },
-      );
+      const context: Context = {
+        systemPrompt: args.instructions,
+        messages: [{ role: "user", content: args.prompt, timestamp: Date.now() }],
+        tools: [],
+      };
+      const options = {
+        apiKey: this.resolveApiKey(modelConfig.model.provider),
+        signal: args.signal,
+      };
+
+      if (modelConfig.effort === "off" && hasApi(modelConfig.model, "openai-codex-responses")) {
+        result = await aiModels.complete(modelConfig.model, context, {
+          ...options,
+          reasoningEffort: "none",
+        });
+      } else {
+        result = await aiModels.completeSimple(modelConfig.model, context, {
+          ...options,
+          reasoning,
+        });
+      }
     } catch (error) {
       this.logDirectCompletionCompleted(
         args.trace,
@@ -214,6 +231,7 @@ export class AgentHarness {
         settings,
         purpose,
         trace: undefined,
+        signal: AbortSignal.timeout(60_000),
       });
 
       if (response === undefined) {
@@ -237,7 +255,6 @@ export class AgentHarness {
     let stopReason = "completed";
     let forceFinalization = false;
     let forcedFinalAttempt = false;
-    let providerCallCount = 0;
     const startedAt = performance.now();
     const toolStartedAt = new Map<string, number>();
 
@@ -256,18 +273,21 @@ export class AgentHarness {
         messages,
       },
       streamFn: (model, context, options) => {
-        if (providerCallCount >= args.maxIterations) {
+        if (iterations >= args.maxIterations) {
           return createHardLimitStream(model);
         }
 
-        providerCallCount += 1;
+        iterations += 1;
+
+        if (modelConfig.effort === "off" && hasApi(model, "openai-codex-responses")) {
+          return aiModels.stream(model, context, { ...options, reasoningEffort: "none" });
+        }
+
         return aiModels.streamSimple(model, context, options);
       },
       getApiKey: (provider) => this.resolveApiKey(provider),
       toolExecution: "parallel",
       prepareNextTurnWithContext: (context) => {
-        iterations += 1;
-
         if (context.message.role !== "assistant") {
           return undefined;
         }
@@ -432,13 +452,18 @@ export class AgentHarness {
 
   private resolveModel(settings: TConfigRecord, purpose: EModelPurpose) {
     const provider = settings[EConfigKey.AiProvider];
+    const preferences = decodeAiModelPreferences(settings[EConfigKey.AiModelPreferences]);
 
     switch (provider) {
       case EAiProvider.OpenaiCodex:
       case EAiProvider.Openrouter:
       case EAiProvider.Ollama:
       case EAiProvider.OpencodeGo:
-        return getAiModelConfig(provider, purpose);
+        return getAiModelConfig(
+          provider,
+          purpose,
+          getAiModelPreference(preferences, provider, purpose),
+        );
       default:
         throw new Error(`Unknown AI provider: ${provider}`);
     }

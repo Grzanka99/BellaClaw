@@ -1,12 +1,20 @@
 import type { TOption } from "@bellaclaw/shared";
+import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { ECronJobType } from "../../../lib/cron-engine";
 import { fetchWeb, searchWeb } from "../../../lib/web";
 import { CalendarService } from "../../calendar";
 import { CronSingleton } from "../../cron";
 import { MessageHandler } from "../../message-handler";
-import { SettingsService } from "../../settings";
+import { SettingsService, type TConfigUpdate } from "../../settings";
 import { ConfigValidators, EConfigKey, type TConfigRecord } from "../../settings/schema";
-import { getAiModelIds } from "../providers/registry";
+import {
+  decodeAiModelPreferences,
+  encodeAiModelPreferences,
+  getAiModelPreference,
+  setAiModelPreference,
+  type TAiModelPreferences,
+} from "../model-preferences";
+import { aiModels, getAiModelConfig, getAiModelConfigs } from "../providers/registry";
 import { EAiProvider, EModelPurpose } from "../types";
 import { CREATE_CALENDAR_EVENT_TOOL } from "./create-calendar-event/definition";
 import {
@@ -88,7 +96,11 @@ import {
   validateUpdateCronJobArgs,
 } from "./update-cron-job/handler";
 import { UPDATE_SETTINGS_TOOL } from "./update-settings/definition";
-import { SUpdateSettingsArgs, type TUpdateSettingsArgs } from "./update-settings/handler";
+import {
+  SUpdateSettingsArgs,
+  type TUpdateSettingsArgs,
+  validateUpdateSettingsArgs,
+} from "./update-settings/handler";
 import { WEB_FETCH_TOOL } from "./web-fetch/definition";
 import { SWebFetchArgs, validateWebFetchArgs } from "./web-fetch/handler";
 import { WEB_SEARCH_TOOL } from "./web-search/definition";
@@ -115,6 +127,75 @@ function requireChatId(chatId: TOption<string>): string {
   }
 
   return chatId;
+}
+
+function resolveAiProvider(settings: TConfigRecord): EAiProvider {
+  const provider = settings[EConfigKey.AiProvider];
+
+  switch (provider) {
+    case EAiProvider.OpenaiCodex:
+    case EAiProvider.Openrouter:
+    case EAiProvider.Ollama:
+    case EAiProvider.OpencodeGo:
+      return provider;
+    default:
+      throw new Error("Configured AI provider is invalid");
+  }
+}
+
+function createAiRuntime(settings: TConfigRecord, includeAvailableModels: boolean) {
+  const provider = resolveAiProvider(settings);
+  const preferences = decodeAiModelPreferences(settings[EConfigKey.AiModelPreferences]);
+  const runtime = {
+    provider,
+    models: getAiModelConfigs(provider, preferences),
+  };
+
+  if (includeAvailableModels) {
+    return {
+      ...runtime,
+      availableModels: aiModels.getModels(provider).map((model) => ({
+        name: model.name,
+        id: model.id,
+        supportedEfforts: getSupportedThinkingLevels(model),
+      })),
+    };
+  }
+
+  return runtime;
+}
+
+function normalizeProviderPreferences(provider: EAiProvider, preferences: TAiModelPreferences) {
+  const fallbacks: Array<{ purpose: EModelPurpose; reason: string }> = [];
+
+  for (const purpose of Object.values(EModelPurpose)) {
+    const preference = getAiModelPreference(preferences, provider, purpose);
+
+    if (preference === undefined) {
+      continue;
+    }
+
+    const model = aiModels.getModel(provider, preference.model);
+
+    if (model === undefined) {
+      setAiModelPreference(preferences, provider, purpose, undefined);
+      fallbacks.push({ purpose, reason: `Remembered model ${preference.model} is unavailable` });
+      continue;
+    }
+
+    if (
+      preference.effort !== undefined &&
+      !getSupportedThinkingLevels(model).includes(preference.effort)
+    ) {
+      setAiModelPreference(preferences, provider, purpose, { model: preference.model });
+      fallbacks.push({
+        purpose,
+        reason: `Remembered effort ${preference.effort} is unsupported by ${preference.model}`,
+      });
+    }
+  }
+
+  return fallbacks;
 }
 
 export function createMemoryTools(context: TToolExecutionContext) {
@@ -168,20 +249,8 @@ export function createSettingsTools(context: TToolExecutionContext) {
       parameters: SGetSettingsArgs,
       execute: async () => {
         const settings = await SettingsService.instance.getAll(requireChatId(context.chatId));
-        const provider = settings[EConfigKey.AiProvider];
 
-        switch (provider) {
-          case EAiProvider.OpenaiCodex:
-          case EAiProvider.Openrouter:
-          case EAiProvider.Ollama:
-          case EAiProvider.OpencodeGo:
-            return textResult({
-              settings,
-              aiRuntime: { provider, models: getAiModelIds(provider) },
-            });
-          default:
-            throw new Error("Configured AI provider is invalid");
-        }
+        return textResult({ settings, aiRuntime: createAiRuntime(settings, true) });
       },
     },
     {
@@ -192,8 +261,9 @@ export function createSettingsTools(context: TToolExecutionContext) {
       executionMode: SEQUENTIAL,
       execute: async (_toolCallId: string, args: unknown) => {
         const parsedArgs: TUpdateSettingsArgs = decodeToolArguments(SUpdateSettingsArgs, args);
-        const updates: Array<{ field: keyof TUpdateSettingsArgs; key: EConfigKey; value: string }> =
-          [];
+        validateUpdateSettingsArgs(parsedArgs);
+
+        const updates: TConfigUpdate[] = [];
         const fields: Array<{ field: keyof TUpdateSettingsArgs; key: EConfigKey }> = [
           { field: "timezone", key: EConfigKey.AiInstructionsTimezone },
           { field: "language", key: EConfigKey.AiInstructionsLanguage },
@@ -207,46 +277,167 @@ export function createSettingsTools(context: TToolExecutionContext) {
           const value = parsedArgs[field.field];
 
           if (value !== undefined) {
-            if (!ConfigValidators[field.key].safeParse(value).success) {
+            const parsed = ConfigValidators[field.key].safeParse(value);
+
+            if (!parsed.success) {
               throw new Error(`Invalid value for ${field.field}`);
             }
 
-            updates.push({ ...field, value });
+            updates.push({ key: field.key, value: parsed.data });
           }
-        }
-
-        if (updates.length === 0) {
-          throw new Error("Provide at least one field to update");
         }
 
         const chatId = requireChatId(context.chatId);
         const settings = await SettingsService.instance.getAll(chatId);
+        const currentProvider = resolveAiProvider(settings);
+        let provider = currentProvider;
 
-        if (updates.some((update) => update.key === EConfigKey.AiProvider)) {
-          const nextSettings = { ...settings };
+        if (parsedArgs.aiProvider !== undefined) {
+          provider = parsedArgs.aiProvider;
+        }
 
-          for (const update of updates) {
-            nextSettings[update.key] = update.value;
+        const hasModelOperation =
+          parsedArgs.aiModel !== undefined ||
+          parsedArgs.aiReasoningEffort !== undefined ||
+          parsedArgs.resetAiModel === true ||
+          parsedArgs.resetAiReasoningEffort === true;
+        let purpose: TOption<EModelPurpose>;
+        const preferences = decodeAiModelPreferences(settings[EConfigKey.AiModelPreferences]);
+        const fallbacks: Array<{ purpose: EModelPurpose; reason: string }> = [];
+
+        if (hasModelOperation) {
+          purpose = EModelPurpose.Main;
+
+          if (parsedArgs.aiModelPurpose !== undefined) {
+            purpose = parsedArgs.aiModelPurpose;
           }
 
-          const error = await context.verifySettings(nextSettings, [
-            EModelPurpose.Utility,
-            EModelPurpose.Main,
-            EModelPurpose.Specialist,
-            EModelPurpose.SpecialistAccurate,
-            EModelPurpose.ScheduledTask,
-          ]);
+          if (parsedArgs.resetAiModel === true) {
+            setAiModelPreference(preferences, provider, purpose, undefined);
+          } else {
+            const currentConfig = getAiModelConfig(
+              provider,
+              purpose,
+              getAiModelPreference(preferences, provider, purpose),
+            );
+            let modelId = currentConfig.model.id;
 
-          if (error !== undefined) {
-            throw new Error(error);
+            if (parsedArgs.aiModel !== undefined) {
+              modelId = parsedArgs.aiModel;
+            }
+
+            const model = aiModels.getModel(provider, modelId);
+
+            if (model === undefined) {
+              throw new Error(`Model "${modelId}" is not available from provider "${provider}"`);
+            }
+
+            let effort = currentConfig.effort;
+
+            if (parsedArgs.resetAiReasoningEffort === true) {
+              effort = getAiModelConfig(provider, purpose, { model: modelId }).effort;
+            } else if (parsedArgs.aiReasoningEffort !== undefined) {
+              effort = parsedArgs.aiReasoningEffort;
+            }
+
+            if (effort !== undefined && !getSupportedThinkingLevels(model).includes(effort)) {
+              fallbacks.push({
+                purpose,
+                reason: `Effort ${effort} is unsupported by ${modelId}; using the model default`,
+              });
+              effort = getAiModelConfig(provider, purpose, { model: modelId }).effort;
+            }
+
+            const defaultConfig = getAiModelConfig(provider, purpose);
+
+            if (modelId === defaultConfig.model.id && effort === defaultConfig.effort) {
+              setAiModelPreference(preferences, provider, purpose, undefined);
+            } else {
+              setAiModelPreference(preferences, provider, purpose, { model: modelId, effort });
+            }
           }
         }
+
+        if (parsedArgs.aiProvider !== undefined) {
+          fallbacks.push(...normalizeProviderPreferences(provider, preferences));
+        }
+
+        if (updates.length === 0 && !hasModelOperation) {
+          throw new Error("Provide at least one field to update");
+        }
+
+        const nextSettings = { ...settings };
 
         for (const update of updates) {
-          await SettingsService.instance.set(chatId, update.key, update.value);
+          nextSettings[update.key] = update.value;
         }
 
-        return textResult({ settings: await SettingsService.instance.getAll(chatId) });
+        nextSettings[EConfigKey.AiModelPreferences] = encodeAiModelPreferences(preferences);
+        const purposes: EModelPurpose[] = [];
+
+        if (parsedArgs.aiProvider !== undefined) {
+          purposes.push(...Object.values(EModelPurpose));
+        } else if (purpose !== undefined) {
+          purposes.push(purpose);
+        }
+
+        for (const verificationPurpose of purposes) {
+          const error = await context.verifySettings(nextSettings, [verificationPurpose]);
+
+          if (error === undefined) {
+            continue;
+          }
+
+          const isExplicitModelChange = hasModelOperation && verificationPurpose === purpose;
+          const rememberedPreference = getAiModelPreference(
+            preferences,
+            provider,
+            verificationPurpose,
+          );
+
+          if (
+            isExplicitModelChange ||
+            parsedArgs.aiProvider === undefined ||
+            rememberedPreference === undefined
+          ) {
+            throw new Error(error);
+          }
+
+          setAiModelPreference(preferences, provider, verificationPurpose, undefined);
+          nextSettings[EConfigKey.AiModelPreferences] = encodeAiModelPreferences(preferences);
+          const fallbackError = await context.verifySettings(nextSettings, [verificationPurpose]);
+
+          if (fallbackError !== undefined) {
+            throw new Error(fallbackError);
+          }
+
+          fallbacks.push({
+            purpose: verificationPurpose,
+            reason: `Remembered model failed verification; using the provider default`,
+          });
+        }
+
+        const encodedPreferences = encodeAiModelPreferences(preferences);
+
+        if (encodedPreferences !== settings[EConfigKey.AiModelPreferences]) {
+          updates.push({ key: EConfigKey.AiModelPreferences, value: encodedPreferences });
+        }
+
+        let savedSettings = settings;
+
+        if (updates.length > 0) {
+          savedSettings = await SettingsService.instance.setMany(chatId, updates);
+        }
+
+        return textResult({
+          settings: savedSettings,
+          aiRuntime: createAiRuntime(savedSettings, false),
+          change: {
+            purpose,
+            fallbacks,
+            effectiveFrom: "next-message",
+          },
+        });
       },
     },
   ];

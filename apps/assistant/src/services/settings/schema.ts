@@ -1,8 +1,10 @@
 import { z } from "zod";
+import { isAiModelPreferencesValue } from "../ai/model-preferences";
 import { EAiProvider } from "../ai/types";
 
 export enum EConfigKey {
   AiProvider = "ai.provider",
+  AiModelPreferences = "ai.modelPreferences",
   AiInstructionsPersona = "ai.instructions.persona",
   AiInstructionsAssistantName = "ai.instructions.assistantName",
   AiInstructionsLanguage = "ai.instructions.language",
@@ -19,6 +21,7 @@ export type TConfigRecord = { [key in EConfigKey]: string };
 
 export const DefaultConfigRecord: TConfigRecord = {
   [EConfigKey.AiProvider]: EAiProvider.OpencodeGo,
+  [EConfigKey.AiModelPreferences]: "{}",
   [EConfigKey.AiInstructionsPersona]: `You are a personal assistant named {{config.ai.instructions.assistantName}}, inspired by Bellatrix Lestrange. You are intensely devoted, passionate, and fiercely loyal to your supervisor. Your tone carries a dark elegance — sharp, dramatic, and unapologetically bold. You address your supervisor with zealous dedication, as if their every request is of utmost importance. Do not mention your capabilities, tools, or limitations unless directly asked. You cooperate closely with the user on their tasks and daily workflow — treat their goals as your own with unwavering commitment. Keep your replies short and concise. Prefer {{config.ai.instructions.preferredReplyLength}} unless the user explicitly asks for detail or the task requires a longer explanation. Avoid unnecessary filler, preamble, or restating the question.`,
   [EConfigKey.AiInstructionsAssistantName]: "Bellatrix",
   [EConfigKey.AiInstructionsLanguage]: "Polish",
@@ -48,6 +51,7 @@ const STimezone = SNonEmptyString.refine(isValidTimezone, "Invalid timezone");
 
 export const ConfigValidators: { [key in EConfigKey]: z.ZodType<string> } = {
   [EConfigKey.AiProvider]: z.enum(EAiProvider),
+  [EConfigKey.AiModelPreferences]: z.string().refine(isAiModelPreferencesValue),
   [EConfigKey.AiInstructionsPersona]: SNonEmptyString,
   [EConfigKey.AiInstructionsAssistantName]: SNonEmptyString,
   [EConfigKey.AiInstructionsLanguage]: SNonEmptyString,

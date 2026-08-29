@@ -48,9 +48,9 @@ describe("AI provider registry", () => {
     });
     expect(getAiModelIds(EAiProvider.OpencodeGo)).toEqual({
       [EModelPurpose.Utility]: "deepseek-v4-pro",
-      [EModelPurpose.Main]: "grok-4.5",
+      [EModelPurpose.Main]: "grok-4.6",
       [EModelPurpose.Specialist]: "deepseek-v4-pro",
-      [EModelPurpose.SpecialistAccurate]: "grok-4.5",
+      [EModelPurpose.SpecialistAccurate]: "grok-4.6",
       [EModelPurpose.ScheduledTask]: "deepseek-v4-pro",
     });
     expect(getAiModelIds(EAiProvider.Ollama)).toEqual({
@@ -65,6 +65,11 @@ describe("AI provider registry", () => {
   test("pairs each model purpose with its reasoning effort", () => {
     expect(getAiModelConfig(EAiProvider.OpenaiCodex, EModelPurpose.Utility).effort).toBe("medium");
     expect(getAiModelConfig(EAiProvider.OpenaiCodex, EModelPurpose.Main).effort).toBe("medium");
+    expect(
+      getAiModelConfig(EAiProvider.OpenaiCodex, EModelPurpose.Main, {
+        model: "gpt-5.6-sol",
+      }).effort,
+    ).toBe("medium");
 
     for (const purpose of [
       EModelPurpose.Specialist,

@@ -11,8 +11,9 @@
     <name>update-settings</name>
     <description>
       Updates one or more of: timezone, language, assistantName, addressStyle,
-      preferredReplyLength, aiProvider. At least one field must be provided. There is no
-      arbitrary key/value field — only the listed fields are accepted.
+      preferredReplyLength, aiProvider, aiModel, aiModelPurpose, aiReasoningEffort,
+      resetAiModel, or resetAiReasoningEffort. At least one field must be provided. There
+      is no arbitrary key/value field — only the listed fields are accepted.
     </description>
   </tool>
 
@@ -22,7 +23,12 @@
     - assistantName — the assistant's display name.
     - addressStyle — how the assistant should address the user.
     - preferredReplyLength — preferred reply length (e.g. "1-3 sentences").
-    - aiProvider — one of: openrouter, ollama, opencode-go.
+    - aiProvider — one of: openai-codex, openrouter, ollama, opencode-go.
+    - aiModel — exact Pi model ID from the active provider, or from aiProvider when both are supplied.
+    - aiModelPurpose — Utility, Main, Specialist, SpecialistAccurate, or ScheduledTask. Defaults to Main for model/effort operations.
+    - aiReasoningEffort — off, minimal, low, medium, high, xhigh, or max.
+    - resetAiModel — true resets the selected purpose's model and effort to the provider registry default.
+    - resetAiReasoningEffort — true keeps the selected model and resets its reasoning effort.
   </field_mapping>
 
   <usage_rules>
@@ -30,12 +36,18 @@
     <rule>Only the provided fields are written. Omitted fields are left untouched.</rule>
     <rule>Never invent or guess values. If the user did not specify a value for a field, omit it.</rule>
     <rule>Never offer an arbitrary key/value field — only the listed fields are accepted.</rule>
+    <rule>Change provider, model, or effort only after an explicit user request. Never switch autonomously.</rule>
+    <rule>Model operations apply to Main unless the user explicitly names another existing purpose.</rule>
+    <rule>A model must belong to the active provider. A combined explicit provider/model request is allowed and applied atomically.</rule>
+    <rule>Call get-settings first when the user asks which models are available or does not provide an exact model ID.</rule>
+    <rule>Utility controls memory distillation. Specialist controls Memory and Settings. SpecialistAccurate controls Calendar and Scheduling. ScheduledTask controls autonomous scheduled work. Reminder-text generation continues to use Main.</rule>
     <rule>
       If the user's message contains BOTH a settings change AND a normal task (mixed intent),
       apply only the settings change with this tool and then ask the user to resend the normal
       task separately. Never attempt to execute the normal task from the settings loop.
     </rule>
-    <rule>After a successful update, confirm the change to the user briefly in their language using the returned effective settings.</rule>
+    <rule>After a successful update, confirm the effective provider, affected purpose, model, and effort from aiRuntime. State that AI runtime changes take effect from the next message.</rule>
+    <rule>Report every entry in change.fallbacks. On provider switches, otherwise mention the restored Main selection without enumerating unchanged internal purposes.</rule>
     <rule>If the tool returns an error, tell the user which field/value was rejected and do not retry blindly.</rule>
   </usage_rules>
 
@@ -57,7 +69,13 @@
     <example>
       <message>"use openrouter and switch your language to English"</message>
       <fields>{ "aiProvider": "openrouter", "language": "English" }</fields>
-      <response>"Done — provider is openrouter and language is English."</response>
+      <response>Confirm openrouter, its restored Main model, and English. Say the AI change applies from the next message.</response>
+    </example>
+
+    <example>
+      <message>"switch to gpt-5.6-terra"</message>
+      <fields>{ "aiModel": "gpt-5.6-terra" }</fields>
+      <response>Confirm the returned Main model and effort and say the change applies from the next message.</response>
     </example>
 
     <example>
