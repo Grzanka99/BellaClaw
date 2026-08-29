@@ -255,7 +255,6 @@ export class AgentHarness {
     let stopReason = "completed";
     let forceFinalization = false;
     let forcedFinalAttempt = false;
-    let providerCallCount = 0;
     const startedAt = performance.now();
     const toolStartedAt = new Map<string, number>();
 
@@ -274,11 +273,11 @@ export class AgentHarness {
         messages,
       },
       streamFn: (model, context, options) => {
-        if (providerCallCount >= args.maxIterations) {
+        if (iterations >= args.maxIterations) {
           return createHardLimitStream(model);
         }
 
-        providerCallCount += 1;
+        iterations += 1;
 
         if (modelConfig.effort === "off" && hasApi(model, "openai-codex-responses")) {
           return aiModels.stream(model, context, { ...options, reasoningEffort: "none" });
@@ -289,8 +288,6 @@ export class AgentHarness {
       getApiKey: (provider) => this.resolveApiKey(provider),
       toolExecution: "parallel",
       prepareNextTurnWithContext: (context) => {
-        iterations += 1;
-
         if (context.message.role !== "assistant") {
           return undefined;
         }

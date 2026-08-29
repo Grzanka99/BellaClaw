@@ -85,10 +85,10 @@ const AI_PROVIDER_REGISTRY: Record<EAiProvider, TAiProviderRegistration> = {
     createProvider: opencodeGoProvider,
     modelByPurpose: {
       [EModelPurpose.Utility]: { model: "deepseek-v4-pro" },
-      [EModelPurpose.Main]: { model: "grok-4.5", effort: "high" },
+      [EModelPurpose.Main]: { model: "grok-4.6", effort: "high" },
       [EModelPurpose.Specialist]: { model: "deepseek-v4-pro", effort: "high" },
       [EModelPurpose.SpecialistAccurate]: {
-        model: "grok-4.5",
+        model: "grok-4.6",
         effort: "medium",
       },
       [EModelPurpose.ScheduledTask]: { model: "deepseek-v4-pro", effort: "high" },

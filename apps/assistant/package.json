@@ -17,8 +17,8 @@
   "dependencies": {
     "@bellaclaw/behavior-logs": "workspace:*",
     "@bellaclaw/shared": "workspace:*",
-    "@earendil-works/pi-agent-core": "0.81.1",
-    "@earendil-works/pi-ai": "0.81.1",
+    "@earendil-works/pi-agent-core": "latest",
+    "@earendil-works/pi-ai": "latest",
     "@googleworkspace/cli": "0.22.5",
     "@libsql/client": "^0.17.3",
     "croner": "^10.0.1",
