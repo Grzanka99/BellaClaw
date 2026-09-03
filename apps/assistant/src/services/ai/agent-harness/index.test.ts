@@ -219,6 +219,33 @@ describe("AgentHarness", () => {
     expect(sessionHeaders).toEqual(sessionIds);
   });
 
+  test("rejects an OpenCode conversation before streaming when its API key is missing", async () => {
+    delete Bun.env.OPENCODE_API_KEY;
+    const opencode = fauxProvider({
+      provider: EAiProvider.OpencodeGo,
+      models: [{ id: "grok-4.6", reasoning: true }],
+    });
+    opencode.setResponses([fauxAssistantMessage("must not stream")]);
+    aiModels.setProvider(opencode.provider);
+
+    await expect(
+      AgentHarness.instance.runMain({
+        prompt: "hello",
+        history: [],
+        chatId: "discord:1",
+        settings: {
+          ...DefaultConfigRecord,
+          [EConfigKey.AiProvider]: EAiProvider.OpencodeGo,
+        },
+        currentTimeContext: undefined,
+        platform: EMessagePlatform.Discord,
+        trace: undefined,
+        signal: undefined,
+      }),
+    ).rejects.toThrow("Missing required environment variable OPENCODE_API_KEY");
+    expect(opencode.state.callCount).toBe(0);
+  });
+
   test("retains the Signal styled-text contract in the assembled production prompt", async () => {
     let systemPrompt = "";
     faux.setResponses([
