@@ -24,6 +24,7 @@ const OPENROUTER_MODELS = [
 
 describe("AgentHarness", () => {
   const previousApiKey = Bun.env.OPENROUTER_API_KEY;
+  const previousOpenCodeApiKey = Bun.env.OPENCODE_API_KEY;
   const faux = fauxProvider({
     provider: EAiProvider.Openrouter,
     models: OPENROUTER_MODELS,
@@ -39,6 +40,12 @@ describe("AgentHarness", () => {
       delete Bun.env.OPENROUTER_API_KEY;
     } else {
       Bun.env.OPENROUTER_API_KEY = previousApiKey;
+    }
+
+    if (previousOpenCodeApiKey === undefined) {
+      delete Bun.env.OPENCODE_API_KEY;
+    } else {
+      Bun.env.OPENCODE_API_KEY = previousOpenCodeApiKey;
     }
   });
 
@@ -110,6 +117,66 @@ describe("AgentHarness", () => {
     expect(contexts[1]?.messages.filter((message) => message.role === "user")).toHaveLength(1);
     expect(JSON.stringify(contexts[1])).not.toContain("first prompt");
     expect(JSON.stringify(contexts[1])).not.toContain("stored history");
+  });
+
+  test("sends a stable OpenCode session header for each conversation", async () => {
+    Bun.env.OPENCODE_API_KEY = "opencode-test-key";
+    const sessionIds: Array<string | undefined> = [];
+    const sessionHeaders: Array<string | null | undefined> = [];
+    const opencode = fauxProvider({
+      provider: EAiProvider.OpencodeGo,
+      models: [
+        { id: "grok-4.6", reasoning: true },
+        { id: "deepseek-v4-pro", reasoning: true },
+      ],
+    });
+    opencode.setResponses([
+      (_context, options) => {
+        sessionIds.push(options?.sessionId);
+        sessionHeaders.push(options?.headers?.["x-opencode-session"]);
+        return fauxAssistantMessage(fauxToolCall("missing-tool", {}, { id: "missing" }));
+      },
+      (_context, options) => {
+        sessionIds.push(options?.sessionId);
+        sessionHeaders.push(options?.headers?.["x-opencode-session"]);
+        return fauxAssistantMessage("conversation final");
+      },
+      (_context, options) => {
+        sessionIds.push(options?.sessionId);
+        sessionHeaders.push(options?.headers?.["x-opencode-session"]);
+        return fauxAssistantMessage("direct final");
+      },
+    ]);
+    aiModels.setProvider(opencode.provider);
+    const settings = {
+      ...DefaultConfigRecord,
+      [EConfigKey.AiProvider]: EAiProvider.OpencodeGo,
+    };
+
+    const conversation = await AgentHarness.instance.runMain({
+      prompt: "hello",
+      history: [],
+      chatId: "discord:1",
+      settings,
+      currentTimeContext: undefined,
+      platform: EMessagePlatform.Discord,
+      trace: undefined,
+      signal: undefined,
+    });
+    const direct = await AgentHarness.instance.completeText({
+      prompt: "hello",
+      instructions: "Reply directly",
+      settings,
+      purpose: EModelPurpose.Utility,
+      trace: undefined,
+    });
+
+    expect(conversation.text).toBe("conversation final");
+    expect(direct).toBe("direct final");
+    expect(sessionIds[0]).toMatch(/^[0-9a-f-]{36}$/);
+    expect(sessionIds[0]).toBe(sessionIds[1]);
+    expect(sessionIds[2]).not.toBe(sessionIds[0]);
+    expect(sessionHeaders).toEqual(sessionIds);
   });
 
   test("retains the Signal styled-text contract in the assembled production prompt", async () => {

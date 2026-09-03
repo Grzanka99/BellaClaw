@@ -9,6 +9,7 @@ import {
   createAssistantMessageEventStream,
   hasApi,
   type Model,
+  type SimpleStreamOptions,
   type Static,
   type ThinkingLevel,
   Type,
@@ -69,6 +70,25 @@ const TOOL_INSTRUCTIONS = {
   webFetch: "./src/services/ai/tools/web-fetch/instructions.xml",
 } as const;
 
+function withOpenCodeSession(
+  options: SimpleStreamOptions,
+  provider: string,
+  sessionId: string,
+): SimpleStreamOptions {
+  if (provider !== EAiProvider.OpencodeGo) {
+    return options;
+  }
+
+  return {
+    ...options,
+    sessionId,
+    headers: {
+      ...options.headers,
+      "x-opencode-session": sessionId,
+    },
+  };
+}
+
 export class AgentHarness {
   private static _instance: TOption<AgentHarness>;
 
@@ -124,6 +144,7 @@ export class AgentHarness {
   }): Promise<TOption<string>> {
     const startedAt = performance.now();
     const modelConfig = this.resolveModel(args.settings, args.purpose);
+    const sessionId = crypto.randomUUID();
     this.logDirectCompletionStarted(
       args.trace,
       modelConfig.model.provider,
@@ -143,10 +164,14 @@ export class AgentHarness {
         messages: [{ role: "user", content: args.prompt, timestamp: Date.now() }],
         tools: [],
       };
-      const options = {
-        apiKey: this.resolveApiKey(modelConfig.model.provider),
-        signal: args.signal,
-      };
+      const options = withOpenCodeSession(
+        {
+          apiKey: this.resolveApiKey(modelConfig.model.provider),
+          signal: args.signal,
+        },
+        modelConfig.model.provider,
+        sessionId,
+      );
 
       if (modelConfig.effort === "off" && hasApi(modelConfig.model, "openai-codex-responses")) {
         result = await aiModels.complete(modelConfig.model, context, {
@@ -256,6 +281,7 @@ export class AgentHarness {
     let forceFinalization = false;
     let forcedFinalAttempt = false;
     const startedAt = performance.now();
+    const sessionId = crypto.randomUUID();
     const toolStartedAt = new Map<string, number>();
 
     const messages = this.createHistory(
@@ -278,12 +304,16 @@ export class AgentHarness {
         }
 
         iterations += 1;
+        const requestOptions = withOpenCodeSession(options ?? {}, model.provider, sessionId);
 
         if (modelConfig.effort === "off" && hasApi(model, "openai-codex-responses")) {
-          return aiModels.stream(model, context, { ...options, reasoningEffort: "none" });
+          return aiModels.stream(model, context, {
+            ...requestOptions,
+            reasoningEffort: "none",
+          });
         }
 
-        return aiModels.streamSimple(model, context, options);
+        return aiModels.streamSimple(model, context, requestOptions);
       },
       getApiKey: (provider) => this.resolveApiKey(provider),
       toolExecution: "parallel",
