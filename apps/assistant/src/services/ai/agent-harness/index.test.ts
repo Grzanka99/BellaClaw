@@ -144,6 +144,16 @@ describe("AgentHarness", () => {
       (_context, options) => {
         sessionIds.push(options?.sessionId);
         sessionHeaders.push(options?.headers?.["x-opencode-session"]);
+        return fauxAssistantMessage("same conversation final");
+      },
+      (_context, options) => {
+        sessionIds.push(options?.sessionId);
+        sessionHeaders.push(options?.headers?.["x-opencode-session"]);
+        return fauxAssistantMessage("other conversation final");
+      },
+      (_context, options) => {
+        sessionIds.push(options?.sessionId);
+        sessionHeaders.push(options?.headers?.["x-opencode-session"]);
         return fauxAssistantMessage("direct final");
       },
     ]);
@@ -163,6 +173,26 @@ describe("AgentHarness", () => {
       trace: undefined,
       signal: undefined,
     });
+    const sameConversation = await AgentHarness.instance.runMain({
+      prompt: "hello again",
+      history: [],
+      chatId: "discord:1",
+      settings,
+      currentTimeContext: undefined,
+      platform: EMessagePlatform.Discord,
+      trace: undefined,
+      signal: undefined,
+    });
+    const otherConversation = await AgentHarness.instance.runMain({
+      prompt: "hello elsewhere",
+      history: [],
+      chatId: "discord:2",
+      settings,
+      currentTimeContext: undefined,
+      platform: EMessagePlatform.Discord,
+      trace: undefined,
+      signal: undefined,
+    });
     const direct = await AgentHarness.instance.completeText({
       prompt: "hello",
       instructions: "Reply directly",
@@ -172,10 +202,20 @@ describe("AgentHarness", () => {
     });
 
     expect(conversation.text).toBe("conversation final");
+    expect(sameConversation.text).toBe("same conversation final");
+    expect(otherConversation.text).toBe("other conversation final");
     expect(direct).toBe("direct final");
-    expect(sessionIds[0]).toMatch(/^[0-9a-f-]{36}$/);
+    const expectedConversationId = new Bun.CryptoHasher("sha256", "opencode-test-key")
+      .update("discord:discord:1")
+      .digest("hex");
+
+    expect(sessionIds[0]).toBe(expectedConversationId);
     expect(sessionIds[0]).toBe(sessionIds[1]);
-    expect(sessionIds[2]).not.toBe(sessionIds[0]);
+    expect(sessionIds[0]).toBe(sessionIds[2]);
+    expect(sessionIds[3]).toMatch(/^[0-9a-f]{64}$/);
+    expect(sessionIds[3]).not.toBe(sessionIds[0]);
+    expect(sessionIds[4]).toMatch(/^[0-9a-f-]{36}$/);
+    expect(sessionIds[4]).not.toBe(sessionIds[0]);
     expect(sessionHeaders).toEqual(sessionIds);
   });
 

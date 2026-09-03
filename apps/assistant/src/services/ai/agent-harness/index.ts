@@ -281,7 +281,22 @@ export class AgentHarness {
     let forceFinalization = false;
     let forcedFinalAttempt = false;
     const startedAt = performance.now();
-    const sessionId = crypto.randomUUID();
+    let sessionId: string = crypto.randomUUID();
+
+    if (
+      modelConfig.model.provider === EAiProvider.OpencodeGo &&
+      args.chatId !== undefined &&
+      args.platform !== undefined
+    ) {
+      const apiKey = this.resolveApiKey(modelConfig.model.provider);
+
+      if (apiKey !== undefined) {
+        sessionId = new Bun.CryptoHasher("sha256", apiKey)
+          .update(`${args.platform}:${args.chatId}`)
+          .digest("hex");
+      }
+    }
+
     const toolStartedAt = new Map<string, number>();
 
     const messages = this.createHistory(
