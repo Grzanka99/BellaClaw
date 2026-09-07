@@ -25,7 +25,7 @@ import { createPlatformInstructions } from "../instructions/platform";
 import { readXmlAndInjectConfig } from "../instructions/read-xml-and-inject-config";
 import { decodeAiModelPreferences, getAiModelPreference } from "../model-preferences";
 import { aiModels, getAiApiKey, getAiModelConfig } from "../providers/registry";
-import { decodeToolArguments } from "../tools/definition";
+import { validateToolArguments } from "../tools/definition";
 import {
   createCalendarTools,
   createMemoryTools,
@@ -48,27 +48,6 @@ const AGENT_INSTRUCTIONS: Record<EAgentName, string> = {
   [EAgentName.Scheduling]: "./src/services/ai/agents/scheduling/instructions.xml",
   [EAgentName.ScheduledTask]: "./src/services/ai/agents/scheduled-task/instructions.xml",
 };
-const TOOL_INSTRUCTIONS = {
-  listCalendars: "./src/services/ai/tools/list-calendars/instructions.xml",
-  removeReadonlyCalendar: "./src/services/ai/tools/remove-readonly-calendar/instructions.xml",
-  listCalendarEvents: "./src/services/ai/tools/list-calendar-events/instructions.xml",
-  findCalendarAvailability: "./src/services/ai/tools/find-calendar-availability/instructions.xml",
-  createCalendarEvent: "./src/services/ai/tools/create-calendar-event/instructions.xml",
-  updateCalendarEvent: "./src/services/ai/tools/update-calendar-event/instructions.xml",
-  deleteCalendarEvent: "./src/services/ai/tools/delete-calendar-event/instructions.xml",
-  searchMemory: "./src/services/ai/tools/search-memory/instructions.xml",
-  rememberMemory: "./src/services/ai/tools/remember-memory/instructions.xml",
-  forgetMemory: "./src/services/ai/tools/forget-memory/instructions.xml",
-  getSettings: "./src/services/ai/tools/get-settings/instructions.xml",
-  updateSettings: "./src/services/ai/tools/update-settings/instructions.xml",
-  listCronJobs: "./src/services/ai/tools/list-cron-jobs/instructions.xml",
-  scheduleOnce: "./src/services/ai/tools/schedule-once/instructions.xml",
-  scheduleRecurring: "./src/services/ai/tools/schedule-recurring/instructions.xml",
-  unscheduleCronJob: "./src/services/ai/tools/unschedule-cron-job/instructions.xml",
-  updateCronJob: "./src/services/ai/tools/update-cron-job/instructions.xml",
-  webSearch: "./src/services/ai/tools/web-search/instructions.xml",
-  webFetch: "./src/services/ai/tools/web-fetch/instructions.xml",
-} as const;
 
 function withOpenCodeSession(
   options: SimpleStreamOptions,
@@ -199,36 +178,15 @@ export class AgentHarness {
       throw error;
     }
 
-    if (result.stopReason === "error" || result.stopReason === "aborted") {
-      this.logDirectCompletionCompleted(
-        args.trace,
-        modelConfig.model.provider,
-        modelConfig.model.id,
-        args.purpose,
-        startedAt,
-        false,
-        result.stopReason,
-        0,
-        result.errorMessage,
-      );
-      return undefined;
-    }
-
-    const text = contentText(result.content).trim();
-
-    if (text.length === 0) {
-      this.logDirectCompletionCompleted(
-        args.trace,
-        modelConfig.model.provider,
-        modelConfig.model.id,
-        args.purpose,
-        startedAt,
-        false,
-        "blank",
-        0,
-        undefined,
-      );
-      return undefined;
+    let text: TOption<string>;
+    let stopReason: string = result.stopReason;
+    if (result.stopReason !== "error" && result.stopReason !== "aborted") {
+      const response = contentText(result.content).trim();
+      if (response.length > 0) {
+        text = response;
+      } else {
+        stopReason = "blank";
+      }
     }
 
     this.logDirectCompletionCompleted(
@@ -237,10 +195,10 @@ export class AgentHarness {
       modelConfig.model.id,
       args.purpose,
       startedAt,
-      true,
-      result.stopReason,
-      text.length,
-      undefined,
+      text !== undefined,
+      stopReason,
+      text?.length ?? 0,
+      result.errorMessage,
     );
     return text;
   }
@@ -271,8 +229,8 @@ export class AgentHarness {
     args: TAgentRunArgs & { delegationCount: TOption<() => void> },
   ): Promise<TAgentRunResult> {
     const modelConfig = this.resolveModel(args.settings, args.purpose);
-    const systemPrompt = await this.createSystemPrompt(args);
     const tools = await this.createTools(args);
+    const systemPrompt = await this.createSystemPrompt(args, tools);
     let iterations = 0;
     let toolCallCount = 0;
     let lastToolBatch: TOption<string>;
@@ -574,8 +532,16 @@ export class AgentHarness {
     return messages;
   }
 
-  private async createSystemPrompt(args: TAgentRunArgs): Promise<string> {
-    const toolPaths = this.getToolInstructionPaths(args.name);
+  private async createSystemPrompt(
+    args: TAgentRunArgs,
+    tools: Array<{ instructionsPath?: string }>,
+  ): Promise<string> {
+    const toolPaths = tools.flatMap((tool) => {
+      if (tool.instructionsPath === undefined) {
+        return [];
+      }
+      return [tool.instructionsPath];
+    });
     const [base, agentInstructions, ...toolInstructions] = await Promise.all([
       readXmlAndInjectConfig(BASE_INSTRUCTIONS_PATH, args.settings),
       readXmlAndInjectConfig(AGENT_INSTRUCTIONS[args.name], args.settings),
@@ -622,51 +588,6 @@ export class AgentHarness {
               tool.name === "list-calendar-events" || tool.name === "find-calendar-availability"
             );
           }),
-        ];
-    }
-  }
-
-  private getToolInstructionPaths(name: EAgentName): string[] {
-    switch (name) {
-      case EAgentName.Calendar:
-        return [
-          TOOL_INSTRUCTIONS.listCalendars,
-          TOOL_INSTRUCTIONS.removeReadonlyCalendar,
-          TOOL_INSTRUCTIONS.listCalendarEvents,
-          TOOL_INSTRUCTIONS.findCalendarAvailability,
-          TOOL_INSTRUCTIONS.createCalendarEvent,
-          TOOL_INSTRUCTIONS.updateCalendarEvent,
-          TOOL_INSTRUCTIONS.deleteCalendarEvent,
-          TOOL_INSTRUCTIONS.webSearch,
-          TOOL_INSTRUCTIONS.webFetch,
-        ];
-      case EAgentName.Main:
-        return [TOOL_INSTRUCTIONS.webSearch, TOOL_INSTRUCTIONS.webFetch];
-      case EAgentName.Memory:
-        return [
-          TOOL_INSTRUCTIONS.searchMemory,
-          TOOL_INSTRUCTIONS.rememberMemory,
-          TOOL_INSTRUCTIONS.forgetMemory,
-        ];
-      case EAgentName.Settings:
-        return [TOOL_INSTRUCTIONS.getSettings, TOOL_INSTRUCTIONS.updateSettings];
-      case EAgentName.Scheduling:
-        return [
-          TOOL_INSTRUCTIONS.listCronJobs,
-          TOOL_INSTRUCTIONS.scheduleOnce,
-          TOOL_INSTRUCTIONS.scheduleRecurring,
-          TOOL_INSTRUCTIONS.unscheduleCronJob,
-          TOOL_INSTRUCTIONS.updateCronJob,
-          TOOL_INSTRUCTIONS.webSearch,
-          TOOL_INSTRUCTIONS.webFetch,
-        ];
-      case EAgentName.ScheduledTask:
-        return [
-          TOOL_INSTRUCTIONS.searchMemory,
-          TOOL_INSTRUCTIONS.webSearch,
-          TOOL_INSTRUCTIONS.webFetch,
-          TOOL_INSTRUCTIONS.listCalendarEvents,
-          TOOL_INSTRUCTIONS.findCalendarAvailability,
         ];
     }
   }
@@ -725,13 +646,14 @@ export class AgentHarness {
         label: delegate.label,
         description,
         parameters: schema,
+        instructionsPath: undefined,
         executionMode,
         execute: async (toolCallId: string, parameters: unknown, signal?: AbortSignal) => {
           if (args.delegationCount === undefined) {
             throw new Error("Specialists cannot delegate");
           }
 
-          const parsedParameters: Static<typeof schema> = decodeToolArguments(schema, parameters);
+          const parsedParameters: Static<typeof schema> = validateToolArguments(schema, parameters);
           args.delegationCount();
           let delegationSignal = args.signal;
 

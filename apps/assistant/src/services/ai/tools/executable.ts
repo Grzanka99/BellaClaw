@@ -1,109 +1,63 @@
 import type { TOption } from "@bellaclaw/shared";
-import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
-import { ECronJobType } from "../../../lib/cron-engine";
 import { fetchWeb, searchWeb } from "../../../lib/web";
 import { CalendarService } from "../../calendar";
 import { CronSingleton } from "../../cron";
 import { MessageHandler } from "../../message-handler";
-import { SettingsService, type TConfigUpdate } from "../../settings";
-import { ConfigValidators, EConfigKey, type TConfigRecord } from "../../settings/schema";
-import {
-  decodeAiModelPreferences,
-  encodeAiModelPreferences,
-  getAiModelPreference,
-  setAiModelPreference,
-  type TAiModelPreferences,
-} from "../model-preferences";
-import { aiModels, getAiModelConfig, getAiModelConfigs } from "../providers/registry";
-import { EAiProvider, EModelPurpose } from "../types";
-import { CREATE_CALENDAR_EVENT_TOOL } from "./create-calendar-event/definition";
+import { SettingsService } from "../../settings";
+import { EConfigKey, type TConfigRecord } from "../../settings/schema";
+import type { EModelPurpose } from "../types";
+import { createCalendarEventTool } from "./create-calendar-event/definition";
 import {
   SCreateCalendarEventArgs,
-  type TCreateCalendarEventArgs,
   validateCreateCalendarEventArgs,
 } from "./create-calendar-event/handler";
-import { decodeToolArguments } from "./definition";
-import { DELETE_CALENDAR_EVENT_TOOL } from "./delete-calendar-event/definition";
-import {
-  SDeleteCalendarEventArgs,
-  type TDeleteCalendarEventArgs,
-} from "./delete-calendar-event/handler";
-import { FIND_CALENDAR_AVAILABILITY_TOOL } from "./find-calendar-availability/definition";
+import { validateToolArguments } from "./definition";
+import { deleteCalendarEventTool } from "./delete-calendar-event/definition";
+import { SDeleteCalendarEventArgs } from "./delete-calendar-event/handler";
+import { findCalendarAvailabilityTool } from "./find-calendar-availability/definition";
 import {
   SFindCalendarAvailabilityArgs,
-  type TFindCalendarAvailabilityArgs,
   validateFindCalendarAvailabilityArgs,
 } from "./find-calendar-availability/handler";
-import {
-  FORGET_MEMORY_TOOL,
-  SForgetMemoryArgs,
-  type TForgetMemoryArgs,
-} from "./forget-memory/definition";
+import { forgetMemoryTool, SForgetMemoryArgs } from "./forget-memory/definition";
 import { handleForgetMemory } from "./forget-memory/handler";
-import { GET_SETTINGS_TOOL } from "./get-settings/definition";
-import { SGetSettingsArgs } from "./get-settings/handler";
-import { LIST_CALENDAR_EVENTS_TOOL } from "./list-calendar-events/definition";
+import { getSettingsTool } from "./get-settings/definition";
+import { createAiRuntime } from "./get-settings/handler";
+import { listCalendarEventsTool } from "./list-calendar-events/definition";
 import {
   SListCalendarEventsArgs,
-  type TListCalendarEventsArgs,
   validateListCalendarEventsArgs,
 } from "./list-calendar-events/handler";
-import { LIST_CALENDARS_TOOL } from "./list-calendars/definition";
+import { listCalendarsTool } from "./list-calendars/definition";
 import { SListCalendarsArgs } from "./list-calendars/handler";
-import { LIST_CRON_JOBS_TOOL } from "./list-cron-jobs/definition";
-import { SListCronJobsArgs } from "./list-cron-jobs/handler";
-import {
-  REMEMBER_MEMORY_TOOL,
-  SRememberMemoryArgs,
-  type TRememberMemoryArgs,
-} from "./remember-memory/definition";
+import { listCronJobsTool } from "./list-cron-jobs/definition";
+import { rememberMemoryTool, SRememberMemoryArgs } from "./remember-memory/definition";
 import { handleRememberMemory } from "./remember-memory/handler";
-import { REMOVE_READONLY_CALENDAR_TOOL } from "./remove-readonly-calendar/definition";
-import {
-  SRemoveReadonlyCalendarArgs,
-  type TRemoveReadonlyCalendarArgs,
-} from "./remove-readonly-calendar/handler";
-import { SCHEDULE_ONCE_TOOL } from "./schedule-once/definition";
-import {
-  SScheduleOnceArgs,
-  type TScheduleOnceArgs,
-  validateScheduleOnceArgs,
-} from "./schedule-once/handler";
-import { SCHEDULE_RECURRING_TOOL } from "./schedule-recurring/definition";
+import { removeReadonlyCalendarTool } from "./remove-readonly-calendar/definition";
+import { SRemoveReadonlyCalendarArgs } from "./remove-readonly-calendar/handler";
+import { scheduleOnceTool } from "./schedule-once/definition";
+import { SScheduleOnceArgs, validateScheduleOnceArgs } from "./schedule-once/handler";
+import { scheduleRecurringTool } from "./schedule-recurring/definition";
 import {
   SScheduleRecurringArgs,
-  type TScheduleRecurringArgs,
   validateScheduleRecurringArgs,
 } from "./schedule-recurring/handler";
-import {
-  SEARCH_MEMORY_TOOL,
-  SSearchMemoryArgs,
-  type TSearchMemoryArgs,
-} from "./search-memory/definition";
+import { SSearchMemoryArgs, searchMemoryTool } from "./search-memory/definition";
 import { handleSearchMemory } from "./search-memory/handler";
-import { UNSCHEDULE_CRON_JOB_TOOL } from "./unschedule-cron-job/definition";
+import { unscheduleCronJobTool } from "./unschedule-cron-job/definition";
 import { SUnscheduleCronJobArgs } from "./unschedule-cron-job/handler";
-import { UPDATE_CALENDAR_EVENT_TOOL } from "./update-calendar-event/definition";
+import { updateCalendarEventTool } from "./update-calendar-event/definition";
 import {
   SUpdateCalendarEventArgs,
-  type TUpdateCalendarEventArgs,
   validateUpdateCalendarEventArgs,
 } from "./update-calendar-event/handler";
-import { UPDATE_CRON_JOB_TOOL } from "./update-cron-job/definition";
-import {
-  SUpdateCronJobArgs,
-  type TUpdateCronJobArgs,
-  validateUpdateCronJobArgs,
-} from "./update-cron-job/handler";
-import { UPDATE_SETTINGS_TOOL } from "./update-settings/definition";
-import {
-  SUpdateSettingsArgs,
-  type TUpdateSettingsArgs,
-  validateUpdateSettingsArgs,
-} from "./update-settings/handler";
-import { WEB_FETCH_TOOL } from "./web-fetch/definition";
+import { updateCronJobTool } from "./update-cron-job/definition";
+import { handleUpdateCronJob, SUpdateCronJobArgs } from "./update-cron-job/handler";
+import { updateSettingsTool } from "./update-settings/definition";
+import { handleUpdateSettings, SUpdateSettingsArgs } from "./update-settings/handler";
+import { webFetchTool } from "./web-fetch/definition";
 import { SWebFetchArgs, validateWebFetchArgs } from "./web-fetch/handler";
-import { WEB_SEARCH_TOOL } from "./web-search/definition";
+import { webSearchTool } from "./web-search/definition";
 import { SWebSearchArgs } from "./web-search/handler";
 
 const SEQUENTIAL: "sequential" = "sequential";
@@ -129,84 +83,13 @@ function requireChatId(chatId: TOption<string>): string {
   return chatId;
 }
 
-function resolveAiProvider(settings: TConfigRecord): EAiProvider {
-  const provider = settings[EConfigKey.AiProvider];
-
-  switch (provider) {
-    case EAiProvider.OpenaiCodex:
-    case EAiProvider.Openrouter:
-    case EAiProvider.Ollama:
-    case EAiProvider.OpencodeGo:
-      return provider;
-    default:
-      throw new Error("Configured AI provider is invalid");
-  }
-}
-
-function createAiRuntime(settings: TConfigRecord, includeAvailableModels: boolean) {
-  const provider = resolveAiProvider(settings);
-  const preferences = decodeAiModelPreferences(settings[EConfigKey.AiModelPreferences]);
-  const runtime = {
-    provider,
-    models: getAiModelConfigs(provider, preferences),
-  };
-
-  if (includeAvailableModels) {
-    return {
-      ...runtime,
-      availableModels: aiModels.getModels(provider).map((model) => ({
-        name: model.name,
-        id: model.id,
-        supportedEfforts: getSupportedThinkingLevels(model),
-      })),
-    };
-  }
-
-  return runtime;
-}
-
-function normalizeProviderPreferences(provider: EAiProvider, preferences: TAiModelPreferences) {
-  const fallbacks: Array<{ purpose: EModelPurpose; reason: string }> = [];
-
-  for (const purpose of Object.values(EModelPurpose)) {
-    const preference = getAiModelPreference(preferences, provider, purpose);
-
-    if (preference === undefined) {
-      continue;
-    }
-
-    const model = aiModels.getModel(provider, preference.model);
-
-    if (model === undefined) {
-      setAiModelPreference(preferences, provider, purpose, undefined);
-      fallbacks.push({ purpose, reason: `Remembered model ${preference.model} is unavailable` });
-      continue;
-    }
-
-    if (
-      preference.effort !== undefined &&
-      !getSupportedThinkingLevels(model).includes(preference.effort)
-    ) {
-      setAiModelPreference(preferences, provider, purpose, { model: preference.model });
-      fallbacks.push({
-        purpose,
-        reason: `Remembered effort ${preference.effort} is unsupported by ${preference.model}`,
-      });
-    }
-  }
-
-  return fallbacks;
-}
-
 export function createMemoryTools(context: TToolExecutionContext) {
   return [
     {
-      name: SEARCH_MEMORY_TOOL,
+      ...searchMemoryTool,
       label: "Search memory",
-      description: "Search stored conversation memory",
-      parameters: SSearchMemoryArgs,
       execute: async (_toolCallId: string, args: unknown) => {
-        const parsedArgs: TSearchMemoryArgs = decodeToolArguments(SSearchMemoryArgs, args);
+        const parsedArgs = validateToolArguments(SSearchMemoryArgs, args);
         const chatId = requireChatId(context.chatId);
         await MessageHandler.getInstance(chatId).ensureFactsCurrent();
         const result = await handleSearchMemory(chatId, parsedArgs);
@@ -214,25 +97,21 @@ export function createMemoryTools(context: TToolExecutionContext) {
       },
     },
     {
-      name: REMEMBER_MEMORY_TOOL,
+      ...rememberMemoryTool,
       label: "Remember memory",
-      description: "Store one explicit durable conversation fact",
-      parameters: SRememberMemoryArgs,
       executionMode: SEQUENTIAL,
       execute: async (_toolCallId: string, args: unknown) => {
-        const parsedArgs: TRememberMemoryArgs = decodeToolArguments(SRememberMemoryArgs, args);
+        const parsedArgs = validateToolArguments(SRememberMemoryArgs, args);
         const result = await handleRememberMemory(requireChatId(context.chatId), parsedArgs);
         return textResult(result);
       },
     },
     {
-      name: FORGET_MEMORY_TOOL,
+      ...forgetMemoryTool,
       label: "Forget memory",
-      description: "Forget resolved conversation facts",
-      parameters: SForgetMemoryArgs,
       executionMode: SEQUENTIAL,
       execute: async (_toolCallId: string, args: unknown) => {
-        const parsedArgs: TForgetMemoryArgs = decodeToolArguments(SForgetMemoryArgs, args);
+        const parsedArgs = validateToolArguments(SForgetMemoryArgs, args);
         const result = await handleForgetMemory(requireChatId(context.chatId), parsedArgs);
         return textResult(result);
       },
@@ -243,10 +122,8 @@ export function createMemoryTools(context: TToolExecutionContext) {
 export function createSettingsTools(context: TToolExecutionContext) {
   return [
     {
-      name: GET_SETTINGS_TOOL,
+      ...getSettingsTool,
       label: "Get settings",
-      description: "Read the owner's assistant settings",
-      parameters: SGetSettingsArgs,
       execute: async () => {
         const settings = await SettingsService.instance.getAll(requireChatId(context.chatId));
 
@@ -254,190 +131,18 @@ export function createSettingsTools(context: TToolExecutionContext) {
       },
     },
     {
-      name: UPDATE_SETTINGS_TOOL,
+      ...updateSettingsTool,
       label: "Update settings",
-      description: "Update the owner's assistant settings",
-      parameters: SUpdateSettingsArgs,
       executionMode: SEQUENTIAL,
       execute: async (_toolCallId: string, args: unknown) => {
-        const parsedArgs: TUpdateSettingsArgs = decodeToolArguments(SUpdateSettingsArgs, args);
-        validateUpdateSettingsArgs(parsedArgs);
-
-        const updates: TConfigUpdate[] = [];
-        const fields: Array<{ field: keyof TUpdateSettingsArgs; key: EConfigKey }> = [
-          { field: "timezone", key: EConfigKey.AiInstructionsTimezone },
-          { field: "language", key: EConfigKey.AiInstructionsLanguage },
-          { field: "assistantName", key: EConfigKey.AiInstructionsAssistantName },
-          { field: "addressStyle", key: EConfigKey.AiInstructionsAddressStyle },
-          { field: "preferredReplyLength", key: EConfigKey.AiInstructionsPreferredReplyLength },
-          { field: "aiProvider", key: EConfigKey.AiProvider },
-        ];
-
-        for (const field of fields) {
-          const value = parsedArgs[field.field];
-
-          if (value !== undefined) {
-            const parsed = ConfigValidators[field.key].safeParse(value);
-
-            if (!parsed.success) {
-              throw new Error(`Invalid value for ${field.field}`);
-            }
-
-            updates.push({ key: field.key, value: parsed.data });
-          }
-        }
-
-        const chatId = requireChatId(context.chatId);
-        const settings = await SettingsService.instance.getAll(chatId);
-        const currentProvider = resolveAiProvider(settings);
-        let provider = currentProvider;
-
-        if (parsedArgs.aiProvider !== undefined) {
-          provider = parsedArgs.aiProvider;
-        }
-
-        const hasModelOperation =
-          parsedArgs.aiModel !== undefined ||
-          parsedArgs.aiReasoningEffort !== undefined ||
-          parsedArgs.resetAiModel === true ||
-          parsedArgs.resetAiReasoningEffort === true;
-        let purpose: TOption<EModelPurpose>;
-        const preferences = decodeAiModelPreferences(settings[EConfigKey.AiModelPreferences]);
-        const fallbacks: Array<{ purpose: EModelPurpose; reason: string }> = [];
-
-        if (hasModelOperation) {
-          purpose = EModelPurpose.Main;
-
-          if (parsedArgs.aiModelPurpose !== undefined) {
-            purpose = parsedArgs.aiModelPurpose;
-          }
-
-          if (parsedArgs.resetAiModel === true) {
-            setAiModelPreference(preferences, provider, purpose, undefined);
-          } else {
-            const currentConfig = getAiModelConfig(
-              provider,
-              purpose,
-              getAiModelPreference(preferences, provider, purpose),
-            );
-            let modelId = currentConfig.model.id;
-
-            if (parsedArgs.aiModel !== undefined) {
-              modelId = parsedArgs.aiModel;
-            }
-
-            const model = aiModels.getModel(provider, modelId);
-
-            if (model === undefined) {
-              throw new Error(`Model "${modelId}" is not available from provider "${provider}"`);
-            }
-
-            let effort = currentConfig.effort;
-
-            if (parsedArgs.resetAiReasoningEffort === true) {
-              effort = getAiModelConfig(provider, purpose, { model: modelId }).effort;
-            } else if (parsedArgs.aiReasoningEffort !== undefined) {
-              effort = parsedArgs.aiReasoningEffort;
-            }
-
-            if (effort !== undefined && !getSupportedThinkingLevels(model).includes(effort)) {
-              fallbacks.push({
-                purpose,
-                reason: `Effort ${effort} is unsupported by ${modelId}; using the model default`,
-              });
-              effort = getAiModelConfig(provider, purpose, { model: modelId }).effort;
-            }
-
-            const defaultConfig = getAiModelConfig(provider, purpose);
-
-            if (modelId === defaultConfig.model.id && effort === defaultConfig.effort) {
-              setAiModelPreference(preferences, provider, purpose, undefined);
-            } else {
-              setAiModelPreference(preferences, provider, purpose, { model: modelId, effort });
-            }
-          }
-        }
-
-        if (parsedArgs.aiProvider !== undefined) {
-          fallbacks.push(...normalizeProviderPreferences(provider, preferences));
-        }
-
-        if (updates.length === 0 && !hasModelOperation) {
-          throw new Error("Provide at least one field to update");
-        }
-
-        const nextSettings = { ...settings };
-
-        for (const update of updates) {
-          nextSettings[update.key] = update.value;
-        }
-
-        nextSettings[EConfigKey.AiModelPreferences] = encodeAiModelPreferences(preferences);
-        const purposes: EModelPurpose[] = [];
-
-        if (parsedArgs.aiProvider !== undefined) {
-          purposes.push(...Object.values(EModelPurpose));
-        } else if (purpose !== undefined) {
-          purposes.push(purpose);
-        }
-
-        for (const verificationPurpose of purposes) {
-          const error = await context.verifySettings(nextSettings, [verificationPurpose]);
-
-          if (error === undefined) {
-            continue;
-          }
-
-          const isExplicitModelChange = hasModelOperation && verificationPurpose === purpose;
-          const rememberedPreference = getAiModelPreference(
-            preferences,
-            provider,
-            verificationPurpose,
-          );
-
-          if (
-            isExplicitModelChange ||
-            parsedArgs.aiProvider === undefined ||
-            rememberedPreference === undefined
-          ) {
-            throw new Error(error);
-          }
-
-          setAiModelPreference(preferences, provider, verificationPurpose, undefined);
-          nextSettings[EConfigKey.AiModelPreferences] = encodeAiModelPreferences(preferences);
-          const fallbackError = await context.verifySettings(nextSettings, [verificationPurpose]);
-
-          if (fallbackError !== undefined) {
-            throw new Error(fallbackError);
-          }
-
-          fallbacks.push({
-            purpose: verificationPurpose,
-            reason: `Remembered model failed verification; using the provider default`,
-          });
-        }
-
-        const encodedPreferences = encodeAiModelPreferences(preferences);
-
-        if (encodedPreferences !== settings[EConfigKey.AiModelPreferences]) {
-          updates.push({ key: EConfigKey.AiModelPreferences, value: encodedPreferences });
-        }
-
-        let savedSettings = settings;
-
-        if (updates.length > 0) {
-          savedSettings = await SettingsService.instance.setMany(chatId, updates);
-        }
-
-        return textResult({
-          settings: savedSettings,
-          aiRuntime: createAiRuntime(savedSettings, false),
-          change: {
-            purpose,
-            fallbacks,
-            effectiveFrom: "next-message",
-          },
-        });
+        const parsedArgs = validateToolArguments(SUpdateSettingsArgs, args);
+        return textResult(
+          await handleUpdateSettings(
+            requireChatId(context.chatId),
+            parsedArgs,
+            context.verifySettings,
+          ),
+        );
       },
     },
   ];
@@ -448,21 +153,17 @@ export function createSchedulingTools(context: TToolExecutionContext) {
 
   return [
     {
-      name: LIST_CRON_JOBS_TOOL,
+      ...listCronJobsTool,
       label: "List cron jobs",
-      description: "List the owner's scheduled jobs",
-      parameters: SListCronJobsArgs,
       execute: async () =>
         textResult(await CronSingleton.instance.list(requireChatId(context.chatId))),
     },
     {
-      name: SCHEDULE_ONCE_TOOL,
+      ...scheduleOnceTool,
       label: "Schedule one-time job",
-      description: "Schedule a one-time reminder or autonomous task",
-      parameters: SScheduleOnceArgs,
       executionMode: SEQUENTIAL,
       execute: async (_toolCallId: string, args: unknown) => {
-        const parsedArgs: TScheduleOnceArgs = decodeToolArguments(SScheduleOnceArgs, args);
+        const parsedArgs = validateToolArguments(SScheduleOnceArgs, args);
         const validatedArgs = validateScheduleOnceArgs(parsedArgs);
         const result = await CronSingleton.instance.createOnce({
           ...validatedArgs,
@@ -478,16 +179,11 @@ export function createSchedulingTools(context: TToolExecutionContext) {
       },
     },
     {
-      name: SCHEDULE_RECURRING_TOOL,
+      ...scheduleRecurringTool,
       label: "Schedule recurring job",
-      description: "Schedule a recurring reminder or autonomous task",
-      parameters: SScheduleRecurringArgs,
       executionMode: SEQUENTIAL,
       execute: async (_toolCallId: string, args: unknown) => {
-        const parsedArgs: TScheduleRecurringArgs = decodeToolArguments(
-          SScheduleRecurringArgs,
-          args,
-        );
+        const parsedArgs = validateToolArguments(SScheduleRecurringArgs, args);
         const validatedArgs = validateScheduleRecurringArgs(parsedArgs);
         const result = await CronSingleton.instance.createRecurring({
           ...validatedArgs,
@@ -503,118 +199,20 @@ export function createSchedulingTools(context: TToolExecutionContext) {
       },
     },
     {
-      name: UPDATE_CRON_JOB_TOOL,
+      ...updateCronJobTool,
       label: "Update cron job",
-      description: "Update an existing scheduled job",
-      parameters: SUpdateCronJobArgs,
       executionMode: SEQUENTIAL,
       execute: async (_toolCallId: string, args: unknown) => {
-        const parsedArgs: TUpdateCronJobArgs = decodeToolArguments(SUpdateCronJobArgs, args);
-        const validatedArgs = validateUpdateCronJobArgs(parsedArgs);
-        const chatId = requireChatId(context.chatId);
-        const existing = await CronSingleton.instance.get(validatedArgs.name, chatId);
-
-        if (existing === undefined) {
-          throw new Error(`No job found with name: ${validatedArgs.name}`);
-        }
-
-        let reminderText = existing.reminderText;
-        let reminderPromptData = existing.reminderPromptData;
-        let reminderFallbackText = existing.reminderFallbackText;
-        let taskPrompt = existing.taskPrompt;
-        let taskFallbackText = existing.taskFallbackText;
-
-        if (validatedArgs.reminderText !== undefined) {
-          reminderText = validatedArgs.reminderText;
-          reminderPromptData = undefined;
-          reminderFallbackText =
-            validatedArgs.reminderFallbackText ?? existing.reminderFallbackText;
-          taskPrompt = undefined;
-          taskFallbackText = undefined;
-        } else if (validatedArgs.reminderPromptData !== undefined) {
-          reminderText = undefined;
-          reminderPromptData = validatedArgs.reminderPromptData;
-          reminderFallbackText =
-            validatedArgs.reminderFallbackText ?? existing.reminderFallbackText;
-          taskPrompt = undefined;
-          taskFallbackText = undefined;
-        } else if (validatedArgs.taskPrompt !== undefined) {
-          reminderText = undefined;
-          reminderPromptData = undefined;
-          reminderFallbackText = undefined;
-          taskPrompt = validatedArgs.taskPrompt;
-          taskFallbackText = validatedArgs.taskFallbackText ?? existing.taskFallbackText;
-        }
-
-        if (existing.type === ECronJobType.Recurring) {
-          if (validatedArgs.fireAt !== undefined) {
-            throw new Error(
-              "fireAt can only update one-time reminders; use pattern for recurring reminders",
-            );
-          }
-
-          const pattern = validatedArgs.pattern ?? existing.pattern;
-
-          if (pattern === undefined) {
-            throw new Error("Existing recurring reminder has no pattern");
-          }
-
-          const result = await CronSingleton.instance.createRecurring({
-            name: existing.name,
-            scope: chatId,
-            group: validatedArgs.group ?? existing.group,
-            pattern,
-            reminderText,
-            reminderPromptData,
-            reminderFallbackText,
-            taskPrompt,
-            taskFallbackText,
-            overwrite: true,
-            timezone: existing.timezone,
-          });
-
-          if ("error" in result) {
-            throw new Error(`${result.operation} failed: ${String(result.error)}`);
-          }
-
-          return textResult(result);
-        }
-
-        if (validatedArgs.pattern !== undefined) {
-          throw new Error(
-            "pattern can only update recurring reminders; use fireAt for one-time reminders",
-          );
-        }
-
-        const result = await CronSingleton.instance.createOnce({
-          name: existing.name,
-          scope: chatId,
-          group: validatedArgs.group ?? existing.group,
-          fireAt: validatedArgs.fireAt ?? existing.nextRunAt,
-          reminderText,
-          reminderPromptData,
-          reminderFallbackText,
-          taskPrompt,
-          taskFallbackText,
-          overwrite: true,
-          timezone: existing.timezone,
-        });
-
-        if ("error" in result) {
-          throw new Error(`${result.operation} failed: ${String(result.error)}`);
-        }
-
-        return textResult(result);
+        const parsedArgs = validateToolArguments(SUpdateCronJobArgs, args);
+        return textResult(await handleUpdateCronJob(requireChatId(context.chatId), parsedArgs));
       },
     },
     {
-      name: UNSCHEDULE_CRON_JOB_TOOL,
+      ...unscheduleCronJobTool,
       label: "Delete cron job",
-      description: "Delete a scheduled job",
-      parameters: SUnscheduleCronJobArgs,
       executionMode: SEQUENTIAL,
       execute: async (_toolCallId: string, args: unknown) => {
-        const parsedArgs = decodeToolArguments(SUnscheduleCronJobArgs, args);
+        const parsedArgs = validateToolArguments(SUnscheduleCronJobArgs, args);
         const result = await CronSingleton.instance.cancel(
           parsedArgs.name,
           requireChatId(context.chatId),
@@ -636,40 +234,28 @@ export function createCalendarTools(context: TToolExecutionContext) {
 
   return [
     {
-      name: LIST_CALENDARS_TOOL,
+      ...listCalendarsTool,
       label: "List calendars",
-      description: "List configured calendars and their live status",
-      parameters: SListCalendarsArgs,
       execute: async (_toolCallId: string, args: unknown, signal?: AbortSignal) => {
-        decodeToolArguments(SListCalendarsArgs, args);
+        validateToolArguments(SListCalendarsArgs, args);
         return textResult(await CalendarService.instance.listCalendars(userId, signal));
       },
     },
     {
-      name: REMOVE_READONLY_CALENDAR_TOOL,
+      ...removeReadonlyCalendarTool,
       label: "Remove read-only calendar",
-      description: "Remove a configured read-only calendar",
-      parameters: SRemoveReadonlyCalendarArgs,
       executionMode: SEQUENTIAL,
       execute: async (_toolCallId: string, args: unknown) => {
-        const parsedArgs: TRemoveReadonlyCalendarArgs = decodeToolArguments(
-          SRemoveReadonlyCalendarArgs,
-          args,
-        );
+        const parsedArgs = validateToolArguments(SRemoveReadonlyCalendarArgs, args);
         await CalendarService.instance.removeReadonlyCalendar(userId, parsedArgs.calendarId);
         return textResult({ success: true });
       },
     },
     {
-      name: LIST_CALENDAR_EVENTS_TOOL,
+      ...listCalendarEventsTool,
       label: "List calendar events",
-      description: "List events across all configured calendars",
-      parameters: SListCalendarEventsArgs,
       execute: async (_toolCallId: string, args: unknown, signal?: AbortSignal) => {
-        const parsedArgs: TListCalendarEventsArgs = decodeToolArguments(
-          SListCalendarEventsArgs,
-          args,
-        );
+        const parsedArgs = validateToolArguments(SListCalendarEventsArgs, args);
         const validatedArgs = validateListCalendarEventsArgs(parsedArgs);
         return textResult(
           await CalendarService.instance.listEvents({ ...validatedArgs, userId, signal }),
@@ -677,15 +263,10 @@ export function createCalendarTools(context: TToolExecutionContext) {
       },
     },
     {
-      name: FIND_CALENDAR_AVAILABILITY_TOOL,
+      ...findCalendarAvailabilityTool,
       label: "Find calendar availability",
-      description: "Check conflicts or find free slots across all configured calendars",
-      parameters: SFindCalendarAvailabilityArgs,
       execute: async (_toolCallId: string, args: unknown, signal?: AbortSignal) => {
-        const parsedArgs: TFindCalendarAvailabilityArgs = decodeToolArguments(
-          SFindCalendarAvailabilityArgs,
-          args,
-        );
+        const parsedArgs = validateToolArguments(SFindCalendarAvailabilityArgs, args);
         const validatedArgs = validateFindCalendarAvailabilityArgs(parsedArgs);
         return textResult(
           await CalendarService.instance.findAvailability({
@@ -698,16 +279,11 @@ export function createCalendarTools(context: TToolExecutionContext) {
       },
     },
     {
-      name: CREATE_CALENDAR_EVENT_TOOL,
+      ...createCalendarEventTool,
       label: "Create calendar event",
-      description: "Create an event on the trusted writable calendar",
-      parameters: SCreateCalendarEventArgs,
       executionMode: SEQUENTIAL,
       execute: async (_toolCallId: string, args: unknown, signal?: AbortSignal) => {
-        const parsedArgs: TCreateCalendarEventArgs = decodeToolArguments(
-          SCreateCalendarEventArgs,
-          args,
-        );
+        const parsedArgs = validateToolArguments(SCreateCalendarEventArgs, args);
         const validatedArgs = validateCreateCalendarEventArgs(parsedArgs);
         return textResult(
           await CalendarService.instance.createEvent({
@@ -720,16 +296,11 @@ export function createCalendarTools(context: TToolExecutionContext) {
       },
     },
     {
-      name: UPDATE_CALENDAR_EVENT_TOOL,
+      ...updateCalendarEventTool,
       label: "Update calendar event",
-      description: "Update one resolved event on the trusted writable calendar",
-      parameters: SUpdateCalendarEventArgs,
       executionMode: SEQUENTIAL,
       execute: async (_toolCallId: string, args: unknown, signal?: AbortSignal) => {
-        const parsedArgs: TUpdateCalendarEventArgs = decodeToolArguments(
-          SUpdateCalendarEventArgs,
-          args,
-        );
+        const parsedArgs = validateToolArguments(SUpdateCalendarEventArgs, args);
         const patch = validateUpdateCalendarEventArgs(parsedArgs);
 
         return textResult(
@@ -744,16 +315,11 @@ export function createCalendarTools(context: TToolExecutionContext) {
       },
     },
     {
-      name: DELETE_CALENDAR_EVENT_TOOL,
+      ...deleteCalendarEventTool,
       label: "Delete calendar event",
-      description: "Delete one resolved event from the trusted writable calendar",
-      parameters: SDeleteCalendarEventArgs,
       executionMode: SEQUENTIAL,
       execute: async (_toolCallId: string, args: unknown, signal?: AbortSignal) => {
-        const parsedArgs: TDeleteCalendarEventArgs = decodeToolArguments(
-          SDeleteCalendarEventArgs,
-          args,
-        );
+        const parsedArgs = validateToolArguments(SDeleteCalendarEventArgs, args);
         await CalendarService.instance.deleteEvent({ ...parsedArgs, userId, signal });
         return textResult({ success: true });
       },
@@ -764,12 +330,10 @@ export function createCalendarTools(context: TToolExecutionContext) {
 export function createWebTools() {
   return [
     {
-      name: WEB_SEARCH_TOOL,
+      ...webSearchTool,
       label: "Web search",
-      description: "Search the public web for current information",
-      parameters: SWebSearchArgs,
       execute: async (_toolCallId: string, args: unknown, signal?: AbortSignal) => {
-        const parsedArgs = decodeToolArguments(SWebSearchArgs, args);
+        const parsedArgs = validateToolArguments(SWebSearchArgs, args);
         return textResult({
           query: parsedArgs.query,
           results: await searchWeb(parsedArgs, signal),
@@ -777,12 +341,10 @@ export function createWebTools() {
       },
     },
     {
-      name: WEB_FETCH_TOOL,
+      ...webFetchTool,
       label: "Web fetch",
-      description: "Fetch a public HTTP or HTTPS URL",
-      parameters: SWebFetchArgs,
       execute: async (_toolCallId: string, args: unknown, signal?: AbortSignal) => {
-        const parsedArgs = validateWebFetchArgs(decodeToolArguments(SWebFetchArgs, args));
+        const parsedArgs = validateWebFetchArgs(validateToolArguments(SWebFetchArgs, args));
         return textResult(await fetchWeb(parsedArgs, signal));
       },
     },

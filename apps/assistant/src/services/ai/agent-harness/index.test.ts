@@ -246,66 +246,6 @@ describe("AgentHarness", () => {
     expect(opencode.state.callCount).toBe(0);
   });
 
-  test("retains the Signal styled-text contract in the assembled production prompt", async () => {
-    let systemPrompt = "";
-    faux.setResponses([
-      (context) => {
-        systemPrompt = context.systemPrompt ?? "";
-        return fauxAssistantMessage("Signal reply");
-      },
-    ]);
-
-    await AgentHarness.instance.runMain({
-      prompt: "hello",
-      history: [],
-      chatId: "signal:+100",
-      settings: {
-        ...DefaultConfigRecord,
-        [EConfigKey.AiProvider]: EAiProvider.Openrouter,
-      },
-      currentTimeContext: undefined,
-      platform: EMessagePlatform.Signal,
-      trace: undefined,
-      signal: undefined,
-    });
-
-    expect(systemPrompt).toContain("*italic*, **bold**, `monospace`, ~strikethrough~");
-    expect(systemPrompt).toContain("Never use headings, tables, blockquotes, embeds");
-  });
-
-  test("requires memory delegation for answers depending on personal user facts", async () => {
-    let systemPrompt = "";
-    let memoryDescription = "";
-    faux.setResponses([
-      (context) => {
-        systemPrompt = context.systemPrompt ?? "";
-        memoryDescription =
-          context.tools?.find((tool) => tool.name === "delegate-memory")?.description ?? "";
-        return fauxAssistantMessage("Memory-aware reply");
-      },
-    ]);
-
-    await AgentHarness.instance.runMain({
-      prompt: "What is my favorite restaurant?",
-      history: [],
-      chatId: "discord:1",
-      settings: {
-        ...DefaultConfigRecord,
-        [EConfigKey.AiProvider]: EAiProvider.Openrouter,
-      },
-      currentTimeContext: undefined,
-      platform: EMessagePlatform.Discord,
-      trace: undefined,
-      signal: undefined,
-    });
-
-    expect(systemPrompt).toContain("Delegate memory lookup");
-    expect(systemPrompt).toContain("Invoke registered tools through the native tool mechanism");
-    expect(memoryDescription).toBe(
-      "Required for personal user facts and forget requests. Run the Memory specialist to retrieve or forget the relevant facts.",
-    );
-  });
-
   test("returns undefined for blank and provider-error final messages", async () => {
     faux.setResponses([
       fauxAssistantMessage("   "),

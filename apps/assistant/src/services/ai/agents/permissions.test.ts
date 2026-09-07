@@ -3,71 +3,55 @@ import type { TOption } from "@bellaclaw/shared";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { DefaultConfigRecord } from "../../settings/schema";
 import { AgentHarness, EAgentName } from "../agent-harness";
+import type { TAgentRunArgs } from "../agent-harness/types";
 import { EModelPurpose } from "../types";
-import { AGENT_TOOL_NAMES } from "./permissions";
+
+const EXPECTED_TOOL_NAMES: Record<EAgentName, readonly string[]> = {
+  [EAgentName.Calendar]: [
+    "list-calendars",
+    "remove-readonly-calendar",
+    "list-calendar-events",
+    "find-calendar-availability",
+    "create-calendar-event",
+    "update-calendar-event",
+    "delete-calendar-event",
+    "web-search",
+    "web-fetch",
+  ],
+  [EAgentName.Main]: [
+    "web-search",
+    "web-fetch",
+    "delegate-calendar",
+    "delegate-memory",
+    "delegate-settings",
+    "delegate-scheduling",
+  ],
+  [EAgentName.Memory]: ["search-memory", "remember-memory", "forget-memory"],
+  [EAgentName.Settings]: ["get-settings", "update-settings"],
+  [EAgentName.Scheduling]: [
+    "list-cron-jobs",
+    "schedule-once",
+    "schedule-recurring",
+    "update-cron-job",
+    "unschedule-cron-job",
+    "web-search",
+    "web-fetch",
+  ],
+  [EAgentName.ScheduledTask]: [
+    "search-memory",
+    "web-search",
+    "web-fetch",
+    "list-calendar-events",
+    "find-calendar-availability",
+  ],
+};
 
 describe("agent permissions", () => {
-  test("matches the six-agent tool matrix", () => {
-    expect(AGENT_TOOL_NAMES[EAgentName.Calendar]).toEqual([
-      "list-calendars",
-      "remove-readonly-calendar",
-      "list-calendar-events",
-      "find-calendar-availability",
-      "create-calendar-event",
-      "update-calendar-event",
-      "delete-calendar-event",
-      "web-search",
-      "web-fetch",
-    ]);
-    expect(AGENT_TOOL_NAMES[EAgentName.Main]).toEqual([
-      "web-search",
-      "web-fetch",
-      "delegate-calendar",
-      "delegate-memory",
-      "delegate-settings",
-      "delegate-scheduling",
-    ]);
-    expect(AGENT_TOOL_NAMES[EAgentName.Memory]).toEqual([
-      "search-memory",
-      "remember-memory",
-      "forget-memory",
-    ]);
-    expect(AGENT_TOOL_NAMES[EAgentName.Settings]).toEqual(["get-settings", "update-settings"]);
-    expect(AGENT_TOOL_NAMES[EAgentName.Scheduling]).toEqual([
-      "list-cron-jobs",
-      "schedule-once",
-      "schedule-recurring",
-      "update-cron-job",
-      "unschedule-cron-job",
-      "web-search",
-      "web-fetch",
-    ]);
-    expect(AGENT_TOOL_NAMES[EAgentName.ScheduledTask]).toEqual([
-      "search-memory",
-      "web-search",
-      "web-fetch",
-      "list-calendar-events",
-      "find-calendar-availability",
-    ]);
-  });
-
   test("assembles the production tools and execution modes for every agent", async () => {
     const harness = AgentHarness.instance as unknown as {
-      createTools(args: {
-        name: EAgentName;
-        purpose: EModelPurpose;
-        prompt: string;
-        chatId: string;
-        settings: typeof DefaultConfigRecord;
-        currentTimeContext: undefined;
-        platform: undefined;
-        trace: undefined;
-        history: [];
-        maxIterations: number;
-        parentToolCallId: TOption<string>;
-        signal: TOption<AbortSignal>;
-        delegationCount: TOption<() => void>;
-      }): Promise<AgentTool[]>;
+      createTools(
+        args: TAgentRunArgs & { delegationCount: TOption<() => void> },
+      ): Promise<AgentTool[]>;
     };
 
     for (const name of Object.values(EAgentName)) {
@@ -93,7 +77,7 @@ describe("agent permissions", () => {
         delegationCount,
       });
 
-      expect(tools.map((tool) => tool.name)).toEqual([...AGENT_TOOL_NAMES[name]]);
+      expect(tools.map((tool) => tool.name)).toEqual([...EXPECTED_TOOL_NAMES[name]]);
       expect(tools.some((tool) => tool.name.startsWith("delegate-"))).toBe(
         name === EAgentName.Main,
       );

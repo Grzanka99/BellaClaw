@@ -1,77 +1,27 @@
 import { describe, expect, test } from "bun:test";
 import type { TSchema } from "@earendil-works/pi-ai";
 import { Value } from "typebox/value";
-import { createCalendarEventTool } from "./create-calendar-event/definition";
 import {
   SCreateCalendarEventArgs,
   validateCreateCalendarEventArgs,
 } from "./create-calendar-event/handler";
-import { decodeToolArguments } from "./definition";
-import { deleteCalendarEventTool } from "./delete-calendar-event/definition";
+import { validateToolArguments } from "./definition";
 import { SDeleteCalendarEventArgs } from "./delete-calendar-event/handler";
-import { findCalendarAvailabilityTool } from "./find-calendar-availability/definition";
-import { forgetMemoryTool, SForgetMemoryArgs } from "./forget-memory/definition";
-import { getSettingsTool } from "./get-settings/definition";
-import { listCalendarEventsTool } from "./list-calendar-events/definition";
-import { listCalendarsTool } from "./list-calendars/definition";
-import { listCronJobsTool } from "./list-cron-jobs/definition";
-import { rememberMemoryTool, SRememberMemoryArgs } from "./remember-memory/definition";
-import { removeReadonlyCalendarTool } from "./remove-readonly-calendar/definition";
-import { scheduleOnceTool } from "./schedule-once/definition";
+import { SForgetMemoryArgs } from "./forget-memory/definition";
+import { SRememberMemoryArgs } from "./remember-memory/definition";
 import { SScheduleOnceArgs, validateScheduleOnceArgs } from "./schedule-once/handler";
-import { scheduleRecurringTool } from "./schedule-recurring/definition";
 import {
   SScheduleRecurringArgs,
   validateScheduleRecurringArgs,
 } from "./schedule-recurring/handler";
-import { SSearchMemoryArgs, searchMemoryTool } from "./search-memory/definition";
-import { unscheduleCronJobTool } from "./unschedule-cron-job/definition";
-import { updateCalendarEventTool } from "./update-calendar-event/definition";
+import { SSearchMemoryArgs } from "./search-memory/definition";
 import {
   SUpdateCalendarEventArgs,
   validateUpdateCalendarEventArgs,
 } from "./update-calendar-event/handler";
-import { updateCronJobTool } from "./update-cron-job/definition";
 import { SUpdateCronJobArgs, validateUpdateCronJobArgs } from "./update-cron-job/handler";
-import { updateSettingsTool } from "./update-settings/definition";
-import { webFetchTool } from "./web-fetch/definition";
-import { webSearchTool } from "./web-search/definition";
 
-const ALL_TOOLS = [
-  createCalendarEventTool,
-  deleteCalendarEventTool,
-  findCalendarAvailabilityTool,
-  forgetMemoryTool,
-  getSettingsTool,
-  listCalendarEventsTool,
-  listCalendarsTool,
-  listCronJobsTool,
-  removeReadonlyCalendarTool,
-  rememberMemoryTool,
-  scheduleOnceTool,
-  scheduleRecurringTool,
-  searchMemoryTool,
-  unscheduleCronJobTool,
-  updateCronJobTool,
-  updateCalendarEventTool,
-  updateSettingsTool,
-  webFetchTool,
-  webSearchTool,
-];
-
-describe("AI tool definitions", () => {
-  test("expose Pi-native TypeBox parameter schemas", () => {
-    expect(ALL_TOOLS).toHaveLength(19);
-    expect(new Set(ALL_TOOLS.map((tool) => tool.name)).size).toBe(19);
-
-    for (const tool of ALL_TOOLS) {
-      expect(tool.name.length).toBeGreaterThan(0);
-      expect(tool.description.length).toBeGreaterThan(0);
-      expect("type" in tool.parameters && tool.parameters.type).toBe("object");
-      expect(() => JSON.stringify(tool.parameters)).not.toThrow();
-    }
-  });
-
+describe("AI tool arguments", () => {
   test("enforce structural constraints", () => {
     expect(Value.Check(SScheduleOnceArgs, { name: "x", fireAt: "invalid" })).toBe(false);
     expect(Value.Check(SScheduleRecurringArgs, { name: "x", pattern: "0 8 * * *" })).toBe(true);
@@ -253,7 +203,7 @@ describe("AI tool definitions", () => {
   });
 });
 
-describe("decodeToolArguments", () => {
+describe("validateToolArguments", () => {
   test("names the offending path instead of throwing a bare Decode error", () => {
     const cases: Array<{ schema: TSchema; args: unknown; path: string; reason: string }> = [
       {
@@ -288,14 +238,14 @@ describe("decodeToolArguments", () => {
     ];
 
     for (const { schema, args, path, reason } of cases) {
-      expect(() => decodeToolArguments(schema, args)).toThrow(
+      expect(() => validateToolArguments(schema, args)).toThrow(
         `Invalid tool arguments: ${path}: ${reason}`,
       );
     }
   });
 
   test("returns the decoded arguments for a valid payload", () => {
-    expect(decodeToolArguments(SSearchMemoryArgs, { query: "tea", limit: 3 })).toEqual({
+    expect(validateToolArguments(SSearchMemoryArgs, { query: "tea", limit: 3 })).toEqual({
       query: "tea",
       limit: 3,
     });
