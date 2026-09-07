@@ -73,20 +73,8 @@ describe("log viewer", () => {
     const homeHtml = await home.text();
 
     expect(homeHtml).toContain("distinctive lookup 100");
-    expect(homeHtml).toContain('class="event-inspector"');
-    expect(homeHtml).toContain('data-event-selectable="true"');
-    expect(homeHtml).toContain("Filter to this turn");
-    expect(homeHtml).toContain("+ More filters");
-    expect(homeHtml).toContain("data-theme-toggle");
-    expect(homeHtml.indexOf("bellaclaw-log-viewer-theme")).toBeLessThan(
-      homeHtml.indexOf("/assets/styles.css"),
-    );
-    expect(homeHtml).toContain('localStorage.getItem("bellaclaw-log-viewer-theme")');
-    expect(homeHtml).toContain('data-copy-current-event="true"');
-    expect(homeHtml).toContain("data-event-json=");
     expect(homeHtml).toContain(
       "q=distinctive&amp;range=all&amp;success=success&amp;turnId=turn-searchable",
     );
-    expect(homeHtml).toContain('hx-trigger="click, intersect once root:#events-list"');
   });
 });

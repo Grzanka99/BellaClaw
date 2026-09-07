@@ -733,86 +733,34 @@ function EventInspectorContent(props: {
           {status.label}
         </span>
       </div>
-      <InspectorSection title="Overview" className={undefined}>
-        <InspectorValue
-          label="Result"
-          value={status.label}
-          className={status.className}
-          mono={undefined}
-        />
-        <InspectorValue
-          label="Duration"
-          value={duration}
-          className={durationClass}
-          mono={undefined}
-        />
+      <InspectorSection title="Overview">
+        <InspectorValue label="Result" value={status.label} className={status.className} />
+        <InspectorValue label="Duration" value={duration} className={durationClass} />
         <div class="inspector-value">
           <span>Timestamp</span>
           <strong class="mono">
             <LocalTime ms={event.createdAtMs} />
           </strong>
         </div>
-        <InspectorValue label="Level" value={event.level} className={undefined} mono={undefined} />
+        <InspectorValue label="Level" value={event.level} />
       </InspectorSection>
-      <InspectorSection title="Context" className={undefined}>
-        <InspectorValue label="Turn ID" value={event.turnId} className={undefined} mono />
-        {event.chatId !== null && (
-          <InspectorValue label="Chat ID" value={event.chatId} className={undefined} mono />
-        )}
-        {event.component !== null && (
-          <InspectorValue
-            label="Component"
-            value={event.component}
-            className={undefined}
-            mono={undefined}
-          />
-        )}
-        {event.toolName !== null && (
-          <InspectorValue
-            label="Tool"
-            value={event.toolName}
-            className={undefined}
-            mono={undefined}
-          />
-        )}
-        {event.platform !== null && (
-          <InspectorValue
-            label="Platform"
-            value={event.platform}
-            className={undefined}
-            mono={undefined}
-          />
-        )}
-        {event.provider !== null && (
-          <InspectorValue
-            label="Provider"
-            value={event.provider}
-            className={undefined}
-            mono={undefined}
-          />
-        )}
-        {event.model !== null && (
-          <InspectorValue
-            label="Model"
-            value={event.model}
-            className={undefined}
-            mono={undefined}
-          />
-        )}
+      <InspectorSection title="Context">
+        <InspectorValue label="Turn ID" value={event.turnId} mono />
+        {event.chatId !== null && <InspectorValue label="Chat ID" value={event.chatId} mono />}
+        {event.component !== null && <InspectorValue label="Component" value={event.component} />}
+        {event.toolName !== null && <InspectorValue label="Tool" value={event.toolName} />}
+        {event.platform !== null && <InspectorValue label="Platform" value={event.platform} />}
+        {event.provider !== null && <InspectorValue label="Provider" value={event.provider} />}
+        {event.model !== null && <InspectorValue label="Model" value={event.model} />}
       </InspectorSection>
-      <InspectorSection title="Metadata" className={undefined}>
+      <InspectorSection title="Metadata">
         {metadataEntries.length === 0 && <p class="inspector-muted">No metadata recorded.</p>}
         {metadataEntries.map(([key, value]) => (
-          <InspectorValue
-            label={key}
-            value={formatMetadataValue(value)}
-            className={undefined}
-            mono
-          />
+          <InspectorValue label={key} value={formatMetadataValue(value)} mono />
         ))}
       </InspectorSection>
       {event.error !== null && (
-        <InspectorSection title="Error" className={undefined}>
+        <InspectorSection title="Error">
           <pre class="error-pre">{event.error}</pre>
         </InspectorSection>
       )}
@@ -831,7 +779,7 @@ function EventInspectorContent(props: {
   );
 }
 
-function InspectorSection(props: PropsWithChildren<{ title: string; className: TOption<string> }>) {
+function InspectorSection(props: PropsWithChildren<{ title: string; className?: string }>) {
   let className = "inspector-section";
 
   if (props.className !== undefined) {
@@ -849,8 +797,8 @@ function InspectorSection(props: PropsWithChildren<{ title: string; className: T
 function InspectorValue(props: {
   label: string;
   value: string;
-  className: TOption<string>;
-  mono: TOption<boolean>;
+  className?: string;
+  mono?: boolean;
 }) {
   let className = "";
 
