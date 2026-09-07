@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { DatabaseConnector } from "../../services/database";
 import { cronEngineJobsTable } from "../../services/database/schema";
 import { resetCronEngineJobsTable } from "../../services/database/test-utils";
-import { CronScheduler, ECronJobStatus, ECronJobType } from "./index";
+import { CronScheduler } from "./index";
 
 type TSchedulerInternals = {
   fire: (id: number) => Promise<void>;
@@ -23,33 +23,6 @@ async function forceJobNextRunAt(id: number, nextRunAt: Date) {
     .where(eq(cronEngineJobsTable.id, id));
 }
 
-async function insertDueOneTimeJob(name: string, scope: string) {
-  const db = DatabaseConnector.instance.database;
-
-  const row = await db
-    .insert(cronEngineJobsTable)
-    .values({
-      name,
-      scope,
-      group: null,
-      type: ECronJobType.OneTime,
-      pattern: null,
-      reminderText: null,
-      reminderPromptData: null,
-      reminderFallbackText: null,
-      nextRunAt: Date.now() - 1_000,
-      lastRunAt: null,
-      createdAt: Date.now(),
-      status: ECronJobStatus.Active,
-      finishedAt: null,
-      finishedReason: null,
-    })
-    .returning()
-    .get();
-
-  return row.id;
-}
-
 describe("CronScheduler runtime safety", () => {
   let scheduler: CronScheduler;
 
@@ -62,9 +35,9 @@ describe("CronScheduler runtime safety", () => {
     scheduler.destroy();
   });
 
-  test("overlapping fires complete a one-time job once", async () => {
+  test("overlapping fires complete a one-time job named error once", async () => {
     const scheduled = await scheduler.createOnce({
-      name: "overlap-job",
+      name: "error",
       scope: "scope-a",
       fireAt: new Date(Date.now() + 60_000),
     });
@@ -81,8 +54,8 @@ describe("CronScheduler runtime safety", () => {
 
     await Promise.all([fireJob(scheduler, scheduled.id), fireJob(scheduler, scheduled.id)]);
 
-    expect(fireEvents).toEqual(["overlap-job"]);
-    expect(await scheduler.get("overlap-job", "scope-a")).toBeUndefined();
+    expect(fireEvents).toEqual(["error"]);
+    expect(await scheduler.get("error", "scope-a")).toBeUndefined();
   });
 
   test("parallel schedulers fire a recurring occurrence once", async () => {
@@ -114,42 +87,5 @@ describe("CronScheduler runtime safety", () => {
     } finally {
       secondScheduler.destroy();
     }
-  });
-
-  test("reserved EventEmitter names are rejected when scheduling", async () => {
-    for (const name of ["error", "newListener", "removeListener"]) {
-      const recurring = await scheduler.createRecurring({
-        name,
-        scope: "scope-a",
-        pattern: "*/5 * * * *",
-      });
-      const oneTime = await scheduler.createOnce({
-        name,
-        scope: "scope-a",
-        fireAt: new Date(Date.now() + 60_000),
-      });
-
-      expect("error" in recurring).toBe(true);
-      expect("error" in oneTime).toBe(true);
-      if ("error" in recurring) {
-        expect(String(recurring.error)).toContain("reserved");
-      }
-      if ("error" in oneTime) {
-        expect(String(oneTime.error)).toContain("reserved");
-      }
-    }
-  });
-
-  test("persisted reserved job names still fire generic listeners", async () => {
-    const id = await insertDueOneTimeJob("error", "scope-a");
-
-    const fireEvents: string[] = [];
-    scheduler.onFire((ctx) => {
-      fireEvents.push(ctx.name);
-    });
-
-    await fireJob(scheduler, id);
-
-    expect(fireEvents).toEqual(["error"]);
   });
 });

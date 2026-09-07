@@ -18,13 +18,7 @@ import {
   type TCronSchedulerOptions,
 } from "./types";
 
-const RESERVED_CRON_JOB_EVENT_NAMES = new Set(["error", "newListener", "removeListener"]);
-
 export * from "./types";
-
-export function isReservedCronJobEventName(name: string) {
-  return RESERVED_CRON_JOB_EVENT_NAMES.has(name);
-}
 
 export class CronScheduler extends EventEmitter {
   private static readonly FIRE_EVENT = Symbol("cron-scheduler-fire");
@@ -57,17 +51,30 @@ export class CronScheduler extends EventEmitter {
   public async createRecurring(
     args: TCreateRecurringArgs,
   ): Promise<TCronJob | TCronSchedulerError> {
-    if (isReservedCronJobEventName(args.name)) {
-      return this.createReservedJobNameError(args.name);
-    }
+    return this.createJob(args);
+  }
 
+  public async createOnce(args: TCreateOnceArgs): Promise<TCronJob | TCronSchedulerError> {
+    if (args.fireAt <= new Date()) {
+      return { operation: "create", error: "fireAt must be in the future" };
+    }
+    return this.createJob(args);
+  }
+
+  private async createJob(
+    args: TCreateRecurringArgs | TCreateOnceArgs,
+  ): Promise<TCronJob | TCronSchedulerError> {
     const normalizedScope = this.normalizeScope(args.scope);
+    let type = ECronJobType.OneTime;
+    if ("pattern" in args) {
+      type = ECronJobType.Recurring;
+    }
 
     try {
       const created = await this.queue.enqueue(async () => {
         const existing = await this.getJobByNormalizedScope(args.name, normalizedScope);
 
-        if (existing && existing.type !== ECronJobType.Recurring) {
+        if (existing && existing.type !== type) {
           return this.createCrossTypeCreateError(args.name, existing.type);
         }
 
@@ -77,23 +84,30 @@ export class CronScheduler extends EventEmitter {
 
         const scheduledAt = new Date();
         const effectiveTimezone = args.timezone ?? existing?.timezone ?? this.timezone;
-        let nextRunAt: TOption<Date>;
-        try {
-          nextRunAt = this.getNextRecurringRun(args.pattern, scheduledAt, effectiveTimezone);
-        } catch (error) {
-          return { operation: "create", error } satisfies TCronSchedulerError;
-        }
-
-        if (!nextRunAt) {
-          return this.createUnschedulablePatternError(args.pattern);
+        let nextRunAt: Date;
+        let pattern: TOption<string>;
+        if ("pattern" in args) {
+          pattern = args.pattern;
+          const next = this.getNextRecurringRun(pattern, scheduledAt, effectiveTimezone);
+          if (next === undefined) {
+            return this.createUnschedulablePatternError(pattern);
+          }
+          nextRunAt = next;
+        } else {
+          try {
+            new Intl.DateTimeFormat(undefined, { timeZone: effectiveTimezone });
+          } catch {
+            throw new Error(`Invalid timezone: ${effectiveTimezone}`);
+          }
+          nextRunAt = args.fireAt;
         }
 
         const rowValues = {
           name: args.name,
           scope: normalizedScope,
           group: args.group ?? null,
-          type: ECronJobType.Recurring,
-          pattern: args.pattern,
+          type,
+          pattern: pattern ?? null,
           reminderText: args.reminderText ?? null,
           reminderPromptData: args.reminderPromptData ?? null,
           reminderFallbackText: args.reminderFallbackText ?? args.reminderText ?? null,
@@ -147,7 +161,7 @@ export class CronScheduler extends EventEmitter {
         } catch (error) {
           const currentJob = await this.getJobByNormalizedScope(args.name, normalizedScope);
           if (currentJob) {
-            if (currentJob.type !== ECronJobType.Recurring) {
+            if (currentJob.type !== type) {
               return this.createCrossTypeCreateError(args.name, currentJob.type);
             }
 
@@ -164,122 +178,7 @@ export class CronScheduler extends EventEmitter {
 
       return created;
     } catch (error) {
-      this.logger.error(`Failed to create recurring job: ${String(error)}`);
-      return { operation: "create", error };
-    }
-  }
-
-  public async createOnce(args: TCreateOnceArgs): Promise<TCronJob | TCronSchedulerError> {
-    if (isReservedCronJobEventName(args.name)) {
-      return this.createReservedJobNameError(args.name);
-    }
-
-    const now = new Date();
-    if (args.fireAt <= now) {
-      return { operation: "create", error: "fireAt must be in the future" };
-    }
-
-    const normalizedScope = this.normalizeScope(args.scope);
-
-    try {
-      const created = await this.queue.enqueue(async () => {
-        const existing = await this.getJobByNormalizedScope(args.name, normalizedScope);
-
-        if (existing && existing.type !== ECronJobType.OneTime) {
-          return this.createCrossTypeCreateError(args.name, existing.type);
-        }
-
-        if (existing && args.overwrite !== true) {
-          return this.createDuplicateJobError(args.name);
-        }
-
-        const effectiveTimezone = args.timezone ?? existing?.timezone ?? this.timezone;
-        try {
-          new Intl.DateTimeFormat(undefined, { timeZone: effectiveTimezone });
-        } catch {
-          return {
-            operation: "create",
-            error: new Error(`Invalid timezone: ${effectiveTimezone}`),
-          } satisfies TCronSchedulerError;
-        }
-
-        const rowValues = {
-          name: args.name,
-          scope: normalizedScope,
-          group: args.group ?? null,
-          type: ECronJobType.OneTime,
-          pattern: null,
-          reminderText: args.reminderText ?? null,
-          reminderPromptData: args.reminderPromptData ?? null,
-          reminderFallbackText: args.reminderFallbackText ?? args.reminderText ?? null,
-          taskPrompt: args.taskPrompt ?? null,
-          taskFallbackText: args.taskFallbackText ?? null,
-          nextRunAt: args.fireAt.getTime(),
-          lastRunAt: null,
-          createdAt: Date.now(),
-          status: ECronJobStatus.Active,
-          finishedAt: null,
-          finishedReason: null,
-          timezone: effectiveTimezone ?? null,
-        };
-
-        if (existing && args.overwrite === true) {
-          const row = await this.db.transaction(async (tx) => {
-            const claimedRow = await tx
-              .update(cronEngineJobsTable)
-              .set({
-                status: ECronJobStatus.Cancelled,
-                finishedAt: Date.now(),
-                finishedReason: ECronFinishedReason.Overwritten,
-              })
-              .where(
-                and(
-                  eq(cronEngineJobsTable.id, existing.id),
-                  eq(cronEngineJobsTable.status, ECronJobStatus.Active),
-                ),
-              )
-              .returning()
-              .get();
-
-            if (!claimedRow) {
-              return undefined;
-            }
-
-            return tx.insert(cronEngineJobsTable).values(rowValues).returning().get();
-          });
-
-          if (!row) {
-            return this.createOverwriteInactiveJobError(args.name);
-          }
-
-          this.stopTimer(existing.id);
-          return this.parseJobRow(row) ?? this.createCreatedJobReadbackError();
-        }
-
-        try {
-          const row = await this.db.insert(cronEngineJobsTable).values(rowValues).returning().get();
-          return this.parseJobRow(row) ?? this.createCreatedJobReadbackError();
-        } catch (error) {
-          const currentJob = await this.getJobByNormalizedScope(args.name, normalizedScope);
-          if (currentJob) {
-            if (currentJob.type !== ECronJobType.OneTime) {
-              return this.createCrossTypeCreateError(args.name, currentJob.type);
-            }
-
-            return this.createDuplicateJobError(args.name);
-          }
-
-          throw error;
-        }
-      });
-
-      if ("id" in created) {
-        await this.startTimerIfActive(created);
-      }
-
-      return created;
-    } catch (error) {
-      this.logger.error(`Failed to create one-time job: ${String(error)}`);
+      this.logger.error(`Failed to create job: ${String(error)}`);
       return { operation: "create", error };
     }
   }
@@ -609,9 +508,6 @@ export class CronScheduler extends EventEmitter {
       };
 
       this.emit(CronScheduler.FIRE_EVENT, ctx);
-      if (!isReservedCronJobEventName(firedJob.name)) {
-        this.emit(firedJob.name, ctx);
-      }
     } catch (error) {
       this.logger.error(`Failed to fire job ${id}: ${String(error)}`);
     }
@@ -663,10 +559,6 @@ export class CronScheduler extends EventEmitter {
 
   private createOverwriteInactiveJobError(name: string): TCronSchedulerError {
     return { operation: "create", error: `Job '${name}' is no longer active.` };
-  }
-
-  private createReservedJobNameError(name: string): TCronSchedulerError {
-    return { operation: "create", error: `Job name '${name}' is reserved by EventEmitter` };
   }
 
   private parseJobRow(row: unknown): TOption<TCronJob> {

@@ -223,10 +223,10 @@ describe("CronScheduler", () => {
     const overdueRunAt = new Date(Date.now() - 10 * 60_000);
     await forceJobNextRunAt(scheduled.id, overdueRunAt);
 
-    const namedEvent = new Promise<
+    const fireEvent = new Promise<
       Pick<TCronJobContext, "name" | "scope" | "type" | "lastRunAt" | "nextRunAt">
     >((resolve) => {
-      scheduler.on("recurring-job", (ctx: TCronJobContext) => {
+      scheduler.onFire((ctx: TCronJobContext) => {
         resolve({
           name: ctx.name,
           scope: ctx.scope,
@@ -237,18 +237,9 @@ describe("CronScheduler", () => {
       });
     });
 
-    const fireEvent = new Promise<string>((resolve) => {
-      scheduler.onFire((ctx) => {
-        if (ctx.name === "recurring-job") {
-          resolve(ctx.name);
-        }
-      });
-    });
-
     await fireJob(scheduler, scheduled.id);
 
-    const emitted = await namedEvent;
-    const firedName = await fireEvent;
+    const emitted = await fireEvent;
     const updatedJob = await scheduler.get("recurring-job", "scope-a");
 
     expect(emitted).toEqual({
@@ -258,7 +249,6 @@ describe("CronScheduler", () => {
       lastRunAt: undefined,
       nextRunAt: overdueRunAt,
     });
-    expect(firedName).toBe("recurring-job");
     expect(updatedJob?.lastRunAt).toBeInstanceOf(Date);
     expect(updatedJob?.nextRunAt.getTime()).toBeGreaterThan(Date.now());
     expect(updatedJob?.reminderPromptData).toBe('{"topic":"water"}');
@@ -278,7 +268,7 @@ describe("CronScheduler", () => {
     await forceJobNextRunAt(scheduled.id, new Date(Date.now() - 1_000));
 
     const fired = new Promise<TCronJobContext>((resolve) => {
-      scheduler.on("daily-news", (ctx: TCronJobContext) => {
+      scheduler.onFire((ctx: TCronJobContext) => {
         resolve(ctx);
       });
     });
@@ -293,32 +283,6 @@ describe("CronScheduler", () => {
     expect(listed?.reminderText).toBeUndefined();
     expect(context.taskPrompt).toBe("Find today's important news with source links.");
     expect(context.taskFallbackText).toBe("No briefing is available.");
-  });
-
-  test("generic fire event does not collide with job named fire", async () => {
-    const scheduled = expectCreated(
-      await scheduler.createRecurring({
-        name: "fire",
-        scope: "scope-a",
-        pattern: "*/5 * * * *",
-      }),
-    );
-    await forceJobNextRunAt(scheduled.id, new Date(Date.now() - 1_000));
-
-    const namedEvents: string[] = [];
-    const fireEvents: string[] = [];
-
-    scheduler.on("fire", (ctx: TCronJobContext) => {
-      namedEvents.push(ctx.name);
-    });
-    scheduler.onFire((ctx) => {
-      fireEvents.push(ctx.name);
-    });
-
-    await fireJob(scheduler, scheduled.id);
-
-    expect(namedEvents).toEqual(["fire"]);
-    expect(fireEvents).toEqual(["fire"]);
   });
 
   test("create does not start a timer after a queued cancel wins", async () => {
@@ -350,13 +314,13 @@ describe("CronScheduler", () => {
       new Date(Date.now() - 1_000),
     );
 
-    const namedEvents: Array<{
+    const fireEvents: Array<{
       type: ECronJobType;
       reminderText: string | undefined;
       reminderFallbackText: string | undefined;
     }> = [];
-    scheduler.on("one-time-job", (ctx: TCronJobContext) => {
-      namedEvents.push({
+    scheduler.onFire((ctx: TCronJobContext) => {
+      fireEvents.push({
         type: ctx.type,
         reminderText: ctx.reminderText,
         reminderFallbackText: ctx.reminderFallbackText,
@@ -369,7 +333,7 @@ describe("CronScheduler", () => {
     const remainingJob = await scheduler.get("one-time-job", "scope-a");
     const rowsAfterFire = await getJobRows("one-time-job", "scope-a");
 
-    expect(namedEvents).toEqual([
+    expect(fireEvents).toEqual([
       {
         type: ECronJobType.OneTime,
         reminderText: "One-time reminder.",
@@ -401,7 +365,7 @@ describe("CronScheduler", () => {
 
   test("future one-time timer fires without polling", async () => {
     const fired = new Promise<TCronJobContext>((resolve) => {
-      scheduler.on("live-once", (ctx: TCronJobContext) => {
+      scheduler.onFire((ctx: TCronJobContext) => {
         resolve(ctx);
       });
     });
@@ -517,7 +481,7 @@ describe("CronScheduler", () => {
   test("setup fires overdue one-time jobs immediately", async () => {
     const overdueScheduler = new CronScheduler({});
     const fired = new Promise<TCronJobContext>((resolve) => {
-      overdueScheduler.on("startup-once", (ctx: TCronJobContext) => {
+      overdueScheduler.onFire((ctx: TCronJobContext) => {
         resolve(ctx);
       });
     });
@@ -547,7 +511,7 @@ describe("CronScheduler", () => {
         "scope-a",
         new Date(Date.now() - 60_000),
       );
-      overdueScheduler.on("startup-recurring", (ctx: TCronJobContext) => {
+      overdueScheduler.onFire((ctx: TCronJobContext) => {
         events.push(ctx.name);
       });
 
