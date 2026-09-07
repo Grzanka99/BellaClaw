@@ -75,7 +75,7 @@ function setupHandler(chatId: string, response = "Final answer") {
   const handler = MessageHandler.getInstance(chatId);
   const internals = handler as unknown as THandlerInternals;
   internals.memory = {
-    findRecent: mock(async () => ({ success: true, data: [] })),
+    findRecent: mock(async () => []),
     save: mock(async (args) => args),
     loadLiveFactWindow: mock(async () => emptyWindow(chatId)),
     commitLiveFactWindow: mock(async () => ({ committed: true, facts: [] })),
@@ -125,7 +125,7 @@ describe("MessageHandler", () => {
       createdAt: new Date(),
       lastReadAt: new Date(),
     }));
-    internals.memory.findRecent = mock(async () => ({ success: true, data: recent }));
+    internals.memory.findRecent = mock(async () => recent);
 
     const result = await handler.handleMessage(
       {
@@ -171,12 +171,12 @@ describe("MessageHandler", () => {
   test("takes an immutable settings snapshot and has no importance classifier routing path", async () => {
     const sharedSettings = structuredClone(DefaultConfigRecord);
     (SettingsService as unknown as { _instance: unknown })._instance = {
-      getAll: mock(async () => sharedSettings),
+      getAll: mock(async () => ({ ...sharedSettings })),
     };
     const handler = MessageHandler.getInstance("signal:1");
     const internals = handler as unknown as THandlerInternals;
     internals.memory = {
-      findRecent: mock(async () => ({ success: true, data: [] })),
+      findRecent: mock(async () => []),
       save: mock(async (args) => args),
       loadLiveFactWindow: mock(async () => emptyWindow("signal:1")),
       commitLiveFactWindow: mock(async () => ({ committed: true, facts: [] })),
@@ -216,10 +216,9 @@ describe("MessageHandler", () => {
 
   test("stops before generating a reply when the user transcript cannot be saved", async () => {
     const { handler, internals } = setupHandler("discord:user-save-failure");
-    internals.memory.save = mock(async () => ({
-      operation: "write",
-      error: "database unavailable",
-    }));
+    internals.memory.save = mock(async () => {
+      throw new Error("database unavailable");
+    });
 
     await expect(
       handler.handleMessage({
@@ -227,10 +226,30 @@ describe("MessageHandler", () => {
         message: { type: "text", content: "remember this" },
         author: { type: ERole.User, id: "1", username: "Owner" },
       }),
-    ).rejects.toThrow("Failed to save user transcript");
+    ).rejects.toThrow("database unavailable");
 
     expect(internals.ai.runMain).not.toHaveBeenCalled();
     expect(internals.memory.save).toHaveBeenCalledTimes(1);
+    expect(internals.memory.loadLiveFactWindow).not.toHaveBeenCalled();
+  });
+
+  test("returns the reply but skips fact processing when its transcript save fails", async () => {
+    const { handler, internals } = setupHandler("discord:assistant-save-failure");
+    internals.memory.save = mock(async (args) => {
+      if (args.author === ERole.Assistant) {
+        throw new Error("database unavailable");
+      }
+      return args;
+    });
+
+    await expect(
+      handler.handleMessage({
+        chatId: "discord:assistant-save-failure",
+        message: { type: "text", content: "hello" },
+        author: { type: ERole.User, id: "1", username: "Owner" },
+      }),
+    ).resolves.toBe("Final answer");
+    await flushAsyncWork();
     expect(internals.memory.loadLiveFactWindow).not.toHaveBeenCalled();
   });
 
