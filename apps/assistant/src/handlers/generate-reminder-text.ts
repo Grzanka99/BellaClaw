@@ -1,7 +1,6 @@
 import type { TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
 import type { TOption } from "@bellaclaw/shared";
 import { createLogger } from "@bellaclaw/shared";
-import { Config } from "../config";
 import type { TCronJobContext } from "../lib/cron-engine";
 import type { AgentHarness } from "../services/ai/agent-harness";
 import { createPlatformInstructions } from "../services/ai/instructions/platform";
@@ -51,7 +50,7 @@ async function resolveCronScopeContext(ctx: TCronJobContext, logPrefix: string) 
   }
 
   if (timezone === undefined) {
-    timezone = Config.ai.instructions.timezone;
+    timezone = DefaultConfigRecord[EConfigKey.AiInstructionsTimezone];
   }
 
   return { settings, timezone, platform };
