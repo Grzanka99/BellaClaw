@@ -228,9 +228,27 @@ export async function handleUpdateSettings(
     purposes.push(purpose);
   }
 
-  for (const verificationPurpose of purposes) {
-    const error = await verifySettings(nextSettings, [verificationPurpose]);
+  const verifications = new Map<string, Promise<TOption<string>>>();
+  const results = await Promise.all(
+    purposes.map(async (verificationPurpose) => {
+      const { model, effort } = getAiModelConfig(
+        provider,
+        verificationPurpose,
+        getAiModelPreference(preferences, provider, verificationPurpose),
+      );
+      const key = JSON.stringify([model.id, effort]);
+      let verification = verifications.get(key);
 
+      if (verification === undefined) {
+        verification = verifySettings(nextSettings, [verificationPurpose]);
+        verifications.set(key, verification);
+      }
+
+      return { purpose: verificationPurpose, error: await verification };
+    }),
+  );
+
+  for (const { purpose: verificationPurpose, error } of results) {
     if (error === undefined) {
       continue;
     }

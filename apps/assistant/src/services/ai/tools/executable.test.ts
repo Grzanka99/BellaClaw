@@ -6,6 +6,7 @@ import { EmbeddingClient } from "../../embedding";
 import { Memory } from "../../memory";
 import { SettingsService, type TConfigUpdate } from "../../settings";
 import { DefaultConfigRecord, EConfigKey, type TConfigRecord } from "../../settings/schema";
+import { decodeAiModelPreferences, getAiModelPreference } from "../model-preferences";
 import { EAiProvider, EModelPurpose } from "../types";
 import {
   createCalendarTools,
@@ -282,6 +283,73 @@ describe("production executable tools", () => {
     expect(JSON.stringify(resetResult?.details)).not.toContain("availableModels");
     expect(verifySettings).toHaveBeenCalledTimes(2);
     expect(settingsMock.setMany).toHaveBeenCalledTimes(2);
+  });
+
+  test("checks distinct model/effort pairs concurrently before saving a provider", async () => {
+    const settingsMock = installSettingsMock(DefaultConfigRecord);
+    const verifySettings = mock(async (_settings: TConfigRecord, _purposes: EModelPurpose[]) => {
+      await Promise.resolve();
+      expect(verifySettings).toHaveBeenCalledTimes(3);
+      expect(settingsMock.setMany).not.toHaveBeenCalled();
+      return undefined;
+    });
+    const tool = createSettingsTools({ ...context, verifySettings }).find(
+      (candidate) => candidate.name === "update-settings",
+    );
+
+    await tool?.execute("call", { aiProvider: EAiProvider.OpenaiCodex });
+
+    expect(verifySettings.mock.calls.map(([, purposes]) => purposes)).toEqual([
+      [EModelPurpose.Utility],
+      [EModelPurpose.Main],
+      [EModelPurpose.Specialist],
+    ]);
+    expect(settingsMock.setMany).toHaveBeenCalledTimes(1);
+  });
+
+  test("retries shared failed preferences separately and clears them sequentially", async () => {
+    const settingsMock = installSettingsMock({
+      ...DefaultConfigRecord,
+      [EConfigKey.AiModelPreferences]: JSON.stringify({
+        [EAiProvider.OpenaiCodex]: {
+          [EModelPurpose.Main]: { model: "gpt-5.6-terra", effort: "high" },
+          [EModelPurpose.Specialist]: { model: "gpt-5.6-terra", effort: "high" },
+        },
+      }),
+    });
+    const retries: EModelPurpose[] = [];
+    const remainingPreferences: string[][] = [];
+    const verifySettings = mock(async (settings: TConfigRecord, purposes: EModelPurpose[]) => {
+      const serialized = settings[EConfigKey.AiModelPreferences];
+      const preferences = decodeAiModelPreferences(serialized);
+      const purpose = purposes[0] as EModelPurpose;
+      await Promise.resolve();
+      expect(settings[EConfigKey.AiModelPreferences]).toBe(serialized);
+      expect(settingsMock.setMany).not.toHaveBeenCalled();
+
+      if (getAiModelPreference(preferences, EAiProvider.OpenaiCodex, purpose) !== undefined) {
+        return "remembered model unavailable";
+      }
+      if (purpose === EModelPurpose.Main || purpose === EModelPurpose.Specialist) {
+        retries.push(purpose);
+        remainingPreferences.push(Object.keys(preferences[EAiProvider.OpenaiCodex] ?? {}));
+      }
+      return undefined;
+    });
+    const tool = createSettingsTools({ ...context, verifySettings }).find(
+      (candidate) => candidate.name === "update-settings",
+    );
+
+    const result = await tool?.execute("call", { aiProvider: EAiProvider.OpenaiCodex });
+
+    expect(verifySettings).toHaveBeenCalledTimes(5);
+    expect(retries).toEqual([EModelPurpose.Main, EModelPurpose.Specialist]);
+    expect(remainingPreferences).toEqual([[EModelPurpose.Specialist], []]);
+    expect(result?.details).toMatchObject({
+      settings: { [EConfigKey.AiModelPreferences]: "{}" },
+      change: { fallbacks: retries.map((purpose) => ({ purpose, reason: expect.any(String) })) },
+    });
+    expect(settingsMock.setMany).toHaveBeenCalledTimes(1);
   });
 
   test("decodes semantic memory arguments and returns facts", async () => {
