@@ -64,7 +64,6 @@ export function sanitizeToolCallArguments(toolCall: TToolCall): TSanitizedLogDet
     return {
       summary: `${toolName} args invalid`,
       metadata: {
-        argumentsValid: false,
         argumentsKind: describeDataKind(args),
       },
     };
@@ -82,24 +81,12 @@ export function sanitizeToolCallArguments(toolCall: TToolCall): TSanitizedLogDet
       const fact = readString(args, "fact");
       const sourceMessage = readString(args, "sourceMessage");
       let supersedesFactCount = 0;
-      let supersedesValid = false;
       if (Array.isArray(args.supersedesFactIds)) {
         supersedesFactCount = args.supersedesFactIds.length;
-        supersedesValid =
-          args.supersedesFactIds.every(
-            (factId) => typeof factId === "number" && Number.isInteger(factId) && factId > 0,
-          ) && new Set(args.supersedesFactIds).size === supersedesFactCount;
       }
       return {
         summary: `remember-memory args factChars=${fact?.length ?? 0} sourceChars=${sourceMessage?.length ?? 0} supersedes=${supersedesFactCount}`,
         metadata: {
-          argumentsValid:
-            Object.keys(args).length === 3 &&
-            fact !== undefined &&
-            fact.trim().length > 0 &&
-            sourceMessage !== undefined &&
-            sourceMessage.trim().length > 0 &&
-            supersedesValid,
           factChars: fact?.length ?? 0,
           sourceMessageChars: sourceMessage?.length ?? 0,
           supersedesFactCount,
@@ -108,20 +95,12 @@ export function sanitizeToolCallArguments(toolCall: TToolCall): TSanitizedLogDet
     }
     case "forget-memory": {
       let factCount = 0;
-      let argumentsValid = false;
       if (Array.isArray(args.factIds)) {
         factCount = args.factIds.length;
-        argumentsValid =
-          Object.keys(args).length === 1 &&
-          factCount > 0 &&
-          args.factIds.every(
-            (factId) => typeof factId === "number" && Number.isInteger(factId) && factId > 0,
-          ) &&
-          new Set(args.factIds).size === factCount;
       }
       return {
         summary: `forget-memory args factCount=${factCount}`,
-        metadata: { argumentsValid, factCount },
+        metadata: { factCount },
       };
     }
     case "web-search": {
@@ -130,11 +109,8 @@ export function sanitizeToolCallArguments(toolCall: TToolCall): TSanitizedLogDet
     case "web-fetch": {
       return sanitizeWebFetchArguments(args);
     }
-    case "define-message-importance": {
-      return sanitizeDefineMessageImportanceArguments(args);
-    }
     case "get-settings": {
-      return { summary: "get-settings args", metadata: { argumentsValid: true } };
+      return { summary: "get-settings args", metadata: {} };
     }
     case "update-settings": {
       return sanitizeUpdateSettingsArguments(args);
@@ -147,7 +123,6 @@ export function sanitizeToolCallArguments(toolCall: TToolCall): TSanitizedLogDet
       return {
         summary: `${toolName} args taskChars=${task?.length ?? 0}`,
         metadata: {
-          argumentsValid: true,
           taskChars: task?.length ?? 0,
           taskPreview: sanitizeContentPreview(task),
         },
@@ -157,7 +132,6 @@ export function sanitizeToolCallArguments(toolCall: TToolCall): TSanitizedLogDet
       return {
         summary: `${toolName} args keys=${Object.keys(args).join(",")}`,
         metadata: {
-          argumentsValid: true,
           argumentKeys: Object.keys(args),
         },
       };
@@ -211,9 +185,6 @@ export function sanitizeToolResult(result: TNormalizedToolResult): TSanitizedLog
     case "web-fetch": {
       return sanitizeWebFetchResult(data);
     }
-    case "define-message-importance": {
-      return sanitizeDefineMessageImportanceResult(data);
-    }
     case "get-settings": {
       return sanitizeSettingsResult("get-settings", data);
     }
@@ -248,9 +219,7 @@ function sanitizeCronToolArguments(
   toolName: string,
   args: Record<string, unknown>,
 ): TSanitizedLogDetails {
-  const metadata: TBehaviorMetadata = {
-    argumentsValid: true,
-  };
+  const metadata: TBehaviorMetadata = {};
   const parts = [`${toolName} args`];
   const name = readString(args, "name");
   const pattern = readString(args, "pattern");
@@ -298,9 +267,7 @@ function sanitizeCronToolArguments(
 function sanitizeSearchMemoryArguments(args: Record<string, unknown>): TSanitizedLogDetails {
   const query = readString(args, "query");
   const limit = readNumber(args, "limit");
-  const metadata: TBehaviorMetadata = {
-    argumentsValid: true,
-  };
+  const metadata: TBehaviorMetadata = {};
 
   addLength(metadata, "queryChars", query);
 
@@ -319,9 +286,7 @@ function sanitizeWebSearchArguments(args: Record<string, unknown>): TSanitizedLo
   const maxResults = readNumber(args, "maxResults");
   const topic = readString(args, "topic");
   const timeRange = readString(args, "timeRange");
-  const metadata: TBehaviorMetadata = {
-    argumentsValid: true,
-  };
+  const metadata: TBehaviorMetadata = {};
 
   addLength(metadata, "queryChars", query);
 
@@ -347,9 +312,7 @@ function sanitizeWebFetchArguments(args: Record<string, unknown>): TSanitizedLog
   const url = readString(args, "url");
   const format = readString(args, "format");
   const timeout = readNumber(args, "timeout");
-  const metadata: TBehaviorMetadata = {
-    argumentsValid: true,
-  };
+  const metadata: TBehaviorMetadata = {};
   const host = extractUrlHost(url);
 
   if (host !== undefined) {
@@ -370,31 +333,9 @@ function sanitizeWebFetchArguments(args: Record<string, unknown>): TSanitizedLog
   };
 }
 
-function sanitizeDefineMessageImportanceArguments(
-  args: Record<string, unknown>,
-): TSanitizedLogDetails {
-  const importance = readString(args, "importance");
-  const reasoning = readString(args, "reasoning");
-  const metadata: TBehaviorMetadata = {
-    argumentsValid: true,
-  };
-
-  if (importance !== undefined) {
-    metadata.importance = importance;
-  }
-
-  addLength(metadata, "reasoningChars", reasoning);
-
-  return {
-    summary: `define-message-importance args importance=${importance ?? "unknown"}`,
-    metadata,
-  };
-}
-
 function sanitizeUpdateSettingsArguments(args: Record<string, unknown>): TSanitizedLogDetails {
   const settingKeys = Object.keys(args);
   const metadata: TBehaviorMetadata = {
-    argumentsValid: true,
     settingKeys,
   };
 
@@ -620,30 +561,6 @@ function sanitizeWebFetchResult(data: unknown): TSanitizedLogDetails {
 
   return {
     summary: `web-fetch completed host=${host ?? "unknown"}`,
-    metadata,
-  };
-}
-
-function sanitizeDefineMessageImportanceResult(data: unknown): TSanitizedLogDetails {
-  const metadata: TBehaviorMetadata = {
-    status: "completed",
-  };
-  let importance = "unknown";
-
-  if (isRecord(data)) {
-    const parsedImportance = readString(data, "importance");
-    const reasoning = readString(data, "reasoning");
-
-    if (parsedImportance !== undefined) {
-      importance = parsedImportance;
-      metadata.importance = parsedImportance;
-    }
-
-    addLength(metadata, "reasoningChars", reasoning);
-  }
-
-  return {
-    summary: `define-message-importance completed importance=${importance}`,
     metadata,
   };
 }

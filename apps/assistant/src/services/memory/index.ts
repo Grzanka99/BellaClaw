@@ -35,21 +35,6 @@ const MAX_SUPERSESSION_COSINE_DISTANCE = 0.5;
 const SUPERSESSION_CANDIDATE_LIMIT = 10;
 const SQueryEmbedding = z.array(z.number()).length(EMBEDDING_DIMENSIONS);
 
-type TMemoryError = {
-  operation: "write" | "read" | "update";
-  error: unknown;
-};
-
-type TMemoryResult =
-  | {
-      success: true;
-      data: TMemory[];
-    }
-  | {
-      success: false;
-      error: TMemoryError;
-    };
-
 export class Memory {
   private static _instance: Memory;
   private db = DatabaseConnector.instance.database;
@@ -67,92 +52,41 @@ export class Memory {
     return Memory._instance;
   }
 
-  public async findRecent(chatId: string, limit: number): Promise<TMemoryResult> {
-    const res = await this.queue.enqueue(async () => {
-      const results = await this.db
+  public async findRecent(chatId: string, limit: number): Promise<TMemory[]> {
+    return this.queue.enqueue(async () => {
+      const rows = await this.db
         .select()
         .from(memoriesTable)
         .where(eq(memoriesTable.chatId, chatId))
         .orderBy(desc(memoriesTable.createdAt))
         .limit(limit);
-
-      const parsed = z.array(SMemory).safeParse(results);
-
+      const parsed = z.array(SMemory).safeParse(rows);
       if (!parsed.success) {
-        this.logger.error("Failed to parse memory from DB");
-        return undefined;
+        throw new Error("Failed to parse memory from DB");
       }
-
       return parsed.data;
     });
-
-    if (!res) {
-      return {
-        success: false,
-        error: {
-          operation: "read",
-          error: "Failed to read memory",
-        },
-      };
-    }
-
-    return {
-      success: true,
-      data: res,
-    };
   }
 
-  public async save(args: TSaveArgs): Promise<Omit<TMemory, "id"> | TMemoryError> {
+  public async save(args: TSaveArgs): Promise<Omit<TMemory, "id">> {
     const now = Date.now();
-
-    try {
-      const res = await this.queue.enqueue(async () =>
-        this.db
-          .insert(memoriesTable)
-          .values({
-            chatId: args.chatId,
-            author: args.author,
-            importance: args.importance,
-            message: args.message,
-            createdAt: now,
-            lastReadAt: now,
-          })
-          .returning()
-          .get(),
-      );
-
-      if (!res) {
-        return {
-          operation: "write",
-          error: "No memory was saved",
-        };
-      }
-
-      const parsed = SMemory.safeParse(res);
-
+    return this.queue.enqueue(async () => {
+      const row = await this.db
+        .insert(memoriesTable)
+        .values({
+          ...args,
+          createdAt: now,
+          lastReadAt: now,
+        })
+        .returning()
+        .get();
+      const parsed = SMemory.safeParse(row);
       if (!parsed.success) {
-        this.logger.error("Failed to parse saved memory result");
-        return {
-          operation: "write",
-          error: parsed.error,
-        };
+        throw new Error("Failed to parse saved memory result");
       }
-
-      return {
-        chatId: parsed.data.chatId,
-        author: parsed.data.author,
-        importance: parsed.data.importance,
-        message: parsed.data.message,
-        createdAt: parsed.data.createdAt,
-        lastReadAt: parsed.data.lastReadAt,
-      };
-    } catch (error) {
-      this.logger.error(`Something went wrong while saving memory: ${String(error)}`);
-      return {
-        operation: "write",
-        error,
-      };
-    }
+      const { id: _id, ...memory } = parsed.data;
+      return memory;
+    });
   }
 
   public async findChatIds(): Promise<string[]> {

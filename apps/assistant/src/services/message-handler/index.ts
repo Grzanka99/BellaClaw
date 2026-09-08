@@ -3,6 +3,11 @@ import type { TOption } from "@bellaclaw/shared";
 import { AsyncQueue, createLogger, logger, type TLogger } from "@bellaclaw/shared";
 import { AgentHarness } from "../ai/agent-harness";
 import { ERole, type THistoryItem } from "../ai/types";
+import {
+  logHandlerCompleted,
+  logHandlerStarted,
+  logMemorySaveCompleted,
+} from "../app-logger/operations";
 import { sanitizeErrorMessage } from "../app-logger/sanitizers";
 import { Memory } from "../memory";
 import { FactDistiller } from "../memory/distill";
@@ -53,16 +58,12 @@ export class MessageHandler {
     logHandlerStarted(trace, "message-handler");
 
     try {
-      const settings = structuredClone(await SettingsService.instance.getAll(message.chatId));
+      const settings = await SettingsService.instance.getAll(message.chatId);
       const last30 = await this.retrieveMemory(message.chatId, trace);
 
-      const userSaved = await this.queue.enqueue(() =>
+      await this.queue.enqueue(() =>
         this.saveMessageToDatabase(message, EMemoryImportance.Medium, trace),
       );
-      if (!userSaved) {
-        this.logger.error("handleMessage: user transcript save failed");
-        throw new Error("Failed to save user transcript");
-      }
 
       const history: THistoryItem[] = [];
 
@@ -106,7 +107,7 @@ export class MessageHandler {
 
       void this.queue
         .enqueue(async () => {
-          const saved = await this.saveMessageToDatabase(
+          await this.saveMessageToDatabase(
             {
               chatId: message.chatId,
               message: {
@@ -120,11 +121,6 @@ export class MessageHandler {
             EMemoryImportance.Medium,
             trace,
           );
-
-          if (!saved) {
-            this.logger.error("handleMessage: assistant transcript save failed");
-            return;
-          }
 
           void this.factQueue
             .enqueue(() => this.drainLiveFactWindows(message.chatId, settings, trace))
@@ -227,44 +223,28 @@ export class MessageHandler {
     message: TIncommingMessage | TOutgoingMessage,
     importance: EMemoryImportance,
     trace: TOption<TBehaviorTraceContext>,
-  ): Promise<boolean> {
+  ): Promise<void> {
     const start = performance.now();
-
-    switch (message.author.type) {
-      case ERole.User: {
-        const result = await this.memory.save({
-          chatId: message.chatId,
-          author: ERole.User,
-          importance,
-          message: message.message.content,
-        });
-        logMemorySaveCompleted(
-          trace,
-          start,
-          ERole.User,
-          importance,
-          message.message.content.length,
-          result,
-        );
-        return !isRecord(result) || !("operation" in result);
-      }
-      case ERole.Assistant: {
-        const result = await this.memory.save({
-          chatId: message.chatId,
-          author: ERole.Assistant,
-          importance,
-          message: message.message.content,
-        });
-        logMemorySaveCompleted(
-          trace,
-          start,
-          ERole.Assistant,
-          importance,
-          message.message.content.length,
-          result,
-        );
-        return !isRecord(result) || !("operation" in result);
-      }
+    let failure: TOption<string>;
+    try {
+      await this.memory.save({
+        chatId: message.chatId,
+        author: message.author.type,
+        importance,
+        message: message.message.content,
+      });
+    } catch (error) {
+      failure = String(error);
+      throw error;
+    } finally {
+      logMemorySaveCompleted(
+        trace,
+        start,
+        message.author.type,
+        importance,
+        message.message.content.length,
+        failure,
+      );
     }
   }
 
@@ -275,71 +255,16 @@ export class MessageHandler {
   ): Promise<TMemory[]> {
     const start = performance.now();
 
-    const res = await this.memory.findRecent(chatId, 30);
-
-    if (!res.success) {
-      this.logger.error(
-        `retrieveMemory: failed to retrieve last 30 memories (${(performance.now() - start).toFixed(0)}ms)`,
-      );
-      logMemoryRecentCompleted(trace, start, false, 0, 30, "Failed to retrieve recent memory");
+    try {
+      const memories = await this.memory.findRecent(chatId, 30);
+      logMemoryRecentCompleted(trace, start, true, memories.length, 30, undefined);
+      return memories;
+    } catch (error) {
+      this.logger.error(`retrieveMemory: failed to retrieve recent memory: ${String(error)}`);
+      logMemoryRecentCompleted(trace, start, false, 0, 30, String(error));
       return [];
     }
-
-    this.logger.info(`retrieveMemory: done (${(performance.now() - start).toFixed(0)}ms)`);
-    logMemoryRecentCompleted(trace, start, true, res.data.length, 30, undefined);
-    return res.data;
   }
-}
-
-function logHandlerStarted(trace: TOption<TBehaviorTraceContext>, handler: string) {
-  if (trace === undefined) {
-    return;
-  }
-
-  AppLogger.instance.record({
-    trace,
-    event: "handler.started",
-    component: handler,
-    summary: `${handler} started`,
-    metadata: {
-      handler,
-    },
-  });
-}
-
-function logHandlerCompleted(
-  trace: TOption<TBehaviorTraceContext>,
-  handler: string,
-  start: number,
-  success: boolean,
-  replyChars: number,
-  summary: string,
-  error: TOption<string>,
-) {
-  if (trace === undefined) {
-    return;
-  }
-
-  let level = EBehaviorLogLevel.Info;
-
-  if (!success) {
-    level = EBehaviorLogLevel.Warning;
-  }
-
-  AppLogger.instance.record({
-    trace,
-    event: "handler.completed",
-    component: handler,
-    level,
-    success,
-    durationMs: performance.now() - start,
-    summary: `${handler} ${summary}`,
-    metadata: {
-      handler,
-      replyChars,
-    },
-    error: sanitizeErrorMessage(error),
-  });
 }
 
 function logMemoryRecentCompleted(
@@ -374,49 +299,6 @@ function logMemoryRecentCompleted(
     },
     error: sanitizeErrorMessage(error),
   });
-}
-
-function logMemorySaveCompleted(
-  trace: TOption<TBehaviorTraceContext>,
-  start: number,
-  author: ERole,
-  importance: EMemoryImportance,
-  messageChars: number,
-  result: unknown,
-) {
-  if (trace === undefined) {
-    return;
-  }
-
-  let success = true;
-  let level = EBehaviorLogLevel.Info;
-  let error: TOption<string>;
-
-  if (isRecord(result) && "operation" in result) {
-    success = false;
-    level = EBehaviorLogLevel.Warning;
-    error = String(result.error);
-  }
-
-  AppLogger.instance.record({
-    trace,
-    event: "memory.save.completed",
-    component: "memory",
-    level,
-    success,
-    durationMs: performance.now() - start,
-    summary: `memory save completed author=${author} importance=${importance}`,
-    metadata: {
-      author,
-      importance,
-      messageChars,
-    },
-    error: sanitizeErrorMessage(error),
-  });
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function createCurrentTimeContext(settings: TConfigRecord) {

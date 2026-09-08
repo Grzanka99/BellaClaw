@@ -1,35 +1,32 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { describe, expect, mock, test } from "bun:test";
 import { fetchTextWithLimit, validatePublicHttpUrl } from "./http";
 
-const originalFetch = globalThis.fetch;
 const encoder = new TextEncoder();
 
 describe("fetchTextWithLimit", () => {
-  afterEach(() => {
-    globalThis.fetch = originalFetch;
-  });
-
   test("times out while reading slow response bodies", async () => {
-    globalThis.fetch = (async () =>
+    const request = async () =>
       new Response(createSlowBody(), {
         headers: { "content-type": "text/plain" },
-      })) as unknown as typeof fetch;
+      });
 
     const startedAt = performance.now();
 
     await expect(
-      fetchTextWithLimit({
-        url: "https://example.com/slow",
-        timeoutMs: 50,
-        maxBytes: 5_000,
-      }),
+      fetchTextWithLimit(
+        {
+          url: "https://example.com/slow",
+          timeoutMs: 50,
+          maxBytes: 5_000,
+        },
+        { lookup: async () => [{ address: "93.184.216.34" }], request },
+      ),
     ).rejects.toThrow("Request timed out");
 
     expect(performance.now() - startedAt).toBeLessThan(300);
   });
 
   test("fails before DNS resolution when the pinned-path caller is already aborted", async () => {
-    globalThis.fetch = originalFetch;
     const controller = new AbortController();
     controller.abort();
     const startedAt = performance.now();
@@ -46,7 +43,6 @@ describe("fetchTextWithLimit", () => {
   });
 
   test("caller cancellation wins while the pinned path is awaiting DNS", async () => {
-    globalThis.fetch = originalFetch;
     const controller = new AbortController();
     const startedAt = performance.now();
     const pending = fetchTextWithLimit({
@@ -63,24 +59,60 @@ describe("fetchTextWithLimit", () => {
 
   test("blocks redirects to non-public IP addresses", async () => {
     let requests = 0;
-    globalThis.fetch = (async () => {
+    const request = async () => {
       requests += 1;
 
       return new Response(null, {
         status: 302,
         headers: { location: "http://127.0.0.1:3000/admin" },
       });
-    }) as unknown as typeof fetch;
+    };
 
     await expect(
-      fetchTextWithLimit({
-        url: "https://example.com/redirect",
-        timeoutMs: 1_000,
-        maxBytes: 5_000,
-        followRedirects: true,
-      }),
+      fetchTextWithLimit(
+        {
+          url: "https://example.com/redirect",
+          timeoutMs: 1_000,
+          maxBytes: 5_000,
+          followRedirects: true,
+        },
+        { lookup: async () => [{ address: "93.184.216.34" }], request },
+      ),
     ).rejects.toThrow("Private or reserved IP addresses are blocked");
     expect(requests).toBe(1);
+  });
+  test("validates every resolved redirect address before making a request", async () => {
+    const lookup = mock(async (hostname: string) => {
+      if (hostname === "private.example") {
+        return [{ address: "127.0.0.1" }];
+      }
+      return [{ address: "93.184.216.34" }];
+    });
+    const request = mock(
+      async (_args: { resolved: { href: string; address: string } }) =>
+        new Response(null, {
+          status: 302,
+          headers: { location: "https://private.example/admin" },
+        }),
+    );
+
+    await expect(
+      fetchTextWithLimit(
+        {
+          url: "https://public.example/start",
+          timeoutMs: 1_000,
+          maxBytes: 5_000,
+          followRedirects: true,
+        },
+        { lookup, request },
+      ),
+    ).rejects.toThrow("Hostname resolves to a private or reserved IP address");
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(request.mock.calls[0]).toEqual([
+      expect.objectContaining({
+        resolved: { href: "https://public.example/start", address: "93.184.216.34" },
+      }),
+    ]);
   });
 });
 

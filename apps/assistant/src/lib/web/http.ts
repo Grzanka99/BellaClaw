@@ -14,7 +14,7 @@ export type TFetchWithLimitResult = {
 
 type TResolvedHttpUrl = {
   href: string;
-  address: TOption<string>;
+  address: string;
 };
 
 type THttpHeaders = Record<string, string>;
@@ -26,7 +26,6 @@ const BROWSER_HEADERS = {
 } satisfies THttpHeaders;
 
 const MAX_REDIRECTS = 5;
-const DEFAULT_FETCH = globalThis.fetch;
 const NON_PUBLIC_IP_ADDRESSES = new BlockList();
 const PUBLIC_IPV6_ADDRESSES = new BlockList();
 
@@ -85,15 +84,18 @@ export function validatePublicHttpUrl(rawUrl: string): string {
   return url.href;
 }
 
-export async function fetchTextWithLimit(args: {
-  url: string;
-  timeoutMs: number;
-  maxBytes: number;
-  headers?: THttpHeaders;
-  signal?: AbortSignal;
-  followRedirects?: boolean;
-  validateResponseHeaders?: (response: Response) => void;
-}): Promise<TFetchWithLimitResult> {
+export async function fetchTextWithLimit(
+  args: {
+    url: string;
+    timeoutMs: number;
+    maxBytes: number;
+    headers?: THttpHeaders;
+    signal?: AbortSignal;
+    followRedirects?: boolean;
+    validateResponseHeaders?: (response: Response) => void;
+  },
+  network = { lookup: lookupWithCancellation, request: fetchResolvedHttpUrl },
+): Promise<TFetchWithLimitResult> {
   args.signal?.throwIfAborted();
   let currentUrl = validatePublicHttpUrl(args.url);
   let redirects = 0;
@@ -104,10 +106,11 @@ export async function fetchTextWithLimit(args: {
       currentUrl,
       getRemainingTimeoutMs(deadline),
       args.signal,
+      network.lookup,
     );
     currentUrl = resolved.href;
 
-    const response = await fetchResolvedHttpUrl({
+    const response = await network.request({
       resolved,
       timeoutMs: getRemainingTimeoutMs(deadline),
       headers: args.headers,
@@ -165,21 +168,15 @@ export async function fetchTextWithLimit(args: {
 async function validateResolvedPublicHttpUrl(
   rawUrl: string,
   timeoutMs: number,
-  signal?: AbortSignal,
+  signal: TOption<AbortSignal>,
+  resolve: typeof lookupWithCancellation,
 ): Promise<TResolvedHttpUrl> {
   signal?.throwIfAborted();
   const href = validatePublicHttpUrl(rawUrl);
 
-  if (globalThis.fetch !== DEFAULT_FETCH) {
-    return {
-      href,
-      address: "",
-    };
-  }
-
   const url = new URL(href);
   const hostname = normalizeHostname(url.hostname);
-  const addresses = await lookupWithCancellation(hostname, timeoutMs, signal);
+  const addresses = await resolve(hostname, timeoutMs, signal);
   const address = addresses[0];
 
   if (address === undefined) {
@@ -236,22 +233,9 @@ async function fetchResolvedHttpUrl(args: {
   headers?: THttpHeaders;
   signal?: AbortSignal;
 }): Promise<Response> {
-  if (globalThis.fetch !== DEFAULT_FETCH) {
-    return await fetch(args.resolved.href, {
-      headers: createBrowserHeaders(args.headers),
-      redirect: "manual",
-      signal: combineAbortSignals(args.signal, AbortSignal.timeout(args.timeoutMs)),
-    });
-  }
-
   return await new Promise<Response>((resolve, reject) => {
     const url = new URL(args.resolved.href);
     const address = args.resolved.address;
-
-    if (address === undefined) {
-      reject(new Error("Resolved request is missing pinned IP address"));
-      return;
-    }
 
     let port: number;
 
@@ -313,14 +297,6 @@ async function fetchResolvedHttpUrl(args: {
     request.on("close", () => args.signal?.removeEventListener("abort", abort));
     request.end();
   });
-}
-
-function combineAbortSignals(signal: AbortSignal | undefined, timeout: AbortSignal): AbortSignal {
-  if (signal === undefined) {
-    return timeout;
-  }
-
-  return AbortSignal.any([signal, timeout]);
 }
 
 function createPinnedRequestHeaders(url: URL, headers: THttpHeaders = {}): THttpHeaders {

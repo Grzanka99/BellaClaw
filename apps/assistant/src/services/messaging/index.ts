@@ -15,6 +15,11 @@ import {
 import type { TCronJobContext } from "../../lib/cron-engine";
 import { AgentHarness } from "../ai/agent-harness";
 import { ERole } from "../ai/types";
+import {
+  logHandlerCompleted,
+  logHandlerStarted,
+  logMemorySaveCompleted,
+} from "../app-logger/operations";
 import { sanitizeErrorMessage } from "../app-logger/sanitizers";
 import {
   AuthorizationService,
@@ -112,32 +117,7 @@ export class MessagingAdapter {
       }
 
       if (authorizationReply !== undefined) {
-        const sendStart = performance.now();
-
-        try {
-          await transport.sendText(message.chatId, authorizationReply);
-          logTransportSendCompleted(
-            trace,
-            sendStart,
-            message.platform,
-            true,
-            authorizationReply.length,
-            undefined,
-          );
-        } catch (error) {
-          this.logger.error(
-            `handleInboundMessage: failed to send authorization reply to ${message.platform} chat ${message.chatId}: ${String(error)}`,
-          );
-          logTransportSendCompleted(
-            trace,
-            sendStart,
-            message.platform,
-            false,
-            authorizationReply.length,
-            String(error),
-          );
-        }
-
+        await this.sendText(transport, message.chatId, authorizationReply, trace);
         return;
       }
 
@@ -146,32 +126,7 @@ export class MessagingAdapter {
       const commandReply = await runCommand(canonicalChatId, message.message.content);
 
       if (commandReply !== undefined) {
-        const commandSendStart = performance.now();
-
-        try {
-          await transport.sendText(message.chatId, commandReply);
-          logTransportSendCompleted(
-            trace,
-            commandSendStart,
-            message.platform,
-            true,
-            commandReply.length,
-            undefined,
-          );
-        } catch (error) {
-          this.logger.error(
-            `handleInboundMessage: failed to send command reply to ${message.platform} chat ${message.chatId}: ${String(error)}`,
-          );
-          logTransportSendCompleted(
-            trace,
-            commandSendStart,
-            message.platform,
-            false,
-            commandReply.length,
-            String(error),
-          );
-        }
-
+        await this.sendText(transport, message.chatId, commandReply, trace);
         return;
       }
 
@@ -194,30 +149,8 @@ export class MessagingAdapter {
         return;
       }
 
-      const sendStart = performance.now();
-
-      try {
-        await transport.sendText(message.chatId, reply);
-        logTransportSendCompleted(
-          trace,
-          sendStart,
-          message.platform,
-          true,
-          reply.length,
-          undefined,
-        );
-      } catch (error) {
-        this.logger.error(
-          `handleInboundMessage: failed to send message to ${message.platform} chat ${message.chatId}: ${String(error)}`,
-        );
-        logTransportSendCompleted(
-          trace,
-          sendStart,
-          message.platform,
-          false,
-          reply.length,
-          String(error),
-        );
+      const sendError = await this.sendText(transport, message.chatId, reply, trace);
+      if (sendError !== undefined) {
         logHandlerCompleted(
           trace,
           "messaging",
@@ -225,7 +158,7 @@ export class MessagingAdapter {
           false,
           reply.length,
           "send failed",
-          String(error),
+          sendError,
         );
         return;
       }
@@ -243,6 +176,33 @@ export class MessagingAdapter {
       logHandlerCompleted(trace, "messaging", handlerStart, false, 0, "failed", String(error));
       throw error;
     }
+  }
+
+  private async sendText(
+    transport: TMessageTransport,
+    chatId: string,
+    text: string,
+    trace: TBehaviorTraceContext,
+  ): Promise<TOption<string>> {
+    const start = performance.now();
+    let failure: TOption<string>;
+    try {
+      await transport.sendText(chatId, text);
+    } catch (error) {
+      failure = String(error);
+      this.logger.error(
+        `sendText: failed to send to ${transport.platform} chat ${chatId}: ${failure}`,
+      );
+    }
+    logTransportSendCompleted(
+      trace,
+      start,
+      transport.platform,
+      failure === undefined,
+      text.length,
+      failure,
+    );
+    return failure;
   }
 
   private ensureCronListener() {
@@ -407,30 +367,8 @@ export class MessagingAdapter {
       return;
     }
 
-    const sendStart = performance.now();
-
-    try {
-      await transport.sendText(parsedScope.chatId, text);
-      logTransportSendCompleted(
-        trace,
-        sendStart,
-        parsedScope.platform,
-        true,
-        text.length,
-        undefined,
-      );
-    } catch (error) {
-      this.logger.error(
-        `handleCronFire: failed to deliver reminder "${ctx.name}" to ${parsedScope.platform} chat ${parsedScope.chatId}: ${String(error)}`,
-      );
-      logTransportSendCompleted(
-        trace,
-        sendStart,
-        parsedScope.platform,
-        false,
-        text.length,
-        String(error),
-      );
+    const sendError = await this.sendText(transport, parsedScope.chatId, text, trace);
+    if (sendError !== undefined) {
       logHandlerCompleted(
         trace,
         "cron-fire",
@@ -438,7 +376,7 @@ export class MessagingAdapter {
         false,
         text.length,
         "send failed",
-        String(error),
+        sendError,
       );
       return;
     }
@@ -446,7 +384,7 @@ export class MessagingAdapter {
     const saveStart = performance.now();
 
     try {
-      const saveResult = await Memory.instance.save({
+      await Memory.instance.save({
         chatId: canonicalChatId,
         author: ERole.Assistant,
         importance: EMemoryImportance.Low,
@@ -458,14 +396,8 @@ export class MessagingAdapter {
         ERole.Assistant,
         EMemoryImportance.Low,
         text.length,
-        saveResult,
+        undefined,
       );
-
-      if ("operation" in saveResult) {
-        this.logger.error(
-          `handleCronFire: failed to save reminder "${ctx.name}" to memory for chat ${canonicalChatId}: ${String(saveResult.error)}`,
-        );
-      }
     } catch (error) {
       this.logger.error(
         `handleCronFire: failed to save reminder "${ctx.name}" to memory for chat ${canonicalChatId}: ${String(error)}`,
@@ -476,7 +408,7 @@ export class MessagingAdapter {
         ERole.Assistant,
         EMemoryImportance.Low,
         text.length,
-        { operation: "write", error: String(error) },
+        String(error),
       );
     }
 
@@ -534,49 +466,6 @@ function logMessageReceived(trace: TBehaviorTraceContext, message: TPlatformMess
   });
 }
 
-function logHandlerStarted(trace: TBehaviorTraceContext, handler: string) {
-  AppLogger.instance.record({
-    trace,
-    event: "handler.started",
-    component: handler,
-    summary: `${handler} started`,
-    metadata: {
-      handler,
-    },
-  });
-}
-
-function logHandlerCompleted(
-  trace: TBehaviorTraceContext,
-  handler: string,
-  start: number,
-  success: boolean,
-  replyChars: number,
-  summary: string,
-  error: TOption<string>,
-) {
-  let level = EBehaviorLogLevel.Info;
-
-  if (!success) {
-    level = EBehaviorLogLevel.Warning;
-  }
-
-  AppLogger.instance.record({
-    trace,
-    event: "handler.completed",
-    component: handler,
-    level,
-    success,
-    durationMs: performance.now() - start,
-    summary: `${handler} ${summary}`,
-    metadata: {
-      handler,
-      replyChars,
-    },
-    error: sanitizeErrorMessage(error),
-  });
-}
-
 function logCronTaskCompleted(trace: TBehaviorTraceContext, result: TScheduledTaskResult) {
   AppLogger.instance.record({
     trace,
@@ -623,43 +512,4 @@ function logTransportSendCompleted(
     },
     error: sanitizeErrorMessage(error),
   });
-}
-
-function logMemorySaveCompleted(
-  trace: TBehaviorTraceContext,
-  start: number,
-  author: ERole,
-  importance: EMemoryImportance,
-  messageChars: number,
-  result: unknown,
-) {
-  let success = true;
-  let level = EBehaviorLogLevel.Info;
-  let error: TOption<string>;
-
-  if (isRecord(result) && "operation" in result) {
-    success = false;
-    level = EBehaviorLogLevel.Warning;
-    error = String(result.error);
-  }
-
-  AppLogger.instance.record({
-    trace,
-    event: "memory.save.completed",
-    component: "memory",
-    level,
-    success,
-    durationMs: performance.now() - start,
-    summary: `memory save completed author=${author} importance=${importance}`,
-    metadata: {
-      author,
-      importance,
-      messageChars,
-    },
-    error: sanitizeErrorMessage(error),
-  });
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

@@ -13,7 +13,6 @@ describe("search-memory log sanitizers", () => {
     expect(result).toEqual({
       summary: `search-memory args queryChars=${query.length}`,
       metadata: {
-        argumentsValid: true,
         queryChars: query.length,
         limit: 4,
       },

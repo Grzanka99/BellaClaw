@@ -83,9 +83,6 @@ describe("Memory", () => {
         message: "Timestamp test",
       });
 
-      if ("operation" in result) {
-        throw new Error("Expected successful save");
-      }
       expect(result.createdAt.getTime()).toBe(result.lastReadAt.getTime());
     });
   });
@@ -105,22 +102,16 @@ describe("Memory", () => {
 
       const result = await memory.findRecent("chat-recent", 3);
 
-      expect(result.success).toBe(true);
-      // @ts-expect-error
-      expect(result.data.length).toBe(3);
-      // @ts-expect-error
-      expect(result.data[0].message).toBe("Memory 4");
-      // @ts-expect-error
-      expect(result.data[2].message).toBe("Memory 2");
+      expect(result.length).toBe(3);
+      expect(result[0]?.message).toBe("Memory 4");
+      expect(result[2]?.message).toBe("Memory 2");
     });
 
     test("returns empty result when no memories exist", async () => {
       const memory = Memory.instance;
       const result = await memory.findRecent("nonexistent", 10);
 
-      expect(result.success).toBe(true);
-      // @ts-expect-error
-      expect(result.data).toEqual([]);
+      expect(result).toEqual([]);
     });
   });
 

@@ -1,5 +1,7 @@
 import { type Static, Type } from "@earendil-works/pi-ai";
 import type { TCronJob } from "../../../../lib/cron-engine";
+import { ECronJobType } from "../../../../lib/cron-engine";
+import { CronSingleton } from "../../../cron";
 import {
   countCronContentModes,
   normalizeCronContentFields,
@@ -65,4 +67,99 @@ export function validateUpdateCronJobArgs(
     ...rest,
     fireAt: new Date(fireAt),
   };
+}
+
+export async function handleUpdateCronJob(chatId: string, parsedArgs: TUpdateCronJobArgs) {
+  const validatedArgs = validateUpdateCronJobArgs(parsedArgs);
+  const existing = await CronSingleton.instance.get(validatedArgs.name, chatId);
+
+  if (existing === undefined) {
+    throw new Error(`No job found with name: ${validatedArgs.name}`);
+  }
+
+  let reminderText = existing.reminderText;
+  let reminderPromptData = existing.reminderPromptData;
+  let reminderFallbackText = existing.reminderFallbackText;
+  let taskPrompt = existing.taskPrompt;
+  let taskFallbackText = existing.taskFallbackText;
+
+  if (validatedArgs.reminderText !== undefined) {
+    reminderText = validatedArgs.reminderText;
+    reminderPromptData = undefined;
+    reminderFallbackText = validatedArgs.reminderFallbackText ?? existing.reminderFallbackText;
+    taskPrompt = undefined;
+    taskFallbackText = undefined;
+  } else if (validatedArgs.reminderPromptData !== undefined) {
+    reminderText = undefined;
+    reminderPromptData = validatedArgs.reminderPromptData;
+    reminderFallbackText = validatedArgs.reminderFallbackText ?? existing.reminderFallbackText;
+    taskPrompt = undefined;
+    taskFallbackText = undefined;
+  } else if (validatedArgs.taskPrompt !== undefined) {
+    reminderText = undefined;
+    reminderPromptData = undefined;
+    reminderFallbackText = undefined;
+    taskPrompt = validatedArgs.taskPrompt;
+    taskFallbackText = validatedArgs.taskFallbackText ?? existing.taskFallbackText;
+  }
+
+  if (existing.type === ECronJobType.Recurring) {
+    if (validatedArgs.fireAt !== undefined) {
+      throw new Error(
+        "fireAt can only update one-time reminders; use pattern for recurring reminders",
+      );
+    }
+
+    const pattern = validatedArgs.pattern ?? existing.pattern;
+
+    if (pattern === undefined) {
+      throw new Error("Existing recurring reminder has no pattern");
+    }
+
+    const result = await CronSingleton.instance.createRecurring({
+      name: existing.name,
+      scope: chatId,
+      group: validatedArgs.group ?? existing.group,
+      pattern,
+      reminderText,
+      reminderPromptData,
+      reminderFallbackText,
+      taskPrompt,
+      taskFallbackText,
+      overwrite: true,
+      timezone: existing.timezone,
+    });
+
+    if ("error" in result) {
+      throw new Error(`${result.operation} failed: ${String(result.error)}`);
+    }
+
+    return result;
+  }
+
+  if (validatedArgs.pattern !== undefined) {
+    throw new Error(
+      "pattern can only update recurring reminders; use fireAt for one-time reminders",
+    );
+  }
+
+  const result = await CronSingleton.instance.createOnce({
+    name: existing.name,
+    scope: chatId,
+    group: validatedArgs.group ?? existing.group,
+    fireAt: validatedArgs.fireAt ?? existing.nextRunAt,
+    reminderText,
+    reminderPromptData,
+    reminderFallbackText,
+    taskPrompt,
+    taskFallbackText,
+    overwrite: true,
+    timezone: existing.timezone,
+  });
+
+  if ("error" in result) {
+    throw new Error(`${result.operation} failed: ${String(result.error)}`);
+  }
+
+  return result;
 }

@@ -1,13 +1,13 @@
 import type { TOption } from "@bellaclaw/shared";
-import { Config } from "../../config";
 import { CronScheduler } from "../../lib/cron-engine";
+import { DefaultConfigRecord, EConfigKey } from "../settings/schema";
 
 export class CronSingleton extends CronScheduler {
   private static _instance: TOption<CronSingleton>;
 
   private constructor() {
     super({
-      timezone: Config.ai.instructions.timezone,
+      timezone: DefaultConfigRecord[EConfigKey.AiInstructionsTimezone],
     });
   }
 
