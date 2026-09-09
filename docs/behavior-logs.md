@@ -63,6 +63,24 @@ In the container:
 podman compose exec bellaclaw bun run logs:turn -- <turnId>
 ```
 
+## Prompt Cache Measurements
+
+Filter the viewer by `model.request.completed`, or inspect these events with `logs:turn`.
+Select an event to see the **Prompt cache** panel with the hit percentage and token counts.
+Each event covers one model response, including specialist and direct utility calls. Agent
+request duration ends before tool execution; `iteration` counts requests within that agent run.
+
+Metadata contains Pi's normalized `input` (uncached), `output`, `cacheRead`, and `cacheWrite`
+token counts. `inputTokens` is `input + cacheRead + cacheWrite`; `cacheHitPercent` is
+`100 * cacheRead / inputTokens`, or `null` when no input tokens were reported. A zero count
+does not prove the provider supports usage reporting. Failed/aborted responses are marked
+unsuccessful; exceptions without a response retain the existing failure event without invented
+usage counts.
+
+Compare the same provider/model and similar conversations before and after changes. For a group
+of requests, divide summed `cacheRead` by summed `inputTokens`; do not average percentages.
+These events contain counts and routing context, not prompts or credentials.
+
 ## Database Path
 
 Defaults:

@@ -1,8 +1,9 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { AppLogger, type TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
 import type { TOption } from "@bellaclaw/shared";
 import {
   type Context,
+  createAssistantMessageEventStream,
   fauxAssistantMessage,
   fauxProvider,
   fauxToolCall,
@@ -707,6 +708,130 @@ describe("AgentHarness", () => {
       "specialist returned no final response",
     );
     harness.run = originalRun;
+  });
+
+  test("records each model response once with cache usage, hierarchy, and unknown zero usage", async () => {
+    const appLogger = new AppLogger({ dbPath: ":memory:", stdout: () => undefined });
+    (AppLogger as unknown as { _instance: AppLogger })._instance = appLogger;
+    const responses = [
+      fauxAssistantMessage(
+        fauxToolCall("delegate-memory", { task: "Recall alpha" }, { id: "usage-delegate" }),
+      ),
+      fauxAssistantMessage("Alpha uses TypeBox"),
+      fauxAssistantMessage("Final answer"),
+    ];
+    const stream = spyOn(aiModels, "streamSimple").mockImplementation((model) => {
+      const message = responses.shift();
+      if (message === undefined) {
+        throw new Error("Unexpected model request");
+      }
+      message.provider = model.provider;
+      message.model = model.id;
+      message.api = model.api;
+      message.usage = {
+        input: 100,
+        output: 20,
+        cacheRead: 800,
+        cacheWrite: 100,
+        totalTokens: 1020,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      };
+      const result = createAssistantMessageEventStream();
+      if (message.stopReason === "toolUse") {
+        result.push({ type: "done", reason: "toolUse", message });
+      } else {
+        result.push({ type: "done", reason: "stop", message });
+      }
+      return result;
+    });
+    const complete = spyOn(aiModels, "completeSimple").mockImplementation(async (model) => ({
+      ...fauxAssistantMessage([], { stopReason: "aborted" }),
+      provider: model.provider,
+      model: model.id,
+      api: model.api,
+    }));
+    const trace = {
+      turnId: "turn-cache-usage",
+      chatId: "discord:1",
+      platform: EMessagePlatform.Discord,
+    };
+    const settings = {
+      ...DefaultConfigRecord,
+      [EConfigKey.AiProvider]: EAiProvider.Openrouter,
+    };
+
+    try {
+      await AgentHarness.instance.runMain({
+        prompt: "Recall alpha",
+        history: [{ role: ERole.Assistant, content: "Old response must not be counted" }],
+        chatId: "discord:1",
+        settings,
+        currentTimeContext: undefined,
+        platform: EMessagePlatform.Discord,
+        trace,
+        signal: undefined,
+      });
+      await AgentHarness.instance.completeText({
+        prompt: "Abort",
+        instructions: "Reply directly",
+        settings,
+        purpose: EModelPurpose.Utility,
+        trace,
+      });
+      await appLogger.flush();
+      const events = (await appLogger.findByTurnId(trace.turnId)).filter(
+        (event) => event.event === "model.request.completed",
+      );
+      expect(events).toHaveLength(4);
+      expect(events.slice(0, 3).map((event) => event.metadata)).toEqual([
+        expect.objectContaining({
+          agentName: EAgentName.Main,
+          iteration: 1,
+          parentToolCallId: null,
+        }),
+        expect.objectContaining({
+          agentName: EAgentName.Memory,
+          iteration: 1,
+          parentToolCallId: "usage-delegate",
+        }),
+        expect.objectContaining({
+          agentName: EAgentName.Main,
+          iteration: 2,
+          parentToolCallId: null,
+        }),
+      ]);
+      for (const event of events.slice(0, 3)) {
+        expect(event).toMatchObject({
+          success: true,
+          provider: EAiProvider.Openrouter,
+          durationMs: expect.any(Number),
+          metadata: {
+            input: 100,
+            output: 20,
+            cacheRead: 800,
+            cacheWrite: 100,
+            inputTokens: 1000,
+            cacheHitPercent: 80,
+          },
+        });
+      }
+      expect(events[3]).toMatchObject({
+        success: false,
+        purpose: EModelPurpose.Utility,
+        metadata: {
+          agentName: null,
+          iteration: 1,
+          stopReason: "aborted",
+          inputTokens: 0,
+          cacheHitPercent: null,
+        },
+      });
+    } finally {
+      stream.mockRestore();
+      complete.mockRestore();
+      await appLogger.close();
+      (AppLogger as unknown as { _instance: undefined })._instance = undefined;
+    }
   });
 
   test("persists agent hierarchy, tool details, and lifecycle durations", async () => {
