@@ -12,6 +12,7 @@ import {
 import type { TOption } from "@bellaclaw/shared";
 import type { PropsWithChildren } from "hono/jsx";
 import { buildLogUrl } from "./query";
+import { SModelRequestUsage } from "./types";
 
 const SLOW_EVENT_THRESHOLD_MS = 5_000;
 
@@ -744,6 +745,7 @@ function EventInspectorContent(props: {
         </div>
         <InspectorValue label="Level" value={event.level} />
       </InspectorSection>
+      {event.event === "model.request.completed" && <ModelRequestUsage event={event} />}
       <InspectorSection title="Context">
         <InspectorValue label="Turn ID" value={event.turnId} mono />
         {event.chatId !== null && <InspectorValue label="Chat ID" value={event.chatId} mono />}
@@ -776,6 +778,41 @@ function EventInspectorContent(props: {
         </a>
       </div>
     </div>
+  );
+}
+
+function ModelRequestUsage(props: { event: TPersistedBehaviorLogEvent }) {
+  const parsed = SModelRequestUsage.safeParse(props.event.metadata);
+  if (!parsed.success) {
+    return (
+      <InspectorSection title="Prompt cache">
+        <p class="inspector-muted">Usage not reported.</p>
+      </InspectorSection>
+    );
+  }
+
+  const usage = parsed.data;
+  let percentage = "Not reported";
+  if (usage.cacheHitPercent !== null) {
+    percentage = `${usage.cacheHitPercent.toFixed(1)}%`;
+  }
+
+  return (
+    <InspectorSection title="Prompt cache">
+      <InspectorValue label="Cache hit" value={percentage} />
+      <InspectorValue
+        label="Input tokens (total)"
+        value={usage.inputTokens.toLocaleString("en-US")}
+      />
+      <InspectorValue label="Cached tokens read" value={usage.cacheRead.toLocaleString("en-US")} />
+      <InspectorValue
+        label="Cache tokens written"
+        value={usage.cacheWrite.toLocaleString("en-US")}
+      />
+      <InspectorValue label="Uncached input tokens" value={usage.input.toLocaleString("en-US")} />
+      <InspectorValue label="Output tokens" value={usage.output.toLocaleString("en-US")} />
+      <p class="inspector-muted">Cache hit is the share of input tokens reused on this request.</p>
+    </InspectorSection>
   );
 }
 

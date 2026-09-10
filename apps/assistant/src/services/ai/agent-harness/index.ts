@@ -4,6 +4,7 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { Agent } from "@earendil-works/pi-agent-core";
 import {
   type Api,
+  type AssistantMessage,
   type Context,
   contentText,
   createAssistantMessageEventStream,
@@ -49,22 +50,23 @@ const AGENT_INSTRUCTIONS: Record<EAgentName, string> = {
   [EAgentName.ScheduledTask]: "./src/services/ai/agents/scheduled-task/instructions.xml",
 };
 
-function withOpenCodeSession(
+function withSession(
   options: SimpleStreamOptions,
   provider: string,
   sessionId: string,
 ): SimpleStreamOptions {
-  if (provider !== EAiProvider.OpencodeGo) {
-    return options;
+  const headers = { ...options.headers };
+  if (provider === EAiProvider.OpencodeGo) {
+    headers["x-opencode-session"] = sessionId;
+  }
+  if (provider === EAiProvider.Openrouter) {
+    headers["x-session-id"] = sessionId;
   }
 
   return {
     ...options,
     sessionId,
-    headers: {
-      ...options.headers,
-      "x-opencode-session": sessionId,
-    },
+    headers,
   };
 }
 
@@ -123,7 +125,11 @@ export class AgentHarness {
   }): Promise<TOption<string>> {
     const startedAt = performance.now();
     const modelConfig = this.resolveModel(args.settings, args.purpose);
-    const sessionId = crypto.randomUUID();
+    const sessionId = this.createSessionId(
+      modelConfig.model.provider,
+      args.trace?.chatId,
+      args.trace?.platform,
+    );
     this.logDirectCompletionStarted(
       args.trace,
       modelConfig.model.provider,
@@ -143,7 +149,7 @@ export class AgentHarness {
         messages: [{ role: "user", content: args.prompt, timestamp: Date.now() }],
         tools: [],
       };
-      const options = withOpenCodeSession(
+      const options = withSession(
         {
           apiKey: this.resolveApiKey(modelConfig.model.provider),
           signal: args.signal,
@@ -177,6 +183,16 @@ export class AgentHarness {
       );
       throw error;
     }
+
+    this.logModelRequestCompleted({
+      trace: args.trace,
+      purpose: args.purpose,
+      agentName: undefined,
+      parentToolCallId: undefined,
+      iteration: 1,
+      startedAt,
+      message: result,
+    });
 
     let text: TOption<string>;
     let stopReason: string = result.stopReason;
@@ -239,21 +255,8 @@ export class AgentHarness {
     let forceFinalization = false;
     let forcedFinalAttempt = false;
     const startedAt = performance.now();
-    let sessionId: string = crypto.randomUUID();
-
-    if (
-      modelConfig.model.provider === EAiProvider.OpencodeGo &&
-      args.chatId !== undefined &&
-      args.platform !== undefined
-    ) {
-      const apiKey = this.resolveApiKey(modelConfig.model.provider);
-
-      if (apiKey !== undefined) {
-        sessionId = new Bun.CryptoHasher("sha256", apiKey)
-          .update(`${args.platform}:${args.chatId}`)
-          .digest("hex");
-      }
-    }
+    let requestStartedAt: TOption<number>;
+    const sessionId = this.createSessionId(modelConfig.model.provider, args.chatId, args.platform);
 
     const toolStartedAt = new Map<string, number>();
 
@@ -277,7 +280,8 @@ export class AgentHarness {
         }
 
         iterations += 1;
-        const requestOptions = withOpenCodeSession(options ?? {}, model.provider, sessionId);
+        requestStartedAt = performance.now();
+        const requestOptions = withSession(options ?? {}, model.provider, sessionId);
 
         if (modelConfig.effort === "off" && hasApi(model, "openai-codex-responses")) {
           return aiModels.stream(model, context, {
@@ -323,6 +327,23 @@ export class AgentHarness {
     });
 
     agent.subscribe((event) => {
+      if (
+        event.type === "message_end" &&
+        event.message.role === "assistant" &&
+        requestStartedAt !== undefined
+      ) {
+        this.logModelRequestCompleted({
+          trace: args.trace,
+          purpose: args.purpose,
+          agentName: args.name,
+          parentToolCallId: args.parentToolCallId,
+          iteration: iterations,
+          startedAt: requestStartedAt,
+          message: event.message,
+        });
+        requestStartedAt = undefined;
+      }
+
       if (event.type === "turn_end") {
         const message = event.message;
 
@@ -377,7 +398,11 @@ export class AgentHarness {
       if (args.signal?.aborted) {
         stopReason = "aborted";
       } else {
-        await agent.prompt(args.prompt);
+        let prompt = args.prompt;
+        if (args.currentTimeContext !== undefined) {
+          prompt = `${args.currentTimeContext}\n\n${prompt}`;
+        }
+        await agent.prompt(prompt);
 
         const firstTerminalAssistant = agent.state.messages.toReversed().find((message) => {
           return message.role === "assistant";
@@ -487,6 +512,20 @@ export class AgentHarness {
     }
   }
 
+  private createSessionId(
+    provider: string,
+    chatId: TOption<string>,
+    platform: TOption<string>,
+  ): string {
+    if (chatId === undefined) {
+      return crypto.randomUUID();
+    }
+
+    return new Bun.CryptoHasher("sha256", this.resolveApiKey(provider))
+      .update(`${platform ?? "unknown"}:${chatId}`)
+      .digest("hex");
+  }
+
   private createHistory(
     history: TOption<THistoryItem[]>,
     api: Api,
@@ -548,10 +587,6 @@ export class AgentHarness {
       ...toolPaths.map((path) => readXmlAndInjectConfig(path, args.settings)),
     ]);
     const parts = [base, agentInstructions, ...toolInstructions];
-
-    if (args.currentTimeContext !== undefined) {
-      parts.push(args.currentTimeContext);
-    }
 
     const platformInstructions = createPlatformInstructions(args.platform);
 
@@ -860,6 +895,58 @@ export class AgentHarness {
         stopReason: "error",
       },
       error: sanitizeErrorMessage(error),
+    });
+  }
+
+  private logModelRequestCompleted(args: {
+    trace: TOption<TBehaviorTraceContext>;
+    purpose: EModelPurpose;
+    agentName: TOption<EAgentName>;
+    parentToolCallId: TOption<string>;
+    iteration: number;
+    startedAt: number;
+    message: AssistantMessage;
+  }) {
+    if (args.trace === undefined) {
+      return;
+    }
+
+    const { usage, stopReason } = args.message;
+    const inputTokens = usage.input + usage.cacheRead + usage.cacheWrite;
+    let cacheHitPercent: number | null = null;
+    if (inputTokens > 0) {
+      cacheHitPercent = (usage.cacheRead / inputTokens) * 100;
+    }
+
+    const success = stopReason !== "error" && stopReason !== "aborted";
+    let level = EBehaviorLogLevel.Info;
+    if (!success) {
+      level = EBehaviorLogLevel.Warning;
+    }
+
+    AppLogger.instance.record({
+      trace: args.trace,
+      event: "model.request.completed",
+      component: "agent-harness",
+      provider: args.message.provider,
+      model: args.message.model,
+      purpose: args.purpose,
+      level,
+      success,
+      durationMs: performance.now() - args.startedAt,
+      summary: `model request completed cacheRead=${usage.cacheRead} inputTokens=${inputTokens}`,
+      metadata: {
+        agentName: args.agentName ?? null,
+        parentToolCallId: args.parentToolCallId ?? null,
+        iteration: args.iteration,
+        stopReason,
+        input: usage.input,
+        output: usage.output,
+        cacheRead: usage.cacheRead,
+        cacheWrite: usage.cacheWrite,
+        inputTokens,
+        cacheHitPercent,
+      },
     });
   }
 

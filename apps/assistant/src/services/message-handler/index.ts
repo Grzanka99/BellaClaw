@@ -61,16 +61,20 @@ export class MessageHandler {
       const settings = await SettingsService.instance.getAll(message.chatId);
       const last30 = await this.retrieveMemory(message.chatId, trace);
 
-      await this.queue.enqueue(() =>
+      const savedMessage = await this.queue.enqueue(() =>
         this.saveMessageToDatabase(message, EMemoryImportance.Medium, trace),
       );
 
       const history: THistoryItem[] = [];
 
       for (const el of last30.toReversed()) {
+        let content = el.message;
+        if (el.author === ERole.User) {
+          content = `${createCurrentTimeContext(settings, el.createdAt)}\n\n${content}`;
+        }
         history.push({
           role: el.author,
-          content: el.message,
+          content,
         });
       }
 
@@ -78,7 +82,7 @@ export class MessageHandler {
       const aiRes = await this.ai.runMain({
         prompt: message.message.content,
         history,
-        currentTimeContext: createCurrentTimeContext(settings),
+        currentTimeContext: createCurrentTimeContext(settings, savedMessage.createdAt),
         chatId: message.chatId,
         settings,
         platform,
@@ -223,11 +227,11 @@ export class MessageHandler {
     message: TIncommingMessage | TOutgoingMessage,
     importance: EMemoryImportance,
     trace: TOption<TBehaviorTraceContext>,
-  ): Promise<void> {
+  ): Promise<Omit<TMemory, "id">> {
     const start = performance.now();
     let failure: TOption<string>;
     try {
-      await this.memory.save({
+      return await this.memory.save({
         chatId: message.chatId,
         author: message.author.type,
         importance,
@@ -248,7 +252,6 @@ export class MessageHandler {
     }
   }
 
-  // NOTE: Retrieve memory based on tool call response, always retrieve last 30 messages
   private async retrieveMemory(
     chatId: string,
     trace: TOption<TBehaviorTraceContext>,
@@ -301,12 +304,11 @@ function logMemoryRecentCompleted(
   });
 }
 
-function createCurrentTimeContext(settings: TConfigRecord) {
-  const now = new Date();
+function createCurrentTimeContext(settings: TConfigRecord, now: Date) {
   const timezone = settings[EConfigKey.AiInstructionsTimezone];
 
   return [
-    "Current time context:",
+    "Message received at:",
     `UTC: ${now.toISOString()}`,
     `Timezone: ${timezone}`,
     `Local: ${now.toLocaleString("sv-SE-u-nu-latn", {

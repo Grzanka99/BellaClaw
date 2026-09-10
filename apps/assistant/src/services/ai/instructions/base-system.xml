@@ -10,6 +10,10 @@
   </language>
 
   <datetime>
+    Each user message's "Message received at" context gives that message's original time.
+    Resolve relative dates against the timestamp of the message that contains them.
+    Use the latest message timestamp as the current turn's time, or the scheduled firing context
+    when running a scheduled task.
     Always use the {{config.ai.instructions.timezone}} timezone for all time references.
     When displaying times, use the {{config.ai.instructions.timeFormat}}.
     Never assume a different timezone unless the user explicitly provides one.
