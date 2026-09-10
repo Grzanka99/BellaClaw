@@ -78,7 +78,7 @@ unsuccessful; exceptions without a response retain the existing failure event wi
 usage counts.
 
 Compare the same provider/model and similar conversations before and after changes. For a group
-of requests, divide summed `cacheRead` by summed `inputTokens`; do not average percentages.
+of requests, calculate `100 * summed cacheRead / summed inputTokens`; do not average percentages.
 These events contain counts and routing context, not prompts or credentials.
 
 ## Database Path
