@@ -1,8 +1,17 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
 import type { TLogger } from "@bellaclaw/shared";
-import { ERole } from "../ai/types";
+import {
+  type Context,
+  fauxAssistantMessage,
+  fauxProvider,
+  type Model,
+} from "@earendil-works/pi-ai";
+import { convertResponsesMessages } from "@earendil-works/pi-ai/api/openai-responses-shared";
+import { AgentHarness } from "../ai/agent-harness";
+import { aiModels } from "../ai/providers/registry";
+import { EAiProvider, ERole } from "../ai/types";
 import { Memory } from "../memory";
-import { EMemoryImportance } from "../memory/types";
+import { EMemoryImportance, type TMemory } from "../memory/types";
 import { EMessagePlatform } from "../messaging/types";
 import { SettingsService } from "../settings";
 import { DefaultConfigRecord, EConfigKey } from "../settings/schema";
@@ -10,7 +19,6 @@ import { MessageHandler } from ".";
 
 type THandlerInternals = {
   ai: {
-    completeText: ReturnType<typeof mock>;
     runMain: ReturnType<typeof mock>;
   };
   memory: {
@@ -76,7 +84,7 @@ function setupHandler(chatId: string, response = "Final answer") {
   const internals = handler as unknown as THandlerInternals;
   internals.memory = {
     findRecent: mock(async () => []),
-    save: mock(async (args) => args),
+    save: mock(async (args) => ({ ...args, createdAt: new Date(), lastReadAt: new Date() })),
     loadLiveFactWindow: mock(async () => emptyWindow(chatId)),
     commitLiveFactWindow: mock(async () => ({ committed: true, facts: [] })),
   };
@@ -84,7 +92,6 @@ function setupHandler(chatId: string, response = "Final answer") {
     processWindow: mock(async () => ({ success: true })),
   };
   internals.ai = {
-    completeText: mock(async () => EMemoryImportance.Low),
     runMain: mock(async () => ({
       text: response,
       iterations: 1,
@@ -115,6 +122,114 @@ async function waitForCall(mockFunction: ReturnType<typeof mock>, count: number)
 afterEach(reset);
 
 describe("MessageHandler", () => {
+  test("reuses the previous request prefix with persisted message times across days", async () => {
+    const { handler, internals, settings } = setupHandler("discord:cache-prefix");
+    settings[EConfigKey.AiProvider] = EAiProvider.Openrouter;
+    settings[EConfigKey.AiInstructionsTimezone] = "Europe/Warsaw";
+    const previousApiKey = Bun.env.OPENROUTER_API_KEY;
+    const previousProvider = aiModels.getProvider(EAiProvider.Openrouter);
+    Bun.env.OPENROUTER_API_KEY = "cache-test-key";
+    const faux = fauxProvider({
+      provider: EAiProvider.Openrouter,
+      models: [{ id: "google/gemini-3.1-pro-preview", reasoning: true }],
+    });
+    const requests: Array<{ context: Context; model: Model<string> }> = [];
+    faux.setResponses([
+      (context, _options, _state, model) => {
+        requests.push({
+          context: {
+            ...context,
+            messages: structuredClone(context.messages),
+            tools: context.tools?.map(({ name, description, parameters }) => ({
+              name,
+              description,
+              parameters,
+            })),
+          },
+          model,
+        });
+        return fauxAssistantMessage("First reply");
+      },
+      (context, _options, _state, model) => {
+        requests.push({
+          context: {
+            ...context,
+            messages: structuredClone(context.messages),
+            tools: context.tools?.map(({ name, description, parameters }) => ({
+              name,
+              description,
+              parameters,
+            })),
+          },
+          model,
+        });
+        return fauxAssistantMessage("Second reply");
+      },
+    ]);
+    aiModels.setProvider(faux.provider);
+    const saved: TMemory[] = [];
+    let savedAt = new Date("2026-09-10T10:00:00.123Z");
+    internals.memory.save = mock(async (args) => {
+      const message = {
+        ...args,
+        id: saved.length + 1,
+        createdAt: savedAt,
+        lastReadAt: savedAt,
+      };
+      saved.push(message);
+      return message;
+    });
+    internals.memory.findRecent = mock(async () => saved.toReversed().slice(0, 30));
+    internals.ai.runMain = mock((args) => AgentHarness.instance.runMain(args));
+
+    try {
+      await handler.handleMessage(
+        {
+          chatId: "discord:cache-prefix",
+          message: { type: "text", content: "What day is tomorrow?" },
+          author: { type: ERole.User, id: "1", username: "Owner" },
+        },
+        EMessagePlatform.Discord,
+      );
+      await flushAsyncWork();
+      savedAt = new Date("2026-09-11T11:00:00.456Z");
+      await handler.handleMessage(
+        {
+          chatId: "discord:cache-prefix",
+          message: { type: "text", content: "And today?" },
+          author: { type: ERole.User, id: "1", username: "Owner" },
+        },
+        EMessagePlatform.Discord,
+      );
+      await flushAsyncWork();
+
+      expect(requests).toHaveLength(2);
+      const [first, second] = requests;
+      if (first === undefined || second === undefined) {
+        throw new Error("Expected two captured requests");
+      }
+      expect(second.context.systemPrompt).toBe(first.context.systemPrompt);
+      expect(second.context.tools).toEqual(first.context.tools);
+      const firstInput = convertResponsesMessages(first.model, first.context, new Set());
+      const secondInput = convertResponsesMessages(second.model, second.context, new Set());
+      expect(secondInput.slice(0, firstInput.length)).toEqual(firstInput);
+      expect(JSON.stringify(firstInput)).toContain("UTC: 2026-09-10T10:00:00.123Z");
+      expect(JSON.stringify(secondInput)).toContain("UTC: 2026-09-11T11:00:00.456Z");
+      expect(JSON.stringify(firstInput)).toContain("Local: 2026-09-10 12:00:00");
+      expect(saved[0]?.message).toBe("What day is tomorrow?");
+      expect(saved[2]?.message).toBe("And today?");
+    } finally {
+      if (previousProvider !== undefined) {
+        aiModels.setProvider(previousProvider);
+      }
+      if (previousApiKey === undefined) {
+        delete Bun.env.OPENROUTER_API_KEY;
+      } else {
+        Bun.env.OPENROUTER_API_KEY = previousApiKey;
+      }
+    }
+  });
+
   test("passes latest-30 chronological history and saves root transcripts as Medium", async () => {
     const { handler, internals } = setupHandler("discord:1");
     const recent = Array.from({ length: 30 }, (_, index) => ({
@@ -145,13 +260,13 @@ describe("MessageHandler", () => {
         platform: EMessagePlatform.Discord,
         history: expect.arrayContaining([
           { role: ERole.Assistant, content: "message-0" },
-          { role: ERole.User, content: "message-29" },
+          { role: ERole.User, content: expect.stringContaining("message-29") },
         ]),
       }),
     );
     const history = internals.ai.runMain.mock.calls[0]?.[0].history;
     expect(history[0]?.content).toBe("message-0");
-    expect(history[29]?.content).toBe("message-29");
+    expect(history[29]?.content).toEndWith("\n\nmessage-29");
     expect(internals.memory.save).toHaveBeenCalledTimes(2);
     expect(internals.memory.save).toHaveBeenNthCalledWith(1, {
       chatId: "discord:1",
@@ -165,10 +280,9 @@ describe("MessageHandler", () => {
       importance: EMemoryImportance.Medium,
       message: "Final answer",
     });
-    expect(internals.ai.completeText).not.toHaveBeenCalled();
   });
 
-  test("takes an immutable settings snapshot and has no importance classifier routing path", async () => {
+  test("takes an immutable settings snapshot", async () => {
     const sharedSettings = structuredClone(DefaultConfigRecord);
     (SettingsService as unknown as { _instance: unknown })._instance = {
       getAll: mock(async () => ({ ...sharedSettings })),
@@ -177,7 +291,7 @@ describe("MessageHandler", () => {
     const internals = handler as unknown as THandlerInternals;
     internals.memory = {
       findRecent: mock(async () => []),
-      save: mock(async (args) => args),
+      save: mock(async (args) => ({ ...args, createdAt: new Date(), lastReadAt: new Date() })),
       loadLiveFactWindow: mock(async () => emptyWindow("signal:1")),
       commitLiveFactWindow: mock(async () => ({ committed: true, facts: [] })),
     };
@@ -186,7 +300,6 @@ describe("MessageHandler", () => {
     };
     let capturedSettings: typeof DefaultConfigRecord | undefined;
     internals.ai = {
-      completeText: mock(async () => EMemoryImportance.Low),
       runMain: mock(async (args) => {
         capturedSettings = args.settings;
         return {
@@ -211,7 +324,6 @@ describe("MessageHandler", () => {
       DefaultConfigRecord[EConfigKey.AiInstructionsTimezone],
     );
     expect(internals.ai.runMain).toHaveBeenCalledTimes(1);
-    expect(internals.ai.completeText).not.toHaveBeenCalled();
   });
 
   test("stops before generating a reply when the user transcript cannot be saved", async () => {
@@ -239,7 +351,7 @@ describe("MessageHandler", () => {
       if (args.author === ERole.Assistant) {
         throw new Error("database unavailable");
       }
-      return args;
+      return { ...args, createdAt: new Date(), lastReadAt: new Date() };
     });
 
     await expect(
@@ -267,7 +379,7 @@ describe("MessageHandler", () => {
         events.push("assistant-save-end");
       }
 
-      return args;
+      return { ...args, createdAt: new Date(), lastReadAt: new Date() };
     });
     internals.memory.loadLiveFactWindow = mock(async () => {
       events.push("drain-load");

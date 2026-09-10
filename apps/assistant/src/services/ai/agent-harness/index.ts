@@ -50,22 +50,23 @@ const AGENT_INSTRUCTIONS: Record<EAgentName, string> = {
   [EAgentName.ScheduledTask]: "./src/services/ai/agents/scheduled-task/instructions.xml",
 };
 
-function withOpenCodeSession(
+function withSession(
   options: SimpleStreamOptions,
   provider: string,
   sessionId: string,
 ): SimpleStreamOptions {
-  if (provider !== EAiProvider.OpencodeGo) {
-    return options;
+  const headers = { ...options.headers };
+  if (provider === EAiProvider.OpencodeGo) {
+    headers["x-opencode-session"] = sessionId;
+  }
+  if (provider === EAiProvider.Openrouter) {
+    headers["x-session-id"] = sessionId;
   }
 
   return {
     ...options,
     sessionId,
-    headers: {
-      ...options.headers,
-      "x-opencode-session": sessionId,
-    },
+    headers,
   };
 }
 
@@ -124,7 +125,11 @@ export class AgentHarness {
   }): Promise<TOption<string>> {
     const startedAt = performance.now();
     const modelConfig = this.resolveModel(args.settings, args.purpose);
-    const sessionId = crypto.randomUUID();
+    const sessionId = this.createSessionId(
+      modelConfig.model.provider,
+      args.trace?.chatId,
+      args.trace?.platform,
+    );
     this.logDirectCompletionStarted(
       args.trace,
       modelConfig.model.provider,
@@ -144,7 +149,7 @@ export class AgentHarness {
         messages: [{ role: "user", content: args.prompt, timestamp: Date.now() }],
         tools: [],
       };
-      const options = withOpenCodeSession(
+      const options = withSession(
         {
           apiKey: this.resolveApiKey(modelConfig.model.provider),
           signal: args.signal,
@@ -251,21 +256,7 @@ export class AgentHarness {
     let forcedFinalAttempt = false;
     const startedAt = performance.now();
     let requestStartedAt: TOption<number>;
-    let sessionId: string = crypto.randomUUID();
-
-    if (
-      modelConfig.model.provider === EAiProvider.OpencodeGo &&
-      args.chatId !== undefined &&
-      args.platform !== undefined
-    ) {
-      const apiKey = this.resolveApiKey(modelConfig.model.provider);
-
-      if (apiKey !== undefined) {
-        sessionId = new Bun.CryptoHasher("sha256", apiKey)
-          .update(`${args.platform}:${args.chatId}`)
-          .digest("hex");
-      }
-    }
+    const sessionId = this.createSessionId(modelConfig.model.provider, args.chatId, args.platform);
 
     const toolStartedAt = new Map<string, number>();
 
@@ -290,7 +281,7 @@ export class AgentHarness {
 
         iterations += 1;
         requestStartedAt = performance.now();
-        const requestOptions = withOpenCodeSession(options ?? {}, model.provider, sessionId);
+        const requestOptions = withSession(options ?? {}, model.provider, sessionId);
 
         if (modelConfig.effort === "off" && hasApi(model, "openai-codex-responses")) {
           return aiModels.stream(model, context, {
@@ -407,7 +398,11 @@ export class AgentHarness {
       if (args.signal?.aborted) {
         stopReason = "aborted";
       } else {
-        await agent.prompt(args.prompt);
+        let prompt = args.prompt;
+        if (args.currentTimeContext !== undefined) {
+          prompt = `${args.currentTimeContext}\n\n${prompt}`;
+        }
+        await agent.prompt(prompt);
 
         const firstTerminalAssistant = agent.state.messages.toReversed().find((message) => {
           return message.role === "assistant";
@@ -517,6 +512,20 @@ export class AgentHarness {
     }
   }
 
+  private createSessionId(
+    provider: string,
+    chatId: TOption<string>,
+    platform: TOption<string>,
+  ): string {
+    if (chatId === undefined) {
+      return crypto.randomUUID();
+    }
+
+    return new Bun.CryptoHasher("sha256", this.resolveApiKey(provider))
+      .update(`${platform ?? "unknown"}:${chatId}`)
+      .digest("hex");
+  }
+
   private createHistory(
     history: TOption<THistoryItem[]>,
     api: Api,
@@ -578,10 +587,6 @@ export class AgentHarness {
       ...toolPaths.map((path) => readXmlAndInjectConfig(path, args.settings)),
     ]);
     const parts = [base, agentInstructions, ...toolInstructions];
-
-    if (args.currentTimeContext !== undefined) {
-      parts.push(args.currentTimeContext);
-    }
 
     const platformInstructions = createPlatformInstructions(args.platform);
 

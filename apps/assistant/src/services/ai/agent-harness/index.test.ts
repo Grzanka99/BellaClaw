@@ -11,7 +11,7 @@ import {
 } from "@earendil-works/pi-ai";
 import { EMessagePlatform } from "../../messaging/types";
 import { DefaultConfigRecord, EConfigKey } from "../../settings/schema";
-import { aiModels } from "../providers/registry";
+import { aiModels, getAiModelIds } from "../providers/registry";
 import { EAiProvider, EModelPurpose, ERole, type THistoryItem } from "../types";
 import { AgentHarness, EAgentName, isSerializedToolCall } from ".";
 
@@ -50,7 +50,7 @@ describe("AgentHarness", () => {
     }
   });
 
-  test("uses the configured registry model and a fresh sessionless transcript for every run", async () => {
+  test("uses the configured model and supplied history with stable conversation routing", async () => {
     const contexts: Array<{ messages: Context["messages"]; toolNames: string[] }> = [];
     const models: Model<string>[] = [];
     const sessionIds: Array<string | undefined> = [];
@@ -113,11 +113,13 @@ describe("AgentHarness", () => {
       "google/gemini-3.1-pro-preview",
       "openai/gpt-5.4-mini",
     ]);
-    expect(sessionIds).toEqual([undefined, undefined]);
+    expect(sessionIds[0]).toMatch(/^[0-9a-f]{64}$/);
+    expect(sessionIds[1]).toBe(sessionIds[0]);
     expect(contexts[0]?.messages.filter((message) => message.role === "user")).toHaveLength(2);
     expect(contexts[1]?.messages.filter((message) => message.role === "user")).toHaveLength(1);
-    expect(JSON.stringify(contexts[1])).not.toContain("first prompt");
-    expect(JSON.stringify(contexts[1])).not.toContain("stored history");
+    expect(contexts[1]?.messages).toMatchObject([
+      { role: "user", content: [{ type: "text", text: "time two\n\nsecond prompt" }] },
+    ]);
   });
 
   test("sends a stable OpenCode session header for each conversation", async () => {
@@ -245,6 +247,143 @@ describe("AgentHarness", () => {
       }),
     ).rejects.toThrow("Missing required environment variable OPENCODE_API_KEY");
     expect(opencode.state.callCount).toBe(0);
+  });
+
+  test.each([
+    EAiProvider.Openrouter,
+    EAiProvider.OpenaiCodex,
+  ])("keeps %s routing stable across model calls and separates conversations", async (provider) => {
+    const previousProvider = aiModels.getProvider(provider);
+    const routed = fauxProvider({
+      provider,
+      models: [...new Set(Object.values(getAiModelIds(provider)))].map((id) => ({
+        id,
+        reasoning: true,
+      })),
+    });
+    const sessions: Array<TOption<string>> = [];
+    const headers: Array<TOption<string | null>> = [];
+    routed.setResponses(
+      Array.from({ length: 7 }, (_, index) => (_context, options) => {
+        sessions.push(options?.sessionId);
+        headers.push(options?.headers?.["x-session-id"]);
+        if (index === 0) {
+          return fauxAssistantMessage(fauxToolCall("missing-tool", {}, { id: "routing-tool" }));
+        }
+        return fauxAssistantMessage("Done");
+      }),
+    );
+    aiModels.setProvider(routed.provider);
+    const auth = spyOn(aiModels, "getAuth").mockResolvedValue({ auth: { apiKey: "test-key" } });
+    const appLogger = new AppLogger({ dbPath: ":memory:", stdout: () => undefined });
+    (AppLogger as unknown as { _instance: AppLogger })._instance = appLogger;
+    const settings = { ...DefaultConfigRecord, [EConfigKey.AiProvider]: provider };
+    const args = {
+      prompt: "Hello",
+      history: [],
+      chatId: "chat-1",
+      settings,
+      currentTimeContext: undefined,
+      platform: EMessagePlatform.Discord,
+      trace: undefined,
+      signal: undefined,
+    };
+    try {
+      await AgentHarness.instance.runMain(args);
+      await AgentHarness.instance.runMain(args);
+      await AgentHarness.instance.runMain({ ...args, chatId: "chat-2" });
+      await AgentHarness.instance.runMain({ ...args, platform: EMessagePlatform.Signal });
+      await AgentHarness.instance.completeText({
+        prompt: "Utility work",
+        instructions: "Reply directly",
+        settings,
+        purpose: EModelPurpose.Utility,
+        trace: { turnId: "routing-utility", chatId: "chat-1", platform: EMessagePlatform.Discord },
+      });
+      await AgentHarness.instance.completeText({
+        prompt: "Verify provider",
+        instructions: "Reply directly",
+        settings,
+        purpose: EModelPurpose.Utility,
+        trace: undefined,
+      });
+
+      expect(sessions).toHaveLength(7);
+      expect(sessions[0]).toMatch(/^[0-9a-f]{64}$/);
+      expect(sessions[1]).toBe(sessions[0]);
+      expect(sessions[2]).toBe(sessions[0]);
+      expect(sessions[3]).not.toBe(sessions[0]);
+      expect(sessions[4]).not.toBe(sessions[0]);
+      expect(sessions[5]).toBe(sessions[0]);
+      expect(sessions[6]).toMatch(/^[0-9a-f-]{36}$/);
+      if (provider === EAiProvider.Openrouter) {
+        expect(headers).toEqual(sessions);
+      }
+    } finally {
+      auth.mockRestore();
+      await appLogger.close();
+      (AppLogger as unknown as { _instance: undefined })._instance = undefined;
+      if (previousProvider !== undefined) {
+        aiModels.setProvider(previousProvider);
+      }
+    }
+  });
+
+  test("passes time context with specialist and scheduled task messages", async () => {
+    const prompts: Array<Context["messages"]> = [];
+    faux.setResponses([
+      fauxAssistantMessage(
+        fauxToolCall("delegate-scheduling", { task: "Schedule tomorrow" }, { id: "time-delegate" }),
+      ),
+      (context) => {
+        prompts.push(structuredClone(context.messages));
+        return fauxAssistantMessage("Scheduled");
+      },
+      fauxAssistantMessage("Done"),
+      (context) => {
+        prompts.push(structuredClone(context.messages));
+        return fauxAssistantMessage("Task complete");
+      },
+    ]);
+    const args = {
+      prompt: "Remind me tomorrow",
+      history: [],
+      chatId: "discord:1",
+      settings: { ...DefaultConfigRecord, [EConfigKey.AiProvider]: EAiProvider.Openrouter },
+      currentTimeContext: "Message received at:\nUTC: 2026-09-10T10:00:00.000Z",
+      platform: EMessagePlatform.Discord,
+      trace: undefined,
+      signal: undefined,
+    };
+    await AgentHarness.instance.runMain(args);
+    await AgentHarness.instance.runScheduledTask({
+      ...args,
+      prompt: "Run the scheduled task",
+      currentTimeContext:
+        'Scheduled firing context JSON:\n{"fireTimestamp":"2026-09-11T10:00:00Z"}',
+    });
+    expect(prompts[0]).toMatchObject([
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: `${args.currentTimeContext}\n\nOriginal user message:\nRemind me tomorrow\n\nDelegated task:\nSchedule tomorrow`,
+          },
+        ],
+      },
+    ]);
+    expect(prompts[1]).toMatchObject([
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: 'Scheduled firing context JSON:\n{"fireTimestamp":"2026-09-11T10:00:00Z"}\n\nRun the scheduled task',
+          },
+        ],
+      },
+    ]);
   });
 
   test("returns undefined for blank and provider-error final messages", async () => {
