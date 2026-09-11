@@ -125,7 +125,6 @@ function selectEvent(row) {
   inspector.replaceChildren(template.content.cloneNode(true));
   inspector.scrollTop = 0;
   updateLocalTimes(inspector);
-  document.documentElement.dataset.eventSelection = "manual";
   document.documentElement.dataset.inspectorOpen = "1";
 }
 
@@ -220,7 +219,6 @@ function handleUpdatedContent(root) {
   updateThemeControls();
 
   if (root.id === "app-shell") {
-    delete document.documentElement.dataset.eventSelection;
     syncMobileCollapse();
     closeInspector();
   }
@@ -231,28 +229,43 @@ function handleUpdatedContent(root) {
     warning.hidden = true;
   }
 
-  const liveStatus = document.querySelector("#live-status[data-new-count]");
+  const template = root.querySelector("template[data-live-events]");
 
-  if (!liveStatus || Number(liveStatus.dataset.newCount) === 0) {
-    return;
-  }
-
-  if (document.documentElement.dataset.eventSelection === "manual") {
-    return;
-  }
-
-  const activeElement = document.activeElement;
-
-  if (activeElement.closest(".search-panel") !== null) {
+  if (!template) {
     return;
   }
 
   const eventsList = document.querySelector("#events-list");
+  const anchor = eventsList.querySelector("[data-event-id]");
+  const anchorTop = anchor?.getBoundingClientRect().top;
+  const preserveListScroll = eventsList.scrollTop > 0;
+  const preservePageScroll = window.scrollY > 0;
+  const incoming = template.content.querySelector(".event-list");
 
-  if (eventsList.scrollTop < 160 && document.querySelector("details[open]") === null) {
-    const link = liveStatus.querySelector("a[href]");
-    window.location.assign(link.href);
+  for (const row of incoming.querySelectorAll("[data-event-id]")) {
+    if (eventsList.querySelector(`[data-event-id="${row.dataset.eventId}"]`)) {
+      row.remove();
+    }
   }
+
+  eventsList.querySelector(".empty-state")?.remove();
+  const timeline = eventsList.querySelector(".event-list");
+  if (timeline) {
+    timeline.prepend(...incoming.children);
+  } else {
+    eventsList.prepend(incoming);
+  }
+  template.remove();
+  updateLocalTimes(eventsList);
+
+  if (anchor && preserveListScroll) {
+    eventsList.scrollTop += anchor.getBoundingClientRect().top - anchorTop;
+  } else if (anchor && preservePageScroll) {
+    window.scrollBy(0, anchor.getBoundingClientRect().top - anchorTop);
+  }
+
+  document.querySelector(".results-title strong").textContent =
+    `${eventsList.querySelectorAll("[data-event-id]").length} events`;
 }
 
 document.addEventListener("DOMContentLoaded", () => {

@@ -16,5 +16,8 @@
     "hono": "^4.12.30",
     "htmx.org": "^2.0.10",
     "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "happy-dom": "^20.14.3"
   }
 }
