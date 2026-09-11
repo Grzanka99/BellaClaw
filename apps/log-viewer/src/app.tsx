@@ -96,13 +96,12 @@ export function createLogViewerApp(
           query={query}
           afterCreatedAt={query.until}
           afterId={0}
-          count={0}
           warning="Invalid live cursor"
         />,
       );
     }
 
-    const result = await reader.countNewEvents(
+    const result = await reader.readNewEvents(
       query,
       cursor.data.afterCreatedAt,
       cursor.data.afterId,
@@ -114,18 +113,19 @@ export function createLogViewerApp(
           query={query}
           afterCreatedAt={cursor.data.afterCreatedAt}
           afterId={cursor.data.afterId}
-          count={0}
           warning={result.error.message}
         />,
       );
     }
 
+    const newest = result.data[0];
+
     return context.html(
       <LivePoller
         query={query}
-        afterCreatedAt={cursor.data.afterCreatedAt}
-        afterId={cursor.data.afterId}
-        count={result.data}
+        afterCreatedAt={newest?.createdAtMs ?? cursor.data.afterCreatedAt}
+        afterId={newest?.id ?? cursor.data.afterId}
+        events={result.data}
         warning={undefined}
       />,
     );

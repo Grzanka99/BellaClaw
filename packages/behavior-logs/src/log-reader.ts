@@ -69,34 +69,32 @@ export class LogReader {
     });
   }
 
-  public async countNewEvents(
+  public async readNewEvents(
     query: TBehaviorLogSearchQuery,
     afterCreatedAt: number,
     afterId: number,
-  ): Promise<TLogReaderResult<number>> {
-    return this.queue.enqueue(async (): Promise<TLogReaderResult<number>> => {
+  ): Promise<TLogReaderResult<TPersistedBehaviorLogEvent[]>> {
+    return this.queue.enqueue(async () => {
       try {
         const db = this.getDatabase();
         const where = this.buildWhere(query, false);
-        where.bindings.push(afterCreatedAt, afterCreatedAt, afterId);
-        const row = db
+        where.bindings.push(afterCreatedAt, afterCreatedAt, afterId, PAGE_SIZE);
+        const rows = db
           .query<unknown, TSqlBinding[]>(
             `
-              SELECT COUNT(*) AS count
+              SELECT ${EVENT_COLUMNS}
               FROM app_event_logs l
               ${where.join}
               WHERE ${where.sql}
                 AND (l.createdAt > ? OR (l.createdAt = ? AND l.id > ?))
+              ORDER BY l.createdAt ASC, l.id ASC
+              LIMIT ?
             `,
           )
-          .get(...where.bindings);
-        const parsed = z.object({ count: z.number() }).safeParse(row);
+          .all(...where.bindings);
 
-        if (!parsed.success) {
-          throw new Error(`Invalid live count row: ${parsed.error.message}`);
-        }
-
-        return { success: true, data: parsed.data.count };
+        // Advance through the oldest unseen batch so bursts cannot skip events.
+        return { success: true, data: this.parseEvents(rows).reverse() };
       } catch (error) {
         return { success: false, error: this.describeError(error) };
       }

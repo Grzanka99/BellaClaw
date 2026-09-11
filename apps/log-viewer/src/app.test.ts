@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -126,4 +127,63 @@ describe("log viewer", () => {
       }
     }
   });
+});
+
+test("live fragments deliver every new matching event across batches and advance the cursor", async () => {
+  tempDir = mkdtempSync(join(tmpdir(), "bellaclaw-log-viewer-"));
+  const dbPath = join(tempDir, "logs.db");
+  const logger = new AppLogger({ dbPath, stdout() {} });
+  try {
+    logger.record({
+      trace: { turnId: "live", chatId: undefined, platform: "discord" },
+      event: "tool.finished",
+      component: "ai",
+    });
+    await logger.flush();
+    application = createLogViewerApp({ dbPath });
+    const home = await application.app.request("/?live=1&range=all&event=tool.finished");
+    const html = await home.text();
+    let pollUrl = html
+      .match(/hx-get="([^"]*\/fragments\/live[^"]*)"/)?.[1]
+      ?.replaceAll("&amp;", "&");
+    expect(pollUrl).toBeDefined();
+
+    for (let index = 0; index < 205; index += 1) {
+      logger.record({
+        trace: { turnId: "live", chatId: undefined, platform: "discord" },
+        event: "tool.finished",
+        component: "ai",
+      });
+    }
+    logger.record({
+      trace: { turnId: "live", chatId: undefined, platform: "discord" },
+      event: "model.request.completed",
+      component: "ai",
+    });
+    await logger.flush();
+
+    const ids: number[] = [];
+    for (const expectedCount of [100, 100, 5, 0]) {
+      assert(pollUrl);
+      const response = await application.app.request(pollUrl);
+      expect(response.status).toBe(200);
+      const fragment = await response.text();
+      const batch = [...fragment.matchAll(/data-event-id="(\d+)"/g)].map((match) =>
+        Number(match[1]),
+      );
+      expect(batch.length).toBe(expectedCount);
+      expect(batch).toEqual([...batch].sort((a, b) => b - a));
+      ids.push(...batch);
+      const nextPollUrl = fragment.match(/hx-get="([^"]+)"/)?.[1]?.replaceAll("&amp;", "&");
+      expect(nextPollUrl).toBeDefined();
+      if (expectedCount === 0) {
+        expect(nextPollUrl).toBe(pollUrl);
+        expect(fragment).not.toContain("data-live-events");
+      }
+      pollUrl = nextPollUrl;
+    }
+    expect(ids.sort((a, b) => a - b)).toEqual(Array.from({ length: 205 }, (_, index) => index + 2));
+  } finally {
+    await logger.close();
+  }
 });

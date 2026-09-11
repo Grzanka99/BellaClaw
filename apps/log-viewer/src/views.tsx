@@ -84,7 +84,6 @@ export function HomePage(props: {
                   query={props.query}
                   afterCreatedAt={afterCreatedAt}
                   afterId={afterId}
-                  count={0}
                   warning={undefined}
                 />
               )}
@@ -162,7 +161,7 @@ export function LivePoller(props: {
   query: TBehaviorLogSearchQuery;
   afterCreatedAt: number;
   afterId: number;
-  count: number;
+  events?: TPersistedBehaviorLogEvent[];
   warning: TOption<string>;
 }) {
   const endpoint = buildLogUrl(props.query, {
@@ -172,36 +171,23 @@ export function LivePoller(props: {
     path: "/fragments/live",
   });
   const pollUrl = `${endpoint}&afterCreatedAt=${props.afterCreatedAt}&afterId=${props.afterId}`;
-  const refreshUrl = buildLogUrl(props.query, {
-    includeUntil: false,
-    includeCursor: false,
-    live: true,
-  });
-
-  let eventLabel = "events";
-
-  if (props.count === 1) {
-    eventLabel = "event";
-  }
-
   return (
     <div
       id="live-status"
       class="live-status"
-      data-new-count={String(props.count)}
       hx-get={pollUrl}
       hx-trigger="every 5s"
       hx-target="#live-status"
       hx-swap="outerHTML"
     >
       <span class="live-dot"></span>
-      {props.count === 0 && props.warning === undefined && <span>Live · 5s</span>}
-      {props.count > 0 && (
-        <a href={refreshUrl}>
-          {props.count} new {eventLabel}
-        </a>
-      )}
+      {props.warning === undefined && <span>Live · 5s</span>}
       {props.warning !== undefined && <span class="warning-text">{props.warning}</span>}
+      {props.events !== undefined && props.events.length > 0 && (
+        <template data-live-events>
+          <EventRows events={props.events} query={props.query} selectedEventId={undefined} />
+        </template>
+      )}
     </div>
   );
 }
