@@ -71,6 +71,13 @@
       "when": 1786491090395,
       "tag": "0009_same_morgan_stark",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1789652666626,
+      "tag": "0010_conversation_compaction",
+      "breakpoints": true
     }
   ]
 }

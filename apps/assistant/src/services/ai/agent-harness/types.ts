@@ -1,5 +1,6 @@
 import type { TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
 import type { TOption } from "@bellaclaw/shared";
+import type { TConversation } from "../../conversation/types";
 import type { EMessagePlatform } from "../../messaging/types";
 import type { TConfigRecord } from "../../settings/schema";
 import type { EModelPurpose, THistoryItem } from "../types";
@@ -23,6 +24,8 @@ export type TAgentRunArgs = {
   platform: TOption<EMessagePlatform>;
   trace: TOption<TBehaviorTraceContext>;
   history: TOption<THistoryItem[]>;
+  conversation?: TConversation;
+  memoryId?: number;
   maxIterations: number;
   parentToolCallId: TOption<string>;
   signal: TOption<AbortSignal>;
@@ -34,3 +37,5 @@ export type TAgentRunResult = {
   toolCallCount: number;
   stopReason: string;
 };
+
+export type TMainAgentRunResult = TAgentRunResult & { conversation: TConversation };

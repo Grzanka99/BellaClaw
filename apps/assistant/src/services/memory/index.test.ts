@@ -65,6 +65,7 @@ describe("Memory", () => {
       });
 
       expect(result).toEqual({
+        id: expect.any(Number),
         chatId: "chat-123",
         author: ERole.User,
         importance: EMemoryImportance.Medium,

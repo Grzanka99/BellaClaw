@@ -1,7 +1,12 @@
 import { AppLogger, EBehaviorLogLevel, type TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
 import type { TOption } from "@bellaclaw/shared";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import { Agent } from "@earendil-works/pi-agent-core";
+import {
+  Agent,
+  convertToLlm,
+  estimateContextTokens,
+  estimateTokens,
+} from "@earendil-works/pi-agent-core";
 import {
   type Api,
   type AssistantMessage,
@@ -21,6 +26,12 @@ import {
   sanitizeToolResult,
   sanitizeToolResultError,
 } from "../../app-logger/sanitizers";
+import {
+  CONTEXT_SOFT_LIMIT,
+  compactConversation,
+  compactionThreshold,
+} from "../../conversation/compaction";
+import { conversationMessages, type TConversation } from "../../conversation/types";
 import { EConfigKey, type TConfigRecord } from "../../settings/schema";
 import { createPlatformInstructions } from "../instructions/platform";
 import { readXmlAndInjectConfig } from "../instructions/read-xml-and-inject-config";
@@ -36,7 +47,12 @@ import {
   type TToolExecutionContext,
 } from "../tools/executable";
 import { EAiProvider, EModelPurpose, ERole, type THistoryItem } from "../types";
-import { EAgentName, type TAgentRunArgs, type TAgentRunResult } from "./types";
+import {
+  EAgentName,
+  type TAgentRunArgs,
+  type TAgentRunResult,
+  type TMainAgentRunResult,
+} from "./types";
 
 const BASE_INSTRUCTIONS_PATH = "./src/services/ai/instructions/base-system.xml";
 const SEQUENTIAL: "sequential" = "sequential";
@@ -83,7 +99,7 @@ export class AgentHarness {
 
   public async runMain(
     args: Omit<TAgentRunArgs, "name" | "purpose" | "maxIterations" | "parentToolCallId">,
-  ): Promise<TAgentRunResult> {
+  ): Promise<TMainAgentRunResult> {
     let delegationCount = 0;
 
     return this.run({
@@ -241,9 +257,72 @@ export class AgentHarness {
     return undefined;
   }
 
+  public async compactConversation(
+    state: TConversation,
+    settings: TConfigRecord,
+    chatId: string,
+    platform: TAgentRunArgs["platform"],
+    trace?: TBehaviorTraceContext,
+  ) {
+    const config = this.resolveModel(settings, EModelPurpose.Main);
+    const args = {
+      name: EAgentName.Main,
+      purpose: EModelPurpose.Main,
+      settings,
+      chatId,
+      platform,
+      prompt: "",
+      history: [],
+      currentTimeContext: undefined,
+      trace,
+      signal: undefined,
+      maxIterations: 30,
+      parentToolCallId: undefined,
+      delegationCount: undefined,
+    };
+    const tools = await this.createTools(args);
+    const systemPrompt = await this.createSystemPrompt(args, tools);
+    const fixedTokens = Math.ceil(
+      (systemPrompt.length +
+        JSON.stringify(
+          tools.map(({ name, description, parameters }) => ({ name, description, parameters })),
+        ).length) /
+        4,
+    );
+    let contextTokens =
+      fixedTokens +
+      conversationMessages(state).reduce((sum, message) => sum + estimateTokens(message), 0);
+    const lastAssistant = state.messages.findLast((message) => message.role === "assistant");
+    if (lastAssistant !== undefined && lastAssistant.timestamp > state.summaryTimestamp) {
+      const usage = estimateContextTokens(state.messages);
+      if (usage.lastUsageIndex !== null) {
+        contextTokens = Math.max(contextTokens, usage.tokens);
+      }
+    }
+    state = { ...state, fixedTokens, contextTokens };
+
+    let thinking = config.effort;
+    if (thinking === "off") {
+      thinking = undefined;
+    }
+    if (
+      state.contextTokens >= compactionThreshold(config.model, state.fixedTokens) &&
+      trace !== undefined
+    ) {
+      AppLogger.instance.record({
+        trace,
+        event: "conversation.compaction.started",
+        component: "agent-harness",
+        summary: "Compacting completed conversation",
+        metadata: { tokensBefore: state.contextTokens, model: config.model.id },
+      });
+    }
+    return compactConversation(state, aiModels, config.model, thinking);
+  }
+
   private async run(
     args: TAgentRunArgs & { delegationCount: TOption<() => void> },
-  ): Promise<TAgentRunResult> {
+  ): Promise<TMainAgentRunResult> {
     const modelConfig = this.resolveModel(args.settings, args.purpose);
     const tools = await this.createTools(args);
     const systemPrompt = await this.createSystemPrompt(args, tools);
@@ -260,12 +339,23 @@ export class AgentHarness {
 
     const toolStartedAt = new Map<string, number>();
 
-    const messages = this.createHistory(
+    let messages = this.createHistory(
       args.history,
       modelConfig.model.api,
       modelConfig.model.provider,
       modelConfig.model.id,
     );
+    if (args.conversation !== undefined) {
+      messages = structuredClone(conversationMessages(args.conversation));
+    }
+    const fixedTokens = Math.ceil(
+      (systemPrompt.length +
+        JSON.stringify(
+          tools.map(({ name, description, parameters }) => ({ name, description, parameters })),
+        ).length) /
+        4,
+    );
+    const initialMessageCount = messages.length;
     const agent = new Agent({
       initialState: {
         systemPrompt,
@@ -475,7 +565,49 @@ export class AgentHarness {
       stopReason,
       startedAt,
     );
-    return { text: finalText, iterations, toolCallCount, stopReason };
+    const transcript = convertToLlm(agent.state.messages);
+    const newMessages = transcript.slice(initialMessageCount);
+    const usageEstimate = estimateContextTokens(newMessages);
+    let contextTokens = usageEstimate.tokens;
+    if (usageEstimate.lastUsageIndex === null) {
+      contextTokens =
+        fixedTokens + transcript.reduce((sum, message) => sum + estimateTokens(message), 0);
+    }
+    if (contextTokens >= CONTEXT_SOFT_LIMIT && args.trace !== undefined) {
+      AppLogger.instance.record({
+        trace: args.trace,
+        event: "conversation.soft-limit",
+        component: "agent-harness",
+        level: EBehaviorLogLevel.Warning,
+        summary: "Context exceeded soft guardrail; turn completed without interruption",
+        metadata: { contextTokens, agentName: args.name },
+      });
+    }
+    let messageIds =
+      args.conversation?.messageIds ??
+      (args.history ?? [])
+        .filter((item) => item.role !== ERole.System)
+        .map((item) => item.memoryId ?? 0);
+    messageIds = [...messageIds, ...newMessages.map(() => args.memoryId ?? 0)];
+    let retainedMessages = transcript;
+    if (args.conversation !== undefined && args.conversation.summary.length > 0) {
+      retainedMessages = transcript.slice(1);
+    }
+    return {
+      text: finalText,
+      iterations,
+      toolCallCount,
+      stopReason,
+      conversation: {
+        summary: args.conversation?.summary ?? "",
+        summaryTimestamp: args.conversation?.summaryTimestamp ?? 0,
+        messages: retainedMessages,
+        messageIds,
+        lastMemoryId: args.memoryId ?? args.conversation?.lastMemoryId ?? 0,
+        fixedTokens,
+        contextTokens,
+      },
+    };
   }
 
   private resolveModel(settings: TConfigRecord, purpose: EModelPurpose) {
@@ -702,6 +834,8 @@ export class AgentHarness {
             purpose: delegate.purpose,
             prompt: `Original user message:\n${args.prompt}\n\nDelegated task:\n${parsedParameters.task}`,
             history: undefined,
+            conversation: undefined,
+            memoryId: undefined,
             maxIterations: 12,
             parentToolCallId: toolCallId,
             delegationCount: undefined,
@@ -714,7 +848,12 @@ export class AgentHarness {
 
           return {
             content: [{ type: "text" as const, text: result.text }],
-            details: result,
+            details: {
+              text: result.text,
+              iterations: result.iterations,
+              toolCallCount: result.toolCallCount,
+              stopReason: result.stopReason,
+            },
           };
         },
       };

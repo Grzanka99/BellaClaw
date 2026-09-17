@@ -10,17 +10,21 @@ import { convertResponsesMessages } from "@earendil-works/pi-ai/api/openai-respo
 import { AgentHarness } from "../ai/agent-harness";
 import { aiModels } from "../ai/providers/registry";
 import { EAiProvider, ERole } from "../ai/types";
+import type { TConversation } from "../conversation/types";
 import { Memory } from "../memory";
 import { EMemoryImportance, type TMemory } from "../memory/types";
 import { EMessagePlatform } from "../messaging/types";
 import { SettingsService } from "../settings";
 import { DefaultConfigRecord, EConfigKey } from "../settings/schema";
 import { MessageHandler } from ".";
+import type { TIncommingMessage } from "./types";
 
 type THandlerInternals = {
   ai: {
     runMain: ReturnType<typeof mock>;
+    compactConversation: ReturnType<typeof mock>;
   };
+  conversations: ReturnType<typeof mockConversationStore>;
   memory: {
     findRecent: ReturnType<typeof mock>;
     save: ReturnType<typeof mock>;
@@ -75,6 +79,21 @@ function populatedWindow(chatId: string, id: number) {
   };
 }
 
+function mockConversationStore() {
+  let state: TConversation | undefined;
+  return {
+    load: mock(async () => structuredClone(state)),
+    saveTurn: mock(async (_chatId: string, _platform: string, next: TConversation) => {
+      state = structuredClone(next);
+      return state;
+    }),
+    saveSummary: mock(async (_chatId: string, _platform: string, next: TConversation) => {
+      state = structuredClone(next);
+      return state;
+    }),
+  };
+}
+
 function setupHandler(chatId: string, response = "Final answer") {
   const settings = structuredClone(DefaultConfigRecord);
   (SettingsService as unknown as { _instance: unknown })._instance = {
@@ -82,9 +101,15 @@ function setupHandler(chatId: string, response = "Final answer") {
   };
   const handler = MessageHandler.getInstance(chatId);
   const internals = handler as unknown as THandlerInternals;
+  internals.conversations = mockConversationStore();
   internals.memory = {
     findRecent: mock(async () => []),
-    save: mock(async (args) => ({ ...args, createdAt: new Date(), lastReadAt: new Date() })),
+    save: mock(async (args) => ({
+      ...args,
+      id: 100,
+      createdAt: new Date(),
+      lastReadAt: new Date(),
+    })),
     loadLiveFactWindow: mock(async () => emptyWindow(chatId)),
     commitLiveFactWindow: mock(async () => ({ committed: true, facts: [] })),
   };
@@ -92,11 +117,21 @@ function setupHandler(chatId: string, response = "Final answer") {
     processWindow: mock(async () => ({ success: true })),
   };
   internals.ai = {
+    compactConversation: mock(async () => undefined),
     runMain: mock(async () => ({
       text: response,
       iterations: 1,
       toolCallCount: 0,
       stopReason: "completed",
+      conversation: {
+        messageIds: [],
+        lastMemoryId: 0,
+        summary: "",
+        summaryTimestamp: 0,
+        messages: [],
+        fixedTokens: 0,
+        contextTokens: 0,
+      },
     })),
   };
   return { handler, internals, settings };
@@ -217,7 +252,7 @@ describe("MessageHandler", () => {
       expect(JSON.stringify(secondInput)).toContain("UTC: 2026-09-11T11:00:00.456Z");
       expect(JSON.stringify(firstInput)).toContain("Local: 2026-09-10 12:00:00");
       expect(saved[0]?.message).toBe("What day is tomorrow?");
-      expect(saved[2]?.message).toBe("And today?");
+      expect(saved[1]?.message).toBe("And today?");
     } finally {
       if (previousProvider !== undefined) {
         aiModels.setProvider(previousProvider);
@@ -230,10 +265,11 @@ describe("MessageHandler", () => {
     }
   });
 
-  test("passes latest-30 chronological history and saves root transcripts as Medium", async () => {
+  test("bootstraps latest-30 chronological history and saves root transcripts as Medium", async () => {
     const { handler, internals } = setupHandler("discord:1");
     const recent = Array.from({ length: 30 }, (_, index) => ({
       chatId: "discord:1",
+      platform: EMessagePlatform.Discord,
       author: index % 2 === 0 ? ERole.User : ERole.Assistant,
       importance: EMemoryImportance.Low,
       message: `message-${29 - index}`,
@@ -253,7 +289,11 @@ describe("MessageHandler", () => {
     await flushAsyncWork();
 
     expect(result).toBe("Final answer");
-    expect(internals.memory.findRecent).toHaveBeenCalledWith("discord:1", 30);
+    expect(internals.memory.findRecent).toHaveBeenCalledWith(
+      "discord:1",
+      30,
+      EMessagePlatform.Discord,
+    );
     expect(internals.ai.runMain).toHaveBeenCalledWith(
       expect.objectContaining({
         prompt: "new question",
@@ -267,19 +307,71 @@ describe("MessageHandler", () => {
     const history = internals.ai.runMain.mock.calls[0]?.[0].history;
     expect(history[0]?.content).toBe("message-0");
     expect(history[29]?.content).toEndWith("\n\nmessage-29");
-    expect(internals.memory.save).toHaveBeenCalledTimes(2);
+    expect(internals.memory.save).toHaveBeenCalledTimes(1);
     expect(internals.memory.save).toHaveBeenNthCalledWith(1, {
       chatId: "discord:1",
+      platform: EMessagePlatform.Discord,
       author: ERole.User,
       importance: EMemoryImportance.Medium,
       message: "new question",
     });
-    expect(internals.memory.save).toHaveBeenNthCalledWith(2, {
-      chatId: "discord:1",
-      author: ERole.Assistant,
-      importance: EMemoryImportance.Medium,
-      message: "Final answer",
+    expect(internals.conversations.saveTurn).toHaveBeenCalledTimes(1);
+  });
+
+  test("returns the reply before compaction finishes and holds the next turn until it finishes", async () => {
+    const { handler, internals } = setupHandler("compaction-order");
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
     });
+    let first = true;
+    internals.ai.compactConversation = mock(async (state) => {
+      if (!first) {
+        return undefined;
+      }
+      first = false;
+      await gate;
+      return { state: { ...state, summary: "We chose the train", summaryTimestamp: 1 }, usage: {} };
+    });
+    const message: TIncommingMessage = {
+      chatId: "compaction-order",
+      message: { type: "text" as const, content: "first" },
+      author: { type: ERole.User, id: "1", username: "Owner" },
+    };
+    expect(await handler.handleMessage(message)).toBe("Final answer");
+    await waitForCall(internals.ai.compactConversation, 1);
+    const second = handler.handleMessage({
+      ...message,
+      message: { type: "text", content: "second" },
+    });
+    await flushAsyncWork();
+    expect(internals.ai.runMain).toHaveBeenCalledTimes(1);
+    release();
+    await second;
+    expect(internals.ai.runMain.mock.calls[1]?.[0].conversation.summary).toBe("We chose the train");
+    expect(internals.memory.findRecent).toHaveBeenCalledTimes(1);
+  });
+
+  test("keeps original context if saving the summary fails and retries before the next turn", async () => {
+    const { handler, internals } = setupHandler("compaction-retry");
+    internals.ai.compactConversation = mock(async (state) => ({
+      state: { ...state, summary: "compact summary", summaryTimestamp: 1 },
+      usage: {},
+    }));
+    internals.conversations.saveSummary.mockImplementationOnce(async () => {
+      throw new Error("summary write failed");
+    });
+    const message: TIncommingMessage = {
+      chatId: "compaction-retry",
+      message: { type: "text" as const, content: "first" },
+      author: { type: ERole.User, id: "1", username: "Owner" },
+    };
+    await handler.handleMessage(message);
+    await waitForCall(internals.conversations.saveSummary, 1);
+    expect((await internals.conversations.load())?.summary).toBe("");
+    await handler.handleMessage(message);
+    expect(internals.ai.runMain.mock.calls[1]?.[0].conversation.summary).toBe("compact summary");
+    await flushAsyncWork();
   });
 
   test("takes an immutable settings snapshot", async () => {
@@ -289,9 +381,15 @@ describe("MessageHandler", () => {
     };
     const handler = MessageHandler.getInstance("signal:1");
     const internals = handler as unknown as THandlerInternals;
+    internals.conversations = mockConversationStore();
     internals.memory = {
       findRecent: mock(async () => []),
-      save: mock(async (args) => ({ ...args, createdAt: new Date(), lastReadAt: new Date() })),
+      save: mock(async (args) => ({
+        ...args,
+        id: 100,
+        createdAt: new Date(),
+        lastReadAt: new Date(),
+      })),
       loadLiveFactWindow: mock(async () => emptyWindow("signal:1")),
       commitLiveFactWindow: mock(async () => ({ committed: true, facts: [] })),
     };
@@ -300,6 +398,7 @@ describe("MessageHandler", () => {
     };
     let capturedSettings: typeof DefaultConfigRecord | undefined;
     internals.ai = {
+      compactConversation: mock(async () => undefined),
       runMain: mock(async (args) => {
         capturedSettings = args.settings;
         return {
@@ -307,6 +406,15 @@ describe("MessageHandler", () => {
           iterations: 1,
           toolCallCount: 0,
           stopReason: "completed",
+          conversation: {
+            messageIds: [],
+            lastMemoryId: 0,
+            summary: "",
+            summaryTimestamp: 0,
+            messages: [],
+            fixedTokens: 0,
+            contextTokens: 0,
+          },
         };
       }),
     };
@@ -345,61 +453,49 @@ describe("MessageHandler", () => {
     expect(internals.memory.loadLiveFactWindow).not.toHaveBeenCalled();
   });
 
-  test("returns the reply but skips fact processing when its transcript save fails", async () => {
+  test("fails without fact processing when the completed transcript cannot be saved", async () => {
     const { handler, internals } = setupHandler("discord:assistant-save-failure");
-    internals.memory.save = mock(async (args) => {
-      if (args.author === ERole.Assistant) {
-        throw new Error("database unavailable");
-      }
-      return { ...args, createdAt: new Date(), lastReadAt: new Date() };
+    internals.conversations.saveTurn = mock(async () => {
+      throw new Error("database unavailable");
     });
-
     await expect(
       handler.handleMessage({
         chatId: "discord:assistant-save-failure",
         message: { type: "text", content: "hello" },
         author: { type: ERole.User, id: "1", username: "Owner" },
       }),
-    ).resolves.toBe("Final answer");
-    await flushAsyncWork();
+    ).rejects.toThrow("database unavailable");
     expect(internals.memory.loadLiveFactWindow).not.toHaveBeenCalled();
   });
 
-  test("saves the assistant transcript before scheduling the live drain", async () => {
+  test("saves the main transcript before scheduling the fact drain", async () => {
     const { handler, internals } = setupHandler("discord:ordering");
-    let releaseAssistantSave: () => void = () => undefined;
-    const assistantSaveGate = new Promise<void>((resolve) => {
-      releaseAssistantSave = resolve;
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
     });
     const events: string[] = [];
-    internals.memory.save = mock(async (args) => {
-      if (args.author === ERole.Assistant) {
-        events.push("assistant-save-start");
-        await assistantSaveGate;
-        events.push("assistant-save-end");
-      }
-
-      return { ...args, createdAt: new Date(), lastReadAt: new Date() };
+    internals.conversations.saveTurn = mock(async (_chat, _platform, state) => {
+      events.push("save-start");
+      await gate;
+      events.push("save-end");
+      return state;
     });
     internals.memory.loadLiveFactWindow = mock(async () => {
-      events.push("drain-load");
+      events.push("drain");
       return emptyWindow("discord:ordering");
     });
-
-    await handler.handleMessage({
+    const reply = handler.handleMessage({
       chatId: "discord:ordering",
       message: { type: "text", content: "remember this" },
       author: { type: ERole.User, id: "1", username: "Owner" },
     });
-    await waitForCall(internals.memory.save, 2);
-
-    expect(events).toEqual(["assistant-save-start"]);
-    expect(internals.memory.loadLiveFactWindow).not.toHaveBeenCalled();
-
-    releaseAssistantSave();
-    await waitForCall(internals.memory.loadLiveFactWindow, 1);
-
-    expect(events).toEqual(["assistant-save-start", "assistant-save-end", "drain-load"]);
+    await waitForCall(internals.conversations.saveTurn, 1);
+    expect(events).toEqual(["save-start"]);
+    release();
+    await reply;
+    await flushAsyncWork();
+    expect(events).toEqual(["save-start", "save-end", "drain"]);
   });
 
   test("scheduleFactDrain catches up chats without an inbound message", async () => {
@@ -530,7 +626,7 @@ describe("MessageHandler", () => {
     expect(internals.factDistiller.processWindow.mock.calls[1]?.[0].window).toEqual(retryWindow);
   });
 
-  test("catches and logs a rejected fire-and-forget enqueue promise", async () => {
+  test("catches and logs a rejected compaction enqueue promise", async () => {
     const { handler, internals } = setupHandler("discord:queue-rejection");
     const logger = {
       info: mock(() => undefined),
@@ -544,8 +640,8 @@ describe("MessageHandler", () => {
     internals.queue = {
       enqueue(callback) {
         enqueueCount += 1;
-        if (enqueueCount === 2) {
-          return Promise.reject(new Error("queue rejected assistant task"));
+        if (enqueueCount === 3) {
+          return Promise.reject(new Error("queue rejected compaction task"));
         }
 
         const task = tail.then(callback);
@@ -568,11 +664,9 @@ describe("MessageHandler", () => {
       await flushAsyncWork();
 
       expect(logger.error).toHaveBeenCalledWith(
-        expect.stringContaining("queue rejected assistant task"),
+        expect.stringContaining("queue rejected compaction task"),
       );
       expect(unhandledRejection).not.toHaveBeenCalled();
-      expect(internals.memory.loadLiveFactWindow).not.toHaveBeenCalled();
-
       await handler.handleMessage({
         chatId: "discord:queue-rejection",
         message: { type: "text", content: "second turn" },
@@ -593,6 +687,15 @@ describe("MessageHandler", () => {
       iterations: 1,
       toolCallCount: 0,
       stopReason: "error",
+      conversation: {
+        messageIds: [],
+        lastMemoryId: 0,
+        summary: "",
+        summaryTimestamp: 0,
+        messages: [],
+        fixedTokens: 0,
+        contextTokens: 0,
+      },
     }));
 
     expect(

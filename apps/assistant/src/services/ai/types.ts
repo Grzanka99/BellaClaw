@@ -13,6 +13,7 @@ export enum ERole {
 
 export type THistoryItem = {
   content: string;
+  memoryId?: number;
   role: ERole;
 };
 
