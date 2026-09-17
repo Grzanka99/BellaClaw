@@ -1,49 +1,79 @@
+import { AppLogger, EBehaviorLogLevel, type TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
 import type { TOption } from "@bellaclaw/shared";
-import { estimateTokens, generateSummaryWithUsage } from "@earendil-works/pi-agent-core";
+import {
+  calculateContextTokens,
+  estimateTokens,
+  generateSummaryWithUsage,
+} from "@earendil-works/pi-agent-core";
 import type { Api, Model, Models, ThinkingLevel } from "@earendil-works/pi-ai";
 import { conversationMessages, type TConversation } from "./types";
 
-export const COMPACTION_TRIGGER = 65_000;
-export const CONTEXT_SOFT_LIMIT = 100_000;
+const COMPACTION_TRIGGER = 65_000;
+const CONTEXT_SOFT_LIMIT = 100_000;
 const TARGET_TOKENS = 25_000;
 const SUMMARY_RESERVE = 4_096;
-
-export function compactionThreshold(model: Model<Api>, fixedTokens: number): number {
-  // Keep room for the summary prompt/output on smaller models too.
-  return Math.min(
-    COMPACTION_TRIGGER,
-    model.contextWindow - Math.min(model.maxTokens, SUMMARY_RESERVE) - fixedTokens,
-  );
-}
 
 export async function compactConversation(
   state: TConversation,
   models: Models,
   model: Model<Api>,
   thinkingLevel: TOption<ThinkingLevel>,
+  fixedTokens: number,
+  trace?: TBehaviorTraceContext,
 ) {
-  const trigger = compactionThreshold(model, state.fixedTokens);
-  if (state.contextTokens < trigger) {
+  const messages = conversationMessages(state);
+  const estimates = messages.map((message) => estimateTokens(message));
+  let tokensBefore = fixedTokens + estimates.reduce((sum, tokens) => sum + tokens, 0);
+  const lastMessage = state.entries.at(-1)?.message;
+  // Usage before the summary was written describes the old, larger context.
+  if (lastMessage?.role === "assistant" && lastMessage.timestamp > state.summaryTimestamp) {
+    tokensBefore = Math.max(tokensBefore, calculateContextTokens(lastMessage.usage));
+  }
+  // Keep room for the summary prompt/output on smaller models too.
+  const trigger = Math.min(
+    COMPACTION_TRIGGER,
+    model.contextWindow - Math.min(model.maxTokens, SUMMARY_RESERVE) - fixedTokens,
+  );
+  if (tokensBefore < trigger) {
     return undefined;
+  }
+  if (trace !== undefined) {
+    if (tokensBefore >= CONTEXT_SOFT_LIMIT) {
+      AppLogger.instance.record({
+        trace,
+        event: "conversation.soft-limit",
+        component: "agent-harness",
+        level: EBehaviorLogLevel.Warning,
+        summary: "Context exceeded soft guardrail; turn completed without interruption",
+        metadata: { contextTokens: tokensBefore },
+      });
+    }
+    AppLogger.instance.record({
+      trace,
+      event: "conversation.compaction.started",
+      component: "agent-harness",
+      summary: "Compacting completed conversation",
+      metadata: { tokensBefore, model: model.id },
+    });
   }
 
   const keepTokens = Math.max(
     0,
-    Math.min(TARGET_TOKENS, trigger / 2) - state.fixedTokens - SUMMARY_RESERVE,
+    Math.min(TARGET_TOKENS, trigger / 2) - fixedTokens - SUMMARY_RESERVE,
   );
-  let cut = state.messages.length;
+  let cut = state.entries.length;
   let tokens = 0;
   // Retain whole user turns, so a tool result never loses its matching call.
-  for (let i = state.messages.length - 1; i >= 0; i -= 1) {
-    const message = state.messages[i];
-    if (message === undefined) {
+  for (let i = state.entries.length - 1; i >= 0; i -= 1) {
+    const entry = state.entries[i];
+    if (entry === undefined) {
       continue;
     }
-    tokens += estimateTokens(message);
+    tokens += estimates[i + messages.length - state.entries.length] ?? 0;
     if (tokens > keepTokens) {
       break;
     }
-    if (message.role === "user") {
+    if (entry.message.role === "user") {
       cut = i;
     }
   }
@@ -52,7 +82,7 @@ export async function compactConversation(
   }
 
   const result = await generateSummaryWithUsage(
-    state.messages.slice(0, cut),
+    state.entries.slice(0, cut).map((entry) => entry.message),
     models,
     model,
     SUMMARY_RESERVE,
@@ -71,16 +101,15 @@ export async function compactConversation(
     ...state,
     summary: result.value.text,
     summaryTimestamp: Date.now(),
-    messages: state.messages.slice(cut),
-    messageIds: state.messageIds.slice(cut),
-    contextTokens: 0,
+    entries: state.entries.slice(cut),
+    summarizedThroughId: state.entries[cut - 1]?.id ?? state.summarizedThroughId,
   };
   // Old assistant usage describes the pre-compaction request; do not reuse it.
-  compacted.contextTokens =
-    state.fixedTokens +
+  const tokensAfter =
+    fixedTokens +
     conversationMessages(compacted).reduce((sum, message) => sum + estimateTokens(message), 0);
-  if (compacted.contextTokens >= state.contextTokens) {
+  if (tokensAfter >= tokensBefore) {
     throw new Error("Compaction did not reduce context");
   }
-  return { state: compacted, usage: result.value.usage, tokensBefore: state.contextTokens };
+  return { state: compacted, usage: result.value.usage, tokensBefore, tokensAfter };
 }

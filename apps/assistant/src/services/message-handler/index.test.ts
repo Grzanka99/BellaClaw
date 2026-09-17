@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
 import type { TLogger } from "@bellaclaw/shared";
+import type { Message } from "@earendil-works/pi-ai";
 import {
   type Context,
   fauxAssistantMessage,
@@ -83,10 +84,24 @@ function mockConversationStore() {
   let state: TConversation | undefined;
   return {
     load: mock(async () => structuredClone(state)),
-    saveTurn: mock(async (_chatId: string, _platform: string, next: TConversation) => {
-      state = structuredClone(next);
-      return state;
-    }),
+    saveTurn: mock(
+      async (
+        _chatId: string,
+        _platform: string,
+        messages: Message[],
+        _userId?: number,
+        previous?: TConversation,
+      ) => {
+        state = structuredClone({
+          summary: "",
+          summaryTimestamp: 0,
+          summarizedThroughId: 0,
+          ...previous,
+          entries: messages.map((message, index) => ({ id: index + 1, message })),
+        });
+        return state;
+      },
+    ),
     saveSummary: mock(async (_chatId: string, _platform: string, next: TConversation) => {
       state = structuredClone(next);
       return state;
@@ -123,15 +138,7 @@ function setupHandler(chatId: string, response = "Final answer") {
       iterations: 1,
       toolCallCount: 0,
       stopReason: "completed",
-      conversation: {
-        messageIds: [],
-        lastMemoryId: 0,
-        summary: "",
-        summaryTimestamp: 0,
-        messages: [],
-        fixedTokens: 0,
-        contextTokens: 0,
-      },
+      messages: [],
     })),
   };
   return { handler, internals, settings };
@@ -406,15 +413,7 @@ describe("MessageHandler", () => {
           iterations: 1,
           toolCallCount: 0,
           stopReason: "completed",
-          conversation: {
-            messageIds: [],
-            lastMemoryId: 0,
-            summary: "",
-            summaryTimestamp: 0,
-            messages: [],
-            fixedTokens: 0,
-            contextTokens: 0,
-          },
+          messages: [],
         };
       }),
     };
@@ -475,11 +474,12 @@ describe("MessageHandler", () => {
       release = resolve;
     });
     const events: string[] = [];
-    internals.conversations.saveTurn = mock(async (_chat, _platform, state) => {
+    const saveTurn = internals.conversations.saveTurn;
+    internals.conversations.saveTurn = mock(async (...args: Parameters<typeof saveTurn>) => {
       events.push("save-start");
       await gate;
       events.push("save-end");
-      return state;
+      return saveTurn(...args);
     });
     internals.memory.loadLiveFactWindow = mock(async () => {
       events.push("drain");
@@ -680,22 +680,19 @@ describe("MessageHandler", () => {
     }
   });
 
-  test("returns the user fallback and does not save an assistant message for blank final output", async () => {
+  test.each([
+    "error",
+    "aborted",
+    "serialized-tool-call",
+    "forced-finalization-failed",
+  ])("does not persist or replay a rejected %s transcript", async (stopReason) => {
     const { handler, internals } = setupHandler("discord:2", "unused");
     internals.ai.runMain = mock(async () => ({
       text: undefined,
       iterations: 1,
       toolCallCount: 0,
-      stopReason: "error",
-      conversation: {
-        messageIds: [],
-        lastMemoryId: 0,
-        summary: "",
-        summaryTimestamp: 0,
-        messages: [],
-        fixedTokens: 0,
-        contextTokens: 0,
-      },
+      stopReason,
+      messages: [fauxAssistantMessage("rejected transcript")],
     }));
 
     expect(
@@ -708,6 +705,17 @@ describe("MessageHandler", () => {
     await flushAsyncWork();
 
     expect(internals.memory.save).toHaveBeenCalledTimes(1);
+    expect(internals.conversations.saveTurn).not.toHaveBeenCalled();
+    expect(await internals.conversations.load()).toBeUndefined();
     expect(internals.memory.loadLiveFactWindow).not.toHaveBeenCalled();
+    await handler.handleMessage({
+      chatId: "discord:2",
+      message: { type: "text", content: "try again" },
+      author: { type: ERole.User, id: "2", username: "Owner" },
+    });
+    expect(internals.ai.runMain.mock.calls[1]?.[0].conversation).toBeUndefined();
+    expect(JSON.stringify(internals.ai.runMain.mock.calls[1]?.[0].history)).not.toContain(
+      "rejected transcript",
+    );
   });
 });

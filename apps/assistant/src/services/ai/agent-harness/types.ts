@@ -1,5 +1,6 @@
 import type { TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
 import type { TOption } from "@bellaclaw/shared";
+import type { Message } from "@earendil-works/pi-ai";
 import type { TConversation } from "../../conversation/types";
 import type { EMessagePlatform } from "../../messaging/types";
 import type { TConfigRecord } from "../../settings/schema";
@@ -25,7 +26,6 @@ export type TAgentRunArgs = {
   trace: TOption<TBehaviorTraceContext>;
   history: TOption<THistoryItem[]>;
   conversation?: TConversation;
-  memoryId?: number;
   maxIterations: number;
   parentToolCallId: TOption<string>;
   signal: TOption<AbortSignal>;
@@ -38,4 +38,4 @@ export type TAgentRunResult = {
   stopReason: string;
 };
 
-export type TMainAgentRunResult = TAgentRunResult & { conversation: TConversation };
+export type TMainAgentRunResult = TAgentRunResult & { messages: Message[] };

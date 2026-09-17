@@ -1,17 +1,11 @@
 import { AsyncQueue, type TOption } from "@bellaclaw/shared";
-import { estimateTokens } from "@earendil-works/pi-agent-core";
 import { contentText, type Message } from "@earendil-works/pi-ai";
 import { and, asc, desc, eq, gt, isNotNull, ne } from "drizzle-orm";
 import { ERole } from "../ai/types";
 import { DatabaseConnector } from "../database";
 import { memoriesTable } from "../database/schema";
 import { EMemoryImportance } from "../memory/types";
-import {
-  conversationMessages,
-  SConversation,
-  SConversationMessage,
-  type TConversation,
-} from "./types";
+import { SConversationMessage, type TConversation } from "./types";
 
 export class ConversationStore {
   private static _instance: TOption<ConversationStore>;
@@ -49,57 +43,39 @@ export class ConversationStore {
       if (summary === undefined && rows.length === 0) {
         return undefined;
       }
-      const messages: Message[] = [];
+      const entries: TConversation["entries"] = [];
       for (const row of rows) {
         const parsed = SConversationMessage.safeParse(JSON.parse(row.modelMessage ?? "null"));
         if (!parsed.success) {
           throw new Error("Invalid persisted conversation message");
         }
-        messages.push(parsed.data);
+        entries.push({ id: row.id, message: parsed.data });
       }
-      const state: TConversation = {
+      return {
         summary: summary?.message ?? "",
         summaryTimestamp: summary?.createdAt ?? 0,
-        messages,
-        messageIds: rows.map((row) => row.id),
-        lastMemoryId: rows.at(-1)?.id ?? summary?.summarizedThroughId ?? 0,
-        fixedTokens: 0,
-        contextTokens: 0,
+        summarizedThroughId: summary?.summarizedThroughId ?? 0,
+        entries,
       };
-      // Fixed instructions are counted by the harness using current settings.
-      state.contextTokens = conversationMessages(state).reduce(
-        (sum, message) => sum + estimateTokens(message),
-        0,
-      );
-      return state;
     });
   }
 
   public saveTurn(
     chatId: string,
     platform: string,
-    state: TConversation,
+    messages: Message[],
     userMessageId: number,
-    bootstrapIds: number[],
+    previous: TOption<TConversation>,
+    bootstrapIds: number[] = [],
   ): Promise<TConversation> {
-    return this.queue.enqueue(async () => {
-      const parsed = SConversation.safeParse(state);
-      if (!parsed.success || state.messageIds.length !== state.messages.length) {
-        throw new Error("Invalid conversation state");
-      }
-      return this.db.transaction(async (tx) => {
-        const ids = [...state.messageIds];
-        let savedUser = false;
-        for (let index = 0; index < state.messages.length; index += 1) {
-          const message = state.messages[index];
-          const sourceId = state.messageIds[index];
-          if (message === undefined || sourceId === undefined) {
-            throw new Error("Missing conversation message ID");
-          }
-          if (sourceId !== userMessageId && !bootstrapIds.includes(sourceId)) {
-            continue;
-          }
-          if (sourceId !== userMessageId || !savedUser) {
+    return this.queue.enqueue(() =>
+      this.db.transaction(async (tx) => {
+        const entries = [...(previous?.entries ?? [])];
+        const pending = messages.slice(entries.length);
+        const sourceIds = [...bootstrapIds, userMessageId];
+        for (const [index, message] of pending.entries()) {
+          const sourceId = sourceIds[index];
+          if (sourceId !== undefined) {
             const updated = await tx
               .update(memoriesTable)
               .set({ modelMessage: JSON.stringify(message), platform })
@@ -107,19 +83,11 @@ export class ConversationStore {
             if (updated.rowsAffected !== 1) {
               throw new Error("Conversation source message is missing");
             }
-            if (sourceId === userMessageId) {
-              savedUser = true;
-            }
+            entries.push({ id: sourceId, message });
             continue;
           }
           let kind = "tool";
-          if (
-            index === state.messages.length - 1 &&
-            message.role === "assistant" &&
-            !message.content.some((part) => part.type === "toolCall") &&
-            message.stopReason !== "error" &&
-            message.stopReason !== "aborted"
-          ) {
+          if (index === pending.length - 1 && message.role === "assistant") {
             kind = "message";
           }
           let text: string;
@@ -143,20 +111,20 @@ export class ConversationStore {
             })
             .returning({ id: memoriesTable.id })
             .get();
-          ids[index] = row.id;
+          entries.push({ id: row.id, message });
         }
-        return { ...state, messageIds: ids, lastMemoryId: ids.at(-1) ?? userMessageId };
-      });
-    });
+        return {
+          summary: previous?.summary ?? "",
+          summaryTimestamp: previous?.summaryTimestamp ?? 0,
+          summarizedThroughId: previous?.summarizedThroughId ?? 0,
+          entries,
+        };
+      }),
+    );
   }
 
   public saveSummary(chatId: string, platform: string, state: TConversation): Promise<void> {
     return this.queue.enqueue(async () => {
-      let summarizedThroughId = state.lastMemoryId;
-      const firstRetainedId = state.messageIds[0];
-      if (firstRetainedId !== undefined) {
-        summarizedThroughId = firstRetainedId - 1;
-      }
       await this.db.insert(memoriesTable).values({
         chatId,
         platform,
@@ -164,7 +132,7 @@ export class ConversationStore {
         author: ERole.System,
         importance: EMemoryImportance.Medium,
         message: state.summary,
-        summarizedThroughId,
+        summarizedThroughId: state.summarizedThroughId,
         createdAt: state.summaryTimestamp,
         lastReadAt: state.summaryTimestamp,
       });

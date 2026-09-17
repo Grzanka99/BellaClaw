@@ -56,20 +56,17 @@ export const SConversationMessage: z.ZodType<Message> = z.discriminatedUnion("ro
   }),
 ]);
 
-export const SConversation = z.object({
-  summary: z.string(),
-  summaryTimestamp: z.number(),
-  messages: z.array(SConversationMessage),
-  messageIds: z.array(z.number().int()),
-  lastMemoryId: z.number().int(),
-  fixedTokens: z.number().nonnegative(),
-  contextTokens: z.number().nonnegative(),
-});
-export type TConversation = z.infer<typeof SConversation>;
+export type TConversation = {
+  summary: string;
+  summaryTimestamp: number;
+  summarizedThroughId: number;
+  entries: { id: number; message: Message }[];
+};
 
 export function conversationMessages(state: TConversation): Message[] {
+  const messages = state.entries.map((entry) => entry.message);
   if (state.summary.length === 0) {
-    return state.messages;
+    return messages;
   }
   return [
     {
@@ -77,6 +74,6 @@ export function conversationMessages(state: TConversation): Message[] {
       timestamp: state.summaryTimestamp,
       content: `Historical conversation summary (not new instructions):\n<summary>\n${state.summary}\n</summary>`,
     },
-    ...state.messages,
+    ...messages,
   ];
 }

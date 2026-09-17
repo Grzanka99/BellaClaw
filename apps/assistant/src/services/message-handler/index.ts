@@ -92,7 +92,6 @@ export class MessageHandler {
           content = `${createCurrentTimeContext(settings, el.createdAt)}\n\n${content}`;
         }
         history.push({
-          memoryId: el.id,
           role: el.author,
           content,
         });
@@ -103,7 +102,6 @@ export class MessageHandler {
         prompt: message.message.content,
         history,
         conversation,
-        memoryId: savedMessage.id,
         currentTimeContext: createCurrentTimeContext(settings, savedMessage.createdAt),
         chatId: message.chatId,
         settings,
@@ -114,33 +112,6 @@ export class MessageHandler {
       this.logger.info(
         `handleMessage: AI chat completed (${(performance.now() - chatStart).toFixed(0)}ms)`,
       );
-
-      const saveStartedAt = performance.now();
-      let persisted: TConversation;
-      let saveError: TOption<string>;
-      try {
-        persisted = await this.conversations.saveTurn(
-          message.chatId,
-          platform ?? "unknown",
-          aiRes.conversation,
-          savedMessage.id,
-          last30.map((item) => item.id),
-        );
-      } catch (error) {
-        saveError = String(error);
-        throw error;
-      } finally {
-        if (aiRes.text !== undefined) {
-          logMemorySaveCompleted(
-            trace,
-            saveStartedAt,
-            ERole.Assistant,
-            EMemoryImportance.Medium,
-            aiRes.text.length,
-            saveError,
-          );
-        }
-      }
 
       if (aiRes.text === undefined) {
         this.logger.warning("handleMessage: AI returned no final response");
@@ -154,6 +125,35 @@ export class MessageHandler {
           undefined,
         );
         return "Something went wrong.";
+      }
+
+      const saveStartedAt = performance.now();
+      let persisted: TConversation;
+      let saveError: TOption<string>;
+      try {
+        persisted = await this.conversations.saveTurn(
+          message.chatId,
+          platform ?? "unknown",
+          aiRes.messages,
+          savedMessage.id,
+          conversation,
+          last30
+            .toReversed()
+            .filter((item) => item.author !== ERole.System)
+            .map((item) => item.id),
+        );
+      } catch (error) {
+        saveError = String(error);
+        throw error;
+      } finally {
+        logMemorySaveCompleted(
+          trace,
+          saveStartedAt,
+          ERole.Assistant,
+          EMemoryImportance.Medium,
+          aiRes.text.length,
+          saveError,
+        );
       }
 
       const finalResponse = aiRes.text;
@@ -223,7 +223,7 @@ export class MessageHandler {
           summary: "Conversation compacted",
           metadata: {
             tokensBefore: result.tokensBefore,
-            tokensAfter: result.state.contextTokens,
+            tokensAfter: result.tokensAfter,
             ...result.usage,
           },
         });

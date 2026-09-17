@@ -145,7 +145,6 @@ describe("AgentHarness", () => {
     const args = {
       prompt: `What do I prefer? ${"background ".repeat(41_000)}`,
       history: [],
-      memoryId: 1,
       chatId: "replay-tools",
       settings: { ...DefaultConfigRecord, [EConfigKey.AiProvider]: EAiProvider.Openrouter },
       platform: EMessagePlatform.Discord,
@@ -155,21 +154,22 @@ describe("AgentHarness", () => {
     };
     const first = await AgentHarness.instance.runMain(args);
     expect(first.text).toBe("You prefer trains.");
-    expect(first.conversation.contextTokens).toBeGreaterThan(100_000);
-    expect(first.conversation.messages.map((message) => message.role)).toEqual([
+    expect(first.messages.map((message) => message.role)).toEqual([
       "user",
       "assistant",
       "toolResult",
       "assistant",
     ]);
-    expect(
-      JSON.stringify(first.conversation.messages).includes("specialist private intermediate"),
-    ).toBe(false);
-    expect(JSON.stringify(first.conversation.messages)).toContain("User prefers trains");
-    const replay = JSON.parse(JSON.stringify(first.conversation));
+    expect(JSON.stringify(first.messages).includes("specialist private intermediate")).toBe(false);
+    expect(JSON.stringify(first.messages)).toContain("User prefers trains");
+    const replay = {
+      summary: "",
+      summaryTimestamp: 0,
+      summarizedThroughId: 0,
+      entries: first.messages.map((message, index) => ({ id: index + 1, message })),
+    };
     await AgentHarness.instance.runMain({
       ...args,
-      memoryId: 2,
       conversation: replay,
       prompt: "What is available today?",
       currentTimeContext: "Message received at: 2026-09-13",
