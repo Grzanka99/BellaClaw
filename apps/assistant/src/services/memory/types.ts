@@ -18,7 +18,9 @@ export const SMemory = z.object({
   lastReadAt: z.coerce.date(),
 });
 
-export const SSaveArgs = SMemory.omit({ id: true, createdAt: true, lastReadAt: true });
+export const SSaveArgs = SMemory.omit({ id: true, createdAt: true, lastReadAt: true }).extend({
+  platform: z.string().optional(),
+});
 
 export type TMemory = z.infer<typeof SMemory>;
 export type TSaveArgs = z.infer<typeof SSaveArgs>;

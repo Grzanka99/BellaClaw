@@ -1,5 +1,5 @@
-import { AsyncQueue, createLogger, type TLogger } from "@bellaclaw/shared";
-import { and, asc, desc, eq, gt, inArray, isNull, lte, sql } from "drizzle-orm";
+import { AsyncQueue, createLogger, type TLogger, type TOption } from "@bellaclaw/shared";
+import { and, asc, desc, eq, gt, inArray, isNull, lte, or, type SQL, sql } from "drizzle-orm";
 import { z } from "zod";
 import { ERole } from "../ai/types";
 import { DatabaseConnector } from "../database";
@@ -52,13 +52,19 @@ export class Memory {
     return Memory._instance;
   }
 
-  public async findRecent(chatId: string, limit: number): Promise<TMemory[]> {
+  public async findRecent(chatId: string, limit: number, platform?: string): Promise<TMemory[]> {
     return this.queue.enqueue(async () => {
+      let platformFilter: TOption<SQL>;
+      if (platform !== undefined) {
+        platformFilter = or(isNull(memoriesTable.platform), eq(memoriesTable.platform, platform));
+      }
       const rows = await this.db
         .select()
         .from(memoriesTable)
-        .where(eq(memoriesTable.chatId, chatId))
-        .orderBy(desc(memoriesTable.createdAt))
+        .where(
+          and(eq(memoriesTable.chatId, chatId), eq(memoriesTable.kind, "message"), platformFilter),
+        )
+        .orderBy(desc(memoriesTable.id))
         .limit(limit);
       const parsed = z.array(SMemory).safeParse(rows);
       if (!parsed.success) {
@@ -68,7 +74,7 @@ export class Memory {
     });
   }
 
-  public async save(args: TSaveArgs): Promise<Omit<TMemory, "id">> {
+  public async save(args: TSaveArgs): Promise<TMemory> {
     const now = Date.now();
     return this.queue.enqueue(async () => {
       const row = await this.db
@@ -84,8 +90,7 @@ export class Memory {
       if (!parsed.success) {
         throw new Error("Failed to parse saved memory result");
       }
-      const { id: _id, ...memory } = parsed.data;
-      return memory;
+      return parsed.data;
     });
   }
 
@@ -290,13 +295,25 @@ export class Memory {
     const contextRows = await this.db
       .select()
       .from(memoriesTable)
-      .where(and(eq(memoriesTable.chatId, chatId), lte(memoriesTable.id, lastProcessedMessageId)))
+      .where(
+        and(
+          eq(memoriesTable.chatId, chatId),
+          eq(memoriesTable.kind, "message"),
+          lte(memoriesTable.id, lastProcessedMessageId),
+        ),
+      )
       .orderBy(desc(memoriesTable.id))
       .limit(FACT_CONTEXT_SIZE);
     const messageRows = await this.db
       .select()
       .from(memoriesTable)
-      .where(and(eq(memoriesTable.chatId, chatId), gt(memoriesTable.id, lastProcessedMessageId)))
+      .where(
+        and(
+          eq(memoriesTable.chatId, chatId),
+          eq(memoriesTable.kind, "message"),
+          gt(memoriesTable.id, lastProcessedMessageId),
+        ),
+      )
       .orderBy(asc(memoriesTable.id))
       .limit(FACT_WINDOW_SIZE);
     const parsedContext = z.array(SMemory).safeParse(contextRows);

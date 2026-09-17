@@ -1,7 +1,7 @@
 import { AppLogger, EBehaviorLogLevel, type TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
 import type { TOption } from "@bellaclaw/shared";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import { Agent } from "@earendil-works/pi-agent-core";
+import { Agent, convertToLlm } from "@earendil-works/pi-agent-core";
 import {
   type Api,
   type AssistantMessage,
@@ -21,6 +21,8 @@ import {
   sanitizeToolResult,
   sanitizeToolResultError,
 } from "../../app-logger/sanitizers";
+import { compactConversation } from "../../conversation/compaction";
+import { conversationMessages, type TConversation } from "../../conversation/types";
 import { EConfigKey, type TConfigRecord } from "../../settings/schema";
 import { createPlatformInstructions } from "../instructions/platform";
 import { readXmlAndInjectConfig } from "../instructions/read-xml-and-inject-config";
@@ -36,7 +38,12 @@ import {
   type TToolExecutionContext,
 } from "../tools/executable";
 import { EAiProvider, EModelPurpose, ERole, type THistoryItem } from "../types";
-import { EAgentName, type TAgentRunArgs, type TAgentRunResult } from "./types";
+import {
+  EAgentName,
+  type TAgentRunArgs,
+  type TAgentRunResult,
+  type TMainAgentRunResult,
+} from "./types";
 
 const BASE_INSTRUCTIONS_PATH = "./src/services/ai/instructions/base-system.xml";
 const SEQUENTIAL: "sequential" = "sequential";
@@ -83,7 +90,7 @@ export class AgentHarness {
 
   public async runMain(
     args: Omit<TAgentRunArgs, "name" | "purpose" | "maxIterations" | "parentToolCallId">,
-  ): Promise<TAgentRunResult> {
+  ): Promise<TMainAgentRunResult> {
     let delegationCount = 0;
 
     return this.run({
@@ -241,9 +248,48 @@ export class AgentHarness {
     return undefined;
   }
 
+  public async compactConversation(
+    state: TConversation,
+    settings: TConfigRecord,
+    chatId: string,
+    platform: TAgentRunArgs["platform"],
+    trace?: TBehaviorTraceContext,
+  ) {
+    const config = this.resolveModel(settings, EModelPurpose.Main);
+    const args = {
+      name: EAgentName.Main,
+      purpose: EModelPurpose.Main,
+      settings,
+      chatId,
+      platform,
+      prompt: "",
+      history: [],
+      currentTimeContext: undefined,
+      trace,
+      signal: undefined,
+      maxIterations: 30,
+      parentToolCallId: undefined,
+      delegationCount: undefined,
+    };
+    const tools = await this.createTools(args);
+    const systemPrompt = await this.createSystemPrompt(args, tools);
+    const fixedTokens = Math.ceil(
+      (systemPrompt.length +
+        JSON.stringify(
+          tools.map(({ name, description, parameters }) => ({ name, description, parameters })),
+        ).length) /
+        4,
+    );
+    let thinking = config.effort;
+    if (thinking === "off") {
+      thinking = undefined;
+    }
+    return compactConversation(state, aiModels, config.model, thinking, fixedTokens, trace);
+  }
+
   private async run(
     args: TAgentRunArgs & { delegationCount: TOption<() => void> },
-  ): Promise<TAgentRunResult> {
+  ): Promise<TMainAgentRunResult> {
     const modelConfig = this.resolveModel(args.settings, args.purpose);
     const tools = await this.createTools(args);
     const systemPrompt = await this.createSystemPrompt(args, tools);
@@ -260,12 +306,15 @@ export class AgentHarness {
 
     const toolStartedAt = new Map<string, number>();
 
-    const messages = this.createHistory(
+    let messages = this.createHistory(
       args.history,
       modelConfig.model.api,
       modelConfig.model.provider,
       modelConfig.model.id,
     );
+    if (args.conversation !== undefined) {
+      messages = structuredClone(conversationMessages(args.conversation));
+    }
     const agent = new Agent({
       initialState: {
         systemPrompt,
@@ -475,7 +524,11 @@ export class AgentHarness {
       stopReason,
       startedAt,
     );
-    return { text: finalText, iterations, toolCallCount, stopReason };
+    let transcript = convertToLlm(agent.state.messages);
+    if (args.conversation !== undefined && args.conversation.summary.length > 0) {
+      transcript = transcript.slice(1);
+    }
+    return { text: finalText, iterations, toolCallCount, stopReason, messages: transcript };
   }
 
   private resolveModel(settings: TConfigRecord, purpose: EModelPurpose) {
@@ -702,6 +755,7 @@ export class AgentHarness {
             purpose: delegate.purpose,
             prompt: `Original user message:\n${args.prompt}\n\nDelegated task:\n${parsedParameters.task}`,
             history: undefined,
+            conversation: undefined,
             maxIterations: 12,
             parentToolCallId: toolCallId,
             delegationCount: undefined,
@@ -714,7 +768,12 @@ export class AgentHarness {
 
           return {
             content: [{ type: "text" as const, text: result.text }],
-            details: result,
+            details: {
+              text: result.text,
+              iterations: result.iterations,
+              toolCallCount: result.toolCallCount,
+              stopReason: result.stopReason,
+            },
           };
         },
       };

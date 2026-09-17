@@ -9,6 +9,8 @@ import {
   logMemorySaveCompleted,
 } from "../app-logger/operations";
 import { sanitizeErrorMessage } from "../app-logger/sanitizers";
+import { ConversationStore } from "../conversation";
+import type { TConversation } from "../conversation/types";
 import { Memory } from "../memory";
 import { FactDistiller } from "../memory/distill";
 import { EMemoryImportance, type TMemory } from "../memory/types";
@@ -23,6 +25,8 @@ export class MessageHandler {
   private logger: TLogger;
   private ai = AgentHarness.instance;
   private queue = new AsyncQueue();
+  private turnQueue = new AsyncQueue();
+  private conversations = ConversationStore.instance;
   // NOTE: fact drains get their own queue so a slow distillation run never delays the
   // transcript saves that the reply path awaits on this.queue
   private factQueue = new AsyncQueue();
@@ -52,6 +56,13 @@ export class MessageHandler {
     message: TIncommingMessage,
     platform?: EMessagePlatform,
   ): Promise<string> {
+    return this.turnQueue.enqueue(() => this.handleTurn(message, platform));
+  }
+
+  private async handleTurn(
+    message: TIncommingMessage,
+    platform: TOption<EMessagePlatform>,
+  ): Promise<string> {
     const trace = getMessageTrace(message);
     const handleMessageStart = performance.now();
     this.logger.info("handleMessage: start");
@@ -59,10 +70,18 @@ export class MessageHandler {
 
     try {
       const settings = await SettingsService.instance.getAll(message.chatId);
-      const last30 = await this.retrieveMemory(message.chatId, trace);
+      await this.queue.enqueue(async () => undefined);
+      let conversation = await this.conversations.load(message.chatId, platform ?? "unknown");
+      if (conversation !== undefined) {
+        conversation = await this.compact(conversation, settings, platform, trace);
+      }
+      let last30: TMemory[] = [];
+      if (conversation === undefined) {
+        last30 = await this.retrieveMemory(message.chatId, trace, platform);
+      }
 
       const savedMessage = await this.queue.enqueue(() =>
-        this.saveMessageToDatabase(message, EMemoryImportance.Medium, trace),
+        this.saveMessageToDatabase(message, EMemoryImportance.Medium, trace, platform),
       );
 
       const history: THistoryItem[] = [];
@@ -82,6 +101,7 @@ export class MessageHandler {
       const aiRes = await this.ai.runMain({
         prompt: message.message.content,
         history,
+        conversation,
         currentTimeContext: createCurrentTimeContext(settings, savedMessage.createdAt),
         chatId: message.chatId,
         settings,
@@ -107,34 +127,45 @@ export class MessageHandler {
         return "Something went wrong.";
       }
 
+      const saveStartedAt = performance.now();
+      let persisted: TConversation;
+      let saveError: TOption<string>;
+      try {
+        persisted = await this.conversations.saveTurn(
+          message.chatId,
+          platform ?? "unknown",
+          aiRes.messages,
+          savedMessage.id,
+          conversation,
+          last30
+            .toReversed()
+            .filter((item) => item.author !== ERole.System)
+            .map((item) => item.id),
+        );
+      } catch (error) {
+        saveError = String(error);
+        throw error;
+      } finally {
+        logMemorySaveCompleted(
+          trace,
+          saveStartedAt,
+          ERole.Assistant,
+          EMemoryImportance.Medium,
+          aiRes.text.length,
+          saveError,
+        );
+      }
+
       const finalResponse = aiRes.text;
 
+      void this.factQueue
+        .enqueue(() => this.drainLiveFactWindows(message.chatId, settings, trace))
+        .catch((error) => this.logger.error(`handleMessage: fact drain failed: ${String(error)}`));
       void this.queue
         .enqueue(async () => {
-          await this.saveMessageToDatabase(
-            {
-              chatId: message.chatId,
-              message: {
-                type: "text",
-                content: finalResponse,
-              },
-              author: {
-                type: ERole.Assistant,
-              },
-            },
-            EMemoryImportance.Medium,
-            trace,
-          );
-
-          void this.factQueue
-            .enqueue(() => this.drainLiveFactWindows(message.chatId, settings, trace))
-            .catch((error) => {
-              this.logger.error(`handleMessage: fact drain failed: ${String(error)}`);
-            });
+          await this.compact(persisted, settings, platform, trace);
         })
-        .catch((error) => {
-          this.logger.error(`handleMessage: assistant transcript save failed: ${String(error)}`);
-        });
+        .catch((error) => this.logger.error(`handleMessage: compaction failed: ${String(error)}`));
 
       this.logger.info(
         `handleMessage: done (${(performance.now() - handleMessageStart).toFixed(0)}ms)`,
@@ -160,6 +191,59 @@ export class MessageHandler {
         String(error),
       );
       throw error;
+    }
+  }
+
+  private async compact(
+    state: TConversation,
+    settings: TConfigRecord,
+    platform: TOption<EMessagePlatform>,
+    trace: TOption<TBehaviorTraceContext>,
+  ): Promise<TConversation> {
+    const startedAt = performance.now();
+    try {
+      const result = await this.ai.compactConversation(
+        state,
+        settings,
+        this.chatId,
+        platform,
+        trace,
+      );
+      if (result === undefined) {
+        return state;
+      }
+      await this.conversations.saveSummary(this.chatId, platform ?? "unknown", result.state);
+      if (trace !== undefined) {
+        AppLogger.instance.record({
+          trace,
+          event: "conversation.compaction.completed",
+          component: "message-handler",
+          success: true,
+          durationMs: performance.now() - startedAt,
+          summary: "Conversation compacted",
+          metadata: {
+            tokensBefore: result.tokensBefore,
+            tokensAfter: result.tokensAfter,
+            ...result.usage,
+          },
+        });
+      }
+      return result.state;
+    } catch (error) {
+      this.logger.error(`Conversation compaction failed: ${String(error)}`);
+      if (trace !== undefined) {
+        AppLogger.instance.record({
+          trace,
+          event: "conversation.compaction.failed",
+          component: "message-handler",
+          level: EBehaviorLogLevel.Warning,
+          success: false,
+          durationMs: performance.now() - startedAt,
+          summary: "Kept original conversation; retry next turn",
+          error: sanitizeErrorMessage(String(error)),
+        });
+      }
+      return state;
     }
   }
 
@@ -227,12 +311,14 @@ export class MessageHandler {
     message: TIncommingMessage | TOutgoingMessage,
     importance: EMemoryImportance,
     trace: TOption<TBehaviorTraceContext>,
-  ): Promise<Omit<TMemory, "id">> {
+    platform: TOption<EMessagePlatform>,
+  ): Promise<TMemory> {
     const start = performance.now();
     let failure: TOption<string>;
     try {
       return await this.memory.save({
         chatId: message.chatId,
+        platform,
         author: message.author.type,
         importance,
         message: message.message.content,
@@ -255,11 +341,12 @@ export class MessageHandler {
   private async retrieveMemory(
     chatId: string,
     trace: TOption<TBehaviorTraceContext>,
+    platform: TOption<EMessagePlatform>,
   ): Promise<TMemory[]> {
     const start = performance.now();
 
     try {
-      const memories = await this.memory.findRecent(chatId, 30);
+      const memories = await this.memory.findRecent(chatId, 30, platform);
       logMemoryRecentCompleted(trace, start, true, memories.length, 30, undefined);
       return memories;
     } catch (error) {

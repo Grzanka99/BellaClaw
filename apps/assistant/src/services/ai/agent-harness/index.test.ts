@@ -9,6 +9,7 @@ import {
   fauxToolCall,
   type Model,
 } from "@earendil-works/pi-ai";
+import { convertResponsesMessages } from "@earendil-works/pi-ai/api/openai-responses-shared";
 import { EMessagePlatform } from "../../messaging/types";
 import { DefaultConfigRecord, EConfigKey } from "../../settings/schema";
 import { aiModels, getAiModelIds } from "../providers/registry";
@@ -120,6 +121,73 @@ describe("AgentHarness", () => {
     expect(contexts[1]?.messages).toMatchObject([
       { role: "user", content: [{ type: "text", text: "time two\n\nsecond prompt" }] },
     ]);
+  });
+
+  test("replays main tool exchanges across turns without specialist internals, even above the soft limit", async () => {
+    const captured: Context[] = [];
+    faux.setResponses([
+      fauxAssistantMessage(
+        fauxToolCall("delegate-memory", { task: "Recall a preference" }, { id: "remember-1" }),
+      ),
+      fauxAssistantMessage([
+        { type: "thinking", thinking: "specialist private intermediate" },
+        { type: "text", text: "User prefers trains" },
+      ]),
+      (context) => {
+        captured.push({ ...context, messages: structuredClone(context.messages) });
+        return fauxAssistantMessage("You prefer trains.");
+      },
+      (context) => {
+        captured.push({ ...context, messages: structuredClone(context.messages) });
+        return fauxAssistantMessage("I will check the current timetable.");
+      },
+    ]);
+    const args = {
+      prompt: `What do I prefer? ${"background ".repeat(41_000)}`,
+      history: [],
+      chatId: "replay-tools",
+      settings: { ...DefaultConfigRecord, [EConfigKey.AiProvider]: EAiProvider.Openrouter },
+      platform: EMessagePlatform.Discord,
+      currentTimeContext: "Message received at: 2026-09-10",
+      trace: undefined,
+      signal: undefined,
+    };
+    const first = await AgentHarness.instance.runMain(args);
+    expect(first.text).toBe("You prefer trains.");
+    expect(first.messages.map((message) => message.role)).toEqual([
+      "user",
+      "assistant",
+      "toolResult",
+      "assistant",
+    ]);
+    expect(JSON.stringify(first.messages).includes("specialist private intermediate")).toBe(false);
+    expect(JSON.stringify(first.messages)).toContain("User prefers trains");
+    const replay = {
+      summary: "",
+      summaryTimestamp: 0,
+      summarizedThroughId: 0,
+      entries: first.messages.map((message, index) => ({ id: index + 1, message })),
+    };
+    await AgentHarness.instance.runMain({
+      ...args,
+      conversation: replay,
+      prompt: "What is available today?",
+      currentTimeContext: "Message received at: 2026-09-13",
+    });
+    expect(captured[1]?.messages.slice(0, captured[0]?.messages.length)).toEqual(
+      captured[0]?.messages,
+    );
+    expect(captured[1]?.systemPrompt).toBe(captured[0]?.systemPrompt);
+    expect(captured[1]?.systemPrompt).toContain("retrieve fresh information");
+    const model = faux.getModel("google/gemini-3.1-pro-preview");
+    const previous = captured[0];
+    const next = captured[1];
+    if (model === undefined || previous === undefined || next === undefined) {
+      throw new Error("Missing captured requests");
+    }
+    const prefix = convertResponsesMessages(model, previous, new Set());
+    const replayed = convertResponsesMessages(model, next, new Set());
+    expect(replayed.slice(0, prefix.length)).toEqual(prefix);
   });
 
   test("sends a stable OpenCode session header for each conversation", async () => {
