@@ -1,9 +1,17 @@
 import type { TOption } from "@bellaclaw/shared";
 import { calendarAddReadCommand } from "./calendar-add-read";
 import { calendarAddWriteCommand } from "./calendar-add-write";
-import { COMMAND_PREFIX, type TCommand } from "./types";
+import { mcpAuthCommand } from "./mcp-auth";
+import { mcpPromptCommand, mcpPromptsCommand } from "./mcp-prompts";
+import { COMMAND_PREFIX, type TCommand, type TCommandResult } from "./types";
 
-const REGISTERED_COMMANDS: TCommand[] = [calendarAddWriteCommand, calendarAddReadCommand];
+const REGISTERED_COMMANDS: TCommand[] = [
+  calendarAddWriteCommand,
+  calendarAddReadCommand,
+  mcpAuthCommand,
+  mcpPromptsCommand,
+  mcpPromptCommand,
+];
 
 export function formatCommandList(): string {
   return REGISTERED_COMMANDS.map((command) => `- ${command.usage} — ${command.description}`).join(
@@ -11,7 +19,10 @@ export function formatCommandList(): string {
   );
 }
 
-export async function runCommand(chatId: string, content: string): Promise<TOption<string>> {
+export async function runCommand(
+  chatId: string,
+  content: string,
+): Promise<TOption<TCommandResult>> {
   const trimmed = content.trim();
 
   if (!trimmed.startsWith(COMMAND_PREFIX)) {

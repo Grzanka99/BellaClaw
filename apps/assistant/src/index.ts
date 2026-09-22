@@ -2,6 +2,12 @@ import { AppLogger, EBehaviorLogLevel } from "@bellaclaw/behavior-logs";
 import { AuthorizationService } from "./services/authorization";
 import { CalendarService } from "./services/calendar";
 import { DiscordSingleton } from "./services/discord";
+import { McpService } from "./services/mcp";
+import {
+  registerMcpAuthConnectedListener,
+  startMcpAuthServer,
+  stopMcpAuthServer,
+} from "./services/mcp/auth";
 import { MessageHandler } from "./services/message-handler";
 import { MessagingAdapter } from "./services/messaging";
 import { SignalSingleton } from "./services/signal";
@@ -30,6 +36,12 @@ async function init(): Promise<void> {
   });
 
   try {
+    registerMcpAuthConnectedListener((chatId, profileId) =>
+      MessagingAdapter.instance.sendMcpConnectedMessage(chatId, profileId),
+    );
+    if (Bun.env.BELLACLAW_MCP_PUBLIC_URL?.trim()) {
+      startMcpAuthServer();
+    }
     await AuthorizationService.instance.setup();
     await Promise.all([
       CalendarService.instance.setup(),
@@ -78,6 +90,14 @@ async function init(): Promise<void> {
   }
 
   console.timeEnd("init");
+}
+
+for (const signal of ["SIGINT", "SIGTERM"]) {
+  process.once(signal, () => {
+    void Promise.allSettled([McpService.instance.close(), stopMcpAuthServer()]).then(() =>
+      process.exit(0),
+    );
+  });
 }
 
 init();

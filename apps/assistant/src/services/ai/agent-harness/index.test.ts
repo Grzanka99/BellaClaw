@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { AppLogger, type TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
 import type { TOption } from "@bellaclaw/shared";
+import type { AgentTool } from "@earendil-works/pi-agent-core";
 import {
   type Context,
   createAssistantMessageEventStream,
@@ -8,13 +9,22 @@ import {
   fauxProvider,
   fauxToolCall,
   type Model,
+  Type,
 } from "@earendil-works/pi-ai";
 import { convertResponsesMessages } from "@earendil-works/pi-ai/api/openai-responses-shared";
+import type {
+  CreateMessageRequest,
+  CreateMessageResult,
+  CreateMessageResultWithTools,
+  ElicitRequest,
+} from "@modelcontextprotocol/sdk/types.js";
+import { McpRunRegistry } from "../../mcp/runs";
 import { EMessagePlatform } from "../../messaging/types";
 import { DefaultConfigRecord, EConfigKey } from "../../settings/schema";
 import { aiModels, getAiModelIds } from "../providers/registry";
 import { EAiProvider, EModelPurpose, ERole, type THistoryItem } from "../types";
 import { AgentHarness, EAgentName, isSerializedToolCall } from ".";
+import type { TAgentRunArgs, TAgentRunResult } from "./types";
 
 const OPENROUTER_MODELS = [
   "openai/gpt-5.4-nano",
@@ -120,6 +130,192 @@ describe("AgentHarness", () => {
     expect(contexts[1]?.messages.filter((message) => message.role === "user")).toHaveLength(1);
     expect(contexts[1]?.messages).toMatchObject([
       { role: "user", content: [{ type: "text", text: "time two\n\nsecond prompt" }] },
+    ]);
+  });
+
+  test("resumes a scheduled MCP question in the next interactive turn", async () => {
+    const chatId = crypto.randomUUID();
+    const elicitation: ElicitRequest["params"] = {
+      mode: "form",
+      message: "Which folder?",
+      requestedSchema: {
+        type: "object",
+        properties: { folder: { type: "string" } },
+        required: ["folder"],
+      },
+    };
+    let answer = "";
+    const pending = await McpRunRegistry.instance.start({
+      chatId,
+      profileId: "files",
+      inputTimeoutMs: 1_000,
+      controller: new AbortController(),
+      close: async () => undefined,
+      run: async (_signal, elicit) => {
+        answer = JSON.stringify(await elicit(elicitation, new AbortController().signal));
+        return { text: "saved", iterations: 2, toolCallCount: 1, stopReason: "completed" };
+      },
+    });
+    const contexts: Context[] = [];
+    faux.setResponses([
+      (context) => {
+        contexts.push({ ...context, messages: structuredClone(context.messages) });
+        return fauxAssistantMessage(
+          fauxToolCall(
+            "resume-mcp",
+            { runId: pending.runId, action: "accept", content: { folder: "docs" } },
+            { id: "resume-scheduled" },
+          ),
+        );
+      },
+      fauxAssistantMessage("The scheduled file operation completed."),
+    ]);
+
+    const result = await AgentHarness.instance.runMain({
+      prompt: "Use docs",
+      history: [],
+      chatId,
+      settings: { ...DefaultConfigRecord, [EConfigKey.AiProvider]: EAiProvider.Openrouter },
+      currentTimeContext: undefined,
+      platform: EMessagePlatform.Discord,
+      trace: undefined,
+      signal: undefined,
+    });
+
+    expect(contexts[0]?.tools?.map((tool) => tool.name)).toContain("resume-mcp");
+    expect(JSON.stringify(contexts[0]?.messages)).toContain("Which folder?");
+    expect(answer).toBe(JSON.stringify({ action: "accept", content: { folder: "docs" } }));
+    expect(result.text).toBe("The scheduled file operation completed.");
+  });
+
+  test("uses refreshed MCP tools on the next specialist turn", async () => {
+    const schema = Type.Object({});
+    const tools: AgentTool[] = [];
+    const replacement: AgentTool = {
+      name: "replacement-tool",
+      label: "Replacement tool",
+      description: "Replacement tool",
+      parameters: schema,
+      execute: async () => {
+        return { content: [{ type: "text", text: "replacement result" }], details: {} };
+      },
+    };
+    tools.push({
+      name: "initial-tool",
+      label: "Initial tool",
+      description: "Initial tool",
+      parameters: schema,
+      execute: async () => {
+        tools.splice(0, tools.length, replacement);
+        return { content: [{ type: "text", text: "initial result" }], details: {} };
+      },
+    });
+    const visibleTools: string[][] = [];
+    faux.setResponses([
+      fauxAssistantMessage(fauxToolCall("initial-tool", {}, { id: "initial-call" })),
+      (context) => {
+        visibleTools.push(context.tools?.map((tool) => tool.name) ?? []);
+        return fauxAssistantMessage(
+          fauxToolCall("replacement-tool", {}, { id: "replacement-call" }),
+        );
+      },
+      fauxAssistantMessage("refreshed"),
+    ]);
+    const harness = AgentHarness.instance as unknown as {
+      run(args: TAgentRunArgs & { delegationCount: TOption<() => void> }): Promise<TAgentRunResult>;
+    };
+
+    const result = await harness.run({
+      name: EAgentName.Mcp,
+      purpose: EModelPurpose.SpecialistAccurate,
+      prompt: "Use the MCP tools",
+      chatId: "discord:1",
+      settings: { ...DefaultConfigRecord, [EConfigKey.AiProvider]: EAiProvider.Openrouter },
+      currentTimeContext: undefined,
+      platform: EMessagePlatform.Discord,
+      trace: undefined,
+      history: [],
+      maxIterations: 6,
+      parentToolCallId: "delegate-call",
+      signal: undefined,
+      delegationCount: undefined,
+      mcp: {
+        profile: {
+          id: "files",
+          description: "Files",
+          instructions: "Use file tools",
+          transport: { type: "stdio", command: "fixture", args: [], env: {} },
+          contextArguments: {},
+          resources: true,
+          prompts: true,
+          sampling: true,
+          requestTimeoutMs: 1_000,
+          inputTimeoutMs: 1_000,
+        },
+        tools,
+      },
+    });
+
+    expect(visibleTools).toEqual([["replacement-tool"]]);
+    expect(result.text).toBe("refreshed");
+    expect(result.toolCallCount).toBe(2);
+  });
+
+  test("samples from MCP request context and returns every requested tool call", async () => {
+    let sampledContext: TOption<Context>;
+    let sampledMaxTokens: TOption<number>;
+    faux.setResponses([
+      (context, options) => {
+        sampledContext = { ...context, messages: structuredClone(context.messages) };
+        sampledMaxTokens = options?.maxTokens;
+        return fauxAssistantMessage([
+          fauxToolCall("lookup", { query: "one" }, { id: "sample-one" }),
+          fauxToolCall("lookup", { query: "two" }, { id: "sample-two" }),
+        ]);
+      },
+    ]);
+    const params: CreateMessageRequest["params"] = {
+      systemPrompt: "Sampling only",
+      messages: [{ role: "user", content: { type: "text", text: "MCP-only request" } }],
+      maxTokens: 999_999,
+      tools: [
+        {
+          name: "lookup",
+          description: "Look up a value",
+          inputSchema: { type: "object", properties: { query: { type: "string" } } },
+        },
+      ],
+    };
+    const harness = AgentHarness.instance as unknown as {
+      sampleMcp(
+        request: CreateMessageRequest["params"],
+        settings: typeof DefaultConfigRecord,
+        trace: TOption<TBehaviorTraceContext>,
+        parentToolCallId: string,
+        iteration: number,
+        signal: AbortSignal,
+      ): Promise<CreateMessageResult | CreateMessageResultWithTools>;
+    };
+
+    const result = await harness.sampleMcp(
+      params,
+      { ...DefaultConfigRecord, [EConfigKey.AiProvider]: EAiProvider.Openrouter },
+      undefined,
+      "delegate-call",
+      2,
+      new AbortController().signal,
+    );
+
+    expect(sampledContext?.systemPrompt).toBe("Sampling only");
+    expect(JSON.stringify(sampledContext?.messages)).toContain("MCP-only request");
+    expect(JSON.stringify(sampledContext?.messages)).not.toContain("stored history");
+    expect(sampledContext?.tools?.map((tool) => tool.name)).toEqual(["lookup"]);
+    expect(sampledMaxTokens).toBeLessThan(999_999);
+    expect(Array.isArray(result.content)).toBe(true);
+    expect(result.content).toHaveLength(2);
+    expect(result.content).toMatchObject([
+      { type: "tool_use", id: "sample-one", name: "lookup", input: { query: "one" } },
+      { type: "tool_use", id: "sample-two", name: "lookup", input: { query: "two" } },
     ]);
   });
 
