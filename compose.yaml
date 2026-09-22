@@ -40,6 +40,7 @@ services:
       - BELLACLAW_LOG_DB_PATH=${BELLACLAW_LOG_DB_PATH:-/app-data/bellaclaw-logs.db}
       - BELLACLAW_LOG_DB_ROOT=/app-data
       - BELLACLAW_LOG_VIEWER_HOSTNAME=0.0.0.0
+      - LOG_CHATID_HMAC_KEY=${LOG_CHATID_HMAC_KEY:-}
     command: ["bun", "run", "--cwd", "apps/log-viewer", "start"]
     ports:
       - "0.0.0.0:8989:8989"

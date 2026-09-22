@@ -1,0 +1,11 @@
+{
+  "profiles": [
+    {
+      "id": "logs",
+      "description": "Inspect BellaClaw failures, turn latency, and model prompt-cache usage.",
+      "instructions": "Use the log server to answer operational questions. Recently means the last hour. Last call means the previous completed conversational turn. Cache hit rate means the previous ten completed user turns in the current chat, including specialist calls. Use server aggregates; never average percentages or sum overlapping durations. Distinguish measured timings from inferred causes. The runtime supplies current chat and diagnostic turn identifiers. Resources and explicitly requested server prompt templates are available.",
+      "transport": { "type": "http", "url": "http://127.0.0.1:8989/mcp" },
+      "contextArguments": { "chatId": "chatId", "excludeTurnId": "turnId" }
+    }
+  ]
+}

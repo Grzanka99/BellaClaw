@@ -48,3 +48,38 @@ export type TLogPage = {
   recentTurns: TRecentTurn[];
   filters: TLogFilterOptions;
 };
+
+export type TRecentFailuresOptions = {
+  sinceMs: number;
+  limit: number;
+  excludeTurnId: TOption<string>;
+};
+
+export type TChatMetricOptions = {
+  chatId: string;
+  excludeTurnId: TOption<string>;
+};
+
+export type TTurnTimelineEvent = {
+  event: TPersistedBehaviorLogEvent;
+  startOffsetMs: number;
+  endOffsetMs: number;
+};
+
+export type TTurnLatency = {
+  turnId: string;
+  startedAtMs: number;
+  completedAtMs: number;
+  latencyMs: number;
+  timeline: TTurnTimelineEvent[];
+};
+
+export type TCacheHitRate = {
+  completedTurnCount: number;
+  turnsWithModelRequests: number;
+  modelRequestCount: number;
+  modelRequestsWithUsage: number;
+  cacheReadTokens: number;
+  inputTokens: number;
+  cacheHitRatePercent: number | null;
+};
