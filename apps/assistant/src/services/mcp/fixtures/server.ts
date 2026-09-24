@@ -64,7 +64,7 @@ export function createFixtureServer() {
                 required: ["limit"],
               },
             },
-            required: ["query", "chatId"],
+            required: ["query", "chatId", "excludeTurnId"],
           },
         },
       ],

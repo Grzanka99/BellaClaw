@@ -5,6 +5,8 @@ import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import type { RequestOptions } from "@modelcontextprotocol/sdk/shared/protocol.js";
 import {
   CallToolResultSchema,
+  ErrorCode,
+  McpError,
   type ResourceUpdatedNotification,
   type Tool,
   UrlElicitationRequiredError,
@@ -85,20 +87,22 @@ export async function discoverTools(context: TMcpToolContext): Promise<AgentTool
 function remoteTool(context: TMcpToolContext, tool: Tool): AgentTool {
   const properties = { ...tool.inputSchema.properties };
   const injected: Record<string, string> = {};
+  const contextArgumentNames = new Set<string>();
   for (const [name, source] of Object.entries(context.profile.contextArguments)) {
     if (!(name in properties)) {
       continue;
     }
+    contextArgumentNames.add(name);
+    delete properties[name];
     const value = context.args[source];
     if (value !== undefined) {
       injected[name] = value;
-      delete properties[name];
     }
   }
   const parameters = {
     ...tool.inputSchema,
     properties,
-    required: tool.inputSchema.required?.filter((name) => !(name in injected)),
+    required: tool.inputSchema.required?.filter((name) => !contextArgumentNames.has(name)),
   };
   // Stable provider-safe names; the original name stays in the server request.
   const suffix = new Bun.CryptoHasher("sha256").update(tool.name).digest("hex").slice(0, 10);
@@ -118,7 +122,11 @@ function remoteTool(context: TMcpToolContext, tool: Tool): AgentTool {
       if (!parsed.success) {
         throw new Error("MCP tool arguments must be a structured object");
       }
-      const argumentsWithContext = { ...parsed.data, ...injected };
+      const argumentsWithContext = { ...parsed.data };
+      for (const name of contextArgumentNames) {
+        delete argumentsWithContext[name];
+      }
+      Object.assign(argumentsWithContext, injected);
       if (!Value.Check(tool.inputSchema, argumentsWithContext)) {
         throw new Error(`Invalid arguments for MCP tool ${tool.name}`);
       }
@@ -189,20 +197,27 @@ function capabilityTools(context: TMcpToolContext): AgentTool[] {
             }
           } while (cursor !== undefined);
           seen.clear();
-          do {
-            const page = await client.listResourceTemplates(
-              { cursor },
-              requestOptions(context, signal),
-            );
-            templates.push(...page.resourceTemplates);
-            cursor = page.nextCursor;
-            if (cursor !== undefined && seen.has(cursor)) {
-              throw new Error("MCP resource template discovery repeated its cursor");
+          try {
+            do {
+              const page = await client.listResourceTemplates(
+                { cursor },
+                requestOptions(context, signal),
+              );
+              templates.push(...page.resourceTemplates);
+              cursor = page.nextCursor;
+              if (cursor !== undefined && seen.has(cursor)) {
+                throw new Error("MCP resource template discovery repeated its cursor");
+              }
+              if (cursor !== undefined) {
+                seen.add(cursor);
+              }
+            } while (cursor !== undefined);
+          } catch (error) {
+            if (!(error instanceof McpError) || error.code !== ErrorCode.MethodNotFound) {
+              throw error;
             }
-            if (cursor !== undefined) {
-              seen.add(cursor);
-            }
-          } while (cursor !== undefined);
+            templates.length = 0;
+          }
           return { resources, templates };
         },
       ),

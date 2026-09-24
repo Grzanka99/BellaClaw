@@ -4,12 +4,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { TOption } from "@bellaclaw/shared";
 import { validateToolArguments } from "@earendil-works/pi-ai";
+import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
+import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import { Value } from "typebox/value";
 import { loadMcpProfiles } from "./config";
 import { mcpResult } from "./content";
 import { createFixtureServer } from "./fixtures/server";
 import { McpService } from "./index";
+import { discoverTools, type TMcpToolContext } from "./tools";
 import type { TMcpSession } from "./types";
 
 let directory: string;
@@ -94,11 +97,12 @@ describe("MCP runtime", () => {
     expect(Value.Check(read.parameters, { query: "hello", options: { limit: null } })).toBe(true);
     expect(Value.Check(read.parameters, { query: 23 })).toBe(false);
     expect(JSON.stringify(read.parameters)).not.toContain('"chatId"');
+    expect(JSON.stringify(read.parameters)).not.toContain('"excludeTurnId"');
     const valid = validateToolArguments(read, {
       type: "toolCall",
       id: "a",
       name: read.name,
-      arguments: { query: "hi", options: { limit: 2 } },
+      arguments: { query: "hi", chatId: "model-supplied", options: { limit: 2 } },
     });
     const result = await read.execute("a", valid);
     expect(result.content[0]).toEqual({
@@ -111,6 +115,12 @@ describe("MCP runtime", () => {
       }),
     });
     await expect(read.execute("bad", { query: 12 })).rejects.toThrow("Invalid arguments");
+    const missingContext = await service.open({ chatId: "discord:missing", profileId: "fixture" });
+    const missingContextRead = tool(missingContext, "read.foo");
+    expect(JSON.stringify(missingContextRead.parameters)).not.toContain('"excludeTurnId"');
+    await expect(
+      missingContextRead.execute("spoofed", { query: "q", excludeTurnId: "model-supplied" }),
+    ).rejects.toThrow("Invalid arguments");
     await expect(tool(session, "failure").execute("fail", {})).rejects.toThrow(
       "deliberate failure",
     );
@@ -266,6 +276,79 @@ describe("MCP runtime", () => {
       await fixture.close();
       await http.stop(true);
     }
+  });
+
+  test("resource listing paginates and tolerates only unsupported template listing", async () => {
+    await configure({ type: "stdio", command: "unused" });
+    const [profile] = await loadMcpProfiles();
+    if (profile === undefined) {
+      throw new Error("Missing MCP test profile");
+    }
+    const resourceCursors: TOption<string>[] = [];
+    const templateCursors: TOption<string>[] = [];
+    let templateFailure: TOption<McpError>;
+    const client = {
+      getServerCapabilities: () => ({ resources: {} }),
+      listResources: async ({ cursor }: { cursor?: string }) => {
+        resourceCursors.push(cursor);
+        if (cursor === undefined) {
+          return {
+            resources: [{ uri: "fixture://one", name: "one" }],
+            nextCursor: "resources-next",
+          };
+        }
+        return { resources: [{ uri: "fixture://two", name: "two" }] };
+      },
+      listResourceTemplates: async ({ cursor }: { cursor?: string }) => {
+        templateCursors.push(cursor);
+        if (templateFailure !== undefined) {
+          throw templateFailure;
+        }
+        if (cursor === undefined) {
+          return {
+            resourceTemplates: [{ uriTemplate: "fixture://{first}", name: "first" }],
+            nextCursor: "templates-next",
+          };
+        }
+        return {
+          resourceTemplates: [{ uriTemplate: "fixture://{second}", name: "second" }],
+        };
+      },
+    } as unknown as Client;
+    const context: TMcpToolContext = {
+      client,
+      profile,
+      args: { chatId: "test", profileId: profile.id },
+      signal: new AbortController().signal,
+      updates: [],
+    };
+    const tools = await discoverTools(context);
+    const list = tool(
+      { profile, tools, signal: context.signal, close: async () => {} },
+      "mcp-list-resources",
+    );
+
+    const paginated = await list.execute("paginated", {});
+    expect(resourceCursors).toEqual([undefined, "resources-next"]);
+    expect(templateCursors).toEqual([undefined, "templates-next"]);
+    expect(JSON.stringify(paginated)).toContain("fixture://two");
+    expect(JSON.stringify(paginated)).toContain("fixture://{second}");
+
+    resourceCursors.length = 0;
+    templateCursors.length = 0;
+    templateFailure = new McpError(ErrorCode.MethodNotFound, "templates unsupported");
+    const unsupported = await list.execute("unsupported", {});
+    expect(resourceCursors).toEqual([undefined, "resources-next"]);
+    expect(templateCursors).toEqual([undefined]);
+    expect(JSON.stringify(unsupported)).toContain("fixture://two");
+    const unsupportedContent = unsupported.content[0];
+    if (unsupportedContent?.type !== "text") {
+      throw new Error("Missing resource list result");
+    }
+    expect(JSON.parse(unsupportedContent.text).templates).toEqual([]);
+
+    templateFailure = new McpError(ErrorCode.InternalError, "template failure");
+    await expect(list.execute("failed", {})).rejects.toThrow("template failure");
   });
 
   test("aborting a call cancels its pending request", async () => {

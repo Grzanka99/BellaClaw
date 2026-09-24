@@ -127,11 +127,31 @@ beforeAll(async () => {
 afterAll(async () => {
   oauthServer.stop(true);
   await rm(directory, { recursive: true, force: true });
-  Bun.env.BELLACLAW_MCP_CONFIG = previousConfigPath;
-  Bun.env.BELLACLAW_MCP_CREDENTIALS_PATH = previousCredentialsPath;
-  Bun.env.BELLACLAW_MCP_PUBLIC_URL = previousPublicUrl;
-  Bun.env.BELLACLAW_TEST_MCP_CLIENT_ID = previousClientId;
-  Bun.env.BELLACLAW_TEST_MCP_CLIENT_SECRET = previousClientSecret;
+  if (previousConfigPath === undefined) {
+    delete Bun.env.BELLACLAW_MCP_CONFIG;
+  } else {
+    Bun.env.BELLACLAW_MCP_CONFIG = previousConfigPath;
+  }
+  if (previousCredentialsPath === undefined) {
+    delete Bun.env.BELLACLAW_MCP_CREDENTIALS_PATH;
+  } else {
+    Bun.env.BELLACLAW_MCP_CREDENTIALS_PATH = previousCredentialsPath;
+  }
+  if (previousPublicUrl === undefined) {
+    delete Bun.env.BELLACLAW_MCP_PUBLIC_URL;
+  } else {
+    Bun.env.BELLACLAW_MCP_PUBLIC_URL = previousPublicUrl;
+  }
+  if (previousClientId === undefined) {
+    delete Bun.env.BELLACLAW_TEST_MCP_CLIENT_ID;
+  } else {
+    Bun.env.BELLACLAW_TEST_MCP_CLIENT_ID = previousClientId;
+  }
+  if (previousClientSecret === undefined) {
+    delete Bun.env.BELLACLAW_TEST_MCP_CLIENT_SECRET;
+  } else {
+    Bun.env.BELLACLAW_TEST_MCP_CLIENT_SECRET = previousClientSecret;
+  }
 });
 
 describe("MCP OAuth", () => {
@@ -229,6 +249,38 @@ describe("MCP OAuth", () => {
     );
     expect(secondCallback.status).toBe(200);
     expect(await service.getMcpAuthStatus("signal:replacement", "documents")).toBe(true);
+  });
+
+  test("closes the runtime session when a connection already exists", async () => {
+    const chatId = "signal:already-connected";
+    const url = new URL(await service.beginMcpAuth(chatId, "documents"));
+    const callback = await service.handleMcpAuthCallback(
+      new Request(
+        `http://localhost:3080/mcp/oauth/callback?code=connected&state=${url.searchParams.get("state")}`,
+      ),
+    );
+    expect(callback.status).toBe(200);
+
+    const provider = await service.getMcpAuthProvider(chatId, profile);
+    expect(provider).toBeDefined();
+    if (provider === undefined) {
+      throw new Error("Missing OAuth provider");
+    }
+    const disconnected: string[] = [];
+    const unregister = service.registerMcpAuthDisconnectListener(
+      (disconnectedChatId, profileId) => {
+        disconnected.push(`${disconnectedChatId}/${profileId}`);
+      },
+    );
+
+    await expect(service.beginMcpAuth(chatId, "documents")).rejects.toThrow(
+      "MCP profile documents is already connected",
+    );
+    expect(disconnected).toEqual([`${chatId}/documents`]);
+    await expect(provider.tokens()).rejects.toThrow(
+      "MCP authentication for profile documents was cancelled",
+    );
+    unregister();
   });
 
   test("rejects a callback when the OAuth configuration changed", async () => {
