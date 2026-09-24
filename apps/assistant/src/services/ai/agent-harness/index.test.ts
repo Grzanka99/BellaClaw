@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { AppLogger, type TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
-import type { TOption } from "@bellaclaw/shared";
+import { logger, type TOption } from "@bellaclaw/shared";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import {
   type Context,
@@ -36,6 +39,7 @@ const OPENROUTER_MODELS = [
 
 describe("AgentHarness", () => {
   const previousApiKey = Bun.env.OPENROUTER_API_KEY;
+  const previousMcpConfig = Bun.env.BELLACLAW_MCP_CONFIG;
   const previousOpenCodeApiKey = Bun.env.OPENCODE_API_KEY;
   const faux = fauxProvider({
     provider: EAiProvider.Openrouter,
@@ -58,6 +62,59 @@ describe("AgentHarness", () => {
       delete Bun.env.OPENCODE_API_KEY;
     } else {
       Bun.env.OPENCODE_API_KEY = previousOpenCodeApiKey;
+    }
+
+    if (previousMcpConfig === undefined) {
+      delete Bun.env.BELLACLAW_MCP_CONFIG;
+    } else {
+      Bun.env.BELLACLAW_MCP_CONFIG = previousMcpConfig;
+    }
+  });
+
+  test("keeps main and scheduled task runs available when MCP configuration is malformed", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "bellaclaw-agent-harness-"));
+    const configPath = join(directory, "mcp.json");
+    await Bun.write(configPath, JSON.stringify({ profiles: [{ id: "invalid" }] }));
+    Bun.env.BELLACLAW_MCP_CONFIG = configPath;
+    const warnings = spyOn(logger, "warning").mockImplementation(() => undefined);
+    const toolNames: string[][] = [];
+    faux.setResponses([
+      (context) => {
+        toolNames.push(context.tools?.map((tool) => tool.name) ?? []);
+        return fauxAssistantMessage("main reply");
+      },
+      (context) => {
+        toolNames.push(context.tools?.map((tool) => tool.name) ?? []);
+        return fauxAssistantMessage("scheduled reply");
+      },
+    ]);
+    const args = {
+      prompt: "hello",
+      history: [],
+      chatId: "discord:1",
+      settings: { ...DefaultConfigRecord, [EConfigKey.AiProvider]: EAiProvider.Openrouter },
+      currentTimeContext: undefined,
+      platform: EMessagePlatform.Discord,
+      trace: undefined,
+      signal: undefined,
+    };
+
+    try {
+      expect((await AgentHarness.instance.runMain(args)).text).toBe("main reply");
+      expect(
+        (await AgentHarness.instance.runScheduledTask({ ...args, prompt: "scheduled" })).text,
+      ).toBe("scheduled reply");
+      expect(toolNames).toHaveLength(2);
+      for (const names of toolNames) {
+        expect(names).not.toContain("delegate-mcp");
+        expect(names).not.toContain("resume-mcp");
+        expect(names).not.toContain("cancel-mcp");
+      }
+      expect(warnings).toHaveBeenCalledTimes(2);
+      expect(warnings).toHaveBeenCalledWith(expect.stringContaining("Invalid MCP configuration"));
+    } finally {
+      warnings.mockRestore();
+      await rm(directory, { recursive: true, force: true });
     }
   });
 

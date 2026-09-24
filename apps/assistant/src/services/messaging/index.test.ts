@@ -17,7 +17,7 @@ import type { TIncommingMessage } from "../message-handler/types";
 import { SettingsService } from "../settings";
 import { DefaultConfigRecord } from "../settings/schema";
 import { MessagingAdapter } from ".";
-import { EMessagePlatform, type TMessageTransport } from "./types";
+import { EMessagePlatform, type TMessageTransport, type TPlatformMessage } from "./types";
 
 type TAdapterInternals = {
   authorization: {
@@ -237,6 +237,57 @@ describe("MessagingAdapter", () => {
         platform: EMessagePlatform.Discord,
       });
       expect(sendText).toHaveBeenCalledWith("channel-1", "Prompt completed.");
+    } finally {
+      MessageHandler.getInstance = originalGetInstance;
+      if (originalMcpConfig === undefined) {
+        delete Bun.env.BELLACLAW_MCP_CONFIG;
+      } else {
+        Bun.env.BELLACLAW_MCP_CONFIG = originalMcpConfig;
+      }
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("replies when MCP prompt commands encounter configuration errors", async () => {
+    const originalGetInstance = MessageHandler.getInstance;
+    const originalMcpConfig = Bun.env.BELLACLAW_MCP_CONFIG;
+    const directory = await mkdtemp(join(tmpdir(), "bellaclaw-messaging-mcp-errors-"));
+    const handleMessage = mock(async () => "Unexpected AI reply");
+    MessageHandler.getInstance = mock(() => ({
+      handleMessage,
+    })) as unknown as typeof MessageHandler.getInstance;
+
+    try {
+      const configPath = join(directory, "mcp.json");
+      await Bun.write(configPath, JSON.stringify({ profiles: [] }));
+      Bun.env.BELLACLAW_MCP_CONFIG = configPath;
+
+      const sendText = mock(async () => undefined);
+      const adapter = MessagingAdapter.instance;
+      adapter.registerTransport({ platform: EMessagePlatform.Discord, sendText });
+      const message: TPlatformMessage = {
+        platform: EMessagePlatform.Discord,
+        chatId: "channel-1",
+        author: { id: "user-1", username: "Owner" },
+        message: { type: "text", content: "!mcp-prompt missing summarize" },
+      };
+
+      await adapter.handleInboundMessage(message);
+
+      expect(sendText).toHaveBeenLastCalledWith(
+        "channel-1",
+        "MCP prompt request failed: Error: Unknown MCP profile: missing",
+      );
+
+      await Bun.write(configPath, JSON.stringify({ profiles: [{ id: "INVALID" }] }));
+      message.message.content = "!mcp-prompts";
+      await adapter.handleInboundMessage(message);
+
+      expect(sendText).toHaveBeenLastCalledWith(
+        "channel-1",
+        expect.stringContaining("MCP prompt listing failed: Error: Invalid MCP configuration:"),
+      );
+      expect(handleMessage).not.toHaveBeenCalled();
     } finally {
       MessageHandler.getInstance = originalGetInstance;
       if (originalMcpConfig === undefined) {

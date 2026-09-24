@@ -1,5 +1,5 @@
 import { AppLogger, EBehaviorLogLevel, type TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
-import type { TOption } from "@bellaclaw/shared";
+import { createLogger, type TOption } from "@bellaclaw/shared";
 import type { AgentMessage, AgentTool } from "@earendil-works/pi-agent-core";
 import { Agent, convertToLlm } from "@earendil-works/pi-agent-core";
 import {
@@ -94,6 +94,7 @@ function withSession(
 
 export class AgentHarness {
   private static _instance: TOption<AgentHarness>;
+  private logger = createLogger("AGENT_HARNESS");
 
   public static get instance(): AgentHarness {
     if (AgentHarness._instance === undefined) {
@@ -833,7 +834,13 @@ export class AgentHarness {
   private async createMcpDelegationTools(
     args: TAgentRunArgs & { delegationCount: TOption<() => void> },
   ): Promise<AgentTool[]> {
-    const profiles = await loadMcpProfiles();
+    let profiles: Awaited<ReturnType<typeof loadMcpProfiles>>;
+    try {
+      profiles = await loadMcpProfiles();
+    } catch (error) {
+      this.logger.warning(`MCP delegation disabled: ${String(error)}`);
+      return [];
+    }
     const profileSummary = profiles
       .map((profile) => `${profile.id}: ${profile.description}`)
       .join("\n");

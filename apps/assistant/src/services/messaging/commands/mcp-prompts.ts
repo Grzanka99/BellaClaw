@@ -10,27 +10,31 @@ export const mcpPromptsCommand: TCommand = {
   description: "List MCP profiles, or list a profile's prompt templates",
   usage: "!mcp-prompts [PROFILE]",
   handler: async (_chatId, args) => {
-    const profileId = args.trim();
-    if (profileId.length === 0) {
-      return (
-        (await loadMcpProfiles())
-          .map((profile) => `${profile.id}: ${profile.description}`)
-          .join("\n") || "No MCP profiles configured."
-      );
-    }
-    const session = await McpService.instance.open({ chatId: _chatId, profileId });
     try {
-      const list = session.tools.find((tool) => tool.name === "mcp-list-prompts");
-      if (list === undefined) {
-        return "This profile does not expose prompt templates.";
+      const profileId = args.trim();
+      if (profileId.length === 0) {
+        return (
+          (await loadMcpProfiles())
+            .map((profile) => `${profile.id}: ${profile.description}`)
+            .join("\n") || "No MCP profiles configured."
+        );
       }
-      const result = await list.execute(crypto.randomUUID(), {});
-      return result.content
-        .filter((block) => block.type === "text")
-        .map((block) => block.text)
-        .join("\n");
-    } finally {
-      await session.close();
+      const session = await McpService.instance.open({ chatId: _chatId, profileId });
+      try {
+        const list = session.tools.find((tool) => tool.name === "mcp-list-prompts");
+        if (list === undefined) {
+          return "This profile does not expose prompt templates.";
+        }
+        const result = await list.execute(crypto.randomUUID(), {});
+        return result.content
+          .filter((block) => block.type === "text")
+          .map((block) => block.text)
+          .join("\n");
+      } finally {
+        await session.close();
+      }
+    } catch (error) {
+      return `MCP prompt listing failed: ${String(error)}`;
     }
   },
 };
@@ -46,26 +50,30 @@ export const mcpPromptCommand: TCommand = {
     if (profileId === undefined || promptName === undefined) {
       return "Usage: !mcp-prompt PROFILE PROMPT [JSON_ARGUMENTS]";
     }
-    const profile = await getMcpProfile(profileId);
-    if (!profile.prompts) {
-      return "Prompts are disabled for this profile.";
-    }
-    let promptArguments: Record<string, string> = {};
-    if (match?.[3] !== undefined) {
-      let decoded: unknown;
-      try {
-        decoded = JSON.parse(match[3]);
-      } catch {
-        return "Prompt arguments must be a JSON object of string values.";
+    try {
+      const profile = await getMcpProfile(profileId);
+      if (!profile.prompts) {
+        return "Prompts are disabled for this profile.";
       }
-      const parsed = SPromptArguments.safeParse(decoded);
-      if (!parsed.success) {
-        return "Prompt arguments must be a JSON object of string values.";
+      let promptArguments: Record<string, string> = {};
+      if (match?.[3] !== undefined) {
+        let decoded: unknown;
+        try {
+          decoded = JSON.parse(match[3]);
+        } catch {
+          return "Prompt arguments must be a JSON object of string values.";
+        }
+        const parsed = SPromptArguments.safeParse(decoded);
+        if (!parsed.success) {
+          return "Prompt arguments must be a JSON object of string values.";
+        }
+        promptArguments = parsed.data;
       }
-      promptArguments = parsed.data;
+      return {
+        prompt: `Use MCP profile ${profileId} to run the explicitly requested prompt template ${promptName} with arguments ${JSON.stringify(promptArguments)}.`,
+      };
+    } catch (error) {
+      return `MCP prompt request failed: ${String(error)}`;
     }
-    return {
-      prompt: `Use MCP profile ${profileId} to run the explicitly requested prompt template ${promptName} with arguments ${JSON.stringify(promptArguments)}.`,
-    };
   },
 };
