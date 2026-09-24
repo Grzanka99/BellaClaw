@@ -21,6 +21,7 @@ import type {
   CreateMessageResultWithTools,
   ElicitRequest,
 } from "@modelcontextprotocol/sdk/types.js";
+import type { TConversation } from "../../conversation/types";
 import { McpRunRegistry } from "../../mcp/runs";
 import { EMessagePlatform } from "../../messaging/types";
 import { DefaultConfigRecord, EConfigKey } from "../../settings/schema";
@@ -541,6 +542,44 @@ describe("AgentHarness", () => {
     expect(sessionIds[4]).toMatch(/^[0-9a-f-]{36}$/);
     expect(sessionIds[4]).not.toBe(sessionIds[0]);
     expect(sessionHeaders).toEqual(sessionIds);
+  });
+
+  test("sends the conversation's OpenCode session header when compacting", async () => {
+    Bun.env.OPENCODE_API_KEY = "opencode-test-key";
+    const opencode = fauxProvider({
+      provider: EAiProvider.OpencodeGo,
+      models: [{ id: "grok-4.6", reasoning: true }],
+    });
+    aiModels.setProvider(opencode.provider);
+    const expectedSessionId = new Bun.CryptoHasher("sha256", "opencode-test-key")
+      .update("discord:discord:1")
+      .digest("hex");
+    opencode.setResponses([
+      (_context, options) => {
+        expect(options?.headers?.["x-opencode-session"]).toBe(expectedSessionId);
+        return fauxAssistantMessage("Earlier context summarized.");
+      },
+    ]);
+    const state: TConversation = {
+      summary: "",
+      summaryTimestamp: 0,
+      summarizedThroughId: 0,
+      entries: [
+        { id: 1, message: { role: "user", content: "old detail ".repeat(26_000), timestamp: 1 } },
+        { id: 2, message: fauxAssistantMessage("Earlier answer", { timestamp: 2 }) },
+        { id: 3, message: { role: "user", content: "Continue", timestamp: 3 } },
+        { id: 4, message: fauxAssistantMessage("Latest answer", { timestamp: Date.now() }) },
+      ],
+    };
+
+    const result = await AgentHarness.instance.compactConversation(
+      state,
+      { ...DefaultConfigRecord, [EConfigKey.AiProvider]: EAiProvider.OpencodeGo },
+      "discord:1",
+      EMessagePlatform.Discord,
+    );
+
+    expect(result?.state.summary).toBe("Earlier context summarized.");
   });
 
   test("rejects an OpenCode conversation before streaming when its API key is missing", async () => {
