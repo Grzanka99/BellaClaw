@@ -89,10 +89,10 @@ function remoteTool(context: TMcpToolContext, tool: Tool): AgentTool {
   const injected: Record<string, string> = {};
   const contextArgumentNames = new Set<string>();
   for (const [name, source] of Object.entries(context.profile.contextArguments)) {
+    contextArgumentNames.add(name);
     if (!(name in properties)) {
       continue;
     }
-    contextArgumentNames.add(name);
     delete properties[name];
     const value = context.args[source];
     if (value !== undefined) {

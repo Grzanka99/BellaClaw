@@ -186,10 +186,33 @@ describe("MCP OAuth", () => {
     expect(await service.getMcpAuthStatus("discord:second", "documents")).toBe(true);
   });
 
-  test("rejects configured overrides of reserved authorization parameters", async () => {
-    expect(service.beginMcpAuth("signal:reserved", "reserved-parameter")).rejects.toThrow(
-      "OAuth authorization parameter state is reserved",
+  test("closes the runtime session when starting authentication fails", async () => {
+    const chatId = "signal:reserved";
+    const config = await import("../config");
+    const reservedProfile = await config.getMcpProfile("reserved-parameter");
+    const provider = await service.getMcpAuthProvider(chatId, reservedProfile);
+    expect(provider).toBeDefined();
+    if (provider === undefined) {
+      throw new Error("Missing OAuth provider");
+    }
+    const disconnected: string[] = [];
+    const unregister = service.registerMcpAuthDisconnectListener(
+      (disconnectedChatId, profileId) => {
+        disconnected.push(`${disconnectedChatId}/${profileId}`);
+      },
     );
+
+    try {
+      await expect(service.beginMcpAuth(chatId, "reserved-parameter")).rejects.toThrow(
+        "OAuth authorization parameter state is reserved",
+      );
+      expect(disconnected).toEqual([`${chatId}/reserved-parameter`]);
+      await expect(provider.tokens()).rejects.toThrow(
+        "MCP authentication for profile reserved-parameter was cancelled",
+      );
+    } finally {
+      unregister();
+    }
   });
 
   test("persists credentials with restrictive permissions and refreshes through the SDK", async () => {

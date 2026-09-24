@@ -246,7 +246,7 @@ export async function beginMcpAuth(chatId: string, profileId: string): Promise<s
   const generation = advanceAuthGeneration(key);
   runtimeProviders.delete(key);
   const serverUrl = profile.transport.url;
-  const authorizationUrl = await authQueue(key).enqueue(async () => {
+  const authentication = authQueue(key).enqueue(async () => {
     if (currentAuthGeneration(key) !== generation) {
       throw new Error(`MCP authentication for profile ${profileId} was cancelled`);
     }
@@ -271,6 +271,15 @@ export async function beginMcpAuth(chatId: string, profileId: string): Promise<s
     await auth(provider, { serverUrl });
     return redirectUrl;
   });
+  let authorizationUrl: TOption<string>;
+  try {
+    authorizationUrl = await authentication;
+  } catch (error) {
+    for (const listener of disconnectListeners) {
+      await listener(chatId, profileId);
+    }
+    throw error;
+  }
   if (authorizationUrl === undefined) {
     for (const listener of disconnectListeners) {
       await listener(chatId, profileId);

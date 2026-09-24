@@ -124,6 +124,14 @@ describe("MCP runtime", () => {
     await expect(tool(session, "failure").execute("fail", {})).rejects.toThrow(
       "deliberate failure",
     );
+    expect(
+      (
+        await tool(session, "read_foo").execute("open-schema", {
+          chatId: "model-supplied",
+          marker: "kept",
+        })
+      ).content[0],
+    ).toEqual({ type: "text", text: JSON.stringify({ marker: "kept" }) });
     const other = await service.open({
       chatId: "discord:b",
       profileId: "fixture",
