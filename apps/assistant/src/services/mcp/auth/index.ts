@@ -245,8 +245,15 @@ export async function beginMcpAuth(chatId: string, profileId: string): Promise<s
   const key = credentialKey(chatId, profile);
   const generation = advanceAuthGeneration(key);
   runtimeProviders.delete(key);
+  for (const listener of disconnectListeners) {
+    try {
+      await listener(chatId, profileId);
+    } catch (_error) {
+      logger.warning("MCP OAuth disconnection notification could not be delivered");
+    }
+  }
   const serverUrl = profile.transport.url;
-  const authentication = authQueue(key).enqueue(async () => {
+  const authorizationUrl = await authQueue(key).enqueue(async () => {
     if (currentAuthGeneration(key) !== generation) {
       throw new Error(`MCP authentication for profile ${profileId} was cancelled`);
     }
@@ -271,19 +278,7 @@ export async function beginMcpAuth(chatId: string, profileId: string): Promise<s
     await auth(provider, { serverUrl });
     return redirectUrl;
   });
-  let authorizationUrl: TOption<string>;
-  try {
-    authorizationUrl = await authentication;
-  } catch (error) {
-    for (const listener of disconnectListeners) {
-      await listener(chatId, profileId);
-    }
-    throw error;
-  }
   if (authorizationUrl === undefined) {
-    for (const listener of disconnectListeners) {
-      await listener(chatId, profileId);
-    }
     throw new Error(`MCP profile ${profileId} is already connected`);
   }
   return authorizationUrl;

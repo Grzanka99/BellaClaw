@@ -306,6 +306,54 @@ describe("MCP OAuth", () => {
     unregister();
   });
 
+  test("replaces the runtime session after a successful re-authentication", async () => {
+    const chatId = "signal:re-authenticated";
+    const firstUrl = new URL(await service.beginMcpAuth(chatId, "documents"));
+    const firstCallback = await service.handleMcpAuthCallback(
+      new Request(
+        `http://localhost:3080/mcp/oauth/callback?code=initial&state=${firstUrl.searchParams.get("state")}`,
+      ),
+    );
+    expect(firstCallback.status).toBe(200);
+
+    const provider = await service.getMcpAuthProvider(chatId, profile);
+    expect(provider).toBeDefined();
+    if (provider === undefined) {
+      throw new Error("Missing OAuth provider");
+    }
+    if (provider.invalidateCredentials === undefined) {
+      throw new Error("OAuth provider cannot invalidate credentials");
+    }
+    await provider.invalidateCredentials("tokens");
+
+    const notifications: string[] = [];
+    const unregisterDisconnected = service.registerMcpAuthDisconnectListener(() => {
+      notifications.push("disconnected");
+    });
+    const unregisterConnected = service.registerMcpAuthConnectedListener(() => {
+      notifications.push("connected");
+    });
+
+    try {
+      const secondUrl = new URL(await service.beginMcpAuth(chatId, "documents"));
+      expect(notifications).toEqual(["disconnected"]);
+      const secondCallback = await service.handleMcpAuthCallback(
+        new Request(
+          `http://localhost:3080/mcp/oauth/callback?code=re-authenticated&state=${secondUrl.searchParams.get("state")}`,
+        ),
+      );
+
+      expect(secondCallback.status).toBe(200);
+      expect(notifications).toEqual(["disconnected", "connected"]);
+      await expect(provider.tokens()).rejects.toThrow(
+        "MCP authentication for profile documents was cancelled",
+      );
+    } finally {
+      unregisterDisconnected();
+      unregisterConnected();
+    }
+  });
+
   test("rejects a callback when the OAuth configuration changed", async () => {
     const url = new URL(await service.beginMcpAuth("signal:changed-config", "documents"));
     Bun.env.BELLACLAW_TEST_MCP_CLIENT_SECRET = "changed-secret";
