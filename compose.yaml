@@ -19,6 +19,8 @@ services:
     volumes:
       - bellaclaw-data:/app-data
       - ./.secrets:/app/.secrets
+    ports:
+      - "127.0.0.1:3080:3080"
 
   ollama:
     image: docker.io/ollama/ollama:latest

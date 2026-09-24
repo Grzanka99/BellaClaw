@@ -1,6 +1,6 @@
 import { AppLogger, EBehaviorLogLevel, type TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
-import type { TOption } from "@bellaclaw/shared";
-import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import { createLogger, type TOption } from "@bellaclaw/shared";
+import type { AgentMessage, AgentTool } from "@earendil-works/pi-agent-core";
 import { Agent, convertToLlm } from "@earendil-works/pi-agent-core";
 import {
   type Api,
@@ -9,12 +9,23 @@ import {
   contentText,
   createAssistantMessageEventStream,
   hasApi,
+  type Message,
   type Model,
   type SimpleStreamOptions,
   type Static,
   type ThinkingLevel,
   Type,
 } from "@earendil-works/pi-ai";
+import type {
+  CreateMessageRequest,
+  CreateMessageResult,
+  CreateMessageResultWithTools,
+  ElicitRequest,
+  ElicitResult,
+  ContentBlock as McpContentBlock,
+  SamplingMessageContentBlock,
+  ToolUseContent,
+} from "@modelcontextprotocol/sdk/types.js";
 import {
   sanitizeErrorMessage,
   sanitizeToolCallArguments,
@@ -23,6 +34,9 @@ import {
 } from "../../app-logger/sanitizers";
 import { compactConversation } from "../../conversation/compaction";
 import { conversationMessages, type TConversation } from "../../conversation/types";
+import { McpService } from "../../mcp";
+import { loadMcpProfiles } from "../../mcp/config";
+import { McpRunRegistry, type TMcpRunStatus } from "../../mcp/runs";
 import { EConfigKey, type TConfigRecord } from "../../settings/schema";
 import { createPlatformInstructions } from "../instructions/platform";
 import { readXmlAndInjectConfig } from "../instructions/read-xml-and-inject-config";
@@ -51,6 +65,7 @@ const PARALLEL: "parallel" = "parallel";
 const AGENT_INSTRUCTIONS: Record<EAgentName, string> = {
   [EAgentName.Calendar]: "./src/services/ai/agents/calendar/instructions.xml",
   [EAgentName.Main]: "./src/services/ai/agents/main/instructions.xml",
+  [EAgentName.Mcp]: "./src/services/ai/agents/mcp/instructions.xml",
   [EAgentName.Memory]: "./src/services/ai/agents/memory/instructions.xml",
   [EAgentName.Settings]: "./src/services/ai/agents/settings/instructions.xml",
   [EAgentName.Scheduling]: "./src/services/ai/agents/scheduling/instructions.xml",
@@ -79,6 +94,7 @@ function withSession(
 
 export class AgentHarness {
   private static _instance: TOption<AgentHarness>;
+  private logger = createLogger("AGENT_HARNESS");
 
   public static get instance(): AgentHarness {
     if (AgentHarness._instance === undefined) {
@@ -344,7 +360,16 @@ export class AgentHarness {
       getApiKey: (provider) => this.resolveApiKey(provider),
       toolExecution: "parallel",
       prepareNextTurnWithContext: (context) => {
+        let nextTools = context.context.tools;
+        if (args.mcp !== undefined) {
+          nextTools = [...args.mcp.tools];
+          agent.state.tools = nextTools;
+        }
+
         if (context.message.role !== "assistant") {
+          if (nextTools !== context.context.tools) {
+            return { context: { ...context.context, tools: nextTools } };
+          }
           return undefined;
         }
 
@@ -369,6 +394,10 @@ export class AgentHarness {
               tools: [],
             },
           };
+        }
+
+        if (nextTools !== context.context.tools) {
+          return { context: { ...context.context, tools: nextTools } };
         }
 
         return undefined;
@@ -450,6 +479,12 @@ export class AgentHarness {
         let prompt = args.prompt;
         if (args.currentTimeContext !== undefined) {
           prompt = `${args.currentTimeContext}\n\n${prompt}`;
+        }
+        if (args.name === EAgentName.Main && args.chatId !== undefined) {
+          const pendingRuns = McpRunRegistry.instance.list(args.chatId);
+          if (pendingRuns.length > 0) {
+            prompt += `\n\nPending MCP runs awaiting this user's response:\n${JSON.stringify(pendingRuns)}`;
+          }
         }
         await agent.prompt(prompt);
 
@@ -626,10 +661,10 @@ export class AgentHarness {
 
   private async createSystemPrompt(
     args: TAgentRunArgs,
-    tools: Array<{ instructionsPath?: string }>,
+    tools: Array<{ instructionsPath?: string } | AgentTool>,
   ): Promise<string> {
     const toolPaths = tools.flatMap((tool) => {
-      if (tool.instructionsPath === undefined) {
+      if (!("instructionsPath" in tool) || tool.instructionsPath === undefined) {
         return [];
       }
       return [tool.instructionsPath];
@@ -640,6 +675,12 @@ export class AgentHarness {
       ...toolPaths.map((path) => readXmlAndInjectConfig(path, args.settings)),
     ]);
     const parts = [base, agentInstructions, ...toolInstructions];
+
+    if (args.mcp !== undefined) {
+      parts.push(
+        `<mcp_profile_instructions>${args.mcp.profile.instructions}</mcp_profile_instructions>`,
+      );
+    }
 
     const platformInstructions = createPlatformInstructions(args.platform);
 
@@ -660,7 +701,16 @@ export class AgentHarness {
       case EAgentName.Calendar:
         return [...createCalendarTools(context), ...createWebTools()];
       case EAgentName.Main:
-        return [...createWebTools(), ...this.createDelegationTools(args)];
+        return [
+          ...createWebTools(),
+          ...this.createDelegationTools(args),
+          ...(await this.createMcpDelegationTools(args)),
+        ];
+      case EAgentName.Mcp:
+        if (args.mcp === undefined) {
+          return [];
+        }
+        return args.mcp.tools;
       case EAgentName.Memory:
         return createMemoryTools(context);
       case EAgentName.Settings:
@@ -676,6 +726,7 @@ export class AgentHarness {
               tool.name === "list-calendar-events" || tool.name === "find-calendar-availability"
             );
           }),
+          ...(await this.createMcpDelegationTools(args)),
         ];
     }
   }
@@ -778,6 +829,404 @@ export class AgentHarness {
         },
       };
     });
+  }
+
+  private async createMcpDelegationTools(
+    args: TAgentRunArgs & { delegationCount: TOption<() => void> },
+  ): Promise<AgentTool[]> {
+    let profiles: Awaited<ReturnType<typeof loadMcpProfiles>>;
+    try {
+      profiles = await loadMcpProfiles();
+    } catch (error) {
+      this.logger.warning(`MCP delegation disabled: ${String(error)}`);
+      return [];
+    }
+    const profileSummary = profiles
+      .map((profile) => `${profile.id}: ${profile.description}`)
+      .join("\n");
+    const delegateSchema = Type.Object({
+      profileId: Type.String({
+        minLength: 1,
+        description: `One configured profile:\n${profileSummary}`,
+      }),
+      task: Type.String({ minLength: 1, description: "Focused task for the MCP specialist" }),
+      context: Type.String({
+        minLength: 1,
+        description: "Recent conversation context needed for this task, stated explicitly",
+      }),
+    });
+    const responseValue = Type.Union([
+      Type.String(),
+      Type.Number(),
+      Type.Boolean(),
+      Type.Array(Type.String()),
+    ]);
+    const resumeSchema = Type.Object({
+      runId: Type.String({ minLength: 1 }),
+      action: Type.Union([Type.Literal("accept"), Type.Literal("decline"), Type.Literal("cancel")]),
+      content: Type.Optional(Type.Record(Type.String(), responseValue)),
+    });
+    const cancelSchema = Type.Object({ runId: Type.String({ minLength: 1 }) });
+    const tools: AgentTool[] = [
+      {
+        name: "delegate-mcp",
+        label: "Delegate MCP",
+        description: `Run one configured MCP specialist. Profiles:\n${profileSummary}`,
+        parameters: delegateSchema,
+        executionMode: SEQUENTIAL,
+        execute: async (toolCallId, parameters, signal) => {
+          const parsed = validateToolArguments(delegateSchema, parameters);
+          if (args.name === EAgentName.Main) {
+            args.delegationCount?.();
+          }
+          const profile = profiles.find((candidate) => candidate.id === parsed.profileId);
+          if (profile === undefined) {
+            throw new Error(`Unknown MCP profile: ${parsed.profileId}`);
+          }
+          const chatId = this.requireMcpChatId(args.chatId);
+          const controller = new AbortController();
+          const abort = () => controller.abort();
+          signal?.addEventListener("abort", abort, { once: true });
+          args.signal?.addEventListener("abort", abort, { once: true });
+          let sampleCount = 0;
+          let forwardElicitation: (
+            params: ElicitRequest["params"],
+            requestSignal: AbortSignal,
+          ) => Promise<ElicitResult> = () => {
+            return Promise.reject(new Error("MCP elicitation started before the specialist"));
+          };
+          try {
+            const session = await McpService.instance.open({
+              chatId,
+              profileId: profile.id,
+              turnId: args.trace?.turnId,
+              signal: controller.signal,
+              sample: (params, requestSignal) => {
+                sampleCount += 1;
+                if (sampleCount > 12) {
+                  throw new Error("MCP sampling request limit reached");
+                }
+                return this.sampleMcp(
+                  params,
+                  args.settings,
+                  args.trace,
+                  toolCallId,
+                  sampleCount,
+                  requestSignal,
+                );
+              },
+              elicit: (params, requestSignal) => forwardElicitation(params, requestSignal),
+            });
+            const status = await McpRunRegistry.instance.start({
+              chatId,
+              profileId: profile.id,
+              inputTimeoutMs: profile.inputTimeoutMs,
+              controller,
+              close: () => session.close(),
+              run: (runSignal, elicit) => {
+                forwardElicitation = elicit;
+                return this.run({
+                  ...args,
+                  name: EAgentName.Mcp,
+                  purpose: EModelPurpose.SpecialistAccurate,
+                  prompt: this.createMcpPrompt(args.prompt, parsed.task, parsed.context),
+                  history: undefined,
+                  conversation: undefined,
+                  maxIterations: 12,
+                  parentToolCallId: toolCallId,
+                  signal: AbortSignal.any([runSignal, session.signal]),
+                  delegationCount: undefined,
+                  mcp: { profile: session.profile, tools: session.tools },
+                });
+              },
+            });
+            return this.mcpStatusResult(status);
+          } finally {
+            signal?.removeEventListener("abort", abort);
+            args.signal?.removeEventListener("abort", abort);
+          }
+        },
+      },
+      {
+        name: "resume-mcp",
+        label: "Resume MCP",
+        description: "Resume an MCP run that requested user input",
+        parameters: resumeSchema,
+        executionMode: SEQUENTIAL,
+        execute: async (_toolCallId, parameters, signal) => {
+          const parsed = validateToolArguments(resumeSchema, parameters);
+          const status = await McpRunRegistry.instance.resume(
+            this.requireMcpChatId(args.chatId),
+            parsed.runId,
+            { action: parsed.action, content: parsed.content },
+            signal,
+          );
+          return this.mcpStatusResult(status);
+        },
+      },
+      {
+        name: "cancel-mcp",
+        label: "Cancel MCP",
+        description: "Cancel a live MCP run owned by this chat",
+        parameters: cancelSchema,
+        executionMode: SEQUENTIAL,
+        execute: async (_toolCallId, parameters) => {
+          const parsed = validateToolArguments(cancelSchema, parameters);
+          await McpRunRegistry.instance.cancel(this.requireMcpChatId(args.chatId), parsed.runId);
+          return {
+            content: [{ type: "text", text: "MCP run cancelled" }],
+            details: { status: "cancelled", runId: parsed.runId },
+          };
+        },
+      },
+    ];
+    if (profiles.length === 0) {
+      if (args.chatId === undefined || McpRunRegistry.instance.list(args.chatId).length === 0) {
+        return [];
+      }
+      return tools.slice(1);
+    }
+    return tools;
+  }
+
+  private requireMcpChatId(chatId: TOption<string>): string {
+    if (chatId === undefined) {
+      throw new Error("MCP delegation requires a chat owner");
+    }
+    return chatId;
+  }
+
+  private createMcpPrompt(original: string, task: string, context: TOption<string>): string {
+    let prompt = `Original user message:\n${original}\n\nDelegated task:\n${task}`;
+    if (context !== undefined) {
+      prompt += `\n\nRelevant context:\n${context}`;
+    }
+    return prompt;
+  }
+
+  private mcpStatusResult(status: TMcpRunStatus) {
+    const content: [{ type: "text"; text: string }] = [
+      { type: "text", text: JSON.stringify(status) },
+    ];
+    return {
+      content,
+      details: status,
+    };
+  }
+
+  private async sampleMcp(
+    params: CreateMessageRequest["params"],
+    settings: TConfigRecord,
+    trace: TOption<TBehaviorTraceContext>,
+    parentToolCallId: string,
+    iteration: number,
+    signal: AbortSignal,
+  ): Promise<CreateMessageResult | CreateMessageResultWithTools> {
+    const modelConfig = this.resolveModel(settings, EModelPurpose.SpecialistAccurate);
+    const tools = params.tools?.map((tool) => {
+      return {
+        name: tool.name,
+        description: tool.description ?? `MCP sampling tool ${tool.name}`,
+        parameters: tool.inputSchema,
+      };
+    });
+    const context: Context = {
+      systemPrompt: params.systemPrompt,
+      messages: this.createMcpSamplingMessages(params, modelConfig.model),
+      tools,
+    };
+    let reasoning: TOption<ThinkingLevel>;
+    if (modelConfig.effort !== "off") {
+      reasoning = modelConfig.effort;
+    }
+    let toolChoice: SimpleStreamOptions["toolChoice"];
+    if (params.toolChoice?.mode === "none") {
+      toolChoice = "none";
+    } else if (tools !== undefined && tools.length > 0) {
+      toolChoice = "auto";
+    }
+    const startedAt = performance.now();
+    const result = await aiModels.completeSimple(modelConfig.model, context, {
+      apiKey: this.resolveApiKey(modelConfig.model.provider),
+      signal,
+      maxTokens: Math.min(params.maxTokens, modelConfig.model.maxTokens),
+      temperature: params.temperature,
+      reasoning,
+      toolChoice,
+    });
+    this.logModelRequestCompleted({
+      trace,
+      purpose: EModelPurpose.SpecialistAccurate,
+      agentName: EAgentName.Mcp,
+      parentToolCallId,
+      iteration,
+      startedAt,
+      message: result,
+    });
+    if (result.stopReason === "error" || result.stopReason === "aborted") {
+      throw new Error(result.errorMessage ?? `MCP sampling ${result.stopReason}`);
+    }
+    const toolUses: ToolUseContent[] = [];
+    const textParts: string[] = [];
+    for (const block of result.content) {
+      if (block.type === "text") {
+        textParts.push(block.text);
+      } else if (block.type === "toolCall") {
+        toolUses.push({
+          type: "tool_use",
+          id: block.id,
+          name: block.name,
+          input: block.arguments,
+        });
+      }
+    }
+    let stopReason: string = "endTurn";
+    if (result.stopReason === "toolUse") {
+      stopReason = "toolUse";
+    } else if (result.stopReason === "length") {
+      stopReason = "maxTokens";
+    }
+    const responseModel = result.responseModel ?? modelConfig.model.id;
+    if (toolUses.length > 0) {
+      const response: CreateMessageResultWithTools = {
+        role: "assistant",
+        content: toolUses,
+        model: responseModel,
+        stopReason,
+      };
+      return response;
+    }
+    return {
+      role: "assistant",
+      content: { type: "text", text: textParts.join("\n") },
+      model: responseModel,
+      stopReason,
+    };
+  }
+
+  private createMcpSamplingMessages(
+    params: CreateMessageRequest["params"],
+    model: Model<string>,
+  ): Message[] {
+    const messages: Message[] = [];
+    const timestamp = Date.now();
+    for (const message of params.messages) {
+      let blocks: SamplingMessageContentBlock[];
+      if (Array.isArray(message.content)) {
+        blocks = message.content;
+      } else {
+        blocks = [message.content];
+      }
+      if (message.role === "assistant") {
+        const content: AssistantMessage["content"] = [];
+        for (const block of blocks) {
+          if (block.type === "text") {
+            content.push({ type: "text", text: block.text });
+          } else if (block.type === "tool_use") {
+            content.push({
+              type: "toolCall",
+              id: block.id,
+              name: block.name,
+              arguments: block.input,
+            });
+          } else {
+            content.push({ type: "text", text: this.describeMcpSamplingBlock(block) });
+          }
+        }
+        let stopReason: AssistantMessage["stopReason"] = "stop";
+        if (content.some((block) => block.type === "toolCall")) {
+          stopReason = "toolUse";
+        }
+        messages.push({
+          role: "assistant",
+          content,
+          api: model.api,
+          provider: model.provider,
+          model: model.id,
+          usage: this.emptyUsage(),
+          stopReason,
+          timestamp,
+        });
+        continue;
+      }
+      const userContent: Array<
+        { type: "text"; text: string } | { type: "image"; data: string; mimeType: string }
+      > = [];
+      for (const block of blocks) {
+        if (block.type === "tool_result") {
+          if (userContent.length > 0) {
+            messages.push({ role: "user", content: userContent.splice(0), timestamp });
+          }
+          const resultContent: Array<
+            { type: "text"; text: string } | { type: "image"; data: string; mimeType: string }
+          > = [];
+          for (const item of block.content) {
+            if (item.type === "text" || item.type === "image") {
+              resultContent.push(item);
+            } else {
+              resultContent.push({ type: "text", text: this.describeMcpContent(item) });
+            }
+          }
+          messages.push({
+            role: "toolResult",
+            toolCallId: block.toolUseId,
+            toolName: "mcp-sampling-tool",
+            content: resultContent,
+            details: block.structuredContent,
+            isError: block.isError ?? false,
+            timestamp,
+          });
+        } else if (block.type === "text" || block.type === "image") {
+          userContent.push(block);
+        } else {
+          userContent.push({ type: "text", text: this.describeMcpSamplingBlock(block) });
+        }
+      }
+      if (userContent.length > 0) {
+        messages.push({ role: "user", content: userContent, timestamp });
+      }
+    }
+    return messages;
+  }
+
+  private describeMcpSamplingBlock(block: SamplingMessageContentBlock): string {
+    if (block.type === "audio") {
+      return `[Audio content: ${block.mimeType}]`;
+    }
+    if (block.type === "tool_result") {
+      return JSON.stringify(block.structuredContent ?? block.content);
+    }
+    if (block.type === "image") {
+      return `[Image content: ${block.mimeType}]`;
+    }
+    if (block.type === "tool_use") {
+      return JSON.stringify({ tool: block.name, arguments: block.input });
+    }
+    return block.text;
+  }
+
+  private describeMcpContent(block: McpContentBlock): string {
+    if (block.type === "audio") {
+      return `[Audio content: ${block.mimeType}]`;
+    }
+    if (block.type === "text") {
+      return block.text;
+    }
+    if (block.type === "image") {
+      return `[Image content: ${block.mimeType}]`;
+    }
+    return JSON.stringify(block);
+  }
+
+  private emptyUsage(): AssistantMessage["usage"] {
+    return {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 0,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    };
   }
 
   private logStarted(args: TAgentRunArgs, provider: string, model: string) {
