@@ -72,12 +72,8 @@ const AGENT_INSTRUCTIONS: Record<EAgentName, string> = {
   [EAgentName.ScheduledTask]: "./src/services/ai/agents/scheduled-task/instructions.xml",
 };
 
-function withSession(
-  options: SimpleStreamOptions,
-  provider: string,
-  sessionId: string,
-): SimpleStreamOptions {
-  const headers = { ...options.headers };
+function sessionHeaders(provider: string, sessionId: string): Record<string, string> {
+  const headers: Record<string, string> = {};
   if (provider === EAiProvider.OpencodeGo) {
     headers["x-opencode-session"] = sessionId;
   }
@@ -85,10 +81,18 @@ function withSession(
     headers["x-session-id"] = sessionId;
   }
 
+  return headers;
+}
+
+function withSession(
+  options: SimpleStreamOptions,
+  provider: string,
+  sessionId: string,
+): SimpleStreamOptions {
   return {
     ...options,
     sessionId,
-    headers,
+    headers: { ...options.headers, ...sessionHeaders(provider, sessionId) },
   };
 }
 
@@ -300,7 +304,15 @@ export class AgentHarness {
     if (thinking === "off") {
       thinking = undefined;
     }
-    return compactConversation(state, aiModels, config.model, thinking, fixedTokens, trace);
+    const sessionId = this.createSessionId(config.model.provider, chatId, platform);
+    const model = {
+      ...config.model,
+      headers: {
+        ...config.model.headers,
+        ...sessionHeaders(config.model.provider, sessionId),
+      },
+    };
+    return compactConversation(state, aiModels, model, thinking, fixedTokens, trace);
   }
 
   private async run(

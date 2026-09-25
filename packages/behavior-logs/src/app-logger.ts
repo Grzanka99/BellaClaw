@@ -1,10 +1,13 @@
 import { Database } from "bun:sqlite";
-import { createHmac } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { AsyncQueue, createLogger, type TOption, writeJsonLog } from "@bellaclaw/shared";
 import { getDefaultLogDbPath } from "./config";
-import { MEMORY_LOG_CHATID_HMAC_KEY, readOrCreateChatIdHmacKey } from "./hmac-key";
+import {
+  MEMORY_LOG_CHATID_HMAC_KEY,
+  maskCanonicalChatId,
+  readOrCreateChatIdHmacKey,
+} from "./hmac-key";
 import { buildSearchableText } from "./searchable-text";
 import { booleanToSqlite, normalizeDurationMs, normalizeRowId, rowToEvent } from "./sqlite";
 import {
@@ -317,8 +320,7 @@ export class AppLogger {
       return null;
     }
 
-    const digest = createHmac("sha256", key).update(chatId).digest("hex");
-    return `sha256:${digest}`;
+    return maskCanonicalChatId(this.dbPath, chatId) ?? null;
   }
 
   private getChatIdHmacKey(): TOption<string> {

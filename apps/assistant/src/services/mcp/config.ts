@@ -25,7 +25,18 @@ export const SMcpProfile = z.object({
     }),
     z.object({
       type: z.literal("http"),
-      url: z.url(),
+      url: z
+        .string()
+        .transform((url) =>
+          url.replace(/\$\{([A-Z][A-Z0-9_]*)(?::-([^}]*))?\}/g, (_match, name, fallback) => {
+            const value = Bun.env[name]?.trim();
+            if (value !== undefined && value.length > 0) {
+              return value;
+            }
+            return fallback ?? "";
+          }),
+        )
+        .pipe(z.url()),
       headers: z.record(z.string(), z.string()).default({}),
       oauth: SOAuth.optional(),
     }),

@@ -61,6 +61,37 @@ function tool(session: TMcpSession, label: string) {
 }
 
 describe("MCP runtime", () => {
+  test("loads the default logs profile for local and Compose URLs", async () => {
+    const configPath = Bun.env.BELLACLAW_MCP_CONFIG;
+    const previousLogsUrl = Bun.env.BELLACLAW_LOGS_MCP_URL;
+    delete Bun.env.BELLACLAW_MCP_CONFIG;
+    delete Bun.env.BELLACLAW_LOGS_MCP_URL;
+    try {
+      const localProfiles = await loadMcpProfiles();
+      expect(localProfiles.map((profile) => profile.id)).toEqual(["logs"]);
+      expect(localProfiles[0]?.transport).toMatchObject({
+        type: "http",
+        url: "http://127.0.0.1:8989/mcp",
+      });
+
+      Bun.env.BELLACLAW_LOGS_MCP_URL = "http://log-viewer:8989/mcp";
+      const composeProfiles = await loadMcpProfiles();
+      expect(composeProfiles[0]?.transport).toMatchObject({
+        type: "http",
+        url: "http://log-viewer:8989/mcp",
+      });
+    } finally {
+      if (configPath !== undefined) {
+        Bun.env.BELLACLAW_MCP_CONFIG = configPath;
+      }
+      if (previousLogsUrl === undefined) {
+        delete Bun.env.BELLACLAW_LOGS_MCP_URL;
+      } else {
+        Bun.env.BELLACLAW_LOGS_MCP_URL = previousLogsUrl;
+      }
+    }
+  });
+
   test("missing config disables MCP; malformed and duplicate profiles fail clearly", async () => {
     expect(await loadMcpProfiles()).toEqual([]);
     await configure({ type: "stdio", command: "bun" });

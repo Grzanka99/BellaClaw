@@ -42,4 +42,4 @@ tmp/
 plans/
 reports/
 .secrets/
-mcp.json
+mcp.*.json

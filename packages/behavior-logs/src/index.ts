@@ -4,12 +4,17 @@ export { createCronTurnId, createMessageTurnId } from "./ids";
 export { LogReader } from "./log-reader";
 export type {
   TBehaviorLogSearchQuery,
+  TCacheHitRate,
+  TChatMetricOptions,
   TLogFilterOptions,
   TLogPage,
   TLogReaderError,
   TLogReaderResult,
   TLogTimeRange,
+  TRecentFailuresOptions,
   TRecentTurn,
+  TTurnLatency,
+  TTurnTimelineEvent,
 } from "./reader-types";
 export type {
   TBehaviorLogEvent,
