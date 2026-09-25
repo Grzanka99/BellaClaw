@@ -27,6 +27,9 @@ This command starts:
 - `bellaclaw`
 - `log-viewer`
 
+The assistant can use the logs MCP profile immediately; Compose configures its connection to
+the log viewer without a separate profile file or per-chat sign-in.
+
 Signal uses a Compose profile. See [Messaging](messaging.md#signal).
 
 ## Server Scripts

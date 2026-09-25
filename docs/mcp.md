@@ -6,13 +6,17 @@ not a new agent or tool implementation.
 
 ## Configure profiles
 
-Copy `mcp.example.json` to `mcp.json` at the repository root. Keep the profiles you want. An absent
-configuration file disables MCP. `BELLACLAW_MCP_CONFIG` selects another file; relative paths are
-resolved from the repository root. Configuration is read for each new delegation; an existing
-specialist keeps its current profile and connection until it finishes.
+The repository includes `mcp.json` with the logs profile enabled. It needs no OAuth connection:
+Main and ScheduledTask can use it as soon as the log viewer is running. `bun run dev` uses the
+local viewer at `127.0.0.1:8989`; Compose supplies `http://log-viewer:8989/mcp` automatically.
+MCP connections open when needed rather than occupying a permanent session for each chat.
 
-For Compose, after creating `mcp.json`, add `./mcp.json:/app/mcp.json:ro` to the assistant's
-volumes in a local Compose override to apply profile edits without rebuilding the image.
+To add your own profiles, copy the default file to `mcp.local.json`, edit it, and set
+`BELLACLAW_MCP_CONFIG=./mcp.local.json`; relative paths are resolved from the repository root.
+In Compose, mount `./mcp.local.json:/app/mcp.local.json:ro` into the assistant. Local profile
+files are excluded from Git and container builds. An absent selected file disables MCP.
+Configuration is read for each new delegation; an existing specialist keeps its current profile
+and connection until it finishes.
 
 Each profile contains:
 
@@ -27,6 +31,8 @@ Each profile contains:
 | `contextArguments` | Map server tool argument names to `chatId` or `turnId`; supplied by the runtime and hidden from the model's argument schema |
 | `requestTimeoutMs` | Request timeout allowance, default 120000 |
 | `inputTimeoutMs` | User-input wait allowance, default 900000 |
+
+HTTP URLs can use `${ENV_NAME:-fallback}` to select an endpoint at runtime.
 
 The stdio command is executed directly with an argument array. Its process receives the SDK's
 minimal default environment plus the profile's `env` values. HTTP headers are operator supplied.
@@ -110,8 +116,9 @@ those credentials in chat.
 
 ## Logs server
 
-The existing log viewer exposes Streamable HTTP at `/mcp`. Locally the example profile uses
-`http://127.0.0.1:8989/mcp`; in Compose change it to `http://log-viewer:8989/mcp`.
+The existing log viewer exposes Streamable HTTP at `/mcp`. The default logs profile uses
+`BELLACLAW_LOGS_MCP_URL` when set, otherwise `http://127.0.0.1:8989/mcp`; Compose sets the
+variable to `http://log-viewer:8989/mcp`.
 The logs MCP endpoint has the same general availability as the viewer, without another login.
 If you set `LOG_CHATID_HMAC_KEY`, use the same value in both applications so chat-scoped queries
 can match the masked log IDs. Compose forwards it to the viewer.
@@ -125,7 +132,7 @@ The server reuses the read-only `@bellaclaw/behavior-logs` reader. Its operation
   `100 × sum(cacheRead) / sum(inputTokens)`, not an average of percentages.
 - `logs://schema`, `logs://turn/{turnId}`, and the `diagnose-turn` prompt.
 
-The example profile injects `chatId` and `excludeTurnId` into tools. This is a query convenience,
+The default profile injects `chatId` and `excludeTurnId` into tools. This is a query convenience,
 not an additional access restriction. Current diagnostic work is excluded from its own results.
 Overlapping model, tool and delegation durations must not be added together. Provider-internal
 latency cannot be explained beyond what the recorded spans measure.
