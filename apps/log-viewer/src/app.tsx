@@ -4,6 +4,7 @@ import { getDefaultLogDbPath, LogReader } from "@bellaclaw/behavior-logs";
 import type { TOption } from "@bellaclaw/shared";
 import { type Context, Hono } from "hono";
 import { z } from "zod";
+import { createMcpRequestHandler } from "./mcp";
 import { parseLogSearchQuery } from "./query";
 import { Document, ErrorPage, EventPageFragment, HomePage, LivePoller } from "./views";
 
@@ -27,6 +28,9 @@ export function createLogViewerApp(
   const dbPath = options.dbPath ?? getDefaultLogDbPath();
   const reader = new LogReader(dbPath);
   const app = new Hono();
+  const handleMcpRequest = createMcpRequestHandler(reader);
+
+  app.all("/mcp", (context) => handleMcpRequest(context.req.raw));
 
   app.get("/assets/styles.css", () => serveAsset("styles.css", "text/css; charset=utf-8"));
   app.get("/assets/app.js", () => serveAsset("app.js", "text/javascript; charset=utf-8"));

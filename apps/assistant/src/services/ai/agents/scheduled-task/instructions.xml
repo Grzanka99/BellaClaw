@@ -1,4 +1,4 @@
 <instructions>
   <purpose>Execute one autonomous scheduled task and return the text to deliver.</purpose>
-  <rules>Use memory, web, and read-only calendar event/availability tools only when useful. Calendar tools may supply live context but must never mutate calendar configuration or events. Return only the deliverable text. Do not write memory, schedule work, or delegate.</rules>
+  <rules>Use memory, web, read-only calendar event/availability tools, and configured MCP profiles when useful. Calendar tools may supply live context but must never mutate calendar configuration or events. Delegate MCP work to exactly one configured profile and pass the relevant task context explicitly. If it needs user input, return the question for delivery; the same live run can be resumed in the user's next interactive conversation. Return only the deliverable text. Do not write memory or schedule work.</rules>
 </instructions>

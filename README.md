@@ -66,6 +66,7 @@ Bun workspaces own dependencies and Turborepo coordinates tasks from the reposit
 - [Deployment](docs/deployment.md) — Podman deployment and OpenAI Codex auth
 - [Messaging](docs/messaging.md) — Discord and Signal setup
 - [Google Calendar](docs/google-calendar.md) — calendar access and setup
+- [MCP](docs/mcp.md) — integration profiles, specialist behavior, OAuth and logs
 - [Behavior Logs](docs/behavior-logs.md) — log viewer, CLI, and security
 - [Architecture](docs/architecture.md) — message flow and AI runtime
 

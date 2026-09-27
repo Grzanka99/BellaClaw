@@ -67,6 +67,18 @@ export class MessagingAdapter {
     await CronSingleton.instance.setup();
   }
 
+  public async sendMcpConnectedMessage(chatId: string, profileId: string): Promise<void> {
+    const owner = parseCanonicalChatKey(chatId);
+    if (owner === undefined) {
+      throw new Error("Unknown chat platform for MCP connection notification");
+    }
+    const transport = this.transports.get(owner.platform);
+    if (transport === undefined) {
+      throw new Error("Chat transport is unavailable for MCP connection notification");
+    }
+    await transport.sendText(owner.chatId, `Connected MCP profile ${profileId}.`);
+  }
+
   public async handleInboundMessage(message: TPlatformMessage) {
     const canonicalChatId = createCanonicalChatKey(message.platform, message.chatId);
     const handlerStart = performance.now();
@@ -125,7 +137,7 @@ export class MessagingAdapter {
 
       const commandReply = await runCommand(canonicalChatId, message.message.content);
 
-      if (commandReply !== undefined) {
+      if (typeof commandReply === "string") {
         await this.sendText(transport, message.chatId, commandReply, trace);
         return;
       }
@@ -137,8 +149,11 @@ export class MessagingAdapter {
           username: message.author.username,
           id: message.author.id,
         },
-        message: message.message,
+        message: { ...message.message },
       };
+      if (commandReply !== undefined) {
+        incomingMessage.message.content = commandReply.prompt;
+      }
       attachMessageTrace(incomingMessage, trace);
 
       const handler = MessageHandler.getInstance(canonicalChatId);

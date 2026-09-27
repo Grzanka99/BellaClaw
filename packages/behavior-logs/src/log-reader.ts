@@ -2,13 +2,18 @@ import { Database } from "bun:sqlite";
 import { existsSync } from "node:fs";
 import { AsyncQueue, createLogger, type TOption } from "@bellaclaw/shared";
 import { z } from "zod";
+import { maskCanonicalChatId } from "./hmac-key";
 import type {
   TBehaviorLogSearchQuery,
+  TCacheHitRate,
+  TChatMetricOptions,
   TLogFilterOptions,
   TLogPage,
   TLogReaderError,
   TLogReaderResult,
+  TRecentFailuresOptions,
   TRecentTurn,
+  TTurnLatency,
 } from "./reader-types";
 import { rowToEvent } from "./sqlite";
 import {
@@ -34,6 +39,21 @@ const SRecentTurnRow = z.object({
 });
 
 const SFilterValueRow = z.object({ value: z.string() });
+const SCompletedTurnRow = z.object({
+  turnId: z.string(),
+  startedAtMs: z.number(),
+  completedAtMs: z.number(),
+  completedId: z.number(),
+});
+const SModelUsageMetadata = z.object({
+  cacheRead: z.number().nonnegative(),
+  inputTokens: z.number().nonnegative(),
+});
+const SDiagnosticCutoffRow = z.object({
+  id: z.number(),
+  createdAtMs: z.number(),
+});
+type TDiagnosticCutoff = z.infer<typeof SDiagnosticCutoffRow>;
 const PAGE_SIZE = 100;
 const EVENT_COLUMNS = `
   l.id, l.createdAt, l.schemaVersion, l.level, l.event, l.turnId, l.chatId,
@@ -107,6 +127,144 @@ export class LogReader {
         const db = this.getDatabase();
         this.verifySchema(db);
         return { success: true, data: undefined };
+      } catch (error) {
+        return { success: false, error: this.describeError(error) };
+      }
+    });
+  }
+
+  public async readRecentFailures(
+    options: TRecentFailuresOptions,
+  ): Promise<TLogReaderResult<TPersistedBehaviorLogEvent[]>> {
+    return this.queue.enqueue(async () => {
+      try {
+        const db = this.getDatabase();
+        const filter = this.buildDiagnosticFilter(db, options.excludeTurnId);
+        const rows = db
+          .query<unknown, TSqlBinding[]>(
+            `
+              SELECT ${EVENT_COLUMNS}
+              FROM app_event_logs l
+              WHERE l.createdAt >= ?
+                AND (l.success = 0 OR l.error IS NOT NULL)
+                ${filter.sql}
+              ORDER BY l.createdAt DESC, l.id DESC
+              LIMIT ?
+            `,
+          )
+          .all(options.sinceMs, ...filter.bindings, options.limit);
+
+        return { success: true, data: this.parseEvents(rows) };
+      } catch (error) {
+        return { success: false, error: this.describeError(error) };
+      }
+    });
+  }
+
+  public async readTurn(turnId: string): Promise<TLogReaderResult<TPersistedBehaviorLogEvent[]>> {
+    return this.queue.enqueue(async () => {
+      try {
+        const db = this.getDatabase();
+        return { success: true, data: this.selectTurnEvents(db, [turnId], undefined) };
+      } catch (error) {
+        return { success: false, error: this.describeError(error) };
+      }
+    });
+  }
+
+  public async readLatestTurnLatency(
+    options: TChatMetricOptions,
+  ): Promise<TLogReaderResult<TTurnLatency | null>> {
+    return this.queue.enqueue(async () => {
+      try {
+        const db = this.getDatabase();
+        const { turns, cutoff } = this.selectCompletedTurns(db, options, 1);
+        const turn = turns[0];
+
+        if (turn === undefined) {
+          return { success: true, data: null };
+        }
+
+        const events = this.selectTurnEvents(db, [turn.turnId], cutoff);
+        const timeline = events.map((event) => {
+          const endOffsetMs = Math.max(0, event.createdAtMs - turn.startedAtMs);
+          let startOffsetMs = endOffsetMs;
+
+          if (event.durationMs !== null) {
+            startOffsetMs = Math.max(0, endOffsetMs - event.durationMs);
+          }
+
+          return { event, startOffsetMs, endOffsetMs };
+        });
+
+        return {
+          success: true,
+          data: {
+            turnId: turn.turnId,
+            startedAtMs: turn.startedAtMs,
+            completedAtMs: turn.completedAtMs,
+            latencyMs: Math.max(0, turn.completedAtMs - turn.startedAtMs),
+            timeline,
+          },
+        };
+      } catch (error) {
+        return { success: false, error: this.describeError(error) };
+      }
+    });
+  }
+
+  public async readCacheHitRate(
+    options: TChatMetricOptions,
+  ): Promise<TLogReaderResult<TCacheHitRate>> {
+    return this.queue.enqueue(async () => {
+      try {
+        const db = this.getDatabase();
+        const { turns, cutoff } = this.selectCompletedTurns(db, options, 10);
+        const turnIds = turns.map((turn) => turn.turnId);
+
+        const events = this.selectTurnEvents(db, turnIds, cutoff);
+        const turnsWithModelRequests = new Set<string>();
+        let modelRequestCount = 0;
+        let modelRequestsWithUsage = 0;
+        let cacheReadTokens = 0;
+        let inputTokens = 0;
+
+        for (const event of events) {
+          if (event.event !== "model.request.completed") {
+            continue;
+          }
+
+          turnsWithModelRequests.add(event.turnId);
+          modelRequestCount += 1;
+          const usage = SModelUsageMetadata.safeParse(event.metadata);
+
+          if (!usage.success) {
+            continue;
+          }
+
+          modelRequestsWithUsage += 1;
+          cacheReadTokens += usage.data.cacheRead;
+          inputTokens += usage.data.inputTokens;
+        }
+
+        let cacheHitRatePercent: number | null = null;
+
+        if (inputTokens > 0) {
+          cacheHitRatePercent = (100 * cacheReadTokens) / inputTokens;
+        }
+
+        return {
+          success: true,
+          data: {
+            completedTurnCount: turnIds.length,
+            turnsWithModelRequests: turnsWithModelRequests.size,
+            modelRequestCount,
+            modelRequestsWithUsage,
+            cacheReadTokens,
+            inputTokens,
+            cacheHitRatePercent,
+          },
+        };
       } catch (error) {
         return { success: false, error: this.describeError(error) };
       }
@@ -227,6 +385,122 @@ export class LogReader {
       components: this.selectFilterValues(db, "component"),
       toolNames: this.selectFilterValues(db, "toolName"),
     };
+  }
+
+  private selectCompletedTurns(db: Database, options: TChatMetricOptions, limit: number) {
+    const maskedChatId = maskCanonicalChatId(this.dbPath, options.chatId);
+
+    if (maskedChatId === undefined) {
+      throw new Error("Behavior log chat ID key is unavailable");
+    }
+
+    const filter = this.buildDiagnosticFilter(db, options.excludeTurnId);
+    const rows = db
+      .query<unknown, TSqlBinding[]>(
+        `
+          SELECT l.turnId,
+            MIN(CASE WHEN l.event = 'message.received' AND l.component = 'messaging'
+              THEN l.createdAt END) AS startedAtMs,
+            MAX(CASE WHEN l.event = 'handler.completed' AND l.component = 'messaging'
+              THEN l.createdAt END) AS completedAtMs,
+            MAX(CASE WHEN l.event = 'handler.completed' AND l.component = 'messaging'
+              THEN l.id END) AS completedId
+          FROM app_event_logs l
+          WHERE l.chatId = ? ${filter.sql}
+          GROUP BY l.turnId
+          HAVING startedAtMs IS NOT NULL
+            AND completedAtMs IS NOT NULL
+            AND completedAtMs >= startedAtMs
+          ORDER BY completedAtMs DESC, completedId DESC
+          LIMIT ?
+        `,
+      )
+      .all(maskedChatId, ...filter.bindings, limit);
+    const parsed = SCompletedTurnRow.array().safeParse(rows);
+
+    if (!parsed.success) {
+      throw new Error(`Invalid completed turn row: ${parsed.error.message}`);
+    }
+
+    return { turns: parsed.data, cutoff: filter.cutoff };
+  }
+
+  private buildDiagnosticFilter(db: Database, excludeTurnId: TOption<string>) {
+    let sql = "";
+    const bindings: TSqlBinding[] = [];
+    let cutoff: TOption<TDiagnosticCutoff>;
+
+    if (excludeTurnId !== undefined) {
+      cutoff = this.selectDiagnosticCutoff(db, excludeTurnId);
+      sql = "AND l.turnId <> ?";
+      bindings.push(excludeTurnId);
+
+      if (cutoff !== undefined) {
+        sql += " AND (l.createdAt < ? OR (l.createdAt = ? AND l.id < ?))";
+        bindings.push(cutoff.createdAtMs, cutoff.createdAtMs, cutoff.id);
+      }
+    }
+
+    return { sql, bindings, cutoff };
+  }
+
+  private selectTurnEvents(
+    db: Database,
+    turnIds: string[],
+    cutoff: TOption<TDiagnosticCutoff>,
+  ): TPersistedBehaviorLogEvent[] {
+    if (turnIds.length === 0) {
+      return [];
+    }
+
+    const placeholders = turnIds.map(() => "?").join(", ");
+    const bindings: TSqlBinding[] = [...turnIds];
+    let upperBound = "";
+
+    if (cutoff !== undefined) {
+      upperBound = "AND (l.createdAt < ? OR (l.createdAt = ? AND l.id < ?))";
+      bindings.push(cutoff.createdAtMs, cutoff.createdAtMs, cutoff.id);
+    }
+
+    const rows = db
+      .query<unknown, TSqlBinding[]>(
+        `
+          SELECT ${EVENT_COLUMNS}
+          FROM app_event_logs l
+          WHERE l.turnId IN (${placeholders})
+            ${upperBound}
+          ORDER BY l.createdAt ASC, l.id ASC
+        `,
+      )
+      .all(...bindings);
+
+    return this.parseEvents(rows);
+  }
+
+  private selectDiagnosticCutoff(db: Database, excludeTurnId: string): TOption<TDiagnosticCutoff> {
+    const row = db
+      .query<unknown, string>(
+        `
+          SELECT id, createdAt AS createdAtMs
+          FROM app_event_logs
+          WHERE turnId = ?
+          ORDER BY createdAt ASC, id ASC
+          LIMIT 1
+        `,
+      )
+      .get(excludeTurnId);
+
+    if (row === null) {
+      return undefined;
+    }
+
+    const parsed = SDiagnosticCutoffRow.safeParse(row);
+
+    if (!parsed.success) {
+      throw new Error(`Invalid diagnostic cutoff row: ${parsed.error.message}`);
+    }
+
+    return parsed.data;
   }
 
   private selectFilterValues(db: Database, column: "event" | "component" | "toolName") {
