@@ -45,7 +45,6 @@ const SCompletedTurnRow = z.object({
   completedAtMs: z.number(),
   completedId: z.number(),
 });
-const STurnIdRow = z.object({ turnId: z.string() });
 const SModelUsageMetadata = z.object({
   cacheRead: z.number().nonnegative(),
   inputTokens: z.number().nonnegative(),
@@ -140,21 +139,7 @@ export class LogReader {
     return this.queue.enqueue(async () => {
       try {
         const db = this.getDatabase();
-        const bindings: TSqlBinding[] = [options.sinceMs];
-        let exclude = "";
-
-        if (options.excludeTurnId !== undefined) {
-          const cutoff = this.selectDiagnosticCutoff(db, options.excludeTurnId);
-          exclude = "AND l.turnId <> ?";
-          bindings.push(options.excludeTurnId);
-
-          if (cutoff !== undefined) {
-            exclude += " AND (l.createdAt < ? OR (l.createdAt = ? AND l.id < ?))";
-            bindings.push(cutoff.createdAtMs, cutoff.createdAtMs, cutoff.id);
-          }
-        }
-
-        bindings.push(options.limit);
+        const filter = this.buildDiagnosticFilter(db, options.excludeTurnId);
         const rows = db
           .query<unknown, TSqlBinding[]>(
             `
@@ -162,12 +147,12 @@ export class LogReader {
               FROM app_event_logs l
               WHERE l.createdAt >= ?
                 AND (l.success = 0 OR l.error IS NOT NULL)
-                ${exclude}
+                ${filter.sql}
               ORDER BY l.createdAt DESC, l.id DESC
               LIMIT ?
             `,
           )
-          .all(...bindings);
+          .all(options.sinceMs, ...filter.bindings, options.limit);
 
         return { success: true, data: this.parseEvents(rows) };
       } catch (error) {
@@ -193,62 +178,16 @@ export class LogReader {
     return this.queue.enqueue(async () => {
       try {
         const db = this.getDatabase();
-        const maskedChatId = maskCanonicalChatId(this.dbPath, options.chatId);
+        const { turns, cutoff } = this.selectCompletedTurns(db, options, 1);
+        const turn = turns[0];
 
-        if (maskedChatId === undefined) {
-          throw new Error("Behavior log chat ID key is unavailable");
-        }
-
-        const bindings: TSqlBinding[] = [maskedChatId];
-        let exclude = "";
-        let cutoff: TOption<TDiagnosticCutoff>;
-
-        if (options.excludeTurnId !== undefined) {
-          cutoff = this.selectDiagnosticCutoff(db, options.excludeTurnId);
-          exclude = "AND turnId <> ?";
-          bindings.push(options.excludeTurnId);
-
-          if (cutoff !== undefined) {
-            exclude += " AND (createdAt < ? OR (createdAt = ? AND id < ?))";
-            bindings.push(cutoff.createdAtMs, cutoff.createdAtMs, cutoff.id);
-          }
-        }
-
-        const row = db
-          .query<unknown, TSqlBinding[]>(
-            `
-              SELECT turnId,
-                MIN(CASE WHEN event = 'message.received' AND component = 'messaging'
-                  THEN createdAt END) AS startedAtMs,
-                MAX(CASE WHEN event = 'handler.completed' AND component = 'messaging'
-                  THEN createdAt END) AS completedAtMs,
-                MAX(CASE WHEN event = 'handler.completed' AND component = 'messaging'
-                  THEN id END) AS completedId
-              FROM app_event_logs
-              WHERE chatId = ? ${exclude}
-              GROUP BY turnId
-              HAVING startedAtMs IS NOT NULL
-                AND completedAtMs IS NOT NULL
-                AND completedAtMs >= startedAtMs
-              ORDER BY completedAtMs DESC, completedId DESC
-              LIMIT 1
-            `,
-          )
-          .get(...bindings);
-
-        if (row === null) {
+        if (turn === undefined) {
           return { success: true, data: null };
         }
 
-        const parsed = SCompletedTurnRow.safeParse(row);
-
-        if (!parsed.success) {
-          throw new Error(`Invalid completed turn row: ${parsed.error.message}`);
-        }
-
-        const events = this.selectTurnEvents(db, [parsed.data.turnId], cutoff);
+        const events = this.selectTurnEvents(db, [turn.turnId], cutoff);
         const timeline = events.map((event) => {
-          const endOffsetMs = Math.max(0, event.createdAtMs - parsed.data.startedAtMs);
+          const endOffsetMs = Math.max(0, event.createdAtMs - turn.startedAtMs);
           let startOffsetMs = endOffsetMs;
 
           if (event.durationMs !== null) {
@@ -261,10 +200,10 @@ export class LogReader {
         return {
           success: true,
           data: {
-            turnId: parsed.data.turnId,
-            startedAtMs: parsed.data.startedAtMs,
-            completedAtMs: parsed.data.completedAtMs,
-            latencyMs: Math.max(0, parsed.data.completedAtMs - parsed.data.startedAtMs),
+            turnId: turn.turnId,
+            startedAtMs: turn.startedAtMs,
+            completedAtMs: turn.completedAtMs,
+            latencyMs: Math.max(0, turn.completedAtMs - turn.startedAtMs),
             timeline,
           },
         };
@@ -280,61 +219,8 @@ export class LogReader {
     return this.queue.enqueue(async () => {
       try {
         const db = this.getDatabase();
-        const maskedChatId = maskCanonicalChatId(this.dbPath, options.chatId);
-
-        if (maskedChatId === undefined) {
-          throw new Error("Behavior log chat ID key is unavailable");
-        }
-
-        const bindings: TSqlBinding[] = [maskedChatId];
-        let exclude = "";
-        let cutoff: TOption<TDiagnosticCutoff>;
-
-        if (options.excludeTurnId !== undefined) {
-          cutoff = this.selectDiagnosticCutoff(db, options.excludeTurnId);
-          exclude = "AND turnId <> ?";
-          bindings.push(options.excludeTurnId);
-
-          if (cutoff !== undefined) {
-            exclude += " AND (createdAt < ? OR (createdAt = ? AND id < ?))";
-            bindings.push(cutoff.createdAtMs, cutoff.createdAtMs, cutoff.id);
-          }
-        }
-
-        const rows = db
-          .query<unknown, TSqlBinding[]>(
-            `
-              SELECT turnId
-              FROM app_event_logs
-              WHERE chatId = ? ${exclude}
-              GROUP BY turnId
-              HAVING SUM(CASE WHEN event = 'message.received' AND component = 'messaging'
-                  THEN 1 ELSE 0 END) > 0
-                AND SUM(CASE WHEN event = 'handler.completed' AND component = 'messaging'
-                  THEN 1 ELSE 0 END) > 0
-                AND MAX(CASE WHEN event = 'handler.completed' AND component = 'messaging'
-                  THEN createdAt END) >= MIN(CASE
-                    WHEN event = 'message.received' AND component = 'messaging'
-                    THEN createdAt END)
-              ORDER BY MAX(CASE WHEN event = 'handler.completed' AND component = 'messaging'
-                THEN createdAt END) DESC,
-                MAX(CASE WHEN event = 'handler.completed' AND component = 'messaging'
-                  THEN id END) DESC
-              LIMIT 10
-            `,
-          )
-          .all(...bindings);
-        const turnIds: string[] = [];
-
-        for (const row of rows) {
-          const parsed = STurnIdRow.safeParse(row);
-
-          if (!parsed.success) {
-            throw new Error(`Invalid completed turn row: ${parsed.error.message}`);
-          }
-
-          turnIds.push(parsed.data.turnId);
-        }
+        const { turns, cutoff } = this.selectCompletedTurns(db, options, 10);
+        const turnIds = turns.map((turn) => turn.turnId);
 
         const events = this.selectTurnEvents(db, turnIds, cutoff);
         const turnsWithModelRequests = new Set<string>();
@@ -499,6 +385,63 @@ export class LogReader {
       components: this.selectFilterValues(db, "component"),
       toolNames: this.selectFilterValues(db, "toolName"),
     };
+  }
+
+  private selectCompletedTurns(db: Database, options: TChatMetricOptions, limit: number) {
+    const maskedChatId = maskCanonicalChatId(this.dbPath, options.chatId);
+
+    if (maskedChatId === undefined) {
+      throw new Error("Behavior log chat ID key is unavailable");
+    }
+
+    const filter = this.buildDiagnosticFilter(db, options.excludeTurnId);
+    const rows = db
+      .query<unknown, TSqlBinding[]>(
+        `
+          SELECT l.turnId,
+            MIN(CASE WHEN l.event = 'message.received' AND l.component = 'messaging'
+              THEN l.createdAt END) AS startedAtMs,
+            MAX(CASE WHEN l.event = 'handler.completed' AND l.component = 'messaging'
+              THEN l.createdAt END) AS completedAtMs,
+            MAX(CASE WHEN l.event = 'handler.completed' AND l.component = 'messaging'
+              THEN l.id END) AS completedId
+          FROM app_event_logs l
+          WHERE l.chatId = ? ${filter.sql}
+          GROUP BY l.turnId
+          HAVING startedAtMs IS NOT NULL
+            AND completedAtMs IS NOT NULL
+            AND completedAtMs >= startedAtMs
+          ORDER BY completedAtMs DESC, completedId DESC
+          LIMIT ?
+        `,
+      )
+      .all(maskedChatId, ...filter.bindings, limit);
+    const parsed = SCompletedTurnRow.array().safeParse(rows);
+
+    if (!parsed.success) {
+      throw new Error(`Invalid completed turn row: ${parsed.error.message}`);
+    }
+
+    return { turns: parsed.data, cutoff: filter.cutoff };
+  }
+
+  private buildDiagnosticFilter(db: Database, excludeTurnId: TOption<string>) {
+    let sql = "";
+    const bindings: TSqlBinding[] = [];
+    let cutoff: TOption<TDiagnosticCutoff>;
+
+    if (excludeTurnId !== undefined) {
+      cutoff = this.selectDiagnosticCutoff(db, excludeTurnId);
+      sql = "AND l.turnId <> ?";
+      bindings.push(excludeTurnId);
+
+      if (cutoff !== undefined) {
+        sql += " AND (l.createdAt < ? OR (l.createdAt = ? AND l.id < ?))";
+        bindings.push(cutoff.createdAtMs, cutoff.createdAtMs, cutoff.id);
+      }
+    }
+
+    return { sql, bindings, cutoff };
   }
 
   private selectTurnEvents(

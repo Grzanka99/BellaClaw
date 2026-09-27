@@ -105,9 +105,7 @@ describe("agent permissions", () => {
             tool.name === "schedule-once" ||
             tool.name === "schedule-recurring" ||
             tool.name === "update-cron-job" ||
-            tool.name === "unschedule-cron-job" ||
-            tool.name === "resume-mcp" ||
-            tool.name === "cancel-mcp"
+            tool.name === "unschedule-cron-job"
           ) {
             expect(tool.executionMode).toBe("sequential");
           }

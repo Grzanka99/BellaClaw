@@ -53,16 +53,35 @@ export function requestOptions(context: TMcpToolContext, signal?: AbortSignal): 
   };
 }
 
+async function* pages<TPage extends { nextCursor?: string }>(
+  fetchPage: (cursor: TOption<string>) => Promise<TPage>,
+  repeatedCursorMessage: string,
+): AsyncGenerator<TPage> {
+  let cursor: TOption<string>;
+  const seen = new Set<string>();
+  do {
+    const page = await fetchPage(cursor);
+    yield page;
+    cursor = page.nextCursor;
+    if (cursor !== undefined) {
+      if (seen.has(cursor)) {
+        throw new Error(repeatedCursorMessage);
+      }
+      seen.add(cursor);
+    }
+  } while (cursor !== undefined);
+}
+
 export async function discoverTools(context: TMcpToolContext): Promise<AgentTool[]> {
   const { client, profile } = context;
   const tools: AgentTool[] = [];
   if (client.getServerCapabilities()?.tools !== undefined) {
-    let cursor: TOption<string>;
-    const cursors = new Set<string>();
     const names = new Set<string>();
-    do {
-      const result = await client.listTools({ cursor }, requestOptions(context));
-      for (const tool of result.tools) {
+    for await (const page of pages(
+      (cursor) => client.listTools({ cursor }, requestOptions(context)),
+      "MCP tool discovery returned a repeated pagination cursor",
+    )) {
+      for (const tool of page.tools) {
         if (profile.tools !== undefined && !profile.tools.includes(tool.name)) {
           continue;
         }
@@ -72,14 +91,7 @@ export async function discoverTools(context: TMcpToolContext): Promise<AgentTool
         names.add(tool.name);
         tools.push(remoteTool(context, tool));
       }
-      cursor = result.nextCursor;
-      if (cursor !== undefined) {
-        if (cursors.has(cursor)) {
-          throw new Error("MCP tool discovery returned a repeated pagination cursor");
-        }
-        cursors.add(cursor);
-      }
-    } while (cursor !== undefined);
+    }
   }
   return [...tools, ...capabilityTools(context)];
 }
@@ -183,35 +195,19 @@ function capabilityTools(context: TMcpToolContext): AgentTool[] {
         async (_args, signal) => {
           const resources = [];
           const templates = [];
-          let cursor: TOption<string>;
-          const seen = new Set<string>();
-          do {
-            const page = await client.listResources({ cursor }, requestOptions(context, signal));
+          for await (const page of pages(
+            (cursor) => client.listResources({ cursor }, requestOptions(context, signal)),
+            "MCP resource discovery repeated its cursor",
+          )) {
             resources.push(...page.resources);
-            cursor = page.nextCursor;
-            if (cursor !== undefined && seen.has(cursor)) {
-              throw new Error("MCP resource discovery repeated its cursor");
-            }
-            if (cursor !== undefined) {
-              seen.add(cursor);
-            }
-          } while (cursor !== undefined);
-          seen.clear();
+          }
           try {
-            do {
-              const page = await client.listResourceTemplates(
-                { cursor },
-                requestOptions(context, signal),
-              );
+            for await (const page of pages(
+              (cursor) => client.listResourceTemplates({ cursor }, requestOptions(context, signal)),
+              "MCP resource template discovery repeated its cursor",
+            )) {
               templates.push(...page.resourceTemplates);
-              cursor = page.nextCursor;
-              if (cursor !== undefined && seen.has(cursor)) {
-                throw new Error("MCP resource template discovery repeated its cursor");
-              }
-              if (cursor !== undefined) {
-                seen.add(cursor);
-              }
-            } while (cursor !== undefined);
+            }
           } catch (error) {
             if (!(error instanceof McpError) || error.code !== ErrorCode.MethodNotFound) {
               throw error;
@@ -256,19 +252,12 @@ function capabilityTools(context: TMcpToolContext): AgentTool[] {
         SEmpty,
         async (_args, signal) => {
           const prompts = [];
-          let cursor: TOption<string>;
-          const seen = new Set<string>();
-          do {
-            const page = await client.listPrompts({ cursor }, requestOptions(context, signal));
+          for await (const page of pages(
+            (cursor) => client.listPrompts({ cursor }, requestOptions(context, signal)),
+            "MCP prompt discovery repeated its cursor",
+          )) {
             prompts.push(...page.prompts);
-            cursor = page.nextCursor;
-            if (cursor !== undefined && seen.has(cursor)) {
-              throw new Error("MCP prompt discovery repeated its cursor");
-            }
-            if (cursor !== undefined) {
-              seen.add(cursor);
-            }
-          } while (cursor !== undefined);
+          }
           return { prompts };
         },
       ),

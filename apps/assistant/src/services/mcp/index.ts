@@ -1,4 +1,4 @@
-import { createLogger } from "@bellaclaw/shared";
+import { createLogger, type TOption } from "@bellaclaw/shared";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
@@ -95,7 +95,30 @@ export class McpService {
         controller.abort(new Error("MCP session closed"));
         signal.removeEventListener("abort", abort);
         this.sessions.delete(session);
-        await client.close();
+        try {
+          if (transport instanceof StreamableHTTPClientTransport) {
+            let timeout: TOption<ReturnType<typeof setTimeout>>;
+            try {
+              await Promise.race([
+                transport.terminateSession(),
+                new Promise<void>((_, reject) => {
+                  timeout = setTimeout(
+                    () => reject(new Error("MCP session termination timed out")),
+                    Math.min(profile.requestTimeoutMs, 5_000),
+                  );
+                }),
+              ]);
+            } finally {
+              if (timeout !== undefined) {
+                clearTimeout(timeout);
+              }
+            }
+          }
+        } catch {
+          this.logger.warning(`Failed to terminate MCP session for profile ${profile.id}`);
+        } finally {
+          await client.close();
+        }
       },
     };
     const abort = () => {

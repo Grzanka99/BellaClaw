@@ -227,11 +227,21 @@ describe("MCP runtime", () => {
     const transport = new WebStandardStreamableHTTPServerTransport({
       sessionIdGenerator: () => crypto.randomUUID(),
     });
+    let serverClosed = false;
+    let terminatedSessionId: TOption<string>;
+    transport.onclose = () => {
+      serverClosed = true;
+    };
     await fixture.connect(transport);
     const http = Bun.serve({
       port: 0,
       hostname: "127.0.0.1",
-      fetch: (request) => transport.handleRequest(request),
+      fetch: (request) => {
+        if (request.method === "DELETE") {
+          terminatedSessionId = request.headers.get("mcp-session-id") ?? undefined;
+        }
+        return transport.handleRequest(request);
+      },
     });
     try {
       await configure({ type: "http", url: `http://127.0.0.1:${http.port}/mcp` });
@@ -310,10 +320,45 @@ describe("MCP runtime", () => {
         0,
       );
       await session.close();
+      expect(terminatedSessionId).toBeString();
+      expect(serverClosed).toBe(true);
     } finally {
       await service.close();
       await fixture.close();
       await http.stop(true);
+    }
+  });
+
+  test("HTTP close cleans up locally when the server rejects session termination", async () => {
+    const fixture = createFixtureServer();
+    const transport = new WebStandardStreamableHTTPServerTransport({
+      sessionIdGenerator: () => crypto.randomUUID(),
+    });
+    await fixture.connect(transport);
+    let deletions = 0;
+    const http = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      fetch: (request) => {
+        if (request.method === "DELETE") {
+          deletions++;
+          return new Response(null, { status: 500 });
+        }
+        return transport.handleRequest(request);
+      },
+    });
+    try {
+      await configure({ type: "http", url: `http://127.0.0.1:${http.port}/mcp` });
+      const session = await service.open({ chatId: "a", profileId: "fixture" });
+      await session.close();
+      expect(deletions).toBe(1);
+      expect(session.signal.aborted).toBe(true);
+      await service.close();
+      expect(deletions).toBe(1);
+    } finally {
+      await service.close();
+      await http.stop(true);
+      await fixture.close();
     }
   });
 

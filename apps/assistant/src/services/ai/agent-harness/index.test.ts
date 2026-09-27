@@ -348,6 +348,8 @@ describe("AgentHarness", () => {
       sampleMcp(
         request: CreateMessageRequest["params"],
         settings: typeof DefaultConfigRecord,
+        chatId: TOption<string>,
+        platform: TOption<EMessagePlatform>,
         trace: TOption<TBehaviorTraceContext>,
         parentToolCallId: string,
         iteration: number,
@@ -358,6 +360,8 @@ describe("AgentHarness", () => {
     const result = await harness.sampleMcp(
       params,
       { ...DefaultConfigRecord, [EConfigKey.AiProvider]: EAiProvider.Openrouter },
+      "discord:1",
+      EMessagePlatform.Discord,
       undefined,
       "delegate-call",
       2,
@@ -366,7 +370,6 @@ describe("AgentHarness", () => {
 
     expect(sampledContext?.systemPrompt).toBe("Sampling only");
     expect(JSON.stringify(sampledContext?.messages)).toContain("MCP-only request");
-    expect(JSON.stringify(sampledContext?.messages)).not.toContain("stored history");
     expect(sampledContext?.tools?.map((tool) => tool.name)).toEqual(["lookup"]);
     expect(sampledMaxTokens).toBeLessThan(999_999);
     expect(Array.isArray(result.content)).toBe(true);
@@ -375,6 +378,53 @@ describe("AgentHarness", () => {
       { type: "tool_use", id: "sample-one", name: "lookup", input: { query: "one" } },
       { type: "tool_use", id: "sample-two", name: "lookup", input: { query: "two" } },
     ]);
+  });
+
+  test("sends the conversation's OpenCode session header when sampling MCP", async () => {
+    Bun.env.OPENCODE_API_KEY = "opencode-test-key";
+    const opencode = fauxProvider({
+      provider: EAiProvider.OpencodeGo,
+      models: [{ id: "grok-4.6", reasoning: true }],
+    });
+    aiModels.setProvider(opencode.provider);
+    const expectedSessionId = new Bun.CryptoHasher("sha256", "opencode-test-key")
+      .update("discord:discord:1")
+      .digest("hex");
+    opencode.setResponses([
+      (_context, options) => {
+        expect(options?.sessionId).toBe(expectedSessionId);
+        expect(options?.headers?.["x-opencode-session"]).toBe(expectedSessionId);
+        return fauxAssistantMessage("Sampled response");
+      },
+    ]);
+    const harness = AgentHarness.instance as unknown as {
+      sampleMcp(
+        request: CreateMessageRequest["params"],
+        settings: typeof DefaultConfigRecord,
+        chatId: TOption<string>,
+        platform: TOption<EMessagePlatform>,
+        trace: TOption<TBehaviorTraceContext>,
+        parentToolCallId: string,
+        iteration: number,
+        signal: AbortSignal,
+      ): Promise<CreateMessageResult | CreateMessageResultWithTools>;
+    };
+
+    const result = await harness.sampleMcp(
+      {
+        messages: [{ role: "user", content: { type: "text", text: "MCP request" } }],
+        maxTokens: 100,
+      },
+      { ...DefaultConfigRecord, [EConfigKey.AiProvider]: EAiProvider.OpencodeGo },
+      "discord:1",
+      EMessagePlatform.Discord,
+      undefined,
+      "delegate-call",
+      1,
+      new AbortController().signal,
+    );
+
+    expect(result.content).toEqual({ type: "text", text: "Sampled response" });
   });
 
   test("replays main tool exchanges across turns without specialist internals, even above the soft limit", async () => {

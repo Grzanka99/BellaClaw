@@ -655,14 +655,7 @@ export class AgentHarness {
         api,
         provider,
         model,
-        usage: {
-          input: 0,
-          output: 0,
-          cacheRead: 0,
-          cacheWrite: 0,
-          totalTokens: 0,
-          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-        },
+        usage: this.emptyUsage(),
         stopReason: "stop",
         timestamp,
       });
@@ -921,6 +914,8 @@ export class AgentHarness {
                 return this.sampleMcp(
                   params,
                   args.settings,
+                  args.chatId,
+                  args.platform,
                   args.trace,
                   toolCallId,
                   sampleCount,
@@ -1029,6 +1024,8 @@ export class AgentHarness {
   private async sampleMcp(
     params: CreateMessageRequest["params"],
     settings: TConfigRecord,
+    chatId: TAgentRunArgs["chatId"],
+    platform: TAgentRunArgs["platform"],
     trace: TOption<TBehaviorTraceContext>,
     parentToolCallId: string,
     iteration: number,
@@ -1058,14 +1055,23 @@ export class AgentHarness {
       toolChoice = "auto";
     }
     const startedAt = performance.now();
-    const result = await aiModels.completeSimple(modelConfig.model, context, {
-      apiKey: this.resolveApiKey(modelConfig.model.provider),
-      signal,
-      maxTokens: Math.min(params.maxTokens, modelConfig.model.maxTokens),
-      temperature: params.temperature,
-      reasoning,
-      toolChoice,
-    });
+    const sessionId = this.createSessionId(modelConfig.model.provider, chatId, platform);
+    const result = await aiModels.completeSimple(
+      modelConfig.model,
+      context,
+      withSession(
+        {
+          apiKey: this.resolveApiKey(modelConfig.model.provider),
+          signal,
+          maxTokens: Math.min(params.maxTokens, modelConfig.model.maxTokens),
+          temperature: params.temperature,
+          reasoning,
+          toolChoice,
+        },
+        modelConfig.model.provider,
+        sessionId,
+      ),
+    );
     this.logModelRequestCompleted({
       trace,
       purpose: EModelPurpose.SpecialistAccurate,
@@ -1142,7 +1148,7 @@ export class AgentHarness {
               arguments: block.input,
             });
           } else {
-            content.push({ type: "text", text: this.describeMcpSamplingBlock(block) });
+            content.push({ type: "text", text: this.describeMcpBlock(block) });
           }
         }
         let stopReason: AssistantMessage["stopReason"] = "stop";
@@ -1176,7 +1182,7 @@ export class AgentHarness {
             if (item.type === "text" || item.type === "image") {
               resultContent.push(item);
             } else {
-              resultContent.push({ type: "text", text: this.describeMcpContent(item) });
+              resultContent.push({ type: "text", text: this.describeMcpBlock(item) });
             }
           }
           messages.push({
@@ -1191,7 +1197,7 @@ export class AgentHarness {
         } else if (block.type === "text" || block.type === "image") {
           userContent.push(block);
         } else {
-          userContent.push({ type: "text", text: this.describeMcpSamplingBlock(block) });
+          userContent.push({ type: "text", text: this.describeMcpBlock(block) });
         }
       }
       if (userContent.length > 0) {
@@ -1201,31 +1207,21 @@ export class AgentHarness {
     return messages;
   }
 
-  private describeMcpSamplingBlock(block: SamplingMessageContentBlock): string {
+  private describeMcpBlock(block: SamplingMessageContentBlock | McpContentBlock): string {
     if (block.type === "audio") {
       return `[Audio content: ${block.mimeType}]`;
+    }
+    if (block.type === "image") {
+      return `[Image content: ${block.mimeType}]`;
     }
     if (block.type === "tool_result") {
       return JSON.stringify(block.structuredContent ?? block.content);
     }
-    if (block.type === "image") {
-      return `[Image content: ${block.mimeType}]`;
-    }
     if (block.type === "tool_use") {
       return JSON.stringify({ tool: block.name, arguments: block.input });
     }
-    return block.text;
-  }
-
-  private describeMcpContent(block: McpContentBlock): string {
-    if (block.type === "audio") {
-      return `[Audio content: ${block.mimeType}]`;
-    }
     if (block.type === "text") {
       return block.text;
-    }
-    if (block.type === "image") {
-      return `[Image content: ${block.mimeType}]`;
     }
     return JSON.stringify(block);
   }
