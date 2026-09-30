@@ -16,7 +16,7 @@ import { convertResponsesMessages } from "@earendil-works/pi-ai/api/openai-respo
 import { transformMessages } from "@earendil-works/pi-ai/api/transform-messages";
 import { ECronJobType, type TCronJobContext } from "../../lib/cron-engine";
 import type { AgentHarness } from "../ai/agent-harness";
-import { getAiModel } from "../ai/providers/registry";
+import { getAiModelConfig } from "../ai/providers/registry";
 import { EAiProvider, EModelPurpose, ERole } from "../ai/types";
 import {
   AuthorizationService,
@@ -213,11 +213,13 @@ describe("MessagingAdapter", () => {
     const messages = conversationMessages(conversation);
     for (const provider of Object.values(EAiProvider)) {
       expect(
-        JSON.stringify(transformMessages(messages, getAiModel(provider, EModelPurpose.Main))),
+        JSON.stringify(
+          transformMessages(messages, getAiModelConfig(provider, EModelPurpose.Main).model),
+        ),
       ).toContain(transcript);
     }
     const request = convertResponsesMessages(
-      getAiModel(EAiProvider.OpenaiCodex, EModelPurpose.Main),
+      getAiModelConfig(EAiProvider.OpenaiCodex, EModelPurpose.Main).model,
       { messages },
       new Set(),
     );
