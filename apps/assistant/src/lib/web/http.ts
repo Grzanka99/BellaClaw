@@ -91,7 +91,6 @@ export async function fetchTextWithLimit(
     maxBytes: number;
     headers?: THttpHeaders;
     signal?: AbortSignal;
-    followRedirects?: boolean;
     validateResponseHeaders?: (response: Response) => void;
   },
   network = { lookup: lookupWithCancellation, request: fetchResolvedHttpUrl },
@@ -118,10 +117,6 @@ export async function fetchTextWithLimit(
     });
 
     if (response.status >= 300 && response.status < 400) {
-      if (args.followRedirects !== true) {
-        throw new Error("Redirect responses are not supported for this request");
-      }
-
       if (redirects >= MAX_REDIRECTS) {
         throw new Error("Too many redirects");
       }
