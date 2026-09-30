@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, describe, expect, mock, setSystemTime, test } from "bun:test";
 import type { TLogger } from "@bellaclaw/shared";
 import type { Message } from "@earendil-works/pi-ai";
 import {
@@ -122,7 +122,7 @@ function setupHandler(chatId: string, response = "Final answer") {
     save: mock(async (args) => ({
       ...args,
       id: 100,
-      createdAt: new Date(),
+      createdAt: args.createdAt,
       lastReadAt: new Date(),
     })),
     loadLiveFactWindow: mock(async () => emptyWindow(chatId)),
@@ -164,6 +164,66 @@ async function waitForCall(mockFunction: ReturnType<typeof mock>, count: number)
 afterEach(reset);
 
 describe("MessageHandler", () => {
+  test("preserves arrival timestamps while queued compaction crosses local midnight", async () => {
+    const chatId = "discord:midnight-arrival";
+    const { handler, internals, settings } = setupHandler(chatId);
+    settings[EConfigKey.AiInstructionsTimezone] = "Europe/Warsaw";
+    const memory = Memory.instance;
+    internals.memory.save = mock((args) => memory.save(args));
+    await internals.conversations.saveTurn(chatId, "discord", []);
+    const firstArrival = new Date("2026-07-24T21:59:50.000Z");
+    const secondArrival = new Date("2026-07-24T21:59:55.000Z");
+    const processingTime = new Date("2026-07-24T22:00:10.000Z");
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let firstCompaction = true;
+    internals.ai.compactConversation = mock(async () => {
+      if (firstCompaction) {
+        firstCompaction = false;
+        await gate;
+      }
+      return undefined;
+    });
+
+    setSystemTime(firstArrival);
+    try {
+      const first = handler.handleMessage({
+        chatId,
+        receivedAt: firstArrival,
+        message: { type: "text", content: "What is on my calendar tomorrow?" },
+        author: { type: ERole.User, id: "1", username: "Owner" },
+      });
+      await waitForCall(internals.ai.compactConversation, 1);
+      const second = handler.handleMessage({
+        chatId,
+        receivedAt: secondArrival,
+        message: { type: "text", content: "And tomorrow evening?" },
+        author: { type: ERole.User, id: "1", username: "Owner" },
+      });
+      setSystemTime(processingTime);
+      release();
+      await Promise.all([first, second]);
+      await flushAsyncWork();
+
+      expect(internals.ai.runMain.mock.calls[0]?.[0].currentTimeContext).toContain(
+        "UTC: 2026-07-24T21:59:50.000Z",
+      );
+      expect(internals.ai.runMain.mock.calls[0]?.[0].currentTimeContext).toContain(
+        "Local: 2026-07-24 23:59:50",
+      );
+      expect(internals.ai.runMain.mock.calls[1]?.[0].currentTimeContext).toContain(
+        "Local: 2026-07-24 23:59:55",
+      );
+      const persisted = await memory.findRecent(chatId, 2);
+      expect(persisted.map((message) => message.createdAt)).toEqual([secondArrival, firstArrival]);
+    } finally {
+      release();
+      setSystemTime();
+    }
+  });
+
   test("reuses the previous request prefix with persisted message times across days", async () => {
     const { handler, internals, settings } = setupHandler("discord:cache-prefix");
     settings[EConfigKey.AiProvider] = EAiProvider.Openrouter;
@@ -228,6 +288,7 @@ describe("MessageHandler", () => {
       await handler.handleMessage(
         {
           chatId: "discord:cache-prefix",
+          receivedAt: savedAt,
           message: { type: "text", content: "What day is tomorrow?" },
           author: { type: ERole.User, id: "1", username: "Owner" },
         },
@@ -238,6 +299,7 @@ describe("MessageHandler", () => {
       await handler.handleMessage(
         {
           chatId: "discord:cache-prefix",
+          receivedAt: savedAt,
           message: { type: "text", content: "And today?" },
           author: { type: ERole.User, id: "1", username: "Owner" },
         },
@@ -288,6 +350,7 @@ describe("MessageHandler", () => {
     const result = await handler.handleMessage(
       {
         chatId: "discord:1",
+        receivedAt: new Date(),
         message: { type: "text", content: "new question" },
         author: { type: ERole.User, id: "1", username: "Owner" },
       },
@@ -321,6 +384,7 @@ describe("MessageHandler", () => {
       author: ERole.User,
       importance: EMemoryImportance.Medium,
       message: "new question",
+      createdAt: expect.any(Date),
     });
     expect(internals.conversations.saveTurn).toHaveBeenCalledTimes(1);
   });
@@ -342,6 +406,7 @@ describe("MessageHandler", () => {
     });
     const message: TIncommingMessage = {
       chatId: "compaction-order",
+      receivedAt: new Date(),
       message: { type: "text" as const, content: "first" },
       author: { type: ERole.User, id: "1", username: "Owner" },
     };
@@ -370,6 +435,7 @@ describe("MessageHandler", () => {
     });
     const message: TIncommingMessage = {
       chatId: "compaction-retry",
+      receivedAt: new Date(),
       message: { type: "text" as const, content: "first" },
       author: { type: ERole.User, id: "1", username: "Owner" },
     };
@@ -394,7 +460,7 @@ describe("MessageHandler", () => {
       save: mock(async (args) => ({
         ...args,
         id: 100,
-        createdAt: new Date(),
+        createdAt: args.createdAt,
         lastReadAt: new Date(),
       })),
       loadLiveFactWindow: mock(async () => emptyWindow("signal:1")),
@@ -420,6 +486,7 @@ describe("MessageHandler", () => {
 
     await handler.handleMessage({
       chatId: "signal:1",
+      receivedAt: new Date(),
       message: { type: "text", content: "change my settings" },
       author: { type: ERole.User, id: "1", username: "Owner" },
     });
@@ -442,6 +509,7 @@ describe("MessageHandler", () => {
     await expect(
       handler.handleMessage({
         chatId: "discord:user-save-failure",
+        receivedAt: new Date(),
         message: { type: "text", content: "remember this" },
         author: { type: ERole.User, id: "1", username: "Owner" },
       }),
@@ -460,6 +528,7 @@ describe("MessageHandler", () => {
     await expect(
       handler.handleMessage({
         chatId: "discord:assistant-save-failure",
+        receivedAt: new Date(),
         message: { type: "text", content: "hello" },
         author: { type: ERole.User, id: "1", username: "Owner" },
       }),
@@ -487,6 +556,7 @@ describe("MessageHandler", () => {
     });
     const reply = handler.handleMessage({
       chatId: "discord:ordering",
+      receivedAt: new Date(),
       message: { type: "text", content: "remember this" },
       author: { type: ERole.User, id: "1", username: "Owner" },
     });
@@ -532,6 +602,7 @@ describe("MessageHandler", () => {
 
     await handler.handleMessage({
       chatId: "discord:stalled",
+      receivedAt: new Date(),
       message: { type: "text", content: "first" },
       author: { type: ERole.User, id: "1", username: "Owner" },
     });
@@ -539,6 +610,7 @@ describe("MessageHandler", () => {
 
     const secondReply = await handler.handleMessage({
       chatId: "discord:stalled",
+      receivedAt: new Date(),
       message: { type: "text", content: "second" },
       author: { type: ERole.User, id: "1", username: "Owner" },
     });
@@ -564,6 +636,7 @@ describe("MessageHandler", () => {
 
     await handler.handleMessage({
       chatId: "discord:drain",
+      receivedAt: new Date(),
       message: { type: "text", content: "two facts" },
       author: { type: ERole.User, id: "1", username: "Owner" },
     });
@@ -606,6 +679,7 @@ describe("MessageHandler", () => {
 
     await handler.handleMessage({
       chatId: "discord:retry",
+      receivedAt: new Date(),
       message: { type: "text", content: "first turn" },
       author: { type: ERole.User, id: "1", username: "Owner" },
     });
@@ -616,6 +690,7 @@ describe("MessageHandler", () => {
 
     await handler.handleMessage({
       chatId: "discord:retry",
+      receivedAt: new Date(),
       message: { type: "text", content: "second turn" },
       author: { type: ERole.User, id: "1", username: "Owner" },
     });
@@ -658,6 +733,7 @@ describe("MessageHandler", () => {
     try {
       await handler.handleMessage({
         chatId: "discord:queue-rejection",
+        receivedAt: new Date(),
         message: { type: "text", content: "first turn" },
         author: { type: ERole.User, id: "1", username: "Owner" },
       });
@@ -669,6 +745,7 @@ describe("MessageHandler", () => {
       expect(unhandledRejection).not.toHaveBeenCalled();
       await handler.handleMessage({
         chatId: "discord:queue-rejection",
+        receivedAt: new Date(),
         message: { type: "text", content: "second turn" },
         author: { type: ERole.User, id: "1", username: "Owner" },
       });
@@ -698,6 +775,7 @@ describe("MessageHandler", () => {
     expect(
       await handler.handleMessage({
         chatId: "discord:2",
+        receivedAt: new Date(),
         message: { type: "text", content: "hello" },
         author: { type: ERole.User, id: "2", username: "Owner" },
       }),
@@ -710,6 +788,7 @@ describe("MessageHandler", () => {
     expect(internals.memory.loadLiveFactWindow).not.toHaveBeenCalled();
     await handler.handleMessage({
       chatId: "discord:2",
+      receivedAt: new Date(),
       message: { type: "text", content: "try again" },
       author: { type: ERole.User, id: "2", username: "Owner" },
     });

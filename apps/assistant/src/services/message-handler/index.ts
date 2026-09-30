@@ -18,7 +18,7 @@ import type { EMessagePlatform } from "../messaging/types";
 import { SettingsService } from "../settings";
 import { EConfigKey, type TConfigRecord } from "../settings/schema";
 import { getMessageTrace } from "./trace";
-import type { TIncommingMessage, TOutgoingMessage } from "./types";
+import type { TIncommingMessage } from "./types";
 
 export class MessageHandler {
   private static _instances = new Map<string, MessageHandler>();
@@ -321,7 +321,7 @@ export class MessageHandler {
   }
 
   private async saveMessageToDatabase(
-    message: TIncommingMessage | TOutgoingMessage,
+    message: TIncommingMessage,
     importance: EMemoryImportance,
     trace: TOption<TBehaviorTraceContext>,
     platform: TOption<EMessagePlatform>,
@@ -335,6 +335,7 @@ export class MessageHandler {
         author: message.author.type,
         importance,
         message: message.message.content,
+        createdAt: message.receivedAt,
       });
     } catch (error) {
       failure = String(error);

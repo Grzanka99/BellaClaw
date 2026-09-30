@@ -81,7 +81,7 @@ export class Memory {
         .insert(memoriesTable)
         .values({
           ...args,
-          createdAt: now,
+          createdAt: args.createdAt?.getTime() ?? now,
           lastReadAt: now,
         })
         .returning()
