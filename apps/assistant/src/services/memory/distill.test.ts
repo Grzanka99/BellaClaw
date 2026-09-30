@@ -18,10 +18,10 @@ type TDistillerInternals = {
   };
 };
 
-function makeMemory(id: number, author: ERole, message: string, chatId = "chat-comet"): TMemory {
+function makeMemory(id: number, author: ERole, message: string): TMemory {
   return {
     id,
-    chatId,
+    chatId: "chat-comet",
     author,
     importance: EMemoryImportance.Medium,
     message,
