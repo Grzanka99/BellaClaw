@@ -25,7 +25,7 @@ import type { TConversation } from "../../conversation/types";
 import { McpRunRegistry } from "../../mcp/runs";
 import { EMessagePlatform } from "../../messaging/types";
 import { DefaultConfigRecord, EConfigKey } from "../../settings/schema";
-import { aiModels, getAiModelIds } from "../providers/registry";
+import { aiModels, getAiModelConfig, getAiModelConfigs } from "../providers/registry";
 import { EAiProvider, EModelPurpose, ERole, type THistoryItem } from "../types";
 import { AgentHarness, EAgentName, isSerializedToolCall } from ".";
 import type { TAgentRunArgs, TAgentRunResult } from "./types";
@@ -380,6 +380,89 @@ describe("AgentHarness", () => {
     ]);
   });
 
+  test.each([
+    "off",
+    "high",
+  ] as const)("honors Codex reasoning effort %s when sampling MCP", async (effort) => {
+    const modelConfig = getAiModelConfig(
+      EAiProvider.OpenaiCodex,
+      EModelPurpose.SpecialistAccurate,
+      {
+        model: "gpt-5.6-luna",
+        effort,
+      },
+    );
+    expect(modelConfig.effort).toBe(effort);
+    const complete = spyOn(aiModels, "complete").mockResolvedValue(fauxAssistantMessage("sampled"));
+    const completeSimple = spyOn(aiModels, "completeSimple").mockResolvedValue(
+      fauxAssistantMessage("sampled"),
+    );
+    const signal = new AbortController().signal;
+    const harness = AgentHarness.instance as unknown as {
+      sampleMcp(
+        request: CreateMessageRequest["params"],
+        settings: typeof DefaultConfigRecord,
+        chatId: TOption<string>,
+        platform: TOption<EMessagePlatform>,
+        trace: TOption<TBehaviorTraceContext>,
+        parentToolCallId: string,
+        iteration: number,
+        signal: AbortSignal,
+      ): Promise<CreateMessageResult | CreateMessageResultWithTools>;
+    };
+
+    try {
+      const result = await harness.sampleMcp(
+        {
+          messages: [{ role: "user", content: { type: "text", text: "MCP request" } }],
+          maxTokens: 999_999,
+          temperature: 0.25,
+        },
+        {
+          ...DefaultConfigRecord,
+          [EConfigKey.AiProvider]: EAiProvider.OpenaiCodex,
+          [EConfigKey.AiModelPreferences]: JSON.stringify({
+            [EAiProvider.OpenaiCodex]: {
+              [EModelPurpose.SpecialistAccurate]: { model: modelConfig.model.id, effort },
+            },
+          }),
+        },
+        "discord:1",
+        EMessagePlatform.Discord,
+        undefined,
+        "delegate-call",
+        1,
+        signal,
+      );
+      const options = {
+        maxTokens: modelConfig.model.maxTokens,
+        temperature: 0.25,
+        signal,
+      };
+      if (effort === "off") {
+        expect(completeSimple).not.toHaveBeenCalled();
+        expect(complete).toHaveBeenCalledTimes(1);
+        expect(complete).toHaveBeenCalledWith(
+          modelConfig.model,
+          expect.anything(),
+          expect.objectContaining({ ...options, reasoningEffort: "none" }),
+        );
+      } else {
+        expect(complete).not.toHaveBeenCalled();
+        expect(completeSimple).toHaveBeenCalledTimes(1);
+        expect(completeSimple).toHaveBeenCalledWith(
+          modelConfig.model,
+          expect.anything(),
+          expect.objectContaining({ ...options, reasoning: effort }),
+        );
+      }
+      expect(result.content).toEqual({ type: "text", text: "sampled" });
+    } finally {
+      complete.mockRestore();
+      completeSimple.mockRestore();
+    }
+  });
+
   test("sends the conversation's OpenCode session header when sampling MCP", async () => {
     Bun.env.OPENCODE_API_KEY = "opencode-test-key";
     const opencode = fauxProvider({
@@ -666,7 +749,9 @@ describe("AgentHarness", () => {
     const previousProvider = aiModels.getProvider(provider);
     const routed = fauxProvider({
       provider,
-      models: [...new Set(Object.values(getAiModelIds(provider)))].map((id) => ({
+      models: [
+        ...new Set(Object.values(getAiModelConfigs(provider, {})).map((config) => config.model)),
+      ].map((id) => ({
         id,
         reasoning: true,
       })),
