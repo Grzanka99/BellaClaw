@@ -56,7 +56,7 @@
     - Apply the settings change with update-settings.
     - In the final reply, confirm the settings change.
     - Explicitly ask the user to resend the normal task as a separate message.
-    - Do NOT call any tool outside the settings loop. Do NOT attempt the normal task.
+    - Do NOT attempt the normal task.
   </mixed_message_handling>
 
   <examples>
