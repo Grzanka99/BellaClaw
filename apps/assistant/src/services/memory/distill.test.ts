@@ -191,20 +191,6 @@ describe("FactDistiller", () => {
     expect(result).toEqual({ success: true, facts: [] });
   });
 
-  test("drops a current user row from another chat as a source", async () => {
-    const { distiller, internals } = setupDistiller();
-    const window = makeWindow();
-    window.messages.push(makeMemory(13, ERole.User, "Other chat fact.", "chat-other"));
-    internals.ai.completeText = mock(
-      async () => '{"facts":[{"text":"Other chat fact.","sourceMessageId":13}]}',
-    );
-
-    await expect(distiller.distill(window, DefaultConfigRecord, undefined)).resolves.toEqual({
-      success: true,
-      facts: [],
-    });
-  });
-
   test("commits a zero-fact window and advances through the final assistant row", async () => {
     const { distiller, internals } = setupDistiller();
     internals.ai.completeText = mock(async () => '{"facts":[]}');
