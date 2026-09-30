@@ -839,12 +839,11 @@ export class AgentHarness {
   private async createMcpDelegationTools(
     args: TAgentRunArgs & { delegationCount: TOption<() => void> },
   ): Promise<AgentTool[]> {
-    let profiles: Awaited<ReturnType<typeof loadMcpProfiles>>;
+    let profiles: Awaited<ReturnType<typeof loadMcpProfiles>> = [];
     try {
       profiles = await loadMcpProfiles();
     } catch (error) {
       this.logger.warning(`MCP delegation disabled: ${String(error)}`);
-      return [];
     }
     const profileSummary = profiles
       .map((profile) => `${profile.id}: ${profile.description}`)

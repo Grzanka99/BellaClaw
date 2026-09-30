@@ -191,59 +191,81 @@ describe("AgentHarness", () => {
     ]);
   });
 
-  test("resumes a scheduled MCP question in the next interactive turn", async () => {
-    const chatId = crypto.randomUUID();
-    const elicitation: ElicitRequest["params"] = {
-      mode: "form",
-      message: "Which folder?",
-      requestedSchema: {
-        type: "object",
-        properties: { folder: { type: "string" } },
-        required: ["folder"],
-      },
-    };
-    let answer = "";
-    const pending = await McpRunRegistry.instance.start({
-      chatId,
-      profileId: "files",
-      inputTimeoutMs: 1_000,
-      controller: new AbortController(),
-      close: async () => undefined,
-      run: async (_signal, elicit) => {
-        answer = JSON.stringify(await elicit(elicitation, new AbortController().signal));
-        return { text: "saved", iterations: 2, toolCallCount: 1, stopReason: "completed" };
-      },
-    });
-    const contexts: Context[] = [];
-    faux.setResponses([
-      (context) => {
-        contexts.push({ ...context, messages: structuredClone(context.messages) });
-        return fauxAssistantMessage(
-          fauxToolCall(
-            "resume-mcp",
-            { runId: pending.runId, action: "accept", content: { folder: "docs" } },
-            { id: "resume-scheduled" },
-          ),
-        );
-      },
-      fauxAssistantMessage("The scheduled file operation completed."),
-    ]);
+  test.each([
+    "empty",
+    "malformed",
+  ])("resumes a scheduled MCP question with %s current configuration", async (configuration) => {
+    const directory = await mkdtemp(join(tmpdir(), "bellaclaw-agent-harness-"));
+    const configPath = join(directory, "mcp.json");
+    let profiles: Array<{ id: string }> = [];
+    if (configuration === "malformed") {
+      profiles = [{ id: "invalid" }];
+    }
+    await Bun.write(configPath, JSON.stringify({ profiles }));
+    Bun.env.BELLACLAW_MCP_CONFIG = configPath;
 
-    const result = await AgentHarness.instance.runMain({
-      prompt: "Use docs",
-      history: [],
-      chatId,
-      settings: { ...DefaultConfigRecord, [EConfigKey.AiProvider]: EAiProvider.Openrouter },
-      currentTimeContext: undefined,
-      platform: EMessagePlatform.Discord,
-      trace: undefined,
-      signal: undefined,
-    });
+    try {
+      const chatId = crypto.randomUUID();
+      const close = mock(async () => undefined);
+      const elicitation: ElicitRequest["params"] = {
+        mode: "form",
+        message: "Which folder?",
+        requestedSchema: {
+          type: "object",
+          properties: { folder: { type: "string" } },
+          required: ["folder"],
+        },
+      };
+      let answer = "";
+      const pending = await McpRunRegistry.instance.start({
+        chatId,
+        profileId: "files",
+        inputTimeoutMs: 1_000,
+        controller: new AbortController(),
+        close,
+        run: async (_signal, elicit) => {
+          answer = JSON.stringify(await elicit(elicitation, new AbortController().signal));
+          return { text: "saved", iterations: 2, toolCallCount: 1, stopReason: "completed" };
+        },
+      });
+      const contexts: Context[] = [];
+      faux.setResponses([
+        (context) => {
+          contexts.push({ ...context, messages: structuredClone(context.messages) });
+          return fauxAssistantMessage(
+            fauxToolCall(
+              "resume-mcp",
+              { runId: pending.runId, action: "accept", content: { folder: "docs" } },
+              { id: "resume-scheduled" },
+            ),
+          );
+        },
+        fauxAssistantMessage("The scheduled file operation completed."),
+      ]);
 
-    expect(contexts[0]?.tools?.map((tool) => tool.name)).toContain("resume-mcp");
-    expect(JSON.stringify(contexts[0]?.messages)).toContain("Which folder?");
-    expect(answer).toBe(JSON.stringify({ action: "accept", content: { folder: "docs" } }));
-    expect(result.text).toBe("The scheduled file operation completed.");
+      const result = await AgentHarness.instance.runMain({
+        prompt: "Use docs",
+        history: [],
+        chatId,
+        settings: { ...DefaultConfigRecord, [EConfigKey.AiProvider]: EAiProvider.Openrouter },
+        currentTimeContext: undefined,
+        platform: EMessagePlatform.Discord,
+        trace: undefined,
+        signal: undefined,
+      });
+
+      const toolNames = contexts[0]?.tools?.map((tool) => tool.name);
+      expect(toolNames).toContain("resume-mcp");
+      expect(toolNames).toContain("cancel-mcp");
+      expect(toolNames).not.toContain("delegate-mcp");
+      expect(JSON.stringify(contexts[0]?.messages)).toContain("Which folder?");
+      expect(answer).toBe(JSON.stringify({ action: "accept", content: { folder: "docs" } }));
+      expect(result.text).toBe("The scheduled file operation completed.");
+      expect(close).toHaveBeenCalledTimes(1);
+      expect(McpRunRegistry.instance.list(chatId)).toEqual([]);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 
   test("uses refreshed MCP tools on the next specialist turn", async () => {
