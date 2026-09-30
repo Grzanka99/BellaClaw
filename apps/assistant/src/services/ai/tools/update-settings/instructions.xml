@@ -3,7 +3,7 @@
   <purpose>
     Update the user's assistant settings. Only the fields explicitly provided are changed;
     omitted fields keep their current value. After a successful update, the new effective
-    settings are returned and the assistant's instruction cache is invalidated, so the next
+    settings are returned, so the next
     normal assistant turn uses the new values.
   </purpose>
 
