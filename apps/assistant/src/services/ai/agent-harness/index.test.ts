@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AppLogger, type TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
+import { AppLogger, LogReader, type TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
 import { logger, type TOption } from "@bellaclaw/shared";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import {
@@ -38,6 +38,8 @@ const OPENROUTER_MODELS = [
   "google/gemini-3.1-pro-preview",
 ].map((id) => ({ id, reasoning: true }));
 
+const logDirectories: string[] = [];
+
 describe("AgentHarness", () => {
   const previousApiKey = Bun.env.OPENROUTER_API_KEY;
   const previousMcpConfig = Bun.env.BELLACLAW_MCP_CONFIG;
@@ -52,7 +54,10 @@ describe("AgentHarness", () => {
     aiModels.setProvider(faux.provider);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    for (const directory of logDirectories.splice(0)) {
+      await rm(directory, { recursive: true, force: true });
+    }
     if (previousApiKey === undefined) {
       delete Bun.env.OPENROUTER_API_KEY;
     } else {
@@ -1410,7 +1415,10 @@ describe("AgentHarness", () => {
   });
 
   test("records each model response once with cache usage, hierarchy, and unknown zero usage", async () => {
-    const appLogger = new AppLogger({ dbPath: ":memory:", stdout: () => undefined });
+    const directory = await mkdtemp(join(tmpdir(), "bellaclaw-harness-logs-"));
+    logDirectories.push(directory);
+    const dbPath = join(directory, "behavior.db");
+    const appLogger = new AppLogger({ dbPath, stdout: () => undefined });
     (AppLogger as unknown as { _instance: AppLogger })._instance = appLogger;
     const responses = [
       fauxAssistantMessage(
@@ -1478,9 +1486,13 @@ describe("AgentHarness", () => {
         trace,
       });
       await appLogger.flush();
-      const events = (await appLogger.findByTurnId(trace.turnId)).filter(
-        (event) => event.event === "model.request.completed",
-      );
+      const reader = new LogReader(dbPath);
+      const result = await reader.readTurn(trace.turnId);
+      await reader.close();
+      if (!result.success) {
+        throw new Error(result.error.message);
+      }
+      const events = result.data.filter((event) => event.event === "model.request.completed");
       expect(events).toHaveLength(4);
       expect(events.slice(0, 3).map((event) => event.metadata)).toEqual([
         expect.objectContaining({
@@ -1534,7 +1546,10 @@ describe("AgentHarness", () => {
   });
 
   test("persists agent hierarchy, tool details, and lifecycle durations", async () => {
-    const appLogger = new AppLogger({ dbPath: ":memory:", stdout: () => undefined });
+    const directory = await mkdtemp(join(tmpdir(), "bellaclaw-harness-logs-"));
+    logDirectories.push(directory);
+    const dbPath = join(directory, "behavior.db");
+    const appLogger = new AppLogger({ dbPath, stdout: () => undefined });
     (AppLogger as unknown as { _instance: AppLogger })._instance = appLogger;
     faux.setResponses([
       fauxAssistantMessage(
@@ -1572,7 +1587,13 @@ describe("AgentHarness", () => {
       trace,
     });
     await appLogger.flush();
-    const events = await appLogger.findByTurnId(trace.turnId);
+    const reader = new LogReader(dbPath);
+    const result = await reader.readTurn(trace.turnId);
+    await reader.close();
+    if (!result.success) {
+      throw new Error(result.error.message);
+    }
+    const events = result.data;
 
     expect(events).toEqual(
       expect.arrayContaining([
@@ -1606,7 +1627,10 @@ describe("AgentHarness", () => {
   });
 
   test("persists extracted tool errors and failed direct-completion lifecycle duration", async () => {
-    const appLogger = new AppLogger({ dbPath: ":memory:", stdout: () => undefined });
+    const directory = await mkdtemp(join(tmpdir(), "bellaclaw-harness-logs-"));
+    logDirectories.push(directory);
+    const dbPath = join(directory, "behavior.db");
+    const appLogger = new AppLogger({ dbPath, stdout: () => undefined });
     (AppLogger as unknown as { _instance: AppLogger })._instance = appLogger;
     faux.setResponses([
       fauxAssistantMessage(
@@ -1647,7 +1671,13 @@ describe("AgentHarness", () => {
       trace,
     });
     await appLogger.flush();
-    const events = await appLogger.findByTurnId(trace.turnId);
+    const reader = new LogReader(dbPath);
+    const result = await reader.readTurn(trace.turnId);
+    await reader.close();
+    if (!result.success) {
+      throw new Error(result.error.message);
+    }
+    const events = result.data;
     const failedTool = events.find(
       (event) => event.event === "tool.call.completed" && event.toolName === "delegate-memory",
     );

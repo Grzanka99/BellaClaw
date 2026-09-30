@@ -1,3 +1,4 @@
+import { Database } from "bun:sqlite";
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -36,6 +37,28 @@ afterEach(() => {
 });
 
 describe("logs:turn", () => {
+  test("fails for an unrelated database without changing its schema or contents", async () => {
+    const dbPath = createTemporaryDbPath();
+    const database = new Database(dbPath, { create: true });
+    database.exec("CREATE TABLE unrelated (id INTEGER PRIMARY KEY)");
+    database.exec("INSERT INTO unrelated VALUES (1)");
+    database.close();
+    const before = await Bun.file(dbPath).arrayBuffer();
+
+    const result = await runLogsTurn("wrong-schema", dbPath);
+
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr).toContain("schema");
+    expect(result.stderr).toContain(dbPath);
+    const observed = new Database(dbPath, { readonly: true });
+    expect(
+      observed.query("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all(),
+    ).toEqual([{ name: "unrelated" }]);
+    observed.close();
+    expect(await Bun.file(dbPath).arrayBuffer()).toEqual(before);
+    expect(existsSync(`${dbPath}.chatid-hmac-key`)).toBe(false);
+  });
+
   test("fails for a missing database without creating its files", async () => {
     const dbPath = createTemporaryDbPath();
 

@@ -1,5 +1,4 @@
-import { existsSync } from "node:fs";
-import { AppLogger, getDefaultLogDbPath } from "../src";
+import { getDefaultLogDbPath, LogReader } from "../src";
 
 const turnId = Bun.argv[2];
 
@@ -13,17 +12,17 @@ if (turnId === undefined || turnId.trim().length === 0) {
 async function printTurn(turnId: string) {
   const dbPath = getDefaultLogDbPath();
 
-  if (dbPath !== ":memory:" && !existsSync(dbPath)) {
-    console.error(`Behavior log database does not exist: ${dbPath}`);
-    process.exitCode = 1;
-    return;
-  }
-
   console.log(`Querying behavior log database: ${dbPath}`);
-  const appLogger = new AppLogger({ dbPath });
+  const reader = new LogReader(dbPath);
 
   try {
-    const events = await appLogger.findByTurnId(turnId);
+    const result = await reader.readTurn(turnId);
+    if (!result.success) {
+      console.error(`${result.error.message}: ${result.error.dbPath}`);
+      process.exitCode = 1;
+      return;
+    }
+    const events = result.data;
 
     if (events.length === 0) {
       console.log(`No behavior events found for turnId: ${turnId}`);
@@ -52,7 +51,7 @@ async function printTurn(turnId: string) {
       }
     }
   } finally {
-    await appLogger.close();
+    await reader.close();
   }
 }
 
