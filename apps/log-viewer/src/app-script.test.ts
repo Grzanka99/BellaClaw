@@ -5,6 +5,51 @@ import { type HTMLElement, type HTMLInputElement, Window } from "happy-dom";
 
 const script = await Bun.file(new URL("./app.js", import.meta.url)).text();
 
+test("pagination swaps update the count without a live-events template", async () => {
+  const window = new Window({ url: "http://localhost/" });
+  const document = window.document;
+  document.body.innerHTML = `
+    <div class="results-title"><strong>1 events</strong></div>
+    <div id="events-list">
+      <div class="event-list"><article data-event-id="1">First</article></div>
+      <div id="load-more"></div>
+    </div>`;
+  try {
+    runInNewContext(script, { window, document, setInterval() {} });
+    const pagination = document.querySelector("#load-more");
+    assert(pagination);
+    const older = document.createElement("div");
+    older.className = "event-list";
+    older.innerHTML = '<article data-event-id="2">Older</article>';
+    pagination.before(older);
+
+    older.dispatchEvent(new window.CustomEvent("htmx:afterSwap", { bubbles: true }));
+
+    expect(document.querySelectorAll("[data-event-id]")).toHaveLength(2);
+    expect(document.querySelector(".results-title strong")?.textContent).toBe("2 events");
+    expect(document.querySelector("#load-more")).toBe(pagination);
+  } finally {
+    await window.happyDOM.close();
+  }
+});
+
+test("updated error pages need no event list or result counter", async () => {
+  const window = new Window({ url: "http://localhost/" });
+  const document = window.document;
+  document.body.innerHTML = '<div id="app-shell">Behavior log database is unavailable</div>';
+  try {
+    expect(() =>
+      runInNewContext(`${script}\nhandleUpdatedContent(document);`, {
+        window,
+        document,
+        setInterval() {},
+      }),
+    ).not.toThrow();
+  } finally {
+    await window.happyDOM.close();
+  }
+});
+
 test("live swaps preserve interaction state and loaded history", async () => {
   const window = new Window({ url: "http://localhost/?live=1" });
   const document = window.document;
