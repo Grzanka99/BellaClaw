@@ -475,8 +475,6 @@ function logMessageReceived(trace: TBehaviorTraceContext, message: TPlatformMess
       platform: message.platform,
       messageType: message.message.type,
       messageChars: message.message.content.length,
-      attachmentCount: 0,
-      attachmentKinds: [],
     },
   });
 }

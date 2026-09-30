@@ -35,8 +35,6 @@ describe("AppLogger", () => {
       metadata: {
         messageType: "text",
         messageChars: 18,
-        attachmentCount: 0,
-        attachmentKinds: [],
       },
     });
 
