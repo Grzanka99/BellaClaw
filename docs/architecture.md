@@ -25,11 +25,13 @@ moving a file cannot silently change which directory it reads.
 
 1. A Discord or Signal transport receives a direct message.
 2. The messaging adapter creates a platform-scoped chat key and behavior trace.
-3. The message handler loads settings and the latest 30 stored messages.
-4. It classifies the user message's importance and queues it for persistence.
-5. A fresh Main agent receives the current message and recent history.
+3. The message handler loads settings and structured conversation state. It bootstraps from the
+   latest 30 stored messages when no replay exists.
+4. It saves the user transcript at Medium importance before generating a reply.
+5. A fresh Main agent receives the current message with structured replay or bootstrap history.
 6. Main answers directly or delegates focused work to a specialist.
-7. The response is queued for classification and persistence.
+7. The completed model turn, including tool exchanges, is persisted for replay. Fact distillation
+   and conversation compaction run in the background.
 8. The transport sends Main's final response.
 
 Discord and Signal use separate chat keys. Their histories and scheduled deliveries do not merge.
