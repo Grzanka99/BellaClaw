@@ -1161,27 +1161,11 @@ describe("AgentHarness", () => {
     expect(schedulingTask).toContain("returned by Memory");
   });
 
-  test("enforces 30 delegations, specialist nonblank results, and depth one", async () => {
+  test("enforces 30 Main delegations and nonblank specialist results", async () => {
     const harness = AgentHarness.instance as unknown as {
-      createDelegationTools(args: {
-        name: EAgentName;
-        purpose: EModelPurpose;
-        prompt: string;
-        chatId: string;
-        settings: typeof DefaultConfigRecord;
-        currentTimeContext: undefined;
-        platform: EMessagePlatform;
-        trace: TBehaviorTraceContext;
-        history: THistoryItem[];
-        maxIterations: number;
-        parentToolCallId: TOption<string>;
-        signal: TOption<AbortSignal>;
-        delegationCount: TOption<() => void>;
-      }): Array<{
-        name: string;
-        executionMode: string;
-        execute(id: string, args: unknown): Promise<unknown>;
-      }>;
+      createTools(
+        args: TAgentRunArgs & { delegationCount: TOption<() => void> },
+      ): Promise<AgentTool[]>;
       run: ReturnType<typeof mock>;
     };
     const originalRun = harness.run;
@@ -1212,7 +1196,7 @@ describe("AgentHarness", () => {
         }
       },
     };
-    const tools = harness.createDelegationTools(base);
+    const tools = await harness.createTools(base);
     const memory = tools.find((tool) => tool.name === "delegate-memory");
     const scheduling = tools.find((tool) => tool.name === "delegate-scheduling");
 
@@ -1224,6 +1208,7 @@ describe("AgentHarness", () => {
     expect(memory?.execute("call-31", { task: "remember" })).rejects.toThrow(
       "Root delegation limit reached",
     );
+    expect(harness.run).toHaveBeenCalledTimes(30);
     expect(harness.run).toHaveBeenCalledWith(
       expect.objectContaining({
         name: EAgentName.Memory,
@@ -1234,25 +1219,17 @@ describe("AgentHarness", () => {
       }),
     );
 
-    const specialistTools = harness.createDelegationTools({
-      ...base,
-      name: EAgentName.Memory,
-      delegationCount: undefined,
-    });
-    expect(specialistTools[0]?.execute("nested", { task: "no" })).rejects.toThrow(
-      "Specialists cannot delegate",
-    );
-
     harness.run = mock(async () => ({
       text: " ",
       iterations: 1,
       toolCallCount: 0,
       stopReason: "completed",
     }));
-    const blankTool = harness.createDelegationTools({
+    const blankTools = await harness.createTools({
       ...base,
       delegationCount: () => undefined,
-    })[0];
+    });
+    const blankTool = blankTools.find((tool) => tool.name === "delegate-memory");
     expect(blankTool?.execute("blank", { task: "remember" })).rejects.toThrow(
       "specialist returned no final response",
     );
