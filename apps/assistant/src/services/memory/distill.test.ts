@@ -89,8 +89,6 @@ describe("FactDistiller", () => {
   test("parses structured facts and marks only current user rows eligible", async () => {
     const { distiller, internals } = setupDistiller();
     const window = makeWindow();
-    window.messages.push(makeMemory(13, ERole.User, "Where does the user live?"));
-    window.messages.push(makeMemory(14, ERole.User, "ユーザーはどこに住んでいますか？"));
     internals.ai.completeText = mock(
       async () =>
         '{"facts":[{"text":"The user attends ceramics on Tuesdays.","sourceMessageId":11}]}',
@@ -118,8 +116,6 @@ describe("FactDistiller", () => {
     expect(prompt).toContain("[id=9][user][CONTEXT ONLY] The ceramics club hosts workshops.");
     expect(prompt).toContain("[id=11][user][ELIGIBLE SOURCE] I attend on Tuesdays.");
     expect(prompt).toContain("[id=12][assistant][CONTEXT ONLY] I will remember that.");
-    expect(prompt).toContain("[id=13][user][CONTEXT ONLY] Where does the user live?");
-    expect(prompt).toContain("[id=14][user][CONTEXT ONLY] ユーザーはどこに住んでいますか？");
   });
 
   test("rejects invalid JSON", async () => {
@@ -160,35 +156,65 @@ describe("FactDistiller", () => {
     });
   });
 
-  test("keeps a user row eligible when a claim precedes a question", async () => {
+  test("commits a grounded claim followed by a comma and question", async () => {
     const { distiller, internals } = setupDistiller();
     const window = makeWindow();
-    window.messages = [makeMemory(11, ERole.User, "Mam rower o imieniu Kometa; co o nim myslisz?")];
+    window.messages = [makeMemory(11, ERole.User, "Mam rower o imieniu Kometa, co o nim myślisz?")];
     internals.ai.completeText = mock(
       async () =>
         '{"facts":[{"text":"The user has a bicycle named Kometa.","sourceMessageId":11}]}',
     );
 
-    const result = await distiller.distill(window, DefaultConfigRecord, undefined);
+    const vector = makeEmbedding(0.25);
+    internals.embedding.embedMany = mock(async () => [vector]);
 
-    expect(result).toEqual({
-      success: true,
-      facts: [{ text: "The user has a bicycle named Kometa.", sourceMessageId: 11 }],
+    const result = await distiller.processWindow({
+      window,
+      settings: DefaultConfigRecord,
+      trace: undefined,
+    });
+
+    expect(result).toEqual({ success: true });
+    expect(internals.memory.commitLiveFactWindow).toHaveBeenCalledWith({
+      chatId: "chat-comet",
+      expectedLastProcessedMessageId: 10,
+      lastProcessedMessageId: 11,
+      facts: [
+        {
+          text: "The user has a bicycle named Kometa.",
+          sourceMessageId: 11,
+          embedding: vector,
+          supersedesFactIds: [],
+        },
+      ],
     });
   });
 
-  test("treats a question-only user row as an ineligible source", async () => {
+  test.each([
+    "Czy jestem w zwiazku?",
+    "Where does the user live?",
+    "ユーザーはどこに住んでいますか？",
+  ])("asks the utility model to extract no durable facts from a question: %s", async (message) => {
     const { distiller, internals } = setupDistiller();
     const window = makeWindow();
-    window.messages = [makeMemory(11, ERole.User, "Czy jestem w zwiazku?")];
-    internals.ai.completeText = mock(
-      async () =>
-        '{"facts":[{"text":"The user asked about a relationship.","sourceMessageId":11}]}',
-    );
+    window.messages = [makeMemory(11, ERole.User, message)];
+    internals.ai.completeText = mock(async () => '{"facts":[]}');
 
     const result = await distiller.distill(window, DefaultConfigRecord, undefined);
 
     expect(result).toEqual({ success: true, facts: [] });
+    expect(internals.ai.completeText).toHaveBeenCalledWith(
+      expect.objectContaining({
+        purpose: EModelPurpose.Utility,
+        prompt: expect.stringContaining(`[id=11][user][ELIGIBLE SOURCE] ${message}`),
+        instructions: expect.stringContaining(
+          "Extract durable facts explicitly stated by the user.",
+        ),
+      }),
+    );
+    expect(internals.ai.completeText.mock.calls[0]?.[0].instructions).toContain(
+      "Never record that the user asked a question",
+    );
   });
 
   test("drops a current user row from another chat as a source", async () => {
