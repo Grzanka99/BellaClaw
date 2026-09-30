@@ -1044,22 +1044,29 @@ export class AgentHarness {
     }
     const startedAt = performance.now();
     const sessionId = this.createSessionId(modelConfig.model.provider, chatId, platform);
-    const result = await aiModels.completeSimple(
-      modelConfig.model,
-      context,
-      withSession(
-        {
-          apiKey: this.resolveApiKey(modelConfig.model.provider),
-          signal,
-          maxTokens: Math.min(params.maxTokens, modelConfig.model.maxTokens),
-          temperature: params.temperature,
-          reasoning,
-          toolChoice,
-        },
-        modelConfig.model.provider,
-        sessionId,
-      ),
+    const options = withSession(
+      {
+        apiKey: this.resolveApiKey(modelConfig.model.provider),
+        signal,
+        maxTokens: Math.min(params.maxTokens, modelConfig.model.maxTokens),
+        temperature: params.temperature,
+        toolChoice,
+      },
+      modelConfig.model.provider,
+      sessionId,
     );
+    let result: Awaited<ReturnType<typeof aiModels.completeSimple>>;
+    if (modelConfig.effort === "off" && hasApi(modelConfig.model, "openai-codex-responses")) {
+      result = await aiModels.complete(modelConfig.model, context, {
+        ...options,
+        reasoningEffort: "none",
+      });
+    } else {
+      result = await aiModels.completeSimple(modelConfig.model, context, {
+        ...options,
+        reasoning,
+      });
+    }
     this.logModelRequestCompleted({
       trace,
       purpose: EModelPurpose.SpecialistAccurate,
