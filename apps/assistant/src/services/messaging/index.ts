@@ -80,6 +80,7 @@ export class MessagingAdapter {
   }
 
   public async handleInboundMessage(message: TPlatformMessage) {
+    const receivedAt = new Date();
     const canonicalChatId = createCanonicalChatKey(message.platform, message.chatId);
     const handlerStart = performance.now();
     const trace: TBehaviorTraceContext = {
@@ -144,6 +145,7 @@ export class MessagingAdapter {
 
       const incomingMessage: TIncommingMessage = {
         chatId: canonicalChatId,
+        receivedAt,
         author: {
           type: ERole.User,
           username: message.author.username,
