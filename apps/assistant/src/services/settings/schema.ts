@@ -12,9 +12,6 @@ export enum EConfigKey {
   AiInstructionsTimezone = "ai.instructions.timezone",
   AiInstructionsTimeFormat = "ai.instructions.timeFormat",
   AiInstructionsPreferredReplyLength = "ai.instructions.preferredReplyLength",
-  AiInstructionsMemoryRetentionLow = "ai.instructions.memoryRetention.low",
-  AiInstructionsMemoryRetentionMedium = "ai.instructions.memoryRetention.medium",
-  AiInstructionsMemoryRetentionHigh = "ai.instructions.memoryRetention.high",
 }
 
 export type TConfigRecord = { [key in EConfigKey]: string };
@@ -30,10 +27,6 @@ export const DefaultConfigRecord: TConfigRecord = {
   [EConfigKey.AiInstructionsTimezone]: "Europe/Warsaw",
   [EConfigKey.AiInstructionsTimeFormat]: "24-hour format (e.g. 14:30, not 2:30 PM)",
   [EConfigKey.AiInstructionsPreferredReplyLength]: "1-3 sentences",
-  [EConfigKey.AiInstructionsMemoryRetentionLow]: "Discard after short-term context window",
-  [EConfigKey.AiInstructionsMemoryRetentionMedium]: "Keep for several weeks, review periodically",
-  [EConfigKey.AiInstructionsMemoryRetentionHigh]:
-    "Keep indefinitely, reference in future conversations",
 };
 
 const SNonEmptyString = z.string().trim().min(1);
@@ -59,9 +52,6 @@ export const ConfigValidators: { [key in EConfigKey]: z.ZodType<string> } = {
   [EConfigKey.AiInstructionsTimezone]: STimezone,
   [EConfigKey.AiInstructionsTimeFormat]: SNonEmptyString,
   [EConfigKey.AiInstructionsPreferredReplyLength]: SNonEmptyString,
-  [EConfigKey.AiInstructionsMemoryRetentionLow]: SNonEmptyString,
-  [EConfigKey.AiInstructionsMemoryRetentionMedium]: SNonEmptyString,
-  [EConfigKey.AiInstructionsMemoryRetentionHigh]: SNonEmptyString,
 };
 
 const KNOWN_CONFIG_KEYS = new Set<string>(Object.values(EConfigKey));
