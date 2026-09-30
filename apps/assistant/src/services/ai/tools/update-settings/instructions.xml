@@ -12,8 +12,7 @@
     <description>
       Updates one or more of: timezone, language, assistantName, addressStyle,
       preferredReplyLength, aiProvider, aiModel, aiModelPurpose, aiReasoningEffort,
-      resetAiModel, or resetAiReasoningEffort. At least one field must be provided. There
-      is no arbitrary key/value field — only the listed fields are accepted.
+      resetAiModel, or resetAiReasoningEffort. At least one field must be provided. Only the listed fields are accepted.
     </description>
   </tool>
 
