@@ -250,18 +250,10 @@ export class FactDistiller {
   ): Promise<TFactPreparationResult> {
     let embeddings: number[][] = [];
     if (distilledFacts.length > 0) {
-      let embeddingResult: TOption<number[][]>;
-      try {
-        embeddingResult = await this.embedding.embedMany(distilledFacts.map((fact) => fact.text));
-      } catch (error) {
-        this.logger.error(`prepareFacts: embedding failed: ${String(error)}`);
-        return {
-          success: false,
-          reason: "embedding",
-        };
-      }
-
-      if (embeddingResult === undefined || embeddingResult.length !== distilledFacts.length) {
+      const embeddingResult = await this.embedding.embedMany(
+        distilledFacts.map((fact) => fact.text),
+      );
+      if (embeddingResult === undefined) {
         this.logger.error("prepareFacts: embedding failed");
         return {
           success: false,
