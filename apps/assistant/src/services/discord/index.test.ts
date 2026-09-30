@@ -17,7 +17,7 @@ type TDiscordSingletonInternals = {
     };
   };
   handleMessage: (message: {
-    author: { id: string; username: string };
+    author: { id: string };
     channel: { type: ChannelType };
     content: string;
   }) => Promise<void>;
@@ -116,7 +116,6 @@ describe("DiscordSingleton", () => {
     await discord.handleMessage({
       author: {
         id: "user-1",
-        username: "TestUser",
       },
       channel: {
         type: ChannelType.DM,
@@ -127,12 +126,7 @@ describe("DiscordSingleton", () => {
     expect(handleInboundMessageMock).toHaveBeenCalledWith({
       platform: EMessagePlatform.Discord,
       chatId: "user-1",
-      author: {
-        id: "user-1",
-        username: "TestUser",
-      },
       message: {
-        type: "text",
         content: "hello",
       },
     });
@@ -153,7 +147,7 @@ describe("DiscordSingleton", () => {
 
     expect(
       await discord.handleMessage({
-        author: { id: "user-1", username: "TestUser" },
+        author: { id: "user-1" },
         channel: { type: ChannelType.DM },
         content: "hello",
       }),

@@ -3,7 +3,7 @@
   <purpose>
     Update the user's assistant settings. Only the fields explicitly provided are changed;
     omitted fields keep their current value. After a successful update, the new effective
-    settings are returned and the assistant's instruction cache is invalidated, so the next
+    settings are returned, so the next
     normal assistant turn uses the new values.
   </purpose>
 
@@ -12,8 +12,7 @@
     <description>
       Updates one or more of: timezone, language, assistantName, addressStyle,
       preferredReplyLength, aiProvider, aiModel, aiModelPurpose, aiReasoningEffort,
-      resetAiModel, or resetAiReasoningEffort. At least one field must be provided. There
-      is no arbitrary key/value field — only the listed fields are accepted.
+      resetAiModel, or resetAiReasoningEffort. At least one field must be provided. Only the listed fields are accepted.
     </description>
   </tool>
 
@@ -35,7 +34,7 @@
     <rule>Provide at least one field. Calling update-settings with an empty object is invalid.</rule>
     <rule>Only the provided fields are written. Omitted fields are left untouched.</rule>
     <rule>Never invent or guess values. If the user did not specify a value for a field, omit it.</rule>
-    <rule>Never offer an arbitrary key/value field — only the listed fields are accepted.</rule>
+    <rule>Only the listed fields are accepted.</rule>
     <rule>Change provider, model, or effort only after an explicit user request. Never switch autonomously.</rule>
     <rule>Model operations apply to Main unless the user explicitly names another existing purpose.</rule>
     <rule>A model must belong to the active provider. A combined explicit provider/model request is allowed and applied atomically.</rule>
@@ -56,7 +55,7 @@
     - Apply the settings change with update-settings.
     - In the final reply, confirm the settings change.
     - Explicitly ask the user to resend the normal task as a separate message.
-    - Do NOT call any tool outside the settings loop. Do NOT attempt the normal task.
+    - Do NOT attempt the normal task.
   </mixed_message_handling>
 
   <examples>

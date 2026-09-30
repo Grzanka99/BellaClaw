@@ -18,7 +18,6 @@ function isTestDatabaseMode() {
 
 export class DatabaseConnector {
   private static _instance: DatabaseConnector;
-  private static _testInstance: DatabaseConnector;
   private db: LibSQLDatabase;
 
   private constructor(isTest = false) {
@@ -47,21 +46,9 @@ export class DatabaseConnector {
     });
   }
 
-  public static get testinstance() {
-    if (!DatabaseConnector._testInstance) {
-      DatabaseConnector._testInstance = new DatabaseConnector(true);
-    }
-
-    return DatabaseConnector._testInstance;
-  }
-
   public static get instance() {
-    if (isTestDatabaseMode()) {
-      return DatabaseConnector.testinstance;
-    }
-
     if (!DatabaseConnector._instance) {
-      DatabaseConnector._instance = new DatabaseConnector();
+      DatabaseConnector._instance = new DatabaseConnector(isTestDatabaseMode());
     }
 
     return DatabaseConnector._instance;

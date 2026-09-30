@@ -30,7 +30,7 @@ describe("delegation log sanitizers", () => {
       toolName,
       success: true,
       data: {
-        content: [{ type: "text", text: `Found super-secret ${"memory ".repeat(80)}` }],
+        text: `Found super-secret ${"memory ".repeat(80)}`,
       },
       error: undefined,
     });

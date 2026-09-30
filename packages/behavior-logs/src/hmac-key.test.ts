@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { TOption } from "@bellaclaw/shared";
 import { AppLogger, EBehaviorLogLevel, type TBehaviorLogEvent } from ".";
+import { maskCanonicalChatId } from "./hmac-key";
 
 let tempDir: TOption<string>;
 let originalLogChatIdHmacKey: TOption<string>;
@@ -44,6 +45,73 @@ describe("AppLogger chatId HMAC key", () => {
     }
   });
 
+  test.each([
+    ":memory:",
+    "file",
+  ])("matches reader masking with a configured key for %s", async (storage) => {
+    if (tempDir === undefined) {
+      throw new Error("tempDir was not initialized");
+    }
+
+    Bun.env.LOG_CHATID_HMAC_KEY = " configured-key ";
+    let dbPath: string = storage;
+    if (storage === "file") {
+      dbPath = join(tempDir, "logs.db");
+    }
+    const stdout: TBehaviorLogEvent[] = [];
+    const appLogger = new AppLogger({
+      dbPath,
+      stdout(event) {
+        stdout.push(event);
+      },
+    });
+
+    recordMessage(appLogger, "turn-test-1");
+    await appLogger.close();
+
+    expect(stdout[0]?.chatId).toBe(maskCanonicalChatId(dbPath, "discord:chat-1"));
+    expect(stdout[0]?.chatId).toMatch(/^sha256:[0-9a-f]{64}$/);
+  });
+
+  test("matches reader masking for an in-memory key", async () => {
+    const stdout: TBehaviorLogEvent[] = [];
+    const appLogger = new AppLogger({
+      dbPath: ":memory:",
+      stdout(event) {
+        stdout.push(event);
+      },
+    });
+
+    recordMessage(appLogger, "turn-test-1");
+    await appLogger.close();
+
+    expect(stdout[0]?.chatId).toBe(maskCanonicalChatId(":memory:", "discord:chat-1"));
+  });
+
+  test("keeps the cached key when its sidecar is removed", async () => {
+    if (tempDir === undefined) {
+      throw new Error("tempDir was not initialized");
+    }
+
+    const dbPath = join(tempDir, "logs.db");
+    const stdout: TBehaviorLogEvent[] = [];
+    const appLogger = new AppLogger({
+      dbPath,
+      stdout(event) {
+        stdout.push(event);
+      },
+    });
+
+    recordMessage(appLogger, "turn-test-1");
+    await appLogger.flush();
+    rmSync(`${dbPath}.chatid-hmac-key`);
+    recordMessage(appLogger, "turn-test-2");
+    await appLogger.close();
+
+    expect(stdout[0]?.chatId).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(stdout[1]?.chatId).toBe(stdout[0]?.chatId);
+  });
+
   test("reuses generated key for file-backed log chat IDs", async () => {
     if (tempDir === undefined) {
       throw new Error("tempDir was not initialized");
@@ -77,5 +145,6 @@ describe("AppLogger chatId HMAC key", () => {
     expect(existsSync(`${dbPath}.chatid-hmac-key`)).toBe(true);
     expect(firstStdout[0]?.chatId).toMatch(/^sha256:[0-9a-f]{64}$/);
     expect(secondStdout[0]?.chatId).toBe(firstStdout[0]?.chatId);
+    expect(secondStdout[0]?.chatId).toBe(maskCanonicalChatId(dbPath, "discord:chat-1"));
   });
 });

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { hasApi } from "@earendil-works/pi-ai";
 import { EAiProvider, EModelPurpose } from "../types";
-import { aiModels, getAiApiKey, getAiModel, getAiModelConfig, getAiModelIds } from "./registry";
+import { aiModels, getAiApiKey, getAiModelConfig, getAiModelConfigs } from "./registry";
 
 const ORIGINAL_OPENROUTER_API_KEY = Bun.env.OPENROUTER_API_KEY;
 const ORIGINAL_OPENCODE_API_KEY = Bun.env.OPENCODE_API_KEY;
@@ -21,10 +21,10 @@ describe("AI provider registry", () => {
     ).toEqual(Object.values(EAiProvider).toSorted());
 
     for (const provider of Object.values(EAiProvider)) {
-      const ids = getAiModelIds(provider);
+      const configs = getAiModelConfigs(provider, {});
 
       for (const purpose of Object.values(EModelPurpose)) {
-        expect(getAiModel(provider, purpose).id).toBe(ids[purpose]);
+        expect(getAiModelConfig(provider, purpose).model.id).toBe(configs[purpose].model);
       }
     }
 
@@ -32,33 +32,33 @@ describe("AI provider registry", () => {
   });
 
   test("maps every role purpose to its configured model", () => {
-    expect(getAiModelIds(EAiProvider.OpenaiCodex)).toEqual({
-      [EModelPurpose.Utility]: "gpt-5.6-luna",
-      [EModelPurpose.Main]: "gpt-5.6-sol",
-      [EModelPurpose.Specialist]: "gpt-5.6-luna",
-      [EModelPurpose.SpecialistAccurate]: "gpt-5.6-luna",
-      [EModelPurpose.ScheduledTask]: "gpt-5.6-luna",
+    expect(getAiModelConfigs(EAiProvider.OpenaiCodex, {})).toMatchObject({
+      [EModelPurpose.Utility]: { model: "gpt-5.6-luna" },
+      [EModelPurpose.Main]: { model: "gpt-5.6-sol" },
+      [EModelPurpose.Specialist]: { model: "gpt-5.6-luna" },
+      [EModelPurpose.SpecialistAccurate]: { model: "gpt-5.6-luna" },
+      [EModelPurpose.ScheduledTask]: { model: "gpt-5.6-luna" },
     });
-    expect(getAiModelIds(EAiProvider.Openrouter)).toEqual({
-      [EModelPurpose.Utility]: "openai/gpt-5.4-nano",
-      [EModelPurpose.Main]: "google/gemini-3.1-pro-preview",
-      [EModelPurpose.Specialist]: "google/gemini-3-flash-preview",
-      [EModelPurpose.SpecialistAccurate]: "google/gemini-3.1-pro-preview",
-      [EModelPurpose.ScheduledTask]: "google/gemini-3.1-pro-preview",
+    expect(getAiModelConfigs(EAiProvider.Openrouter, {})).toMatchObject({
+      [EModelPurpose.Utility]: { model: "openai/gpt-5.4-nano" },
+      [EModelPurpose.Main]: { model: "google/gemini-3.1-pro-preview" },
+      [EModelPurpose.Specialist]: { model: "google/gemini-3-flash-preview" },
+      [EModelPurpose.SpecialistAccurate]: { model: "google/gemini-3.1-pro-preview" },
+      [EModelPurpose.ScheduledTask]: { model: "google/gemini-3.1-pro-preview" },
     });
-    expect(getAiModelIds(EAiProvider.OpencodeGo)).toEqual({
-      [EModelPurpose.Utility]: "deepseek-v4-pro",
-      [EModelPurpose.Main]: "grok-4.6",
-      [EModelPurpose.Specialist]: "deepseek-v4-pro",
-      [EModelPurpose.SpecialistAccurate]: "grok-4.6",
-      [EModelPurpose.ScheduledTask]: "deepseek-v4-pro",
+    expect(getAiModelConfigs(EAiProvider.OpencodeGo, {})).toMatchObject({
+      [EModelPurpose.Utility]: { model: "deepseek-v4-pro" },
+      [EModelPurpose.Main]: { model: "grok-4.6" },
+      [EModelPurpose.Specialist]: { model: "deepseek-v4-pro" },
+      [EModelPurpose.SpecialistAccurate]: { model: "grok-4.6" },
+      [EModelPurpose.ScheduledTask]: { model: "deepseek-v4-pro" },
     });
-    expect(getAiModelIds(EAiProvider.Ollama)).toEqual({
-      [EModelPurpose.Utility]: "nemotron-3-super:cloud",
-      [EModelPurpose.Main]: "minimax-m2.7:cloud",
-      [EModelPurpose.Specialist]: "minimax-m2.7:cloud",
-      [EModelPurpose.SpecialistAccurate]: "minimax-m2.7:cloud",
-      [EModelPurpose.ScheduledTask]: "minimax-m2.7:cloud",
+    expect(getAiModelConfigs(EAiProvider.Ollama, {})).toMatchObject({
+      [EModelPurpose.Utility]: { model: "nemotron-3-super:cloud" },
+      [EModelPurpose.Main]: { model: "minimax-m2.7:cloud" },
+      [EModelPurpose.Specialist]: { model: "minimax-m2.7:cloud" },
+      [EModelPurpose.SpecialistAccurate]: { model: "minimax-m2.7:cloud" },
+      [EModelPurpose.ScheduledTask]: { model: "minimax-m2.7:cloud" },
     });
   });
 
@@ -149,7 +149,9 @@ describe("AI provider registry", () => {
       expect(model.compat?.maxTokensField).toBe("max_tokens");
     }
 
-    const auth = await aiModels.getAuth(getAiModel(EAiProvider.Ollama, EModelPurpose.Main));
+    const auth = await aiModels.getAuth(
+      getAiModelConfig(EAiProvider.Ollama, EModelPurpose.Main).model,
+    );
     expect(auth?.auth.apiKey).toBe("ollama");
   });
 });

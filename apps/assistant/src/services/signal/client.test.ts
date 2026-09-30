@@ -29,7 +29,6 @@ describe("parseSignalReceiveMessage", () => {
       JSON.stringify({
         envelope: {
           sourceNumber: "+111",
-          sourceName: "Alice",
           dataMessage: {
             message: "hello",
             timestamp: 123,
@@ -40,7 +39,6 @@ describe("parseSignalReceiveMessage", () => {
 
     expect(result).toEqual({
       sourceNumber: "+111",
-      sourceName: "Alice",
       message: "hello",
       timestamp: 123,
     });
@@ -51,7 +49,6 @@ describe("parseSignalReceiveMessage", () => {
       JSON.stringify({
         envelope: {
           sourceNumber: "+111",
-          sourceName: "Alice",
           dataMessage: {
             message: "hello",
             groupInfo: null,
@@ -62,20 +59,17 @@ describe("parseSignalReceiveMessage", () => {
 
     expect(result).toEqual({
       sourceNumber: "+111",
-      sourceName: "Alice",
       message: "hello",
       timestamp: undefined,
     });
   });
 
-  test("falls back to source and profile name", () => {
+  test("falls back to source and envelope timestamp", () => {
     const result = parseSignalReceiveMessage(
       JSON.stringify({
         envelope: {
           source: "+222",
           sourceNumber: null,
-          sourceName: null,
-          profileName: "Bob",
           timestamp: 456,
           dataMessage: {
             message: "hello",
@@ -86,7 +80,6 @@ describe("parseSignalReceiveMessage", () => {
 
     expect(result).toEqual({
       sourceNumber: "+222",
-      sourceName: "Bob",
       message: "hello",
       timestamp: 456,
     });
@@ -390,7 +383,6 @@ describe("SignalClient", () => {
 
     expect(onMessage).toHaveBeenCalledWith({
       sourceNumber: "+200",
-      sourceName: "+200",
       message: "hello",
       timestamp: 123,
     });

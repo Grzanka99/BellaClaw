@@ -787,12 +787,8 @@ export class AgentHarness {
         instructionsPath: undefined,
         executionMode,
         execute: async (toolCallId: string, parameters: unknown, signal?: AbortSignal) => {
-          if (args.delegationCount === undefined) {
-            throw new Error("Specialists cannot delegate");
-          }
-
           const parsedParameters: Static<typeof schema> = validateToolArguments(schema, parameters);
-          args.delegationCount();
+          args.delegationCount?.();
           let delegationSignal = args.signal;
 
           if (signal !== undefined) {
@@ -996,12 +992,8 @@ export class AgentHarness {
     return chatId;
   }
 
-  private createMcpPrompt(original: string, task: string, context: TOption<string>): string {
-    let prompt = `Original user message:\n${original}\n\nDelegated task:\n${task}`;
-    if (context !== undefined) {
-      prompt += `\n\nRelevant context:\n${context}`;
-    }
-    return prompt;
+  private createMcpPrompt(original: string, task: string, context: string): string {
+    return `Original user message:\n${original}\n\nDelegated task:\n${task}\n\nRelevant context:\n${context}`;
   }
 
   private mcpStatusResult(status: TMcpRunStatus) {

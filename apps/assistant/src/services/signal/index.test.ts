@@ -14,7 +14,6 @@ type TSignalSingletonInternals = {
   client: Pick<SignalClient, "sendReadReceipt" | "showTyping" | "hideTyping"> | undefined;
   handleInboundMessage: (message: {
     sourceNumber: string;
-    sourceName: string;
     message: string;
     timestamp: number | undefined;
   }) => Promise<void>;
@@ -133,7 +132,6 @@ describe("SignalSingleton", () => {
 
     await signal.handleInboundMessage({
       sourceNumber: "+200",
-      sourceName: "Alice",
       message: "hello",
       timestamp: 123,
     });
@@ -142,12 +140,7 @@ describe("SignalSingleton", () => {
     expect(handleInboundMessageMock).toHaveBeenCalledWith({
       platform: EMessagePlatform.Signal,
       chatId: "+200",
-      author: {
-        id: "+200",
-        username: "Alice",
-      },
       message: {
-        type: "text",
         content: "hello",
       },
     });
@@ -172,7 +165,6 @@ describe("SignalSingleton", () => {
       signal
         .handleInboundMessage({
           sourceNumber: "+200",
-          sourceName: "Alice",
           message: "hello",
           timestamp: 123,
         })

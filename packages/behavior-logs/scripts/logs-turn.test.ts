@@ -52,8 +52,8 @@ describe("logs:turn", () => {
     const appLogger = new AppLogger({ dbPath, stdout() {} });
     appLogger.record({
       trace: { turnId: "known-turn", chatId: undefined, platform: undefined },
-      event: "assistant_loop.completed",
-      component: "ai-runtime",
+      event: "agent.completed",
+      component: "agent-harness",
       success: true,
       summary: "completed",
     });
@@ -64,7 +64,7 @@ describe("logs:turn", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain(dbPath);
-    expect(result.stdout).toContain("assistant_loop.completed");
+    expect(result.stdout).toContain("agent.completed");
   });
 
   test("reports no events only after querying an existing database", async () => {
@@ -72,8 +72,8 @@ describe("logs:turn", () => {
     const appLogger = new AppLogger({ dbPath, stdout() {} });
     appLogger.record({
       trace: { turnId: "other-turn", chatId: undefined, platform: undefined },
-      event: "assistant_loop.completed",
-      component: "ai-runtime",
+      event: "agent.completed",
+      component: "agent-harness",
       success: true,
       summary: "completed",
     });
