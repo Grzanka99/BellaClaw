@@ -2,7 +2,6 @@ import type { TOption } from "@bellaclaw/shared";
 import { createLogger, type TLogger } from "@bellaclaw/shared";
 import { z } from "zod";
 
-const SSignalSendResponse = z.unknown();
 const RECONNECT_DELAY_MS = 5000;
 
 const SSignalReceiveEnvelope = z.object({
@@ -147,22 +146,6 @@ export class SignalClient {
     if (!response.ok) {
       this.logger.error(`sendText: /v2/send returned ${response.status}`);
       throw new Error(`Signal send failed with status ${response.status}`);
-    }
-
-    const body = await response.text();
-    if (body.trim().length === 0) {
-      return;
-    }
-
-    const parsedJson = parseJson(body);
-    if (parsedJson === undefined) {
-      this.logger.warning("sendText: response was not valid JSON");
-      return;
-    }
-
-    const parsed = SSignalSendResponse.safeParse(parsedJson);
-    if (!parsed.success) {
-      this.logger.warning("sendText: response did not match expected shape");
     }
   }
 
