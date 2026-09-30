@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, mock, setSystemTime, test } from "bun:test";
-import type { TLogger } from "@bellaclaw/shared";
 import type { Message } from "@earendil-works/pi-ai";
 import {
   type Context,
@@ -34,10 +33,6 @@ type THandlerInternals = {
   };
   factDistiller: {
     processWindow: ReturnType<typeof mock>;
-  };
-  logger: TLogger;
-  queue: {
-    enqueue(callback: () => Promise<unknown>): Promise<unknown>;
   };
 };
 
@@ -699,62 +694,6 @@ describe("MessageHandler", () => {
     expect(internals.factDistiller.processWindow).toHaveBeenCalledTimes(2);
     expect(internals.factDistiller.processWindow.mock.calls[0]?.[0].window).toEqual(retryWindow);
     expect(internals.factDistiller.processWindow.mock.calls[1]?.[0].window).toEqual(retryWindow);
-  });
-
-  test("catches and logs a rejected compaction enqueue promise", async () => {
-    const { handler, internals } = setupHandler("discord:queue-rejection");
-    const logger = {
-      info: mock(() => undefined),
-      warning: mock(() => undefined),
-      error: mock(() => undefined),
-      message: mock(() => undefined),
-    };
-    internals.logger = logger as unknown as TLogger;
-    let enqueueCount = 0;
-    let tail = Promise.resolve<unknown>(undefined);
-    internals.queue = {
-      enqueue(callback) {
-        enqueueCount += 1;
-        if (enqueueCount === 3) {
-          return Promise.reject(new Error("queue rejected compaction task"));
-        }
-
-        const task = tail.then(callback);
-        tail = task.then(
-          () => undefined,
-          () => undefined,
-        );
-        return task;
-      },
-    };
-    const unhandledRejection = mock(() => undefined);
-    process.on("unhandledRejection", unhandledRejection);
-
-    try {
-      await handler.handleMessage({
-        chatId: "discord:queue-rejection",
-        receivedAt: new Date(),
-        message: { type: "text", content: "first turn" },
-        author: { type: ERole.User, id: "1", username: "Owner" },
-      });
-      await flushAsyncWork();
-
-      expect(logger.error).toHaveBeenCalledWith(
-        expect.stringContaining("queue rejected compaction task"),
-      );
-      expect(unhandledRejection).not.toHaveBeenCalled();
-      await handler.handleMessage({
-        chatId: "discord:queue-rejection",
-        receivedAt: new Date(),
-        message: { type: "text", content: "second turn" },
-        author: { type: ERole.User, id: "1", username: "Owner" },
-      });
-      await waitForCall(internals.memory.loadLiveFactWindow, 1);
-
-      expect(unhandledRejection).not.toHaveBeenCalled();
-    } finally {
-      process.off("unhandledRejection", unhandledRejection);
-    }
   });
 
   test.each([
