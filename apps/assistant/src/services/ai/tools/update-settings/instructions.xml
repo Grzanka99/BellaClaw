@@ -35,7 +35,7 @@
     <rule>Provide at least one field. Calling update-settings with an empty object is invalid.</rule>
     <rule>Only the provided fields are written. Omitted fields are left untouched.</rule>
     <rule>Never invent or guess values. If the user did not specify a value for a field, omit it.</rule>
-    <rule>Never offer an arbitrary key/value field — only the listed fields are accepted.</rule>
+    <rule>Only the listed fields are accepted.</rule>
     <rule>Change provider, model, or effort only after an explicit user request. Never switch autonomously.</rule>
     <rule>Model operations apply to Main unless the user explicitly names another existing purpose.</rule>
     <rule>A model must belong to the active provider. A combined explicit provider/model request is allowed and applied atomically.</rule>
