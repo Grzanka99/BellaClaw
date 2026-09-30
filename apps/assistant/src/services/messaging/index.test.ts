@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, mock, setSystemTime, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -81,6 +81,40 @@ afterEach(() => {
 });
 
 describe("MessagingAdapter", () => {
+  test("captures arrival before awaiting authorization", async () => {
+    const arrival = new Date("2026-07-24T21:59:50.000Z");
+    const originalGetInstance = MessageHandler.getInstance;
+    const handleMessage = mock(async (_message: TIncommingMessage) => "Root reply");
+    MessageHandler.getInstance = mock(() => ({
+      handleMessage,
+    })) as unknown as typeof MessageHandler.getInstance;
+    const adapter = MessagingAdapter.instance;
+    adapter.registerTransport({
+      platform: EMessagePlatform.Signal,
+      sendText: mock(async () => undefined),
+    });
+    const internals = adapter as unknown as TAdapterInternals;
+    internals.authorization.authorize = mock(async () => {
+      setSystemTime(new Date("2026-07-24T22:00:10.000Z"));
+      return authorizationResult(EAuthorizationDecision.Allow, 0);
+    });
+
+    setSystemTime(arrival);
+    try {
+      await adapter.handleInboundMessage({
+        platform: EMessagePlatform.Signal,
+        chatId: "+100",
+        author: { id: "1", username: "Owner" },
+        message: { type: "text", content: "What is on my calendar tomorrow?" },
+      });
+
+      expect(handleMessage.mock.calls[0]?.[0].receivedAt).toEqual(arrival);
+    } finally {
+      MessageHandler.getInstance = originalGetInstance;
+      setSystemTime();
+    }
+  });
+
   test("silently rejects failures and handles activation without invoking the AI", async () => {
     const originalGetInstance = MessageHandler.getInstance;
     const handleMessage = mock(async () => "Root reply");
@@ -224,6 +258,7 @@ describe("MessagingAdapter", () => {
       expect(receivedPlatform).toBe(EMessagePlatform.Discord);
       expect(receivedMessage).toEqual({
         chatId: "discord:channel-1",
+        receivedAt: expect.any(Date),
         author: { type: ERole.User, id: "user-1", username: "Owner" },
         message: {
           type: "text",

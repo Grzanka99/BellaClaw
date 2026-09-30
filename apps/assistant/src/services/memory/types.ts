@@ -20,6 +20,7 @@ export const SMemory = z.object({
 
 export const SSaveArgs = SMemory.omit({ id: true, createdAt: true, lastReadAt: true }).extend({
   platform: z.string().optional(),
+  createdAt: z.date().optional(),
 });
 
 export type TMemory = z.infer<typeof SMemory>;
