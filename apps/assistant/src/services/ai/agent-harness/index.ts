@@ -1003,12 +1003,8 @@ export class AgentHarness {
     return chatId;
   }
 
-  private createMcpPrompt(original: string, task: string, context: TOption<string>): string {
-    let prompt = `Original user message:\n${original}\n\nDelegated task:\n${task}`;
-    if (context !== undefined) {
-      prompt += `\n\nRelevant context:\n${context}`;
-    }
-    return prompt;
+  private createMcpPrompt(original: string, task: string, context: string): string {
+    return `Original user message:\n${original}\n\nDelegated task:\n${task}\n\nRelevant context:\n${context}`;
   }
 
   private mcpStatusResult(status: TMcpRunStatus) {
