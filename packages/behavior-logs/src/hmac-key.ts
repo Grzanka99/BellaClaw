@@ -44,6 +44,10 @@ export function maskCanonicalChatId(dbPath: string, chatId: string): TOption<str
     key = persistedKey;
   }
 
+  return hashChatId(key, chatId);
+}
+
+export function hashChatId(key: string, chatId: string): string {
   const digest = createHmac("sha256", key).update(chatId).digest("hex");
   return `sha256:${digest}`;
 }
