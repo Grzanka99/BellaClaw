@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdir } from "node:fs/promises";
 import { repositoryPath } from "@bellaclaw/shared";
 import type { LibSQLDatabase } from "drizzle-orm/libsql";
+import { validateUpdateCalendarEventArgs } from "../ai/tools/update-calendar-event/handler";
 import { CalendarService } from ".";
 import type { GwsCalendarClient } from "./gws";
 
@@ -323,6 +324,72 @@ describe("CalendarService mutation boundary", () => {
     expect(inserted[0]?.colorId).toBe("7");
     expect(inserted[0]?.sequence).toBe(3);
   });
+
+  for (const conversion of [
+    {
+      name: "timed to all-day",
+      masterStart: { dateTime: "2026-07-24T09:00:00Z" },
+      masterEnd: { dateTime: "2026-07-24T10:00:00Z" },
+      occurrenceStart: { dateTime: "2026-07-25T09:00:00Z" },
+      occurrenceEnd: { dateTime: "2026-07-25T10:00:00Z" },
+      start: "2026-07-25",
+    },
+    {
+      name: "all-day to timed",
+      masterStart: { date: "2026-07-24" },
+      masterEnd: { date: "2026-07-25" },
+      occurrenceStart: { date: "2026-07-25" },
+      occurrenceEnd: { date: "2026-07-26" },
+      start: "2026-07-25T09:00:00Z",
+    },
+  ]) {
+    test(`rejects an incomplete ${conversion.name} following conversion without writes`, async () => {
+      const writes: string[] = [];
+      const recurrence = ["RRULE:FREQ=DAILY;COUNT=10"];
+      const master = googleEvent("master", {
+        start: conversion.masterStart,
+        end: conversion.masterEnd,
+        recurrence,
+      });
+      const events = new Map<string, unknown>([
+        ["master", master],
+        [
+          "instance",
+          googleEvent("instance", {
+            recurringEventId: "master",
+            originalStartTime: conversion.occurrenceStart,
+            start: conversion.occurrenceStart,
+            end: conversion.occurrenceEnd,
+          }),
+        ],
+      ]);
+      const client = {
+        getEvent: async (_calendarId: string, eventId: string) => events.get(eventId),
+        patchEvent: async (_calendarId: string, eventId: string, body: Record<string, unknown>) => {
+          writes.push("patch");
+          Object.assign(master, body);
+          return googleEvent(eventId, body);
+        },
+        insertEvent: async (_calendarId: string, body: Record<string, unknown>) => {
+          writes.push("insert");
+          return googleEvent("successor", body);
+        },
+      } as unknown as GwsCalendarClient;
+      const service = new CalendarService(database, client);
+      Object.assign(service, { status: { ready: true, error: undefined } });
+      const patch = validateUpdateCalendarEventArgs({
+        eventId: "instance",
+        scope: "following",
+        start: conversion.start,
+      });
+
+      await expect(
+        service.updateEvent({ userId: "user-1", eventId: "instance", scope: "following", patch }),
+      ).rejects.toThrow("requires an explicit end or duration");
+      expect(writes).toEqual([]);
+      expect(master).toHaveProperty("recurrence", recurrence);
+    });
+  }
 
   test("returns extended Google details without using them as mutation input", async () => {
     const client = {
