@@ -452,11 +452,11 @@ describe("MCP OAuth", () => {
       fetchFn: service.createMcpAuthFetch(chatId, "documents"),
     });
     await refreshExchangeStarted;
-    const disconnect = service.disconnectMcpAuth(chatId, "documents");
+    const disconnect = await service.disconnectMcpAuth(chatId, "documents");
     releaseRefreshExchange();
 
     await expect(refreshing).rejects.toThrow("was cancelled");
-    expect(await disconnect).toBe(true);
+    expect(disconnect).toBe(true);
     expect(await service.getMcpAuthStatus(chatId, "documents")).toBe(false);
 
     const reconnectUrl = new URL(await service.beginMcpAuth(chatId, "documents"));
