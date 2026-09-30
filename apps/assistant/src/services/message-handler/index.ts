@@ -94,7 +94,7 @@ export class MessageHandler {
       }
 
       const savedMessage = await this.queue.enqueue(() =>
-        this.saveMessageToDatabase(message, EMemoryImportance.Medium, trace, platform),
+        this.saveMessageToDatabase(message, trace, platform),
       );
 
       const history: THistoryItem[] = [];
@@ -322,7 +322,6 @@ export class MessageHandler {
 
   private async saveMessageToDatabase(
     message: TIncommingMessage,
-    importance: EMemoryImportance,
     trace: TOption<TBehaviorTraceContext>,
     platform: TOption<EMessagePlatform>,
   ): Promise<TMemory> {
@@ -333,7 +332,7 @@ export class MessageHandler {
         chatId: message.chatId,
         platform,
         author: message.author.type,
-        importance,
+        importance: EMemoryImportance.Medium,
         message: message.message.content,
         createdAt: message.receivedAt,
       });
@@ -345,7 +344,7 @@ export class MessageHandler {
         trace,
         start,
         message.author.type,
-        importance,
+        EMemoryImportance.Medium,
         message.message.content.length,
         failure,
       );

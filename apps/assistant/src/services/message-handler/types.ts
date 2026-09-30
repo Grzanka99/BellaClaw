@@ -13,14 +13,3 @@ export type TIncommingMessage = {
     username: string;
   };
 };
-
-export type TOutgoingMessage = {
-  chatId: string;
-  message: {
-    type: "text";
-    content: string;
-  };
-  author: {
-    type: ERole.Assistant;
-  };
-};
