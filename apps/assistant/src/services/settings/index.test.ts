@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { eq } from "drizzle-orm";
 import { DatabaseConnector } from "../database";
 import { userConfigsTable } from "../database/schema";
@@ -46,6 +46,46 @@ describe("SettingsService", () => {
   });
 
   describe("getAll", () => {
+    test("caches defaults and refreshes independent records after set and reset", async () => {
+      const settings = SettingsService.instance;
+      const ownerKey = "owner-default-cache";
+      const select = spyOn(DatabaseConnector.instance.database, "select");
+
+      try {
+        const first = await settings.getAll(ownerKey);
+        const second = await settings.getAll(ownerKey);
+        expect(first).toEqual(DefaultConfigRecord);
+        expect(second).toEqual(DefaultConfigRecord);
+        expect(select).toHaveBeenCalledTimes(1);
+        first[EConfigKey.AiInstructionsTimezone] = "mutated";
+        expect(second[EConfigKey.AiInstructionsTimezone]).toBe(
+          DefaultConfigRecord[EConfigKey.AiInstructionsTimezone],
+        );
+
+        const changed = await settings.set(
+          ownerKey,
+          EConfigKey.AiInstructionsTimezone,
+          "Asia/Tokyo",
+        );
+        changed[EConfigKey.AiInstructionsTimezone] = "mutated";
+        expect((await settings.getAll(ownerKey))[EConfigKey.AiInstructionsTimezone]).toBe(
+          "Asia/Tokyo",
+        );
+        expect(select).toHaveBeenCalledTimes(2);
+
+        const reset = await settings.set(
+          ownerKey,
+          EConfigKey.AiInstructionsTimezone,
+          DefaultConfigRecord[EConfigKey.AiInstructionsTimezone],
+        );
+        reset[EConfigKey.AiInstructionsTimezone] = "mutated";
+        expect(await settings.getAll(ownerKey)).toEqual(DefaultConfigRecord);
+        expect(select).toHaveBeenCalledTimes(3);
+      } finally {
+        select.mockRestore();
+      }
+    });
+
     test("missing owner returns DefaultConfigRecord without writing rows", async () => {
       const settings = SettingsService.instance;
       const ownerKey = "owner-missing";

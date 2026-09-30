@@ -54,12 +54,7 @@ export class DiscordSingleton implements TMessageTransport {
       await MessagingAdapter.instance.handleInboundMessage({
         platform: EMessagePlatform.Discord,
         chatId: message.author.id,
-        author: {
-          username: message.author.username,
-          id: message.author.id,
-        },
         message: {
-          type: "text",
           content: message.content,
         },
       });

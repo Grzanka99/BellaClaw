@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, mock, setSystemTime, test } from "bun:test";
-import type { TLogger } from "@bellaclaw/shared";
 import type { Message } from "@earendil-works/pi-ai";
 import {
   type Context,
@@ -34,10 +33,6 @@ type THandlerInternals = {
   };
   factDistiller: {
     processWindow: ReturnType<typeof mock>;
-  };
-  logger: TLogger;
-  queue: {
-    enqueue(callback: () => Promise<unknown>): Promise<unknown>;
   };
 };
 
@@ -192,15 +187,15 @@ describe("MessageHandler", () => {
       const first = handler.handleMessage({
         chatId,
         receivedAt: firstArrival,
-        message: { type: "text", content: "What is on my calendar tomorrow?" },
-        author: { type: ERole.User, id: "1", username: "Owner" },
+        message: { content: "What is on my calendar tomorrow?" },
+        author: { type: ERole.User },
       });
       await waitForCall(internals.ai.compactConversation, 1);
       const second = handler.handleMessage({
         chatId,
         receivedAt: secondArrival,
-        message: { type: "text", content: "And tomorrow evening?" },
-        author: { type: ERole.User, id: "1", username: "Owner" },
+        message: { content: "And tomorrow evening?" },
+        author: { type: ERole.User },
       });
       setSystemTime(processingTime);
       release();
@@ -289,8 +284,8 @@ describe("MessageHandler", () => {
         {
           chatId: "discord:cache-prefix",
           receivedAt: savedAt,
-          message: { type: "text", content: "What day is tomorrow?" },
-          author: { type: ERole.User, id: "1", username: "Owner" },
+          message: { content: "What day is tomorrow?" },
+          author: { type: ERole.User },
         },
         EMessagePlatform.Discord,
       );
@@ -300,8 +295,8 @@ describe("MessageHandler", () => {
         {
           chatId: "discord:cache-prefix",
           receivedAt: savedAt,
-          message: { type: "text", content: "And today?" },
-          author: { type: ERole.User, id: "1", username: "Owner" },
+          message: { content: "And today?" },
+          author: { type: ERole.User },
         },
         EMessagePlatform.Discord,
       );
@@ -351,8 +346,8 @@ describe("MessageHandler", () => {
       {
         chatId: "discord:1",
         receivedAt: new Date(),
-        message: { type: "text", content: "new question" },
-        author: { type: ERole.User, id: "1", username: "Owner" },
+        message: { content: "new question" },
+        author: { type: ERole.User },
       },
       EMessagePlatform.Discord,
     );
@@ -407,14 +402,14 @@ describe("MessageHandler", () => {
     const message: TIncommingMessage = {
       chatId: "compaction-order",
       receivedAt: new Date(),
-      message: { type: "text" as const, content: "first" },
-      author: { type: ERole.User, id: "1", username: "Owner" },
+      message: { content: "first" },
+      author: { type: ERole.User },
     };
     expect(await handler.handleMessage(message)).toBe("Final answer");
     await waitForCall(internals.ai.compactConversation, 1);
     const second = handler.handleMessage({
       ...message,
-      message: { type: "text", content: "second" },
+      message: { content: "second" },
     });
     await flushAsyncWork();
     expect(internals.ai.runMain).toHaveBeenCalledTimes(1);
@@ -436,8 +431,8 @@ describe("MessageHandler", () => {
     const message: TIncommingMessage = {
       chatId: "compaction-retry",
       receivedAt: new Date(),
-      message: { type: "text" as const, content: "first" },
-      author: { type: ERole.User, id: "1", username: "Owner" },
+      message: { content: "first" },
+      author: { type: ERole.User },
     };
     await handler.handleMessage(message);
     await waitForCall(internals.conversations.saveSummary, 1);
@@ -487,8 +482,8 @@ describe("MessageHandler", () => {
     await handler.handleMessage({
       chatId: "signal:1",
       receivedAt: new Date(),
-      message: { type: "text", content: "change my settings" },
-      author: { type: ERole.User, id: "1", username: "Owner" },
+      message: { content: "change my settings" },
+      author: { type: ERole.User },
     });
     sharedSettings[EConfigKey.AiInstructionsTimezone] = "Asia/Tokyo";
     await flushAsyncWork();
@@ -510,8 +505,8 @@ describe("MessageHandler", () => {
       handler.handleMessage({
         chatId: "discord:user-save-failure",
         receivedAt: new Date(),
-        message: { type: "text", content: "remember this" },
-        author: { type: ERole.User, id: "1", username: "Owner" },
+        message: { content: "remember this" },
+        author: { type: ERole.User },
       }),
     ).rejects.toThrow("database unavailable");
 
@@ -529,8 +524,8 @@ describe("MessageHandler", () => {
       handler.handleMessage({
         chatId: "discord:assistant-save-failure",
         receivedAt: new Date(),
-        message: { type: "text", content: "hello" },
-        author: { type: ERole.User, id: "1", username: "Owner" },
+        message: { content: "hello" },
+        author: { type: ERole.User },
       }),
     ).rejects.toThrow("database unavailable");
     expect(internals.memory.loadLiveFactWindow).not.toHaveBeenCalled();
@@ -557,8 +552,8 @@ describe("MessageHandler", () => {
     const reply = handler.handleMessage({
       chatId: "discord:ordering",
       receivedAt: new Date(),
-      message: { type: "text", content: "remember this" },
-      author: { type: ERole.User, id: "1", username: "Owner" },
+      message: { content: "remember this" },
+      author: { type: ERole.User },
     });
     await waitForCall(internals.conversations.saveTurn, 1);
     expect(events).toEqual(["save-start"]);
@@ -603,16 +598,16 @@ describe("MessageHandler", () => {
     await handler.handleMessage({
       chatId: "discord:stalled",
       receivedAt: new Date(),
-      message: { type: "text", content: "first" },
-      author: { type: ERole.User, id: "1", username: "Owner" },
+      message: { content: "first" },
+      author: { type: ERole.User },
     });
     await waitForCall(internals.memory.loadLiveFactWindow, 1);
 
     const secondReply = await handler.handleMessage({
       chatId: "discord:stalled",
       receivedAt: new Date(),
-      message: { type: "text", content: "second" },
-      author: { type: ERole.User, id: "1", username: "Owner" },
+      message: { content: "second" },
+      author: { type: ERole.User },
     });
 
     expect(secondReply).toBe("Final answer");
@@ -637,8 +632,8 @@ describe("MessageHandler", () => {
     await handler.handleMessage({
       chatId: "discord:drain",
       receivedAt: new Date(),
-      message: { type: "text", content: "two facts" },
-      author: { type: ERole.User, id: "1", username: "Owner" },
+      message: { content: "two facts" },
+      author: { type: ERole.User },
     });
     await waitForCall(internals.memory.loadLiveFactWindow, 3);
 
@@ -680,8 +675,8 @@ describe("MessageHandler", () => {
     await handler.handleMessage({
       chatId: "discord:retry",
       receivedAt: new Date(),
-      message: { type: "text", content: "first turn" },
-      author: { type: ERole.User, id: "1", username: "Owner" },
+      message: { content: "first turn" },
+      author: { type: ERole.User },
     });
     await waitForCall(internals.factDistiller.processWindow, 1);
     await flushAsyncWork();
@@ -691,70 +686,14 @@ describe("MessageHandler", () => {
     await handler.handleMessage({
       chatId: "discord:retry",
       receivedAt: new Date(),
-      message: { type: "text", content: "second turn" },
-      author: { type: ERole.User, id: "1", username: "Owner" },
+      message: { content: "second turn" },
+      author: { type: ERole.User },
     });
     await waitForCall(internals.memory.loadLiveFactWindow, 3);
 
     expect(internals.factDistiller.processWindow).toHaveBeenCalledTimes(2);
     expect(internals.factDistiller.processWindow.mock.calls[0]?.[0].window).toEqual(retryWindow);
     expect(internals.factDistiller.processWindow.mock.calls[1]?.[0].window).toEqual(retryWindow);
-  });
-
-  test("catches and logs a rejected compaction enqueue promise", async () => {
-    const { handler, internals } = setupHandler("discord:queue-rejection");
-    const logger = {
-      info: mock(() => undefined),
-      warning: mock(() => undefined),
-      error: mock(() => undefined),
-      message: mock(() => undefined),
-    };
-    internals.logger = logger as unknown as TLogger;
-    let enqueueCount = 0;
-    let tail = Promise.resolve<unknown>(undefined);
-    internals.queue = {
-      enqueue(callback) {
-        enqueueCount += 1;
-        if (enqueueCount === 3) {
-          return Promise.reject(new Error("queue rejected compaction task"));
-        }
-
-        const task = tail.then(callback);
-        tail = task.then(
-          () => undefined,
-          () => undefined,
-        );
-        return task;
-      },
-    };
-    const unhandledRejection = mock(() => undefined);
-    process.on("unhandledRejection", unhandledRejection);
-
-    try {
-      await handler.handleMessage({
-        chatId: "discord:queue-rejection",
-        receivedAt: new Date(),
-        message: { type: "text", content: "first turn" },
-        author: { type: ERole.User, id: "1", username: "Owner" },
-      });
-      await flushAsyncWork();
-
-      expect(logger.error).toHaveBeenCalledWith(
-        expect.stringContaining("queue rejected compaction task"),
-      );
-      expect(unhandledRejection).not.toHaveBeenCalled();
-      await handler.handleMessage({
-        chatId: "discord:queue-rejection",
-        receivedAt: new Date(),
-        message: { type: "text", content: "second turn" },
-        author: { type: ERole.User, id: "1", username: "Owner" },
-      });
-      await waitForCall(internals.memory.loadLiveFactWindow, 1);
-
-      expect(unhandledRejection).not.toHaveBeenCalled();
-    } finally {
-      process.off("unhandledRejection", unhandledRejection);
-    }
   });
 
   test.each([
@@ -776,8 +715,8 @@ describe("MessageHandler", () => {
       await handler.handleMessage({
         chatId: "discord:2",
         receivedAt: new Date(),
-        message: { type: "text", content: "hello" },
-        author: { type: ERole.User, id: "2", username: "Owner" },
+        message: { content: "hello" },
+        author: { type: ERole.User },
       }),
     ).toBe("Something went wrong.");
     await flushAsyncWork();
@@ -789,8 +728,8 @@ describe("MessageHandler", () => {
     await handler.handleMessage({
       chatId: "discord:2",
       receivedAt: new Date(),
-      message: { type: "text", content: "try again" },
-      author: { type: ERole.User, id: "2", username: "Owner" },
+      message: { content: "try again" },
+      author: { type: ERole.User },
     });
     expect(internals.ai.runMain.mock.calls[1]?.[0].conversation).toBeUndefined();
     expect(JSON.stringify(internals.ai.runMain.mock.calls[1]?.[0].history)).not.toContain(

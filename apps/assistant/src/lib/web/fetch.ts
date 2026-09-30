@@ -15,7 +15,6 @@ export async function fetchWeb(
     url: args.url,
     timeoutMs: timeoutSeconds * 1000,
     maxBytes: FETCH_MAX_BYTES,
-    followRedirects: true,
     signal,
     headers: {
       accept: acceptHeaderForFormat(format),

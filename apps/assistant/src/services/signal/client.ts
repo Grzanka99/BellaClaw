@@ -2,14 +2,11 @@ import type { TOption } from "@bellaclaw/shared";
 import { createLogger, type TLogger } from "@bellaclaw/shared";
 import { z } from "zod";
 
-const SSignalSendResponse = z.unknown();
 const RECONNECT_DELAY_MS = 5000;
 
 const SSignalReceiveEnvelope = z.object({
   source: z.string().nullable().optional(),
   sourceNumber: z.string().nullable().optional(),
-  sourceName: z.string().nullable().optional(),
-  profileName: z.string().nullable().optional(),
   timestamp: z.number().optional(),
   dataMessage: z
     .object({
@@ -26,7 +23,6 @@ const SSignalReceivePayload = z.object({
 
 export type TSignalInboundMessage = {
   sourceNumber: string;
-  sourceName: string;
   message: string;
   timestamp: TOption<number>;
 };
@@ -83,17 +79,8 @@ export function parseSignalReceiveMessage(raw: string): TOption<TSignalInboundMe
     return undefined;
   }
 
-  let sourceName = envelope.sourceName;
-  if (sourceName === null || sourceName === undefined || sourceName.trim().length === 0) {
-    sourceName = envelope.profileName;
-  }
-  if (sourceName === null || sourceName === undefined || sourceName.trim().length === 0) {
-    sourceName = sourceNumber;
-  }
-
   return {
     sourceNumber,
-    sourceName,
     message,
     timestamp: dataMessage.timestamp ?? envelope.timestamp,
   };
@@ -147,22 +134,6 @@ export class SignalClient {
     if (!response.ok) {
       this.logger.error(`sendText: /v2/send returned ${response.status}`);
       throw new Error(`Signal send failed with status ${response.status}`);
-    }
-
-    const body = await response.text();
-    if (body.trim().length === 0) {
-      return;
-    }
-
-    const parsedJson = parseJson(body);
-    if (parsedJson === undefined) {
-      this.logger.warning("sendText: response was not valid JSON");
-      return;
-    }
-
-    const parsed = SSignalSendResponse.safeParse(parsedJson);
-    if (!parsed.success) {
-      this.logger.warning("sendText: response did not match expected shape");
     }
   }
 

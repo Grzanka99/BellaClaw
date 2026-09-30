@@ -1,9 +1,7 @@
 import type { TOption } from "@bellaclaw/shared";
 import {
-  type Api,
   createModels,
   getSupportedThinkingLevels,
-  type Model,
   type ModelThinkingLevel,
   type Provider,
 } from "@earendil-works/pi-ai";
@@ -131,10 +129,6 @@ for (const providerId of Object.values(EAiProvider)) {
   }
 }
 
-export function getAiModel(provider: EAiProvider, purpose: EModelPurpose): Model<Api> {
-  return getAiModelConfig(provider, purpose).model;
-}
-
 export function getAiModelConfig(
   provider: EAiProvider,
   purpose: EModelPurpose,
@@ -208,18 +202,6 @@ export function getAiModelConfigs(
       EModelPurpose.ScheduledTask,
       preferences,
     ),
-  };
-}
-
-export function getAiModelIds(provider: EAiProvider): Readonly<Record<EModelPurpose, string>> {
-  const modelByPurpose = AI_PROVIDER_REGISTRY[provider].modelByPurpose;
-
-  return {
-    [EModelPurpose.Utility]: modelByPurpose[EModelPurpose.Utility].model,
-    [EModelPurpose.Main]: modelByPurpose[EModelPurpose.Main].model,
-    [EModelPurpose.Specialist]: modelByPurpose[EModelPurpose.Specialist].model,
-    [EModelPurpose.SpecialistAccurate]: modelByPurpose[EModelPurpose.SpecialistAccurate].model,
-    [EModelPurpose.ScheduledTask]: modelByPurpose[EModelPurpose.ScheduledTask].model,
   };
 }
 
