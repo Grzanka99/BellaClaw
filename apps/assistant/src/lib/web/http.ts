@@ -365,11 +365,9 @@ async function readResponseTextWithLimit(
 
   async function readChunkWithDeadline() {
     let timeoutId: TOption<ReturnType<typeof setTimeout>>;
-    let timedOut = false;
     const timeoutMs = getRemainingTimeoutMs(deadline);
     const timeout = new Promise<never>((_, reject) => {
       timeoutId = setTimeout(() => {
-        timedOut = true;
         reject(new Error("Request timed out"));
         cancelReader();
       }, timeoutMs);
@@ -377,10 +375,6 @@ async function readResponseTextWithLimit(
 
     try {
       const result = await Promise.race([reader.read(), timeout]);
-
-      if (timedOut) {
-        throw new Error("Request timed out");
-      }
 
       return result;
     } finally {
