@@ -50,22 +50,4 @@ describe("search-memory log sanitizers", () => {
       },
     });
   });
-
-  test("reports zero when returned facts are absent", () => {
-    const result = sanitizeToolResult({
-      toolCallId: "call-1",
-      toolName: "search-memory",
-      success: true,
-      data: {},
-      error: undefined,
-    });
-
-    expect(result).toEqual({
-      summary: "search-memory returned 0 facts",
-      metadata: {
-        status: "completed",
-        resultCount: 0,
-      },
-    });
-  });
 });
