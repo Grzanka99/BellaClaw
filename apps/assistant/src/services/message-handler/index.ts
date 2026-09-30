@@ -59,6 +59,19 @@ export class MessageHandler {
     return this.turnQueue.enqueue(() => this.handleTurn(message, platform));
   }
 
+  public saveDeliveredMessage(
+    text: string,
+    platform: EMessagePlatform,
+    deliveredAt: number,
+  ): Promise<void> {
+    // Append after the active turn and its compaction so a summary cannot skip this delivery.
+    return this.turnQueue.enqueue(() =>
+      this.queue.enqueue(() =>
+        this.conversations.saveDeliveredMessage(this.chatId, platform, text, deliveredAt),
+      ),
+    );
+  }
+
   private async handleTurn(
     message: TIncommingMessage,
     platform: TOption<EMessagePlatform>,
