@@ -9,7 +9,7 @@
     <name>schedule-once</name>
     <description>
       Creates a one-time cron job identified by a unique name that fires at the provided fireAt timestamp.
-      The job removes itself after firing. It stores direct reminder text, wording-only regeneration data,
+      It stores direct reminder text, wording-only regeneration data,
       or an autonomous web task with fallback text. Returns the scheduled job details including the fire time.
     </description>
   </tool>
