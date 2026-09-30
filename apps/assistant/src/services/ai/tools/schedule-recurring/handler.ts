@@ -25,7 +25,7 @@ export const SScheduleRecurringArgs = Type.Object(
       Type.String({ description: "Fallback text required with reminderPromptData" }),
     ),
     taskPrompt: Type.Optional(
-      Type.String({ description: "Autonomous objective to complete with fresh web information" }),
+      Type.String({ description: "Autonomous objective requiring tools at firing time" }),
     ),
     taskFallbackText: Type.Optional(
       Type.String({ description: "Fallback text required with taskPrompt" }),

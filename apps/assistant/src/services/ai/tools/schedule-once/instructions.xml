@@ -10,7 +10,7 @@
     <description>
       Creates a one-time cron job identified by a unique name that fires at the provided fireAt timestamp.
       The job removes itself after firing. It stores direct reminder text, wording-only regeneration data,
-      or an autonomous web task with fallback text. Returns the scheduled job details including the fire time.
+      or an autonomous task with tools and fallback text. Returns the scheduled job details including the fire time.
     </description>
   </tool>
 
@@ -29,7 +29,7 @@
     <rule>Choose clear, descriptive names for jobs so they can be easily referenced later</rule>
     <rule>If a one-time job with the same name already exists, set overwrite to true only if the user explicitly agrees to replace it</rule>
     <rule>Provide exactly one mode: reminderText; reminderPromptData plus reminderFallbackText; or taskPrompt plus taskFallbackText</rule>
-    <rule>Use taskPrompt when firing-time web search or fetch is required; use reminderPromptData only for fresh wording that needs no tools</rule>
+    <rule>Use taskPrompt for work requiring tools at firing time; use reminderPromptData for fresh wording without tools</rule>
     <rule>Pass reminderPromptData as a serialized JSON string, not as a nested object</rule>
     <rule>Inform the user of the scheduled fire time after successfully scheduling</rule>
   </usage_rules>
