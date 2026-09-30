@@ -22,3 +22,47 @@ describe("formatWebContent", () => {
     expect(result.truncated).toBe(false);
   });
 });
+
+describe("HTML entity text formatting", () => {
+  test("decodes named and numeric entities exactly once", async () => {
+    const result = await formatWebContent({
+      html: "<body><p>Fish &amp; chips &lt;3 &#169; &#x1F600; &copy; &amp;lt;</p></body>",
+      format: "text",
+    });
+
+    expect(result).toEqual({
+      content: "Fish & chips <3 © 😀 © &lt;",
+      truncated: false,
+    });
+  });
+
+  test("preserves literal characters and normalizes whitespace", async () => {
+    const result = await formatWebContent({
+      html: "Plain  text\n with < 3 and > 2 & signs",
+      format: "text",
+    });
+
+    expect(result.content).toBe("Plain text with < 3 and > 2 & signs");
+  });
+
+  test("keeps entity references and words intact across rewriter chunks", async () => {
+    const text = `${"x".repeat(1023)}&amp;lt;${"y".repeat(2050)}`;
+    const result = await formatWebContent({
+      html: `<body><p>${text}</p><p> next </p></body>`,
+      format: "text",
+    });
+
+    expect(result.content).toBe(`${"x".repeat(1023)}&lt;${"y".repeat(2050)} next`);
+    expect(result.truncated).toBe(false);
+  });
+
+  test("applies the character limit after decoding", async () => {
+    const result = await formatWebContent({
+      html: `<body><p>${"&copy;".repeat(80_001)}</p></body>`,
+      format: "text",
+    });
+
+    expect(result.content).toBe("©".repeat(80_000));
+    expect(result.truncated).toBe(true);
+  });
+});
