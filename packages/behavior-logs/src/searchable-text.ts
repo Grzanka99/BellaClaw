@@ -9,7 +9,6 @@ export const SEARCHABLE_METADATA_KEYS = new Set([
   "importance",
   "intent",
   "mediaKind",
-  "messageType",
   "model",
   "operation",
   "platform",

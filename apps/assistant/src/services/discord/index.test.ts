@@ -127,7 +127,6 @@ describe("DiscordSingleton", () => {
       platform: EMessagePlatform.Discord,
       chatId: "user-1",
       message: {
-        type: "text",
         content: "hello",
       },
     });

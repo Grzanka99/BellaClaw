@@ -7,7 +7,6 @@ export type TPlatformMessage = {
   platform: EMessagePlatform;
   chatId: string;
   message: {
-    type: "text";
     content: string;
   };
 };

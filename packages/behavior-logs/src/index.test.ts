@@ -31,9 +31,8 @@ describe("AppLogger", () => {
       component: "messaging",
       level: EBehaviorLogLevel.Info,
       success: true,
-      summary: "message received platform=discord type=text",
+      summary: "message received platform=discord",
       metadata: {
-        messageType: "text",
         messageChars: 18,
         attachmentCount: 0,
         attachmentKinds: [],

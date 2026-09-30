@@ -469,10 +469,9 @@ function logMessageReceived(trace: TBehaviorTraceContext, message: TPlatformMess
     trace,
     event: "message.received",
     component: "messaging",
-    summary: `message received platform=${message.platform} type=${message.message.type}`,
+    summary: `message received platform=${message.platform}`,
     metadata: {
       platform: message.platform,
-      messageType: message.message.type,
       messageChars: message.message.content.length,
       attachmentCount: 0,
       attachmentKinds: [],

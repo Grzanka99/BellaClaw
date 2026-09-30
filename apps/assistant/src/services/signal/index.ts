@@ -148,7 +148,6 @@ export class SignalSingleton implements TMessageTransport {
         platform: EMessagePlatform.Signal,
         chatId: message.sourceNumber,
         message: {
-          type: "text",
           content: message.message,
         },
       });

@@ -141,7 +141,6 @@ describe("SignalSingleton", () => {
       platform: EMessagePlatform.Signal,
       chatId: "+200",
       message: {
-        type: "text",
         content: "hello",
       },
     });

@@ -115,7 +115,7 @@ function setupConversationHandler(chatId: string) {
     chatId,
     receivedAt: new Date(),
     author: { type: ERole.User },
-    message: { type: "text", content: "Hello" },
+    message: { content: "Hello" },
   };
   return { handler, runMain, compactConversation, message };
 }
@@ -164,7 +164,7 @@ describe("MessagingAdapter", () => {
       await adapter.handleInboundMessage({
         platform: EMessagePlatform.Signal,
         chatId: "+100",
-        message: { type: "text", content: "What is on my calendar tomorrow?" },
+        message: { content: "What is on my calendar tomorrow?" },
       });
 
       expect(handleMessage.mock.calls[0]?.[0].receivedAt).toEqual(arrival);
@@ -334,7 +334,7 @@ describe("MessagingAdapter", () => {
     const message = {
       platform: EMessagePlatform.Discord,
       chatId: "user-1",
-      message: { type: "text" as const, content: "wrong" },
+      message: { content: "wrong" },
     };
 
     await adapter.handleInboundMessage(message);
@@ -373,7 +373,7 @@ describe("MessagingAdapter", () => {
     await adapter.handleInboundMessage({
       platform: EMessagePlatform.Signal,
       chatId: "+100",
-      message: { type: "text", content: "hello" },
+      message: { content: "hello" },
     });
     expect(handleMessage).toHaveBeenCalledTimes(1);
     expect(sendText).toHaveBeenCalledWith("+100", "Root reply");
@@ -385,7 +385,7 @@ describe("MessagingAdapter", () => {
       adapter.handleInboundMessage({
         platform: EMessagePlatform.Signal,
         chatId: "+100",
-        message: { type: "text", content: "again" },
+        message: { content: "again" },
       }),
     ).resolves.toBeUndefined();
     MessageHandler.getInstance = originalGetInstance;
@@ -432,7 +432,6 @@ describe("MessagingAdapter", () => {
         platform: EMessagePlatform.Discord,
         chatId: "channel-1",
         message: {
-          type: "text",
           content: '!mcp-prompt documents summarize {"style":"brief"}',
         },
       });
@@ -445,7 +444,6 @@ describe("MessagingAdapter", () => {
         receivedAt: expect.any(Date),
         author: { type: ERole.User },
         message: {
-          type: "text",
           content:
             'Use MCP profile documents to run the explicitly requested prompt template summarize with arguments {"style":"brief"}.',
         },
@@ -487,7 +485,7 @@ describe("MessagingAdapter", () => {
       const message: TPlatformMessage = {
         platform: EMessagePlatform.Discord,
         chatId: "channel-1",
-        message: { type: "text", content: "!mcp-prompt missing summarize" },
+        message: { content: "!mcp-prompt missing summarize" },
       };
 
       await adapter.handleInboundMessage(message);

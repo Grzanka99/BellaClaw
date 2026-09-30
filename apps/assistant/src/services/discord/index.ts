@@ -55,7 +55,6 @@ export class DiscordSingleton implements TMessageTransport {
         platform: EMessagePlatform.Discord,
         chatId: message.author.id,
         message: {
-          type: "text",
           content: message.content,
         },
       });
