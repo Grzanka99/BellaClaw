@@ -1,9 +1,8 @@
-import { randomUUID } from "node:crypto";
-import { mkdir, open, rename, rm } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { resolve } from "node:path";
 import { repositoryPath } from "@bellaclaw/shared";
 import type { Credential, CredentialInfo, CredentialStore } from "@earendil-works/pi-ai";
 import { z } from "zod";
+import { writeJsonAtomically } from "../../../lib/atomic-json";
 
 export const LOCAL_AI_CREDENTIALS_PATH = repositoryPath(".secrets/pi-auth.json");
 let defaultAiCredentialsPath = LOCAL_AI_CREDENTIALS_PATH;
@@ -64,7 +63,7 @@ export class FileCredentialStore implements CredentialStore {
       }
 
       credentials[providerId] = next;
-      await this.writeAll(credentials);
+      await writeJsonAtomically(this.path, credentials);
       return next;
     });
   }
@@ -78,7 +77,7 @@ export class FileCredentialStore implements CredentialStore {
       }
 
       delete credentials[providerId];
-      await this.writeAll(credentials);
+      await writeJsonAtomically(this.path, credentials);
     });
   }
 
@@ -105,35 +104,5 @@ export class FileCredentialStore implements CredentialStore {
     }
 
     return parsed.data;
-  }
-
-  private async writeAll(credentials: Record<string, Credential>): Promise<void> {
-    const directory = dirname(this.path);
-    const temporaryPath = `${this.path}.${randomUUID()}.tmp`;
-    await mkdir(directory, { recursive: true });
-    const temporaryFile = await open(temporaryPath, "wx", 0o600);
-    let temporaryFileOpen = true;
-
-    try {
-      await temporaryFile.writeFile(`${JSON.stringify(credentials, null, 2)}\n`, "utf8");
-      await temporaryFile.sync();
-      await temporaryFile.close();
-      temporaryFileOpen = false;
-      await rename(temporaryPath, this.path);
-
-      const directoryHandle = await open(directory, "r");
-
-      try {
-        await directoryHandle.sync();
-      } finally {
-        await directoryHandle.close();
-      }
-    } finally {
-      if (temporaryFileOpen) {
-        await temporaryFile.close().catch(() => undefined);
-      }
-
-      await rm(temporaryPath, { force: true });
-    }
   }
 }
