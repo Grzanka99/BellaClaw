@@ -147,10 +147,6 @@ export class SignalSingleton implements TMessageTransport {
       await MessagingAdapter.instance.handleInboundMessage({
         platform: EMessagePlatform.Signal,
         chatId: message.sourceNumber,
-        author: {
-          id: message.sourceNumber,
-          username: message.sourceName,
-        },
         message: {
           type: "text",
           content: message.message,

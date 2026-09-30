@@ -147,8 +147,6 @@ export class MessagingAdapter {
         receivedAt,
         author: {
           type: ERole.User,
-          username: message.author.username,
-          id: message.author.id,
         },
         message: { ...message.message },
       };

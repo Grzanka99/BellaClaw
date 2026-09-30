@@ -114,7 +114,7 @@ function setupConversationHandler(chatId: string) {
   const message: TIncommingMessage = {
     chatId,
     receivedAt: new Date(),
-    author: { type: ERole.User, id: "1", username: "Owner" },
+    author: { type: ERole.User },
     message: { type: "text", content: "Hello" },
   };
   return { handler, runMain, compactConversation, message };
@@ -164,7 +164,6 @@ describe("MessagingAdapter", () => {
       await adapter.handleInboundMessage({
         platform: EMessagePlatform.Signal,
         chatId: "+100",
-        author: { id: "1", username: "Owner" },
         message: { type: "text", content: "What is on my calendar tomorrow?" },
       });
 
@@ -335,7 +334,6 @@ describe("MessagingAdapter", () => {
     const message = {
       platform: EMessagePlatform.Discord,
       chatId: "user-1",
-      author: { id: "user-1", username: "Owner" },
       message: { type: "text" as const, content: "wrong" },
     };
 
@@ -375,7 +373,6 @@ describe("MessagingAdapter", () => {
     await adapter.handleInboundMessage({
       platform: EMessagePlatform.Signal,
       chatId: "+100",
-      author: { id: "1", username: "Owner" },
       message: { type: "text", content: "hello" },
     });
     expect(handleMessage).toHaveBeenCalledTimes(1);
@@ -388,7 +385,6 @@ describe("MessagingAdapter", () => {
       adapter.handleInboundMessage({
         platform: EMessagePlatform.Signal,
         chatId: "+100",
-        author: { id: "1", username: "Owner" },
         message: { type: "text", content: "again" },
       }),
     ).resolves.toBeUndefined();
@@ -435,7 +431,6 @@ describe("MessagingAdapter", () => {
       await adapter.handleInboundMessage({
         platform: EMessagePlatform.Discord,
         chatId: "channel-1",
-        author: { id: "user-1", username: "Owner" },
         message: {
           type: "text",
           content: '!mcp-prompt documents summarize {"style":"brief"}',
@@ -448,7 +443,7 @@ describe("MessagingAdapter", () => {
       expect(receivedMessage).toEqual({
         chatId: "discord:channel-1",
         receivedAt: expect.any(Date),
-        author: { type: ERole.User, id: "user-1", username: "Owner" },
+        author: { type: ERole.User },
         message: {
           type: "text",
           content:
@@ -492,7 +487,6 @@ describe("MessagingAdapter", () => {
       const message: TPlatformMessage = {
         platform: EMessagePlatform.Discord,
         chatId: "channel-1",
-        author: { id: "user-1", username: "Owner" },
         message: { type: "text", content: "!mcp-prompt missing summarize" },
       };
 

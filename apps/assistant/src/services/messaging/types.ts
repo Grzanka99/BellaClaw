@@ -6,10 +6,6 @@ export enum EMessagePlatform {
 export type TPlatformMessage = {
   platform: EMessagePlatform;
   chatId: string;
-  author: {
-    id: string;
-    username: string;
-  };
   message: {
     type: "text";
     content: string;

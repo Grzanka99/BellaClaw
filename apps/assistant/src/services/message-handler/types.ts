@@ -9,7 +9,5 @@ export type TIncommingMessage = {
   };
   author: {
     type: ERole.User;
-    id: string;
-    username: string;
   };
 };

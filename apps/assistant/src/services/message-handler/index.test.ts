@@ -188,14 +188,14 @@ describe("MessageHandler", () => {
         chatId,
         receivedAt: firstArrival,
         message: { type: "text", content: "What is on my calendar tomorrow?" },
-        author: { type: ERole.User, id: "1", username: "Owner" },
+        author: { type: ERole.User },
       });
       await waitForCall(internals.ai.compactConversation, 1);
       const second = handler.handleMessage({
         chatId,
         receivedAt: secondArrival,
         message: { type: "text", content: "And tomorrow evening?" },
-        author: { type: ERole.User, id: "1", username: "Owner" },
+        author: { type: ERole.User },
       });
       setSystemTime(processingTime);
       release();
@@ -285,7 +285,7 @@ describe("MessageHandler", () => {
           chatId: "discord:cache-prefix",
           receivedAt: savedAt,
           message: { type: "text", content: "What day is tomorrow?" },
-          author: { type: ERole.User, id: "1", username: "Owner" },
+          author: { type: ERole.User },
         },
         EMessagePlatform.Discord,
       );
@@ -296,7 +296,7 @@ describe("MessageHandler", () => {
           chatId: "discord:cache-prefix",
           receivedAt: savedAt,
           message: { type: "text", content: "And today?" },
-          author: { type: ERole.User, id: "1", username: "Owner" },
+          author: { type: ERole.User },
         },
         EMessagePlatform.Discord,
       );
@@ -347,7 +347,7 @@ describe("MessageHandler", () => {
         chatId: "discord:1",
         receivedAt: new Date(),
         message: { type: "text", content: "new question" },
-        author: { type: ERole.User, id: "1", username: "Owner" },
+        author: { type: ERole.User },
       },
       EMessagePlatform.Discord,
     );
@@ -403,7 +403,7 @@ describe("MessageHandler", () => {
       chatId: "compaction-order",
       receivedAt: new Date(),
       message: { type: "text" as const, content: "first" },
-      author: { type: ERole.User, id: "1", username: "Owner" },
+      author: { type: ERole.User },
     };
     expect(await handler.handleMessage(message)).toBe("Final answer");
     await waitForCall(internals.ai.compactConversation, 1);
@@ -432,7 +432,7 @@ describe("MessageHandler", () => {
       chatId: "compaction-retry",
       receivedAt: new Date(),
       message: { type: "text" as const, content: "first" },
-      author: { type: ERole.User, id: "1", username: "Owner" },
+      author: { type: ERole.User },
     };
     await handler.handleMessage(message);
     await waitForCall(internals.conversations.saveSummary, 1);
@@ -483,7 +483,7 @@ describe("MessageHandler", () => {
       chatId: "signal:1",
       receivedAt: new Date(),
       message: { type: "text", content: "change my settings" },
-      author: { type: ERole.User, id: "1", username: "Owner" },
+      author: { type: ERole.User },
     });
     sharedSettings[EConfigKey.AiInstructionsTimezone] = "Asia/Tokyo";
     await flushAsyncWork();
@@ -506,7 +506,7 @@ describe("MessageHandler", () => {
         chatId: "discord:user-save-failure",
         receivedAt: new Date(),
         message: { type: "text", content: "remember this" },
-        author: { type: ERole.User, id: "1", username: "Owner" },
+        author: { type: ERole.User },
       }),
     ).rejects.toThrow("database unavailable");
 
@@ -525,7 +525,7 @@ describe("MessageHandler", () => {
         chatId: "discord:assistant-save-failure",
         receivedAt: new Date(),
         message: { type: "text", content: "hello" },
-        author: { type: ERole.User, id: "1", username: "Owner" },
+        author: { type: ERole.User },
       }),
     ).rejects.toThrow("database unavailable");
     expect(internals.memory.loadLiveFactWindow).not.toHaveBeenCalled();
@@ -553,7 +553,7 @@ describe("MessageHandler", () => {
       chatId: "discord:ordering",
       receivedAt: new Date(),
       message: { type: "text", content: "remember this" },
-      author: { type: ERole.User, id: "1", username: "Owner" },
+      author: { type: ERole.User },
     });
     await waitForCall(internals.conversations.saveTurn, 1);
     expect(events).toEqual(["save-start"]);
@@ -599,7 +599,7 @@ describe("MessageHandler", () => {
       chatId: "discord:stalled",
       receivedAt: new Date(),
       message: { type: "text", content: "first" },
-      author: { type: ERole.User, id: "1", username: "Owner" },
+      author: { type: ERole.User },
     });
     await waitForCall(internals.memory.loadLiveFactWindow, 1);
 
@@ -607,7 +607,7 @@ describe("MessageHandler", () => {
       chatId: "discord:stalled",
       receivedAt: new Date(),
       message: { type: "text", content: "second" },
-      author: { type: ERole.User, id: "1", username: "Owner" },
+      author: { type: ERole.User },
     });
 
     expect(secondReply).toBe("Final answer");
@@ -633,7 +633,7 @@ describe("MessageHandler", () => {
       chatId: "discord:drain",
       receivedAt: new Date(),
       message: { type: "text", content: "two facts" },
-      author: { type: ERole.User, id: "1", username: "Owner" },
+      author: { type: ERole.User },
     });
     await waitForCall(internals.memory.loadLiveFactWindow, 3);
 
@@ -676,7 +676,7 @@ describe("MessageHandler", () => {
       chatId: "discord:retry",
       receivedAt: new Date(),
       message: { type: "text", content: "first turn" },
-      author: { type: ERole.User, id: "1", username: "Owner" },
+      author: { type: ERole.User },
     });
     await waitForCall(internals.factDistiller.processWindow, 1);
     await flushAsyncWork();
@@ -687,7 +687,7 @@ describe("MessageHandler", () => {
       chatId: "discord:retry",
       receivedAt: new Date(),
       message: { type: "text", content: "second turn" },
-      author: { type: ERole.User, id: "1", username: "Owner" },
+      author: { type: ERole.User },
     });
     await waitForCall(internals.memory.loadLiveFactWindow, 3);
 
@@ -716,7 +716,7 @@ describe("MessageHandler", () => {
         chatId: "discord:2",
         receivedAt: new Date(),
         message: { type: "text", content: "hello" },
-        author: { type: ERole.User, id: "2", username: "Owner" },
+        author: { type: ERole.User },
       }),
     ).toBe("Something went wrong.");
     await flushAsyncWork();
@@ -729,7 +729,7 @@ describe("MessageHandler", () => {
       chatId: "discord:2",
       receivedAt: new Date(),
       message: { type: "text", content: "try again" },
-      author: { type: ERole.User, id: "2", username: "Owner" },
+      author: { type: ERole.User },
     });
     expect(internals.ai.runMain.mock.calls[1]?.[0].conversation).toBeUndefined();
     expect(JSON.stringify(internals.ai.runMain.mock.calls[1]?.[0].history)).not.toContain(

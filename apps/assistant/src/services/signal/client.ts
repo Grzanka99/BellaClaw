@@ -8,8 +8,6 @@ const RECONNECT_DELAY_MS = 5000;
 const SSignalReceiveEnvelope = z.object({
   source: z.string().nullable().optional(),
   sourceNumber: z.string().nullable().optional(),
-  sourceName: z.string().nullable().optional(),
-  profileName: z.string().nullable().optional(),
   timestamp: z.number().optional(),
   dataMessage: z
     .object({
@@ -26,7 +24,6 @@ const SSignalReceivePayload = z.object({
 
 export type TSignalInboundMessage = {
   sourceNumber: string;
-  sourceName: string;
   message: string;
   timestamp: TOption<number>;
 };
@@ -83,17 +80,8 @@ export function parseSignalReceiveMessage(raw: string): TOption<TSignalInboundMe
     return undefined;
   }
 
-  let sourceName = envelope.sourceName;
-  if (sourceName === null || sourceName === undefined || sourceName.trim().length === 0) {
-    sourceName = envelope.profileName;
-  }
-  if (sourceName === null || sourceName === undefined || sourceName.trim().length === 0) {
-    sourceName = sourceNumber;
-  }
-
   return {
     sourceNumber,
-    sourceName,
     message,
     timestamp: dataMessage.timestamp ?? envelope.timestamp,
   };
