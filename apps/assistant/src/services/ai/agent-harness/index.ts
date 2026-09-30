@@ -1031,6 +1031,9 @@ export class AgentHarness {
     iteration: number,
     signal: AbortSignal,
   ): Promise<CreateMessageResult | CreateMessageResultWithTools> {
+    if (params.toolChoice?.mode === "required") {
+      throw new Error("MCP sampling toolChoice mode 'required' is not supported");
+    }
     const modelConfig = this.resolveModel(settings, EModelPurpose.SpecialistAccurate);
     const tools = params.tools?.map((tool) => {
       return {
