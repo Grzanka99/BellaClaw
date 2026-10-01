@@ -94,9 +94,10 @@ async function init(): Promise<void> {
 
 for (const signal of ["SIGINT", "SIGTERM"]) {
   process.once(signal, () => {
-    void Promise.allSettled([McpService.instance.close(), stopMcpAuthServer()]).then(() =>
-      process.exit(0),
-    );
+    void Promise.allSettled([McpService.instance.close(), stopMcpAuthServer()]).then(async () => {
+      await AppLogger.instance.close();
+      process.exit(0);
+    });
   });
 }
 
