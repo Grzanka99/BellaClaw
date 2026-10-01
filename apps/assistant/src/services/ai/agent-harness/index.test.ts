@@ -341,6 +341,65 @@ describe("AgentHarness", () => {
     expect(result.toolCallCount).toBe(2);
   });
 
+  test.each([
+    "required",
+    "auto",
+    "none",
+  ] as const)("validates MCP sampling tool choice %s before provider completion", async (mode) => {
+    const complete = spyOn(aiModels, "complete").mockResolvedValue(fauxAssistantMessage("sampled"));
+    const completeSimple = spyOn(aiModels, "completeSimple").mockResolvedValue(
+      fauxAssistantMessage("sampled"),
+    );
+    const harness = AgentHarness.instance as unknown as {
+      sampleMcp(
+        request: CreateMessageRequest["params"],
+        settings: typeof DefaultConfigRecord,
+        chatId: TOption<string>,
+        platform: TOption<EMessagePlatform>,
+        trace: TOption<TBehaviorTraceContext>,
+        parentToolCallId: string,
+        iteration: number,
+        signal: AbortSignal,
+      ): Promise<CreateMessageResult | CreateMessageResultWithTools>;
+    };
+
+    try {
+      const sampling = harness.sampleMcp(
+        {
+          messages: [{ role: "user", content: { type: "text", text: "MCP request" } }],
+          maxTokens: 100,
+          tools: [{ name: "lookup", inputSchema: { type: "object" } }],
+          toolChoice: { mode },
+        },
+        { ...DefaultConfigRecord, [EConfigKey.AiProvider]: EAiProvider.Openrouter },
+        "discord:1",
+        EMessagePlatform.Discord,
+        undefined,
+        "delegate-call",
+        1,
+        new AbortController().signal,
+      );
+      if (mode === "required") {
+        await expect(sampling).rejects.toThrow(
+          "MCP sampling toolChoice mode 'required' is not supported",
+        );
+        expect(completeSimple).not.toHaveBeenCalled();
+      } else {
+        expect((await sampling).content).toEqual({ type: "text", text: "sampled" });
+        expect(completeSimple).toHaveBeenCalledTimes(1);
+        expect(completeSimple).toHaveBeenCalledWith(
+          expect.anything(),
+          expect.objectContaining({ tools: [expect.objectContaining({ name: "lookup" })] }),
+          expect.objectContaining({ toolChoice: mode }),
+        );
+      }
+      expect(complete).not.toHaveBeenCalled();
+    } finally {
+      complete.mockRestore();
+      completeSimple.mockRestore();
+    }
+  });
+
   test("samples from MCP request context and returns every requested tool call", async () => {
     let sampledContext: TOption<Context>;
     let sampledMaxTokens: TOption<number>;
