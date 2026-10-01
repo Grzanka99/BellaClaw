@@ -229,43 +229,44 @@ function handleUpdatedContent(root) {
     warning.hidden = true;
   }
 
-  const template = root.querySelector("template[data-live-events]");
-
-  if (!template) {
+  const eventsList = document.querySelector("#events-list");
+  const eventCount = document.querySelector(".results-title strong");
+  if (!eventsList || !eventCount) {
     return;
   }
 
-  const eventsList = document.querySelector("#events-list");
-  const anchor = eventsList.querySelector("[data-event-id]");
-  const anchorTop = anchor?.getBoundingClientRect().top;
-  const preserveListScroll = eventsList.scrollTop > 0;
-  const preservePageScroll = window.scrollY > 0;
-  const incoming = template.content.querySelector(".event-list");
+  const template = root.querySelector("template[data-live-events]");
+  if (template) {
+    const anchor = eventsList.querySelector("[data-event-id]");
+    const anchorTop = anchor?.getBoundingClientRect().top;
+    const preserveListScroll = eventsList.scrollTop > 0;
+    const preservePageScroll = window.scrollY > 0;
+    const incoming = template.content.querySelector(".event-list");
 
-  for (const row of incoming.querySelectorAll("[data-event-id]")) {
-    if (eventsList.querySelector(`[data-event-id="${row.dataset.eventId}"]`)) {
-      row.remove();
+    for (const row of incoming.querySelectorAll("[data-event-id]")) {
+      if (eventsList.querySelector(`[data-event-id="${row.dataset.eventId}"]`)) {
+        row.remove();
+      }
+    }
+
+    eventsList.querySelector(".empty-state")?.remove();
+    const timeline = eventsList.querySelector(".event-list");
+    if (timeline) {
+      timeline.prepend(...incoming.children);
+    } else {
+      eventsList.prepend(incoming);
+    }
+    template.remove();
+    updateLocalTimes(eventsList);
+
+    if (anchor && preserveListScroll) {
+      eventsList.scrollTop += anchor.getBoundingClientRect().top - anchorTop;
+    } else if (anchor && preservePageScroll) {
+      window.scrollBy(0, anchor.getBoundingClientRect().top - anchorTop);
     }
   }
 
-  eventsList.querySelector(".empty-state")?.remove();
-  const timeline = eventsList.querySelector(".event-list");
-  if (timeline) {
-    timeline.prepend(...incoming.children);
-  } else {
-    eventsList.prepend(incoming);
-  }
-  template.remove();
-  updateLocalTimes(eventsList);
-
-  if (anchor && preserveListScroll) {
-    eventsList.scrollTop += anchor.getBoundingClientRect().top - anchorTop;
-  } else if (anchor && preservePageScroll) {
-    window.scrollBy(0, anchor.getBoundingClientRect().top - anchorTop);
-  }
-
-  document.querySelector(".results-title strong").textContent =
-    `${eventsList.querySelectorAll("[data-event-id]").length} events`;
+  eventCount.textContent = `${eventsList.querySelectorAll("[data-event-id]").length} events`;
 }
 
 document.addEventListener("DOMContentLoaded", () => {
