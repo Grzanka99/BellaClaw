@@ -442,17 +442,5 @@ export class FactDistiller {
 }
 
 function isEligibleFactSource(message: TMemory, chatId: string): boolean {
-  if (message.chatId !== chatId || message.author !== ERole.User) {
-    return false;
-  }
-
-  // NOTE: a message that is only a question carries no durable claim, but one that states something
-  // before asking still does. Judging the whole row by its final punctuation drops the claim, and
-  // the checkpoint then advances past it for good.
-  const clauses = message.message
-    .split(/(?<=[.!?？;])\s+/)
-    .map((clause) => clause.trim())
-    .filter((clause) => clause.length > 0);
-
-  return clauses.some((clause) => !clause.endsWith("?") && !clause.endsWith("？"));
+  return message.chatId === chatId && message.author === ERole.User;
 }
