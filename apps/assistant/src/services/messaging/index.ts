@@ -27,7 +27,6 @@ import {
   type TAuthorizationResult,
 } from "../authorization";
 import { CronSingleton } from "../cron";
-import { Memory } from "../memory";
 import { EMemoryImportance } from "../memory/types";
 import { MessageHandler } from "../message-handler";
 import { attachMessageTrace } from "../message-handler/trace";
@@ -398,15 +397,15 @@ export class MessagingAdapter {
       return;
     }
 
+    const deliveredAt = Date.now();
     const saveStart = performance.now();
 
     try {
-      await Memory.instance.save({
-        chatId: canonicalChatId,
-        author: ERole.Assistant,
-        importance: EMemoryImportance.Low,
-        message: `[${memoryPrefix} ${ctx.name}]: ${text}`,
-      });
+      await MessageHandler.getInstance(canonicalChatId).saveDeliveredMessage(
+        `[${memoryPrefix} ${ctx.name}]: ${text}`,
+        parsedScope.platform,
+        deliveredAt,
+      );
       logMemorySaveCompleted(
         trace,
         saveStart,
