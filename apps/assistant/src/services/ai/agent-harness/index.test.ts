@@ -796,10 +796,14 @@ describe("AgentHarness", () => {
     ]);
   });
 
-  test("returns undefined for blank and provider-error final messages", async () => {
+  test("returns undefined for blank, empty-error, and partial-error final messages", async () => {
     faux.setResponses([
       fauxAssistantMessage("   "),
       fauxAssistantMessage([], { stopReason: "error", errorMessage: "provider failed" }),
+      fauxAssistantMessage("This is a partial answer", {
+        stopReason: "error",
+        errorMessage: "connection dropped",
+      }),
     ]);
     const args = {
       prompt: "hello",
@@ -819,6 +823,9 @@ describe("AgentHarness", () => {
     const failed = await AgentHarness.instance.runMain(args);
     expect(failed.text).toBeUndefined();
     expect(failed.stopReason).toBe("error");
+    const partial = await AgentHarness.instance.runMain(args);
+    expect(partial.text).toBeUndefined();
+    expect(partial.stopReason).toBe("error");
   });
 
   test("does not start a provider stream for a pre-cancelled run", async () => {

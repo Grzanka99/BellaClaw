@@ -449,12 +449,6 @@ export class AgentHarness {
 
           if (toolCalls.length > 0) {
             lastToolBatch = signature;
-          } else {
-            const text = contentText(message.content).trim();
-
-            if (text.length > 0) {
-              finalText = text;
-            }
           }
         }
       }
