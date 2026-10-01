@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { EModelPurpose, ERole } from "../ai/types";
 import { DefaultConfigRecord } from "../settings/schema";
+import { Memory } from ".";
 import { FactDistiller } from "./distill";
 import type { TFactSearchResult, TLiveFactWindow, TMemory } from "./types";
 import { EMemoryImportance } from "./types";
@@ -374,6 +375,80 @@ describe("FactDistiller", () => {
         },
       ],
     });
+  });
+
+  test.each([
+    {
+      label: "repeated facts in source order",
+      reverse: false,
+      distinct: false,
+      sourceIndexes: [1],
+    },
+    {
+      label: "repeated facts in reverse order",
+      reverse: true,
+      distinct: false,
+      sourceIndexes: [1],
+    },
+    { label: "distinct facts", reverse: false, distinct: true, sourceIndexes: [0, 1] },
+  ])("commits one live fact per exact text for $label", async (scenario) => {
+    const { distiller, internals } = setupDistiller();
+    const memory = Memory.instance;
+    const chatId = `distill-${scenario.label}`;
+    const vector = makeEmbedding(0.25);
+    const firstText = "The user's bicycle is named Comet.";
+    let secondText = firstText;
+    if (scenario.distinct) {
+      secondText = "The user's bicycle is blue.";
+    }
+    const first = await memory.save({
+      chatId,
+      author: ERole.User,
+      importance: EMemoryImportance.Medium,
+      message: firstText,
+    });
+    const second = await memory.save({
+      chatId,
+      author: ERole.User,
+      importance: EMemoryImportance.Medium,
+      message: secondText,
+    });
+    const sources = [first, second];
+    const facts = [
+      { text: firstText, sourceMessageId: first.id },
+      { text: secondText, sourceMessageId: second.id },
+    ];
+    if (scenario.reverse) {
+      facts.reverse();
+    }
+    Object.assign(distiller, { memory });
+    internals.ai.completeText = mock(async () => JSON.stringify({ facts }));
+    internals.embedding.embedMany = mock(async (texts: string[]) => texts.map(() => vector));
+
+    const result = await distiller.processWindow({
+      window: await memory.loadLiveFactWindow(chatId),
+      settings: DefaultConfigRecord,
+      trace: undefined,
+    });
+
+    expect(result).toEqual({ success: true });
+    const expectedSources = scenario.sourceIndexes.map((index) => {
+      const source = sources[index];
+      if (source === undefined) {
+        throw new Error("Expected a saved fact source");
+      }
+      return source;
+    });
+    expect(internals.embedding.embedMany).toHaveBeenCalledWith(
+      expectedSources.map((source) => source.message),
+    );
+    const liveFacts = await memory.findLiveFactCandidates(chatId, vector);
+    expect(
+      liveFacts.map((fact) => ({ text: fact.text, sourceMessageId: fact.sourceMessageId })),
+    ).toEqual(
+      expectedSources.map((source) => ({ text: source.message, sourceMessageId: source.id })),
+    );
+    expect((await memory.loadLiveFactWindow(chatId)).state.lastProcessedMessageId).toBe(second.id);
   });
 
   test("validates and commits an offered supersession candidate", async () => {

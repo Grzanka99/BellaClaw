@@ -155,7 +155,7 @@ export class FactDistiller {
       }
     }
 
-    const eligibleFacts: TDistilledFact[] = [];
+    const eligibleFacts = new Map<string, TDistilledFact>();
     for (const fact of parsed.data.facts) {
       if (!eligibleSourceIds.has(fact.sourceMessageId)) {
         this.logger.error(
@@ -164,10 +164,15 @@ export class FactDistiller {
         continue;
       }
 
-      eligibleFacts.push(fact);
+      const existing = eligibleFacts.get(fact.text);
+      if (existing !== undefined && existing.sourceMessageId >= fact.sourceMessageId) {
+        continue;
+      }
+
+      eligibleFacts.set(fact.text, fact);
     }
 
-    return { success: true, facts: eligibleFacts };
+    return { success: true, facts: [...eligibleFacts.values()] };
   }
 
   public async processWindow(args: TProcessFactWindowArgs): Promise<TFactWindowProcessResult> {
