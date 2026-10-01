@@ -765,12 +765,6 @@ export class CalendarService {
       resolved.originalStartTime,
       occurrenceNumber,
     );
-    await this.client.patchEvent(
-      calendarId,
-      master.id,
-      { recurrence: split.original },
-      args.signal,
-    );
     const successor = eventBody(master);
     successor.start = resolved.start;
     successor.end = resolved.end;
@@ -778,6 +772,12 @@ export class CalendarService {
     const deterministicId = successorId(calendarId, master.id, resolved);
     successor.id = deterministicId;
     applyPatch(successor, args.patch, resolved);
+    await this.client.patchEvent(
+      calendarId,
+      master.id,
+      { recurrence: split.original },
+      args.signal,
+    );
     try {
       return mapEvent(
         calendarId,
