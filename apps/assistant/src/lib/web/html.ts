@@ -1,3 +1,4 @@
+import { decodeHTML } from "entities";
 import TurndownService from "turndown";
 import type { TWebContentFormat } from "./types";
 
@@ -44,6 +45,8 @@ export async function formatWebContent(args: {
 export async function extractVisibleText(html: string): Promise<string> {
   const bodyChunks: string[] = [];
   const documentChunks: string[] = [];
+  let bodyText = "";
+  let documentText = "";
   let bodyElementFound = false;
   let skippedDepth = 0;
 
@@ -62,7 +65,11 @@ export async function extractVisibleText(html: string): Promise<string> {
     .onDocument({
       text(text) {
         if (skippedDepth === 0) {
-          documentChunks.push(text.text);
+          documentText += text.text;
+          if (text.lastInTextNode) {
+            documentChunks.push(decodeHTML(documentText));
+            documentText = "";
+          }
         }
       },
     })
@@ -73,7 +80,11 @@ export async function extractVisibleText(html: string): Promise<string> {
       },
       text(text) {
         if (skippedDepth === 0) {
-          bodyChunks.push(text.text);
+          bodyText += text.text;
+          if (text.lastInTextNode) {
+            bodyChunks.push(decodeHTML(bodyText));
+            bodyText = "";
+          }
         }
       },
     })
