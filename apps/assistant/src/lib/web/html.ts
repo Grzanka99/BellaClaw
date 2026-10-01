@@ -69,6 +69,7 @@ export async function extractVisibleText(html: string): Promise<string> {
     .on("body", {
       element() {
         bodyElementFound = true;
+        skippedDepth = 0;
       },
       text(text) {
         if (skippedDepth === 0) {
