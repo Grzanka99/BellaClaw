@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AppLogger, type TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
+import { AppLogger, LogReader, type TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
 import { logger, type TOption } from "@bellaclaw/shared";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import {
@@ -25,7 +25,7 @@ import type { TConversation } from "../../conversation/types";
 import { McpRunRegistry } from "../../mcp/runs";
 import { EMessagePlatform } from "../../messaging/types";
 import { DefaultConfigRecord, EConfigKey } from "../../settings/schema";
-import { aiModels, getAiModelIds } from "../providers/registry";
+import { aiModels, getAiModelConfig, getAiModelConfigs } from "../providers/registry";
 import { EAiProvider, EModelPurpose, ERole, type THistoryItem } from "../types";
 import { AgentHarness, EAgentName, isSerializedToolCall } from ".";
 import type { TAgentRunArgs, TAgentRunResult } from "./types";
@@ -37,6 +37,8 @@ const OPENROUTER_MODELS = [
   "openai/gpt-5.4-mini",
   "google/gemini-3.1-pro-preview",
 ].map((id) => ({ id, reasoning: true }));
+
+const logDirectories: string[] = [];
 
 describe("AgentHarness", () => {
   const previousApiKey = Bun.env.OPENROUTER_API_KEY;
@@ -52,7 +54,10 @@ describe("AgentHarness", () => {
     aiModels.setProvider(faux.provider);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    for (const directory of logDirectories.splice(0)) {
+      await rm(directory, { recursive: true, force: true });
+    }
     if (previousApiKey === undefined) {
       delete Bun.env.OPENROUTER_API_KEY;
     } else {
@@ -461,6 +466,89 @@ describe("AgentHarness", () => {
     ]);
   });
 
+  test.each([
+    "off",
+    "high",
+  ] as const)("honors Codex reasoning effort %s when sampling MCP", async (effort) => {
+    const modelConfig = getAiModelConfig(
+      EAiProvider.OpenaiCodex,
+      EModelPurpose.SpecialistAccurate,
+      {
+        model: "gpt-5.6-luna",
+        effort,
+      },
+    );
+    expect(modelConfig.effort).toBe(effort);
+    const complete = spyOn(aiModels, "complete").mockResolvedValue(fauxAssistantMessage("sampled"));
+    const completeSimple = spyOn(aiModels, "completeSimple").mockResolvedValue(
+      fauxAssistantMessage("sampled"),
+    );
+    const signal = new AbortController().signal;
+    const harness = AgentHarness.instance as unknown as {
+      sampleMcp(
+        request: CreateMessageRequest["params"],
+        settings: typeof DefaultConfigRecord,
+        chatId: TOption<string>,
+        platform: TOption<EMessagePlatform>,
+        trace: TOption<TBehaviorTraceContext>,
+        parentToolCallId: string,
+        iteration: number,
+        signal: AbortSignal,
+      ): Promise<CreateMessageResult | CreateMessageResultWithTools>;
+    };
+
+    try {
+      const result = await harness.sampleMcp(
+        {
+          messages: [{ role: "user", content: { type: "text", text: "MCP request" } }],
+          maxTokens: 999_999,
+          temperature: 0.25,
+        },
+        {
+          ...DefaultConfigRecord,
+          [EConfigKey.AiProvider]: EAiProvider.OpenaiCodex,
+          [EConfigKey.AiModelPreferences]: JSON.stringify({
+            [EAiProvider.OpenaiCodex]: {
+              [EModelPurpose.SpecialistAccurate]: { model: modelConfig.model.id, effort },
+            },
+          }),
+        },
+        "discord:1",
+        EMessagePlatform.Discord,
+        undefined,
+        "delegate-call",
+        1,
+        signal,
+      );
+      const options = {
+        maxTokens: modelConfig.model.maxTokens,
+        temperature: 0.25,
+        signal,
+      };
+      if (effort === "off") {
+        expect(completeSimple).not.toHaveBeenCalled();
+        expect(complete).toHaveBeenCalledTimes(1);
+        expect(complete).toHaveBeenCalledWith(
+          modelConfig.model,
+          expect.anything(),
+          expect.objectContaining({ ...options, reasoningEffort: "none" }),
+        );
+      } else {
+        expect(complete).not.toHaveBeenCalled();
+        expect(completeSimple).toHaveBeenCalledTimes(1);
+        expect(completeSimple).toHaveBeenCalledWith(
+          modelConfig.model,
+          expect.anything(),
+          expect.objectContaining({ ...options, reasoning: effort }),
+        );
+      }
+      expect(result.content).toEqual({ type: "text", text: "sampled" });
+    } finally {
+      complete.mockRestore();
+      completeSimple.mockRestore();
+    }
+  });
+
   test("sends the conversation's OpenCode session header when sampling MCP", async () => {
     Bun.env.OPENCODE_API_KEY = "opencode-test-key";
     const opencode = fauxProvider({
@@ -747,7 +835,9 @@ describe("AgentHarness", () => {
     const previousProvider = aiModels.getProvider(provider);
     const routed = fauxProvider({
       provider,
-      models: [...new Set(Object.values(getAiModelIds(provider)))].map((id) => ({
+      models: [
+        ...new Set(Object.values(getAiModelConfigs(provider, {})).map((config) => config.model)),
+      ].map((id) => ({
         id,
         reasoning: true,
       })),
@@ -1249,27 +1339,11 @@ describe("AgentHarness", () => {
     expect(schedulingTask).toContain("returned by Memory");
   });
 
-  test("enforces 30 delegations, specialist nonblank results, and depth one", async () => {
+  test("enforces 30 Main delegations and nonblank specialist results", async () => {
     const harness = AgentHarness.instance as unknown as {
-      createDelegationTools(args: {
-        name: EAgentName;
-        purpose: EModelPurpose;
-        prompt: string;
-        chatId: string;
-        settings: typeof DefaultConfigRecord;
-        currentTimeContext: undefined;
-        platform: EMessagePlatform;
-        trace: TBehaviorTraceContext;
-        history: THistoryItem[];
-        maxIterations: number;
-        parentToolCallId: TOption<string>;
-        signal: TOption<AbortSignal>;
-        delegationCount: TOption<() => void>;
-      }): Array<{
-        name: string;
-        executionMode: string;
-        execute(id: string, args: unknown): Promise<unknown>;
-      }>;
+      createTools(
+        args: TAgentRunArgs & { delegationCount: TOption<() => void> },
+      ): Promise<AgentTool[]>;
       run: ReturnType<typeof mock>;
     };
     const originalRun = harness.run;
@@ -1300,7 +1374,7 @@ describe("AgentHarness", () => {
         }
       },
     };
-    const tools = harness.createDelegationTools(base);
+    const tools = await harness.createTools(base);
     const memory = tools.find((tool) => tool.name === "delegate-memory");
     const scheduling = tools.find((tool) => tool.name === "delegate-scheduling");
 
@@ -1312,6 +1386,7 @@ describe("AgentHarness", () => {
     expect(memory?.execute("call-31", { task: "remember" })).rejects.toThrow(
       "Root delegation limit reached",
     );
+    expect(harness.run).toHaveBeenCalledTimes(30);
     expect(harness.run).toHaveBeenCalledWith(
       expect.objectContaining({
         name: EAgentName.Memory,
@@ -1322,25 +1397,17 @@ describe("AgentHarness", () => {
       }),
     );
 
-    const specialistTools = harness.createDelegationTools({
-      ...base,
-      name: EAgentName.Memory,
-      delegationCount: undefined,
-    });
-    expect(specialistTools[0]?.execute("nested", { task: "no" })).rejects.toThrow(
-      "Specialists cannot delegate",
-    );
-
     harness.run = mock(async () => ({
       text: " ",
       iterations: 1,
       toolCallCount: 0,
       stopReason: "completed",
     }));
-    const blankTool = harness.createDelegationTools({
+    const blankTools = await harness.createTools({
       ...base,
       delegationCount: () => undefined,
-    })[0];
+    });
+    const blankTool = blankTools.find((tool) => tool.name === "delegate-memory");
     expect(blankTool?.execute("blank", { task: "remember" })).rejects.toThrow(
       "specialist returned no final response",
     );
@@ -1348,7 +1415,10 @@ describe("AgentHarness", () => {
   });
 
   test("records each model response once with cache usage, hierarchy, and unknown zero usage", async () => {
-    const appLogger = new AppLogger({ dbPath: ":memory:", stdout: () => undefined });
+    const directory = await mkdtemp(join(tmpdir(), "bellaclaw-harness-logs-"));
+    logDirectories.push(directory);
+    const dbPath = join(directory, "behavior.db");
+    const appLogger = new AppLogger({ dbPath, stdout: () => undefined });
     (AppLogger as unknown as { _instance: AppLogger })._instance = appLogger;
     const responses = [
       fauxAssistantMessage(
@@ -1416,9 +1486,13 @@ describe("AgentHarness", () => {
         trace,
       });
       await appLogger.flush();
-      const events = (await appLogger.findByTurnId(trace.turnId)).filter(
-        (event) => event.event === "model.request.completed",
-      );
+      const reader = new LogReader(dbPath);
+      const result = await reader.readTurn(trace.turnId);
+      await reader.close();
+      if (!result.success) {
+        throw new Error(result.error.message);
+      }
+      const events = result.data.filter((event) => event.event === "model.request.completed");
       expect(events).toHaveLength(4);
       expect(events.slice(0, 3).map((event) => event.metadata)).toEqual([
         expect.objectContaining({
@@ -1472,7 +1546,10 @@ describe("AgentHarness", () => {
   });
 
   test("persists agent hierarchy, tool details, and lifecycle durations", async () => {
-    const appLogger = new AppLogger({ dbPath: ":memory:", stdout: () => undefined });
+    const directory = await mkdtemp(join(tmpdir(), "bellaclaw-harness-logs-"));
+    logDirectories.push(directory);
+    const dbPath = join(directory, "behavior.db");
+    const appLogger = new AppLogger({ dbPath, stdout: () => undefined });
     (AppLogger as unknown as { _instance: AppLogger })._instance = appLogger;
     faux.setResponses([
       fauxAssistantMessage(
@@ -1510,7 +1587,13 @@ describe("AgentHarness", () => {
       trace,
     });
     await appLogger.flush();
-    const events = await appLogger.findByTurnId(trace.turnId);
+    const reader = new LogReader(dbPath);
+    const result = await reader.readTurn(trace.turnId);
+    await reader.close();
+    if (!result.success) {
+      throw new Error(result.error.message);
+    }
+    const events = result.data;
 
     expect(events).toEqual(
       expect.arrayContaining([
@@ -1544,7 +1627,10 @@ describe("AgentHarness", () => {
   });
 
   test("persists extracted tool errors and failed direct-completion lifecycle duration", async () => {
-    const appLogger = new AppLogger({ dbPath: ":memory:", stdout: () => undefined });
+    const directory = await mkdtemp(join(tmpdir(), "bellaclaw-harness-logs-"));
+    logDirectories.push(directory);
+    const dbPath = join(directory, "behavior.db");
+    const appLogger = new AppLogger({ dbPath, stdout: () => undefined });
     (AppLogger as unknown as { _instance: AppLogger })._instance = appLogger;
     faux.setResponses([
       fauxAssistantMessage(
@@ -1585,7 +1671,13 @@ describe("AgentHarness", () => {
       trace,
     });
     await appLogger.flush();
-    const events = await appLogger.findByTurnId(trace.turnId);
+    const reader = new LogReader(dbPath);
+    const result = await reader.readTurn(trace.turnId);
+    await reader.close();
+    if (!result.success) {
+      throw new Error(result.error.message);
+    }
+    const events = result.data;
     const failedTool = events.find(
       (event) => event.event === "tool.call.completed" && event.toolName === "delegate-memory",
     );

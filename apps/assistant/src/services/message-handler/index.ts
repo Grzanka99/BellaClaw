@@ -18,7 +18,7 @@ import type { EMessagePlatform } from "../messaging/types";
 import { SettingsService } from "../settings";
 import { EConfigKey, type TConfigRecord } from "../settings/schema";
 import { getMessageTrace } from "./trace";
-import type { TIncommingMessage, TOutgoingMessage } from "./types";
+import type { TIncommingMessage } from "./types";
 
 export class MessageHandler {
   private static _instances = new Map<string, MessageHandler>();
@@ -59,6 +59,19 @@ export class MessageHandler {
     return this.turnQueue.enqueue(() => this.handleTurn(message, platform));
   }
 
+  public saveDeliveredMessage(
+    text: string,
+    platform: EMessagePlatform,
+    deliveredAt: number,
+  ): Promise<void> {
+    // Append after the active turn and its compaction so a summary cannot skip this delivery.
+    return this.turnQueue.enqueue(() =>
+      this.queue.enqueue(() =>
+        this.conversations.saveDeliveredMessage(this.chatId, platform, text, deliveredAt),
+      ),
+    );
+  }
+
   private async handleTurn(
     message: TIncommingMessage,
     platform: TOption<EMessagePlatform>,
@@ -81,7 +94,7 @@ export class MessageHandler {
       }
 
       const savedMessage = await this.queue.enqueue(() =>
-        this.saveMessageToDatabase(message, EMemoryImportance.Medium, trace, platform),
+        this.saveMessageToDatabase(message, trace, platform),
       );
 
       const history: THistoryItem[] = [];
@@ -308,8 +321,7 @@ export class MessageHandler {
   }
 
   private async saveMessageToDatabase(
-    message: TIncommingMessage | TOutgoingMessage,
-    importance: EMemoryImportance,
+    message: TIncommingMessage,
     trace: TOption<TBehaviorTraceContext>,
     platform: TOption<EMessagePlatform>,
   ): Promise<TMemory> {
@@ -320,8 +332,9 @@ export class MessageHandler {
         chatId: message.chatId,
         platform,
         author: message.author.type,
-        importance,
+        importance: EMemoryImportance.Medium,
         message: message.message.content,
+        createdAt: message.receivedAt,
       });
     } catch (error) {
       failure = String(error);
@@ -331,7 +344,7 @@ export class MessageHandler {
         trace,
         start,
         message.author.type,
-        importance,
+        EMemoryImportance.Medium,
         message.message.content.length,
         failure,
       );

@@ -27,7 +27,6 @@ import {
   type TAuthorizationResult,
 } from "../authorization";
 import { CronSingleton } from "../cron";
-import { Memory } from "../memory";
 import { EMemoryImportance } from "../memory/types";
 import { MessageHandler } from "../message-handler";
 import { attachMessageTrace } from "../message-handler/trace";
@@ -80,6 +79,7 @@ export class MessagingAdapter {
   }
 
   public async handleInboundMessage(message: TPlatformMessage) {
+    const receivedAt = new Date();
     const canonicalChatId = createCanonicalChatKey(message.platform, message.chatId);
     const handlerStart = performance.now();
     const trace: TBehaviorTraceContext = {
@@ -144,10 +144,9 @@ export class MessagingAdapter {
 
       const incomingMessage: TIncommingMessage = {
         chatId: canonicalChatId,
+        receivedAt,
         author: {
           type: ERole.User,
-          username: message.author.username,
-          id: message.author.id,
         },
         message: { ...message.message },
       };
@@ -396,15 +395,15 @@ export class MessagingAdapter {
       return;
     }
 
+    const deliveredAt = Date.now();
     const saveStart = performance.now();
 
     try {
-      await Memory.instance.save({
-        chatId: canonicalChatId,
-        author: ERole.Assistant,
-        importance: EMemoryImportance.Low,
-        message: `[${memoryPrefix} ${ctx.name}]: ${text}`,
-      });
+      await MessageHandler.getInstance(canonicalChatId).saveDeliveredMessage(
+        `[${memoryPrefix} ${ctx.name}]: ${text}`,
+        parsedScope.platform,
+        deliveredAt,
+      );
       logMemorySaveCompleted(
         trace,
         saveStart,
@@ -470,13 +469,10 @@ function logMessageReceived(trace: TBehaviorTraceContext, message: TPlatformMess
     trace,
     event: "message.received",
     component: "messaging",
-    summary: `message received platform=${message.platform} type=${message.message.type}`,
+    summary: `message received platform=${message.platform}`,
     metadata: {
       platform: message.platform,
-      messageType: message.message.type,
       messageChars: message.message.content.length,
-      attachmentCount: 0,
-      attachmentKinds: [],
     },
   });
 }

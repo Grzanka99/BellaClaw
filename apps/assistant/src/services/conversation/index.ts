@@ -1,5 +1,5 @@
 import { AsyncQueue, type TOption } from "@bellaclaw/shared";
-import { contentText, type Message } from "@earendil-works/pi-ai";
+import { type AssistantMessage, contentText, type Message } from "@earendil-works/pi-ai";
 import { and, asc, desc, eq, gt, isNotNull, ne } from "drizzle-orm";
 import { ERole } from "../ai/types";
 import { DatabaseConnector } from "../database";
@@ -121,6 +121,44 @@ export class ConversationStore {
         };
       }),
     );
+  }
+
+  public saveDeliveredMessage(
+    chatId: string,
+    platform: string,
+    text: string,
+    deliveredAt: number,
+  ): Promise<void> {
+    const message: AssistantMessage = {
+      role: "assistant",
+      content: [{ type: "text", text }],
+      api: "bellaclaw",
+      provider: "bellaclaw",
+      model: "scheduled-delivery",
+      usage: {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 0,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      },
+      stopReason: "stop",
+      timestamp: deliveredAt,
+    };
+    return this.queue.enqueue(async () => {
+      await this.db.insert(memoriesTable).values({
+        chatId,
+        platform,
+        kind: "message",
+        author: ERole.Assistant,
+        importance: EMemoryImportance.Low,
+        message: text,
+        modelMessage: JSON.stringify(message),
+        createdAt: deliveredAt,
+        lastReadAt: deliveredAt,
+      });
+    });
   }
 
   public saveSummary(chatId: string, platform: string, state: TConversation): Promise<void> {

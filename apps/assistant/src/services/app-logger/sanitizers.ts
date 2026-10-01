@@ -605,18 +605,7 @@ function sanitizeGenericToolResult(toolName: string, data: unknown): TSanitizedL
 function sanitizeDelegationResult(toolName: string, data: unknown): TSanitizedLogDetails {
   let response: TOption<string>;
 
-  if (isRecord(data) && Array.isArray(data.content)) {
-    for (const content of data.content) {
-      if (!isRecord(content) || content.type !== "text") {
-        continue;
-      }
-
-      response = readString(content, "text");
-      break;
-    }
-  }
-
-  if (response === undefined && isRecord(data)) {
+  if (isRecord(data)) {
     response = readString(data, "text");
   }
 

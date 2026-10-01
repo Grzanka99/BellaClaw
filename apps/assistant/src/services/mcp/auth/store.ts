@@ -1,6 +1,3 @@
-import { randomUUID } from "node:crypto";
-import { mkdir, open, rename, rm } from "node:fs/promises";
-import { dirname } from "node:path";
 import { AsyncQueue, repositoryPath, type TOption } from "@bellaclaw/shared";
 import {
   OAuthClientInformationFullSchema,
@@ -10,6 +7,7 @@ import {
   OAuthTokensSchema,
 } from "@modelcontextprotocol/sdk/shared/auth.js";
 import { z } from "zod";
+import { writeJsonAtomically } from "../../../lib/atomic-json";
 
 const SStoredCredential = z.object({
   tokens: OAuthTokensSchema.optional(),
@@ -67,7 +65,7 @@ export class McpAuthCredentialStore {
       }
 
       delete credentials[key];
-      await this.writeAll(credentials);
+      await writeJsonAtomically(this.path(), credentials);
       return true;
     });
   }
@@ -100,7 +98,7 @@ export class McpAuthCredentialStore {
     return this.queue.enqueue(async () => {
       const credentials = await this.readAll();
       credentials[key] = change(credentials[key] ?? {});
-      await this.writeAll(credentials);
+      await writeJsonAtomically(this.path(), credentials);
     });
   }
 
@@ -116,35 +114,6 @@ export class McpAuthCredentialStore {
       throw new Error(`Invalid MCP OAuth credentials file: ${path}`);
     }
     return parsed.data;
-  }
-
-  private async writeAll(credentials: Record<string, TStoredCredential>): Promise<void> {
-    const path = this.path();
-    const directory = dirname(path);
-    const temporaryPath = `${path}.${randomUUID()}.tmp`;
-    await mkdir(directory, { recursive: true });
-    const temporaryFile = await open(temporaryPath, "wx", 0o600);
-    let temporaryFileOpen = true;
-
-    try {
-      await temporaryFile.writeFile(`${JSON.stringify(credentials, null, 2)}\n`, "utf8");
-      await temporaryFile.sync();
-      await temporaryFile.close();
-      temporaryFileOpen = false;
-      await rename(temporaryPath, path);
-
-      const directoryHandle = await open(directory, "r");
-      try {
-        await directoryHandle.sync();
-      } finally {
-        await directoryHandle.close();
-      }
-    } finally {
-      if (temporaryFileOpen) {
-        await temporaryFile.close().catch(() => undefined);
-      }
-      await rm(temporaryPath, { force: true });
-    }
   }
 
   private path(): string {

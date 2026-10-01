@@ -1,7 +1,6 @@
 import { existsSync } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { REPOSITORY_ROOT, repositoryPath } from "@bellaclaw/shared";
-import type { TBehaviorLogEvent } from "./types";
 
 export const APP_DATA_DIR = "/app-data";
 export const DEFAULT_LOG_DB_FILE = "bellaclaw-logs.db";
@@ -53,8 +52,4 @@ export function getDefaultLogDbPath(): string {
   }
 
   return repositoryPath(DEFAULT_LOG_DB_FILE);
-}
-
-export function formatBehaviorEventForStdout(event: TBehaviorLogEvent): string {
-  return JSON.stringify(event);
 }

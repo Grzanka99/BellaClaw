@@ -1,14 +1,30 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  setSystemTime,
+  spyOn,
+  test,
+} from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fauxAssistantMessage, type Message } from "@earendil-works/pi-ai";
+import { convertResponsesMessages } from "@earendil-works/pi-ai/api/openai-responses-shared";
+import { transformMessages } from "@earendil-works/pi-ai/api/transform-messages";
 import { ECronJobType, type TCronJobContext } from "../../lib/cron-engine";
-import { ERole } from "../ai/types";
+import type { AgentHarness } from "../ai/agent-harness";
+import { getAiModelConfig } from "../ai/providers/registry";
+import { EAiProvider, EModelPurpose, ERole } from "../ai/types";
 import {
   AuthorizationService,
   EAuthorizationDecision,
   type TAuthorizationResult,
 } from "../authorization";
+import { ConversationStore } from "../conversation";
+import { conversationMessages, type TConversation } from "../conversation/types";
 import { Memory } from "../memory";
 import { EMemoryImportance } from "../memory/types";
 import { MessageHandler } from "../message-handler";
@@ -68,6 +84,50 @@ function reset() {
   (MessagingAdapter as unknown as { _instance: unknown })._instance = undefined;
   (Memory as unknown as { _instance: unknown })._instance = undefined;
   (SettingsService as unknown as { _instance: unknown })._instance = undefined;
+  (MessageHandler as unknown as { _instances: Map<string, MessageHandler> })._instances.clear();
+}
+
+function setupConversationHandler(chatId: string) {
+  (SettingsService as unknown as { _instance: unknown })._instance = {
+    getAll: mock(async () => DefaultConfigRecord),
+  };
+  const handler = MessageHandler.getInstance(chatId);
+  const runMain = mock(async (args: Parameters<AgentHarness["runMain"]>[0]) => {
+    const messages: Message[] = [
+      ...(args.conversation?.entries.map((entry) => entry.message) ?? []),
+      { role: "user", content: args.prompt, timestamp: Date.now() },
+      fauxAssistantMessage("Main reply"),
+    ];
+    return {
+      text: "Main reply",
+      iterations: 1,
+      toolCallCount: 0,
+      stopReason: "completed",
+      messages,
+    };
+  });
+  const compactConversation = mock(async (_state: TConversation): Promise<unknown> => undefined);
+  Object.assign(handler, {
+    ai: { runMain, compactConversation },
+    factQueue: { enqueue: async () => undefined },
+  });
+  const message: TIncommingMessage = {
+    chatId,
+    receivedAt: new Date(),
+    author: { type: ERole.User },
+    message: { content: "Hello" },
+  };
+  return { handler, runMain, compactConversation, message };
+}
+
+async function waitForCall(callback: ReturnType<typeof mock>) {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    if (callback.mock.calls.length > 0) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  throw new Error("Expected callback to run");
 }
 
 beforeEach(() => {
@@ -81,6 +141,168 @@ afterEach(() => {
 });
 
 describe("MessagingAdapter", () => {
+  test("captures arrival before awaiting authorization", async () => {
+    const arrival = new Date("2026-07-24T21:59:50.000Z");
+    const originalGetInstance = MessageHandler.getInstance;
+    const handleMessage = mock(async (_message: TIncommingMessage) => "Root reply");
+    MessageHandler.getInstance = mock(() => ({
+      handleMessage,
+    })) as unknown as typeof MessageHandler.getInstance;
+    const adapter = MessagingAdapter.instance;
+    adapter.registerTransport({
+      platform: EMessagePlatform.Signal,
+      sendText: mock(async () => undefined),
+    });
+    const internals = adapter as unknown as TAdapterInternals;
+    internals.authorization.authorize = mock(async () => {
+      setSystemTime(new Date("2026-07-24T22:00:10.000Z"));
+      return authorizationResult(EAuthorizationDecision.Allow, 0);
+    });
+
+    setSystemTime(arrival);
+    try {
+      await adapter.handleInboundMessage({
+        platform: EMessagePlatform.Signal,
+        chatId: "+100",
+        message: { content: "What is on my calendar tomorrow?" },
+      });
+
+      expect(handleMessage.mock.calls[0]?.[0].receivedAt).toEqual(arrival);
+    } finally {
+      MessageHandler.getInstance = originalGetInstance;
+      setSystemTime();
+    }
+  });
+
+  test.each([
+    "reminder",
+    "task",
+  ])("replays a delivered %s in the next Main request", async (kind) => {
+    const chatId = `signal:replay-${kind}`;
+    const { handler, runMain, message } = setupConversationHandler(chatId);
+    await handler.handleMessage(message, EMessagePlatform.Signal);
+    const adapter = MessagingAdapter.instance;
+    const sendText = mock(async () => undefined);
+    adapter.registerTransport({ platform: EMessagePlatform.Signal, sendText });
+    const internals = adapter as unknown as TAdapterInternals;
+    internals.ai = {
+      completeText: mock(async () => undefined),
+      runScheduledTask: mock(async () => ({
+        text: "Your briefing is ready.",
+        stopReason: "completed",
+        iterations: 1,
+        toolCallCount: 0,
+      })),
+    };
+    let context = cron({ scope: chatId });
+    let transcript = "[CRON REMINDER daily]: Take a break.";
+    if (kind === "task") {
+      context = cron({ scope: chatId, taskPrompt: "Prepare briefing", taskFallbackText: "Failed" });
+      transcript = "[CRON TASK daily]: Your briefing is ready.";
+    }
+
+    await internals.handleCronFire(context);
+    await handler.handleMessage(message, EMessagePlatform.Signal);
+
+    const conversation = runMain.mock.calls[1]?.[0].conversation;
+    expect(JSON.stringify(conversation)).toContain(transcript);
+    if (conversation === undefined) {
+      throw new Error("Expected replayable conversation");
+    }
+    const messages = conversationMessages(conversation);
+    for (const provider of Object.values(EAiProvider)) {
+      expect(
+        JSON.stringify(
+          transformMessages(messages, getAiModelConfig(provider, EModelPurpose.Main).model),
+        ),
+      ).toContain(transcript);
+    }
+    const request = convertResponsesMessages(
+      getAiModelConfig(EAiProvider.OpenaiCodex, EModelPurpose.Main).model,
+      { messages },
+      new Set(),
+    );
+    expect(JSON.stringify(request)).toContain(transcript);
+    expect(await ConversationStore.instance.load(chatId, EMessagePlatform.Discord)).toBeUndefined();
+    const memories = await Memory.instance.findRecent(chatId, 10, EMessagePlatform.Signal);
+    expect(memories.filter((row) => row.message === transcript)).toHaveLength(1);
+    expect(memories.find((row) => row.message === transcript)?.importance).toBe(
+      EMemoryImportance.Low,
+    );
+  });
+
+  test.each([
+    "turn",
+    "compaction",
+  ])("retains delivery during an active %s after compaction", async (phase) => {
+    const chatId = `signal:overlap-${phase}`;
+    const { handler, runMain, compactConversation, message } = setupConversationHandler(chatId);
+    const started = Promise.withResolvers<void>();
+    const finish = Promise.withResolvers<void>();
+    const deliveredAt = 1_800_000_000_000;
+    const clock = spyOn(Date, "now").mockReturnValue(deliveredAt);
+    if (phase === "turn") {
+      const completeMain = runMain.getMockImplementation();
+      if (completeMain === undefined) {
+        throw new Error("Missing Main fixture");
+      }
+      runMain.mockImplementationOnce(async (args) => {
+        started.resolve();
+        await finish.promise;
+        return completeMain(args);
+      });
+    }
+    compactConversation.mockImplementationOnce(async (state) => {
+      if (phase === "compaction") {
+        started.resolve();
+        await finish.promise;
+      }
+      return {
+        state: {
+          ...state,
+          summary: "The normal turn was summarized.",
+          summaryTimestamp: Date.now(),
+          summarizedThroughId: state.entries.at(-1)?.id ?? 0,
+          entries: [],
+        },
+        usage: {},
+      };
+    });
+    const adapter = MessagingAdapter.instance;
+    const sendText = mock(async () => undefined);
+    adapter.registerTransport({ platform: EMessagePlatform.Signal, sendText });
+    const internals = adapter as unknown as TAdapterInternals;
+
+    try {
+      const turn = handler.handleMessage(message, EMessagePlatform.Signal);
+      await started.promise;
+      const delivery = internals.handleCronFire(cron({ scope: chatId }));
+      await waitForCall(sendText);
+      clock.mockReturnValue(deliveredAt + 60_000);
+      finish.resolve();
+      await turn;
+      await delivery;
+      await handler.handleMessage(message, EMessagePlatform.Signal);
+
+      const conversation = runMain.mock.calls[1]?.[0].conversation;
+      expect(conversation?.summary).toBe("The normal turn was summarized.");
+      expect(conversation?.entries).toHaveLength(1);
+      expect(conversation?.entries[0]?.message).toMatchObject({
+        role: "assistant",
+        content: [{ type: "text", text: "[CRON REMINDER daily]: Take a break." }],
+        timestamp: deliveredAt,
+      });
+      expect(conversation?.entries[0]?.id).toBeGreaterThan(conversation?.summarizedThroughId ?? 0);
+      const saved = (await Memory.instance.findRecent(chatId, 10)).find((row) =>
+        row.message.includes("CRON REMINDER"),
+      );
+      expect(saved?.createdAt.getTime()).toBe(deliveredAt);
+    } finally {
+      finish.resolve();
+      clock.mockRestore();
+    }
+  });
+
   test("silently rejects failures and handles activation without invoking the AI", async () => {
     const originalGetInstance = MessageHandler.getInstance;
     const handleMessage = mock(async () => "Root reply");
@@ -112,8 +334,7 @@ describe("MessagingAdapter", () => {
     const message = {
       platform: EMessagePlatform.Discord,
       chatId: "user-1",
-      author: { id: "user-1", username: "Owner" },
-      message: { type: "text" as const, content: "wrong" },
+      message: { content: "wrong" },
     };
 
     await adapter.handleInboundMessage(message);
@@ -152,8 +373,7 @@ describe("MessagingAdapter", () => {
     await adapter.handleInboundMessage({
       platform: EMessagePlatform.Signal,
       chatId: "+100",
-      author: { id: "1", username: "Owner" },
-      message: { type: "text", content: "hello" },
+      message: { content: "hello" },
     });
     expect(handleMessage).toHaveBeenCalledTimes(1);
     expect(sendText).toHaveBeenCalledWith("+100", "Root reply");
@@ -165,8 +385,7 @@ describe("MessagingAdapter", () => {
       adapter.handleInboundMessage({
         platform: EMessagePlatform.Signal,
         chatId: "+100",
-        author: { id: "1", username: "Owner" },
-        message: { type: "text", content: "again" },
+        message: { content: "again" },
       }),
     ).resolves.toBeUndefined();
     MessageHandler.getInstance = originalGetInstance;
@@ -212,9 +431,7 @@ describe("MessagingAdapter", () => {
       await adapter.handleInboundMessage({
         platform: EMessagePlatform.Discord,
         chatId: "channel-1",
-        author: { id: "user-1", username: "Owner" },
         message: {
-          type: "text",
           content: '!mcp-prompt documents summarize {"style":"brief"}',
         },
       });
@@ -224,9 +441,9 @@ describe("MessagingAdapter", () => {
       expect(receivedPlatform).toBe(EMessagePlatform.Discord);
       expect(receivedMessage).toEqual({
         chatId: "discord:channel-1",
-        author: { type: ERole.User, id: "user-1", username: "Owner" },
+        receivedAt: expect.any(Date),
+        author: { type: ERole.User },
         message: {
-          type: "text",
           content:
             'Use MCP profile documents to run the explicitly requested prompt template summarize with arguments {"style":"brief"}.',
         },
@@ -268,8 +485,7 @@ describe("MessagingAdapter", () => {
       const message: TPlatformMessage = {
         platform: EMessagePlatform.Discord,
         chatId: "channel-1",
-        author: { id: "user-1", username: "Owner" },
-        message: { type: "text", content: "!mcp-prompt missing summarize" },
+        message: { content: "!mcp-prompt missing summarize" },
       };
 
       await adapter.handleInboundMessage(message);
@@ -309,9 +525,11 @@ describe("MessagingAdapter", () => {
     expect(sendText).toHaveBeenCalledWith("+15551234567", "Connected MCP profile documents.");
   });
 
-  test("saves low-importance root memory only after successful reminder delivery", async () => {
-    const save = mock(async (args) => args);
-    (Memory as unknown as { _instance: unknown })._instance = { save };
+  test("records the reminder transcript only after successful delivery", async () => {
+    const save = mock(async () => undefined);
+    Object.assign(MessageHandler.getInstance("signal:+100"), {
+      conversations: { saveDeliveredMessage: save },
+    });
     const sendText = mock(async () => undefined);
     const adapter = MessagingAdapter.instance;
     adapter.registerTransport({ platform: EMessagePlatform.Signal, sendText });
@@ -319,12 +537,12 @@ describe("MessagingAdapter", () => {
 
     await internals.handleCronFire(cron());
     expect(sendText).toHaveBeenCalledWith("+100", "Take a break.");
-    expect(save).toHaveBeenCalledWith({
-      chatId: "signal:+100",
-      author: ERole.Assistant,
-      importance: EMemoryImportance.Low,
-      message: "[CRON REMINDER daily]: Take a break.",
-    });
+    expect(save).toHaveBeenCalledWith(
+      "signal:+100",
+      EMessagePlatform.Signal,
+      "[CRON REMINDER daily]: Take a break.",
+      expect.any(Number),
+    );
 
     save.mockClear();
     sendText.mockImplementation(async () => {
@@ -338,8 +556,10 @@ describe("MessagingAdapter", () => {
     (SettingsService as unknown as { _instance: unknown })._instance = {
       getAll: mock(async () => DefaultConfigRecord),
     };
-    const save = mock(async (args) => args);
-    (Memory as unknown as { _instance: unknown })._instance = { save };
+    const save = mock(async () => undefined);
+    Object.assign(MessageHandler.getInstance("signal:+100"), {
+      conversations: { saveDeliveredMessage: save },
+    });
     const sendText = mock(async () => undefined);
     let release: () => void = () => undefined;
     const waiting = new Promise<void>((resolve) => {
@@ -376,9 +596,10 @@ describe("MessagingAdapter", () => {
     expect(sendText).toHaveBeenCalledTimes(1);
     expect(sendText).toHaveBeenCalledWith("+100", "Briefing unavailable.");
     expect(save).toHaveBeenCalledWith(
-      expect.objectContaining({
-        message: "[CRON TASK daily]: Briefing unavailable.",
-      }),
+      "signal:+100",
+      EMessagePlatform.Signal,
+      "[CRON TASK daily]: Briefing unavailable.",
+      expect.any(Number),
     );
     expect(internals.runningCronTaskKeys.size).toBe(0);
   });

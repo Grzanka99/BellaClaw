@@ -787,12 +787,8 @@ export class AgentHarness {
         instructionsPath: undefined,
         executionMode,
         execute: async (toolCallId: string, parameters: unknown, signal?: AbortSignal) => {
-          if (args.delegationCount === undefined) {
-            throw new Error("Specialists cannot delegate");
-          }
-
           const parsedParameters: Static<typeof schema> = validateToolArguments(schema, parameters);
-          args.delegationCount();
+          args.delegationCount?.();
           let delegationSignal = args.signal;
 
           if (signal !== undefined) {
@@ -996,12 +992,8 @@ export class AgentHarness {
     return chatId;
   }
 
-  private createMcpPrompt(original: string, task: string, context: TOption<string>): string {
-    let prompt = `Original user message:\n${original}\n\nDelegated task:\n${task}`;
-    if (context !== undefined) {
-      prompt += `\n\nRelevant context:\n${context}`;
-    }
-    return prompt;
+  private createMcpPrompt(original: string, task: string, context: string): string {
+    return `Original user message:\n${original}\n\nDelegated task:\n${task}\n\nRelevant context:\n${context}`;
   }
 
   private mcpStatusResult(status: TMcpRunStatus) {
@@ -1052,22 +1044,29 @@ export class AgentHarness {
     }
     const startedAt = performance.now();
     const sessionId = this.createSessionId(modelConfig.model.provider, chatId, platform);
-    const result = await aiModels.completeSimple(
-      modelConfig.model,
-      context,
-      withSession(
-        {
-          apiKey: this.resolveApiKey(modelConfig.model.provider),
-          signal,
-          maxTokens: Math.min(params.maxTokens, modelConfig.model.maxTokens),
-          temperature: params.temperature,
-          reasoning,
-          toolChoice,
-        },
-        modelConfig.model.provider,
-        sessionId,
-      ),
+    const options = withSession(
+      {
+        apiKey: this.resolveApiKey(modelConfig.model.provider),
+        signal,
+        maxTokens: Math.min(params.maxTokens, modelConfig.model.maxTokens),
+        temperature: params.temperature,
+        toolChoice,
+      },
+      modelConfig.model.provider,
+      sessionId,
     );
+    let result: Awaited<ReturnType<typeof aiModels.completeSimple>>;
+    if (modelConfig.effort === "off" && hasApi(modelConfig.model, "openai-codex-responses")) {
+      result = await aiModels.complete(modelConfig.model, context, {
+        ...options,
+        reasoningEffort: "none",
+      });
+    } else {
+      result = await aiModels.completeSimple(modelConfig.model, context, {
+        ...options,
+        reasoning,
+      });
+    }
     this.logModelRequestCompleted({
       trace,
       purpose: EModelPurpose.SpecialistAccurate,

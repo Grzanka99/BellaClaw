@@ -220,8 +220,7 @@ pre,
 .header-actions,
 .error-actions,
 .inspector-actions,
-.results-actions,
-.inspector-heading-actions {
+.results-actions {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1176,7 +1175,6 @@ pre {
 }
 
 .empty-state,
-.empty-page,
 .result-end,
 .load-more {
   padding: 24px 10px;
@@ -1186,9 +1184,7 @@ pre {
 }
 
 .empty-state h3,
-.empty-state p,
-.empty-page h2,
-.empty-page p {
+.empty-state p {
   margin: 3px;
 }
 

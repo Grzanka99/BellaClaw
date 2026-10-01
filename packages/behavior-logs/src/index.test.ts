@@ -1,11 +1,16 @@
-import { describe, expect, test } from "bun:test";
-import {
-  AppLogger,
-  EBehaviorLogLevel,
-  formatBehaviorEventForStdout,
-  type TBehaviorLogEvent,
-  type TBehaviorTraceContext,
-} from ".";
+import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { AppLogger, EBehaviorLogLevel, LogReader, type TBehaviorTraceContext } from ".";
+
+const temporaryDirectories: string[] = [];
+afterEach(() => {
+  mock.restore();
+  for (const directory of temporaryDirectories.splice(0)) {
+    rmSync(directory, { force: true, recursive: true });
+  }
+});
 
 function createTrace(): TBehaviorTraceContext {
   return {
@@ -18,12 +23,13 @@ function createTrace(): TBehaviorTraceContext {
 describe("AppLogger", () => {
   test("writes JSON stdout events and persists them by turnId", async () => {
     const stdout: string[] = [];
-    const appLogger = new AppLogger({
-      dbPath: ":memory:",
-      stdout(event: TBehaviorLogEvent) {
-        stdout.push(formatBehaviorEventForStdout(event));
-      },
+    const directory = mkdtempSync(join(tmpdir(), "bellaclaw-app-logger-"));
+    temporaryDirectories.push(directory);
+    const dbPath = join(directory, "behavior.db");
+    const stdoutSpy = spyOn(console, "log").mockImplementation((line: unknown) => {
+      stdout.push(String(line));
     });
+    const appLogger = new AppLogger({ dbPath });
 
     appLogger.record({
       trace: createTrace(),
@@ -31,15 +37,13 @@ describe("AppLogger", () => {
       component: "messaging",
       level: EBehaviorLogLevel.Info,
       success: true,
-      summary: "message received platform=discord type=text",
+      summary: "message received platform=discord",
       metadata: {
-        messageType: "text",
         messageChars: 18,
-        attachmentCount: 0,
-        attachmentKinds: [],
       },
     });
 
+    stdoutSpy.mockRestore();
     await appLogger.flush();
 
     expect(stdout).toHaveLength(1);
@@ -56,7 +60,13 @@ describe("AppLogger", () => {
     expect(stdoutEvent.chatId).toMatch(/^sha256:[0-9a-f]{64}$/);
     expect(stdoutEvent.chatId).not.toBe("discord:chat-1");
 
-    const events = await appLogger.findByTurnId("turn-test-1");
+    const reader = new LogReader(dbPath);
+    const result = await reader.readTurn("turn-test-1");
+    await reader.close();
+    if (!result.success) {
+      throw new Error(result.error.message);
+    }
+    const events = result.data;
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({
       event: "message.received",

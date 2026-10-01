@@ -3,23 +3,16 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { AsyncQueue, createLogger, type TOption, writeJsonLog } from "@bellaclaw/shared";
 import { getDefaultLogDbPath } from "./config";
-import {
-  MEMORY_LOG_CHATID_HMAC_KEY,
-  maskCanonicalChatId,
-  readOrCreateChatIdHmacKey,
-} from "./hmac-key";
+import { hashChatId, MEMORY_LOG_CHATID_HMAC_KEY, readOrCreateChatIdHmacKey } from "./hmac-key";
 import { buildSearchableText } from "./searchable-text";
-import { booleanToSqlite, normalizeDurationMs, normalizeRowId, rowToEvent } from "./sqlite";
+import { booleanToSqlite, normalizeDurationMs, normalizeRowId } from "./sqlite";
 import {
   EBehaviorLogLevel,
   SBehaviorLogEvent,
   SBehaviorMetadata,
-  SStoredBehaviorLogRow,
   type TBehaviorLogEvent,
   type TBehaviorLogInput,
   type TBehaviorMetadata,
-  type TPersistedBehaviorLogEvent,
-  type TStoredBehaviorLogRow,
 } from "./types";
 
 type TAppLoggerOptions = {
@@ -93,27 +86,6 @@ export class AppLogger {
     this.enqueuePersist(parsed.data);
 
     return parsed.data;
-  }
-
-  public async findByTurnId(turnId: string): Promise<TPersistedBehaviorLogEvent[]> {
-    return this.queue.enqueue(async () => {
-      const db = this.getDatabase();
-      this.initializeSchema(db);
-
-      const rows = db
-        .query<TStoredBehaviorLogRow, string>(
-          `
-          SELECT id, createdAt, schemaVersion, level, event, turnId, chatId, platform, component,
-            provider, model, purpose, toolName, success, durationMs, summary, metadataJson, error
-          FROM app_event_logs
-          WHERE turnId = ?
-          ORDER BY createdAt ASC, id ASC
-        `,
-        )
-        .all(turnId);
-
-      return this.parseRows(rows);
-    });
   }
 
   public async flush(): Promise<void> {
@@ -276,39 +248,6 @@ export class AppLogger {
     insert();
   }
 
-  private parseRows(rows: TStoredBehaviorLogRow[]): TPersistedBehaviorLogEvent[] {
-    const events: TPersistedBehaviorLogEvent[] = [];
-
-    for (const row of rows) {
-      const rowParse = SStoredBehaviorLogRow.safeParse(row);
-
-      if (!rowParse.success) {
-        this.logger.error(`findByTurnId: invalid row ${rowParse.error.message}`);
-        continue;
-      }
-
-      let metadataJson: unknown;
-
-      try {
-        metadataJson = JSON.parse(rowParse.data.metadataJson);
-      } catch (error) {
-        this.logger.error(`findByTurnId: invalid metadata JSON ${String(error)}`);
-        continue;
-      }
-      const metadataParse = SBehaviorMetadata.safeParse(metadataJson);
-
-      if (!metadataParse.success) {
-        this.logger.error(`findByTurnId: invalid metadata ${metadataParse.error.message}`);
-        continue;
-      }
-
-      const event = rowToEvent(rowParse.data, metadataParse.data);
-      events.push(event);
-    }
-
-    return events;
-  }
-
   private maskChatId(chatId: TOption<string>): string | null {
     if (chatId === undefined) {
       return null;
@@ -320,7 +259,7 @@ export class AppLogger {
       return null;
     }
 
-    return maskCanonicalChatId(this.dbPath, chatId) ?? null;
+    return hashChatId(key, chatId);
   }
 
   private getChatIdHmacKey(): TOption<string> {

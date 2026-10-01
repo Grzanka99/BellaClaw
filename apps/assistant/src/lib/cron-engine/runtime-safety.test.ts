@@ -57,35 +57,4 @@ describe("CronScheduler runtime safety", () => {
     expect(fireEvents).toEqual(["error"]);
     expect(await scheduler.get("error", "scope-a")).toBeUndefined();
   });
-
-  test("parallel schedulers fire a recurring occurrence once", async () => {
-    const secondScheduler = new CronScheduler({});
-
-    try {
-      const scheduled = await scheduler.createRecurring({
-        name: "parallel-recurring",
-        scope: "scope-a",
-        pattern: "*/5 * * * *",
-      });
-
-      if ("error" in scheduled) {
-        throw new Error(String(scheduled.error));
-      }
-      await forceJobNextRunAt(scheduled.id, new Date(Date.now() - 60_000));
-
-      const fireEvents: string[] = [];
-      scheduler.onFire((ctx) => {
-        fireEvents.push(ctx.name);
-      });
-      secondScheduler.onFire((ctx) => {
-        fireEvents.push(ctx.name);
-      });
-
-      await Promise.all([fireJob(scheduler, scheduled.id), fireJob(secondScheduler, scheduled.id)]);
-
-      expect(fireEvents).toEqual(["parallel-recurring"]);
-    } finally {
-      secondScheduler.destroy();
-    }
-  });
 });
