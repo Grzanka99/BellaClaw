@@ -50,6 +50,9 @@ export async function extractVisibleText(html: string): Promise<string> {
   await new HTMLRewriter()
     .on(HIDDEN_TEXT_SELECTOR, {
       element(element) {
+        if (!element.canHaveContent) {
+          return;
+        }
         skippedDepth += 1;
         element.onEndTag(() => {
           skippedDepth -= 1;
