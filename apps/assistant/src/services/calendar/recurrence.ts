@@ -1,5 +1,7 @@
 import type { TOption } from "@bellaclaw/shared";
+import ICAL from "ical.js";
 import { RRule } from "rrule";
+import { isCalendarDate } from "./event-fields";
 import type { TEventDateTime } from "./types";
 
 export type TRecurrenceSplit = {
@@ -8,7 +10,7 @@ export type TRecurrenceSplit = {
 };
 
 function wallClockDate(value: string, timezone: TEventDateTime["timeZone"]): Date {
-  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+  if (isCalendarDate(value)) {
     return new Date(`${value}T00:00:00Z`);
   }
   const instant = new Date(value);
@@ -87,19 +89,13 @@ function assertBoundaryGeneratedByEveryRule(
 }
 
 function recurrenceTimestamp(value: string): number {
-  const normalized = value
-    .replace(/^TZID=[^:]+:/, "")
-    .replace(/^VALUE=DATE:/, "")
-    .replace(/^.*:/, "");
-  if (/^\d{8}$/.test(normalized)) {
-    return Date.parse(
-      `${normalized.slice(0, 4)}-${normalized.slice(4, 6)}-${normalized.slice(6, 8)}T00:00:00Z`,
-    );
+  let prefix = "RDATE:";
+  if (!value.includes("T")) {
+    prefix = "RDATE;VALUE=DATE:";
   }
-  if (/^\d{8}T\d{6}Z$/.test(normalized)) {
-    return Date.parse(
-      `${normalized.slice(0, 4)}-${normalized.slice(4, 6)}-${normalized.slice(6, 8)}T${normalized.slice(9, 11)}:${normalized.slice(11, 13)}:${normalized.slice(13, 15)}Z`,
-    );
+  const parsed = ICAL.Property.fromString(`${prefix}${value}`).getFirstValue();
+  if (parsed instanceof ICAL.Time && (parsed.isDate || parsed.zone === ICAL.Timezone.utcTimezone)) {
+    return parsed.toUnixTime() * 1000;
   }
   return Number.NaN;
 }
@@ -140,7 +136,11 @@ function partitionValues(
     return { original: line, successor: line };
   }
   const prefix = line.slice(0, separator + 1);
-  const timezone = line.match(/TZID=([^:;]+)/)?.[1];
+  const timezoneValue = ICAL.Property.fromString(line).getParameter("tzid");
+  let timezone: TOption<string>;
+  if (typeof timezoneValue === "string") {
+    timezone = timezoneValue;
+  }
   let localBoundary = boundary;
   if (timezone !== undefined) {
     localBoundary = localBoundaryOrder(boundary, timezone);
@@ -151,7 +151,7 @@ function partitionValues(
     let timestamp = recurrenceTimestamp(value);
     if (timezone !== undefined) {
       if (Number.isNaN(timestamp)) {
-        timestamp = Number(value.replace(/\D/g, ""));
+        timestamp = Number(value.replaceAll("T", "").replaceAll("-", "").replaceAll(":", ""));
       } else {
         timestamp = localBoundaryOrder(timestamp, timezone);
       }

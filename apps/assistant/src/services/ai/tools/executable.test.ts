@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
 import { ECronJobStatus, ECronJobType } from "../../../lib/cron-engine";
-import { CalendarService } from "../../calendar";
+import { CalendarAdapter } from "../../calendar";
 import { CronSingleton } from "../../cron";
 import { EmbeddingClient } from "../../embedding";
 import { Memory } from "../../memory";
@@ -22,7 +22,7 @@ const context = {
 };
 
 function reset() {
-  (CalendarService as unknown as { _instance: unknown })._instance = undefined;
+  (CalendarAdapter as unknown as { _instance: unknown })._instance = undefined;
   (CronSingleton as unknown as { _instance: unknown })._instance = undefined;
   (EmbeddingClient as unknown as { _instance: unknown })._instance = undefined;
   (Memory as unknown as { _instance: unknown })._instance = undefined;
@@ -49,7 +49,7 @@ afterEach(reset);
 describe("production executable tools", () => {
   test("uses the configured timezone and trusted service for calendar creation", async () => {
     const createEvent = mock(async (args) => args);
-    (CalendarService as unknown as { _instance: unknown })._instance = { createEvent };
+    (CalendarAdapter as unknown as { _instance: unknown })._instance = { createEvent };
     const tool = createCalendarTools(context).find(
       (candidate) => candidate.name === "create-calendar-event",
     );
@@ -70,7 +70,7 @@ describe("production executable tools", () => {
 
   test("preserves the existing timezone for start-only calendar updates", async () => {
     const updateEvent = mock(async (args) => args);
-    (CalendarService as unknown as { _instance: unknown })._instance = { updateEvent };
+    (CalendarAdapter as unknown as { _instance: unknown })._instance = { updateEvent };
     const tool = createCalendarTools(context).find(
       (candidate) => candidate.name === "update-calendar-event",
     );
@@ -103,7 +103,7 @@ describe("production executable tools", () => {
   test("returns explicit success for void calendar mutations", async () => {
     const removeReadonlyCalendar = mock(async () => undefined);
     const deleteEvent = mock(async () => undefined);
-    (CalendarService as unknown as { _instance: unknown })._instance = {
+    (CalendarAdapter as unknown as { _instance: unknown })._instance = {
       removeReadonlyCalendar,
       deleteEvent,
     };
@@ -111,7 +111,7 @@ describe("production executable tools", () => {
 
     const removeResult = await tools
       .find((candidate) => candidate.name === "remove-readonly-calendar")
-      ?.execute("remove", { calendarId: "shared" });
+      ?.execute("remove", { provider: "google", calendarId: "shared" });
     const deleteResult = await tools
       .find((candidate) => candidate.name === "delete-calendar-event")
       ?.execute("delete", { eventId: "event", scope: "series" });

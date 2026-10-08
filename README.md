@@ -9,7 +9,7 @@ part). So I decided to just build something from scratch -- partly as practice, 
 - Chats through Discord DMs or Signal
 - Remembers past conversations
 - Creates reminders and recurring tasks
-- Reads and manages Google Calendar events
+- Reads and manages Google and iCloud Calendar events
 - Searches and fetches the web
 - Supports OpenCode Go, OpenAI Codex, OpenRouter, and Ollama
 
@@ -65,7 +65,8 @@ Bun workspaces own dependencies and Turborepo coordinates tasks from the reposit
 - [Development](docs/development.md) — local commands, tests, and code checks
 - [Deployment](docs/deployment.md) — Podman deployment and OpenAI Codex auth
 - [Messaging](docs/messaging.md) — Discord and Signal setup
-- [Google Calendar](docs/google-calendar.md) — calendar access and setup
+- [Google Calendar](docs/google-calendar.md) — Google access and setup
+- [iCloud Calendar](docs/icloud-calendar.md) — dedicated Apple account and calendar setup
 - [MCP](docs/mcp.md) — integration profiles, specialist behavior, OAuth and logs
 - [Behavior Logs](docs/behavior-logs.md) — log viewer, CLI, and security
 - [Architecture](docs/architecture.md) — message flow and AI runtime
