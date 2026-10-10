@@ -1,7 +1,7 @@
 import { AppLogger, EBehaviorLogLevel, type TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
 import { createLogger, type TOption } from "@bellaclaw/shared";
 import type { AgentMessage, AgentTool } from "@earendil-works/pi-agent-core";
-import { Agent, convertToLlm } from "@earendil-works/pi-agent-core";
+import { Agent } from "@earendil-works/pi-agent-core";
 import {
   type Api,
   type AssistantMessage,
@@ -9,6 +9,7 @@ import {
   contentText,
   createAssistantMessageEventStream,
   hasApi,
+  type JsonValue,
   type Message,
   type Model,
   type SimpleStreamOptions,
@@ -26,6 +27,7 @@ import type {
   SamplingMessageContentBlock,
   ToolUseContent,
 } from "@modelcontextprotocol/sdk/types.js";
+import { z } from "zod";
 import {
   sanitizeErrorMessage,
   sanitizeToolCallArguments,
@@ -378,13 +380,6 @@ export class AgentHarness {
           agent.state.tools = nextTools;
         }
 
-        if (context.message.role !== "assistant") {
-          if (nextTools !== context.context.tools) {
-            return { context: { ...context.context, tools: nextTools } };
-          }
-          return undefined;
-        }
-
         const hasToolCall = context.message.content.some((content) => content.type === "toolCall");
 
         if (!hasToolCall) {
@@ -401,10 +396,16 @@ export class AgentHarness {
           forcedFinalAttempt = true;
           return {
             context: {
-              systemPrompt: `${context.context.systemPrompt}\n\nTool budget reached. Do not call tools. Give the final answer using available results.`,
               messages: context.context.messages,
               tools: [],
             },
+            messages: [
+              {
+                role: "system",
+                content: "Tool budget reached. Give the final answer using available results.",
+                timestamp: Date.now(),
+              },
+            ],
           };
         }
 
@@ -565,7 +566,9 @@ export class AgentHarness {
       stopReason,
       startedAt,
     );
-    let transcript = convertToLlm(agent.state.messages);
+    let transcript = (await agent.convertToLlm(agent.state.messages)).filter(
+      (message) => message.role !== "system",
+    );
     if (args.conversation !== undefined && args.conversation.summary.length > 0) {
       transcript = transcript.slice(1);
     }
@@ -1136,11 +1139,15 @@ export class AgentHarness {
           if (block.type === "text") {
             content.push({ type: "text", text: block.text });
           } else if (block.type === "tool_use") {
+            const input = z.record(z.string(), z.json()).safeParse(block.input);
+            if (!input.success) {
+              throw new Error("MCP sampling tool input must contain JSON values");
+            }
             content.push({
               type: "toolCall",
               id: block.id,
               name: block.name,
-              arguments: block.input,
+              arguments: input.data,
             });
           } else {
             content.push({ type: "text", text: this.describeMcpBlock(block) });
@@ -1180,12 +1187,20 @@ export class AgentHarness {
               resultContent.push({ type: "text", text: this.describeMcpBlock(item) });
             }
           }
+          let details: TOption<JsonValue>;
+          if (block.structuredContent !== undefined) {
+            const parsed = z.json().safeParse(block.structuredContent);
+            if (!parsed.success) {
+              throw new Error("MCP sampling structured content must contain JSON values");
+            }
+            details = parsed.data;
+          }
           messages.push({
             role: "toolResult",
             toolCallId: block.toolUseId,
             toolName: "mcp-sampling-tool",
             content: resultContent,
-            details: block.structuredContent,
+            details,
             isError: block.isError ?? false,
             timestamp,
           });

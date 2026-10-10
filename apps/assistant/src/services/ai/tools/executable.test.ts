@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
+import { opencodeGoProvider } from "@earendil-works/pi-ai/providers/opencode-go";
 import { ECronJobStatus, ECronJobType } from "../../../lib/cron-engine";
 import { CalendarService } from "../../calendar";
 import { CronSingleton } from "../../cron";
@@ -7,6 +8,7 @@ import { Memory } from "../../memory";
 import { SettingsService, type TConfigUpdate } from "../../settings";
 import { DefaultConfigRecord, EConfigKey, type TConfigRecord } from "../../settings/schema";
 import { decodeAiModelPreferences, getAiModelPreference } from "../model-preferences";
+import { aiModels } from "../providers/registry";
 import { EAiProvider, EModelPurpose } from "../types";
 import {
   createCalendarTools,
@@ -239,6 +241,38 @@ describe("production executable tools", () => {
       [EModelPurpose.Utility],
     );
     expect(settingsMock.setMany).not.toHaveBeenCalled();
+  });
+
+  test.each(["claude-haiku-5-5", "gpt-6-luna"])("lists and selects Go model %s", async (model) => {
+    const previousProvider = aiModels.getProvider(EAiProvider.OpencodeGo);
+    aiModels.setProvider(opencodeGoProvider());
+    const settingsMock = installSettingsMock({
+      ...DefaultConfigRecord,
+      [EConfigKey.AiProvider]: EAiProvider.OpencodeGo,
+    });
+    const verifySettings = mock(async () => undefined);
+    const tools = createSettingsTools({ ...context, verifySettings });
+    const read = tools.find((tool) => tool.name === "get-settings");
+    const update = tools.find((tool) => tool.name === "update-settings");
+
+    try {
+      const settings = await read?.execute("read", {});
+      expect(settings?.details).toMatchObject({
+        aiRuntime: {
+          availableModels: expect.arrayContaining([expect.objectContaining({ id: model })]),
+        },
+      });
+      const result = await update?.execute("select", { aiModel: model });
+      expect(result?.details).toMatchObject({
+        aiRuntime: { models: { [EModelPurpose.Main]: { model } } },
+      });
+      expect(verifySettings).toHaveBeenCalledTimes(1);
+      expect(settingsMock.setMany).toHaveBeenCalledTimes(1);
+    } finally {
+      if (previousProvider !== undefined) {
+        aiModels.setProvider(previousProvider);
+      }
+    }
   });
 
   test("preserves and resets effort without returning the model catalog", async () => {
