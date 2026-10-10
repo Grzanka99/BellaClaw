@@ -6,12 +6,14 @@ import { AppLogger, LogReader, type TBehaviorTraceContext } from "@bellaclaw/beh
 import { logger, type TOption } from "@bellaclaw/shared";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import {
-  type Context,
   createAssistantMessageEventStream,
   fauxAssistantMessage,
   fauxProvider,
   fauxToolCall,
+  getCurrentSystemPrompt,
+  getCurrentTools,
   type Model,
+  type TranscriptContext,
   Type,
 } from "@earendil-works/pi-ai";
 import { convertResponsesMessages } from "@earendil-works/pi-ai/api/openai-responses-shared";
@@ -44,6 +46,7 @@ describe("AgentHarness", () => {
   const previousApiKey = Bun.env.OPENROUTER_API_KEY;
   const previousMcpConfig = Bun.env.BELLACLAW_MCP_CONFIG;
   const previousOpenCodeApiKey = Bun.env.OPENCODE_API_KEY;
+  const previousOpencodeGoProvider = aiModels.getProvider(EAiProvider.OpencodeGo);
   const faux = fauxProvider({
     provider: EAiProvider.Openrouter,
     models: OPENROUTER_MODELS,
@@ -70,6 +73,10 @@ describe("AgentHarness", () => {
       Bun.env.OPENCODE_API_KEY = previousOpenCodeApiKey;
     }
 
+    if (previousOpencodeGoProvider !== undefined) {
+      aiModels.setProvider(previousOpencodeGoProvider);
+    }
+
     if (previousMcpConfig === undefined) {
       delete Bun.env.BELLACLAW_MCP_CONFIG;
     } else {
@@ -86,11 +93,11 @@ describe("AgentHarness", () => {
     const toolNames: string[][] = [];
     faux.setResponses([
       (context) => {
-        toolNames.push(context.tools?.map((tool) => tool.name) ?? []);
+        toolNames.push(getCurrentTools(context.messages).map((tool) => tool.name));
         return fauxAssistantMessage("main reply");
       },
       (context) => {
-        toolNames.push(context.tools?.map((tool) => tool.name) ?? []);
+        toolNames.push(getCurrentTools(context.messages).map((tool) => tool.name));
         return fauxAssistantMessage("scheduled reply");
       },
     ]);
@@ -125,14 +132,14 @@ describe("AgentHarness", () => {
   });
 
   test("uses the configured model and supplied history with stable conversation routing", async () => {
-    const contexts: Array<{ messages: Context["messages"]; toolNames: string[] }> = [];
+    const contexts: Array<{ messages: TranscriptContext["messages"]; toolNames: string[] }> = [];
     const models: Model<string>[] = [];
     const sessionIds: Array<string | undefined> = [];
     faux.setResponses([
       (context, options, _state, model) => {
         contexts.push({
           messages: structuredClone(context.messages),
-          toolNames: context.tools?.map((tool) => tool.name) ?? [],
+          toolNames: getCurrentTools(context.messages).map((tool) => tool.name),
         });
         models.push(model);
         sessionIds.push(options?.sessionId);
@@ -141,7 +148,7 @@ describe("AgentHarness", () => {
       (context, options, _state, model) => {
         contexts.push({
           messages: structuredClone(context.messages),
-          toolNames: context.tools?.map((tool) => tool.name) ?? [],
+          toolNames: getCurrentTools(context.messages).map((tool) => tool.name),
         });
         models.push(model);
         sessionIds.push(options?.sessionId);
@@ -191,7 +198,7 @@ describe("AgentHarness", () => {
     expect(sessionIds[1]).toBe(sessionIds[0]);
     expect(contexts[0]?.messages.filter((message) => message.role === "user")).toHaveLength(2);
     expect(contexts[1]?.messages.filter((message) => message.role === "user")).toHaveLength(1);
-    expect(contexts[1]?.messages).toMatchObject([
+    expect(contexts[1]?.messages.filter((message) => message.role === "user")).toMatchObject([
       { role: "user", content: [{ type: "text", text: "time two\n\nsecond prompt" }] },
     ]);
   });
@@ -233,7 +240,7 @@ describe("AgentHarness", () => {
           return { text: "saved", iterations: 2, toolCallCount: 1, stopReason: "completed" };
         },
       });
-      const contexts: Context[] = [];
+      const contexts: TranscriptContext[] = [];
       faux.setResponses([
         (context) => {
           contexts.push({ ...context, messages: structuredClone(context.messages) });
@@ -259,7 +266,7 @@ describe("AgentHarness", () => {
         signal: undefined,
       });
 
-      const toolNames = contexts[0]?.tools?.map((tool) => tool.name);
+      const toolNames = getCurrentTools(contexts[0]?.messages ?? []).map((tool) => tool.name);
       expect(toolNames).toContain("resume-mcp");
       expect(toolNames).toContain("cancel-mcp");
       expect(toolNames).not.toContain("delegate-mcp");
@@ -299,7 +306,7 @@ describe("AgentHarness", () => {
     faux.setResponses([
       fauxAssistantMessage(fauxToolCall("initial-tool", {}, { id: "initial-call" })),
       (context) => {
-        visibleTools.push(context.tools?.map((tool) => tool.name) ?? []);
+        visibleTools.push(getCurrentTools(context.messages).map((tool) => tool.name));
         return fauxAssistantMessage(
           fauxToolCall("replacement-tool", {}, { id: "replacement-call" }),
         );
@@ -406,7 +413,7 @@ describe("AgentHarness", () => {
   });
 
   test("samples from MCP request context and returns every requested tool call", async () => {
-    let sampledContext: TOption<Context>;
+    let sampledContext: TOption<TranscriptContext>;
     let sampledMaxTokens: TOption<number>;
     faux.setResponses([
       (context, options) => {
@@ -420,7 +427,27 @@ describe("AgentHarness", () => {
     ]);
     const params: CreateMessageRequest["params"] = {
       systemPrompt: "Sampling only",
-      messages: [{ role: "user", content: { type: "text", text: "MCP-only request" } }],
+      messages: [
+        {
+          role: "assistant",
+          content: {
+            type: "tool_use",
+            id: "previous-lookup",
+            name: "lookup",
+            input: { filters: { enabled: true, values: [1, null, "two"] } },
+          },
+        },
+        {
+          role: "user",
+          content: {
+            type: "tool_result",
+            toolUseId: "previous-lookup",
+            content: [{ type: "text", text: "Previous result" }],
+            structuredContent: { results: [{ count: 2, next: null }] },
+          },
+        },
+        { role: "user", content: { type: "text", text: "MCP-only request" } },
+      ],
       maxTokens: 999_999,
       tools: [
         {
@@ -454,9 +481,28 @@ describe("AgentHarness", () => {
       new AbortController().signal,
     );
 
-    expect(sampledContext?.systemPrompt).toBe("Sampling only");
+    expect(getCurrentSystemPrompt(sampledContext?.messages ?? [])).toBe("Sampling only");
     expect(JSON.stringify(sampledContext?.messages)).toContain("MCP-only request");
-    expect(sampledContext?.tools?.map((tool) => tool.name)).toEqual(["lookup"]);
+    expect(sampledContext?.messages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: "assistant",
+          content: [
+            expect.objectContaining({
+              type: "toolCall",
+              arguments: { filters: { enabled: true, values: [1, null, "two"] } },
+            }),
+          ],
+        }),
+        expect.objectContaining({
+          role: "toolResult",
+          details: { results: [{ count: 2, next: null }] },
+        }),
+      ]),
+    );
+    expect(getCurrentTools(sampledContext?.messages ?? []).map((tool) => tool.name)).toEqual([
+      "lookup",
+    ]);
     expect(sampledMaxTokens).toBeLessThan(999_999);
     expect(Array.isArray(result.content)).toBe(true);
     expect(result.content).toHaveLength(2);
@@ -597,7 +643,7 @@ describe("AgentHarness", () => {
   });
 
   test("replays main tool exchanges across turns without specialist internals, even above the soft limit", async () => {
-    const captured: Context[] = [];
+    const captured: TranscriptContext[] = [];
     faux.setResponses([
       fauxAssistantMessage(
         fauxToolCall("delegate-memory", { task: "Recall a preference" }, { id: "remember-1" }),
@@ -650,8 +696,12 @@ describe("AgentHarness", () => {
     expect(captured[1]?.messages.slice(0, captured[0]?.messages.length)).toEqual(
       captured[0]?.messages,
     );
-    expect(captured[1]?.systemPrompt).toBe(captured[0]?.systemPrompt);
-    expect(captured[1]?.systemPrompt).toContain("retrieve fresh information");
+    expect(getCurrentSystemPrompt(captured[1]?.messages ?? [])).toBe(
+      getCurrentSystemPrompt(captured[0]?.messages ?? []),
+    );
+    expect(getCurrentSystemPrompt(captured[1]?.messages ?? [])).toContain(
+      "retrieve fresh information",
+    );
     const model = faux.getModel("google/gemini-3.1-pro-preview");
     const previous = captured[0];
     const next = captured[1];
@@ -911,7 +961,7 @@ describe("AgentHarness", () => {
   });
 
   test("passes time context with specialist and scheduled task messages", async () => {
-    const prompts: Array<Context["messages"]> = [];
+    const prompts: Array<TranscriptContext["messages"]> = [];
     faux.setResponses([
       fauxAssistantMessage(
         fauxToolCall("delegate-scheduling", { task: "Schedule tomorrow" }, { id: "time-delegate" }),
@@ -943,7 +993,7 @@ describe("AgentHarness", () => {
       currentTimeContext:
         'Scheduled firing context JSON:\n{"fireTimestamp":"2026-09-11T10:00:00Z"}',
     });
-    expect(prompts[0]).toMatchObject([
+    expect(prompts[0]?.filter((message) => message.role === "user")).toMatchObject([
       {
         role: "user",
         content: [
@@ -954,7 +1004,7 @@ describe("AgentHarness", () => {
         ],
       },
     ]);
-    expect(prompts[1]).toMatchObject([
+    expect(prompts[1]?.filter((message) => message.role === "user")).toMatchObject([
       {
         role: "user",
         content: [
@@ -1190,7 +1240,7 @@ describe("AgentHarness", () => {
       fauxAssistantMessage(fauxToolCall("delegate-memory", { task: "same" }, { id: "two" })),
       fauxAssistantMessage("memory two"),
       (context) => {
-        toolNames.push(context.tools?.map((tool) => tool.name) ?? []);
+        toolNames.push(getCurrentTools(context.messages).map((tool) => tool.name));
         return fauxAssistantMessage("forced final");
       },
     ]);
@@ -1227,7 +1277,7 @@ describe("AgentHarness", () => {
         }),
       ),
       (context) => {
-        toolNames.push(context.tools?.map((tool) => tool.name) ?? []);
+        toolNames.push(getCurrentTools(context.messages).map((tool) => tool.name));
         return fauxAssistantMessage("forced after canonical repeat");
       },
     ]);
@@ -1682,8 +1732,16 @@ describe("AgentHarness", () => {
       (event) => event.event === "tool.call.completed" && event.toolName === "delegate-memory",
     );
     const failedDirect = events.find((event) => event.event === "direct-completion.completed");
+    const failedRequest = events.find(
+      (event) => event.event === "model.request.completed" && event.success === false,
+    );
 
     expect(direct).toBeUndefined();
+    expect(failedRequest).toMatchObject({
+      success: false,
+      error: "direct provider failed",
+      metadata: expect.objectContaining({ stopReason: "error" }),
+    });
     expect(failedTool).toMatchObject({
       success: false,
       durationMs: expect.any(Number),

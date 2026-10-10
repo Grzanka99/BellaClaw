@@ -5,6 +5,7 @@ import { CronSingleton } from "../../cron";
 import { MessageHandler } from "../../message-handler";
 import { SettingsService } from "../../settings";
 import { EConfigKey, type TConfigRecord } from "../../settings/schema";
+import { refreshAiModels } from "../providers/registry";
 import type { EModelPurpose } from "../types";
 import { createCalendarEventTool } from "./create-calendar-event/definition";
 import {
@@ -22,7 +23,7 @@ import {
 import { forgetMemoryTool, SForgetMemoryArgs } from "./forget-memory/definition";
 import { handleForgetMemory } from "./forget-memory/handler";
 import { getSettingsTool } from "./get-settings/definition";
-import { createAiRuntime } from "./get-settings/handler";
+import { createAiRuntime, resolveAiProvider } from "./get-settings/handler";
 import { listCalendarEventsTool } from "./list-calendar-events/definition";
 import {
   SListCalendarEventsArgs,
@@ -126,6 +127,7 @@ export function createSettingsTools(context: TToolExecutionContext) {
       label: "Get settings",
       execute: async () => {
         const settings = await SettingsService.instance.getAll(requireChatId(context.chatId));
+        await refreshAiModels(resolveAiProvider(settings), true);
 
         return textResult({ settings, aiRuntime: createAiRuntime(settings, true) });
       },

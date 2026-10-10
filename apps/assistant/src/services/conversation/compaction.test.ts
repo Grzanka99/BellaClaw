@@ -87,10 +87,44 @@ describe("conversation compaction", () => {
     ).toContain("Updated");
   });
 
-  test("summarizes an oversized completed turn rather than splitting its tool pair", async () => {
+  test.each([
+    false,
+    true,
+  ])("summarizes an oversized completed turn preserving tool identity and isError=%s", async (isError) => {
     const { state, models, model, faux } = fixture();
     state.entries.splice(2, 1);
-    faux.setResponses([fauxAssistantMessage("Completed calendar work; results are historical.")]);
+    const toolResult = state.entries[3]?.message;
+    if (toolResult?.role !== "toolResult") {
+      throw new Error("Expected calendar result");
+    }
+    toolResult.isError = isError;
+    let resultText = "Free at noon";
+    if (isError) {
+      resultText = "Calendar unavailable";
+    }
+    toolResult.content = [{ type: "text", text: resultText }];
+    faux.setResponses([
+      (context) => {
+        const prompt = context.messages.find((message) => message.role === "user");
+        if (typeof prompt?.content !== "string") {
+          throw new Error("Expected summary input");
+        }
+        const conversation = JSON.parse(prompt.content.split("\n\nConversation:\n")[1] ?? "null");
+        expect(conversation[2]).toMatchObject({
+          role: "assistant",
+          content: "toolCallId=calendar-1 calendar({})",
+        });
+        expect(conversation[3]).toEqual({
+          role: "toolResult",
+          timestamp: toolResult.timestamp,
+          toolCallId: "calendar-1",
+          toolName: "calendar",
+          isError,
+          content: resultText,
+        });
+        return fauxAssistantMessage("Calendar result recorded; results are historical.");
+      },
+    ]);
     const result = await compactConversation(state, models, model, undefined, 3000);
     expect(result?.state.entries).toEqual([]);
     expect(result?.tokensAfter).toBeLessThan(25_000);

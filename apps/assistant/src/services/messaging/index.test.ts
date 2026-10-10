@@ -11,7 +11,7 @@ import {
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fauxAssistantMessage, type Message } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, type Message, normalizeContext } from "@earendil-works/pi-ai";
 import { convertResponsesMessages } from "@earendil-works/pi-ai/api/openai-responses-shared";
 import { transformMessages } from "@earendil-works/pi-ai/api/transform-messages";
 import { ECronJobType, type TCronJobContext } from "../../lib/cron-engine";
@@ -219,7 +219,7 @@ describe("MessagingAdapter", () => {
     }
     const request = convertResponsesMessages(
       getAiModelConfig(EAiProvider.OpenaiCodex, EModelPurpose.Main).model,
-      { messages },
+      normalizeContext({ messages }),
       new Set(),
     );
     expect(JSON.stringify(request)).toContain(transcript);
