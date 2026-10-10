@@ -106,7 +106,7 @@ describe("Google calendar regression", () => {
     } as unknown as GwsCalendarClient;
     const service = calendarAdapter(database, client);
 
-    expect(
+    await expect(
       service.updateEvent({
         userId: "user-1",
         eventId: "google:trusted-writer:birthday",

@@ -95,7 +95,10 @@ export async function splitGoogleFollowingEvent(
           `Google returned event ${existing.id} while verifying successor ${deterministicId}`,
         );
       }
-      return existing;
+      // Google keeps deleted events under their ID; that successor is not a completed split.
+      if (existing.status !== "cancelled") {
+        return existing;
+      }
     } catch (verificationError) {
       if (!isConfirmedNotFound(verificationError)) {
         throw new Error(
