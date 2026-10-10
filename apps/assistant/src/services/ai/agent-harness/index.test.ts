@@ -1727,8 +1727,16 @@ describe("AgentHarness", () => {
       (event) => event.event === "tool.call.completed" && event.toolName === "delegate-memory",
     );
     const failedDirect = events.find((event) => event.event === "direct-completion.completed");
+    const failedRequest = events.find(
+      (event) => event.event === "model.request.completed" && event.success === false,
+    );
 
     expect(direct).toBeUndefined();
+    expect(failedRequest).toMatchObject({
+      success: false,
+      error: "direct provider failed",
+      metadata: expect.objectContaining({ stopReason: "error" }),
+    });
     expect(failedTool).toMatchObject({
       success: false,
       durationMs: expect.any(Number),

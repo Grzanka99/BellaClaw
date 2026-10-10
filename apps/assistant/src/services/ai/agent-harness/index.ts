@@ -1466,6 +1466,7 @@ export class AgentHarness {
       success,
       durationMs: performance.now() - args.startedAt,
       summary: `model request completed cacheRead=${usage.cacheRead} inputTokens=${inputTokens}`,
+      error: sanitizeErrorMessage(args.message.errorMessage),
       metadata: {
         agentName: args.agentName ?? null,
         parentToolCallId: args.parentToolCallId ?? null,
