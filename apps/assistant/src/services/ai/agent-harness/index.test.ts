@@ -46,6 +46,7 @@ describe("AgentHarness", () => {
   const previousApiKey = Bun.env.OPENROUTER_API_KEY;
   const previousMcpConfig = Bun.env.BELLACLAW_MCP_CONFIG;
   const previousOpenCodeApiKey = Bun.env.OPENCODE_API_KEY;
+  const previousOpencodeGoProvider = aiModels.getProvider(EAiProvider.OpencodeGo);
   const faux = fauxProvider({
     provider: EAiProvider.Openrouter,
     models: OPENROUTER_MODELS,
@@ -70,6 +71,10 @@ describe("AgentHarness", () => {
       delete Bun.env.OPENCODE_API_KEY;
     } else {
       Bun.env.OPENCODE_API_KEY = previousOpenCodeApiKey;
+    }
+
+    if (previousOpencodeGoProvider !== undefined) {
+      aiModels.setProvider(previousOpencodeGoProvider);
     }
 
     if (previousMcpConfig === undefined) {
