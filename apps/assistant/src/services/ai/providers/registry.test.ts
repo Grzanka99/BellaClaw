@@ -1,7 +1,14 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, type Mock, spyOn, test } from "bun:test";
 import { hasApi } from "@earendil-works/pi-ai";
 import { EAiProvider, EModelPurpose } from "../types";
-import { aiModels, getAiApiKey, getAiModelConfig, getAiModelConfigs } from "./registry";
+import { opencodeGoProvider } from "./opencode-go";
+import {
+  aiModels,
+  getAiApiKey,
+  getAiModelConfig,
+  getAiModelConfigs,
+  refreshAiModels,
+} from "./registry";
 
 const ORIGINAL_OPENROUTER_API_KEY = Bun.env.OPENROUTER_API_KEY;
 const ORIGINAL_OPENCODE_API_KEY = Bun.env.OPENCODE_API_KEY;
@@ -153,5 +160,105 @@ describe("AI provider registry", () => {
       getAiModelConfig(EAiProvider.Ollama, EModelPurpose.Main).model,
     );
     expect(auth?.auth.apiKey).toBe("ollama");
+  });
+});
+
+describe("OpenCode Go catalog refresh", () => {
+  let previousProvider = aiModels.getProvider(EAiProvider.OpencodeGo);
+  let fetchMock: Mock<(input: Parameters<typeof fetch>[0]) => Promise<Response>>;
+  let liveModel = "";
+
+  function catalogResponse(input: Parameters<typeof fetch>[0]) {
+    if (String(input).endsWith("/models")) {
+      return Response.json({ data: [{ id: liveModel }] });
+    }
+    return Response.json({
+      "opencode-go": {
+        models: {
+          [liveModel]: {
+            name: "Current model",
+            tool_call: true,
+            modalities: { input: ["text"], output: ["text"] },
+            limit: { context: 1000000, output: 64000 },
+            cost: { input: 1, output: 5 },
+          },
+        },
+      },
+    });
+  }
+
+  // The models collection is shared by every test file, so its stored catalog must not leak.
+  async function dropStoredCatalog() {
+    aiModels.setProvider({
+      ...opencodeGoProvider([]),
+      refreshModels: async (context) => {
+        await context.publish({ persist: null });
+      },
+    });
+    await aiModels.refresh({ providers: [EAiProvider.OpencodeGo], allowNetwork: false });
+  }
+
+  beforeEach(async () => {
+    Bun.env.OPENCODE_API_KEY = "catalog-test-key";
+    previousProvider = aiModels.getProvider(EAiProvider.OpencodeGo);
+    await dropStoredCatalog();
+    aiModels.setProvider(opencodeGoProvider(["grok-4.6", "deepseek-v4-pro"]));
+    fetchMock = spyOn(globalThis, "fetch");
+    fetchMock.mockImplementation(async (input) => catalogResponse(input));
+  });
+
+  afterEach(async () => {
+    fetchMock.mockRestore();
+    await dropStoredCatalog();
+    if (previousProvider !== undefined) {
+      aiModels.setProvider(previousProvider);
+    }
+  });
+
+  test("keeps a shared refresh running when its first caller cancels", async () => {
+    liveModel = "completions-shared";
+    const release = Promise.withResolvers<void>();
+    fetchMock.mockImplementation(async (input) => {
+      await release.promise;
+      return catalogResponse(input);
+    });
+    const controller = new AbortController();
+    const cancelled = refreshAiModels(EAiProvider.OpencodeGo, true, controller.signal);
+    const waiting = refreshAiModels(EAiProvider.OpencodeGo, true);
+    controller.abort();
+    await cancelled;
+    release.resolve();
+    await waiting;
+    expect(aiModels.getModel(EAiProvider.OpencodeGo, liveModel)).toBeDefined();
+  });
+
+  test("lets a forced caller cancel while it waits behind another refresh", async () => {
+    liveModel = "completions-queued";
+    const release = Promise.withResolvers<void>();
+    fetchMock.mockImplementation(async (input) => {
+      await release.promise;
+      return catalogResponse(input);
+    });
+    const running = refreshAiModels(EAiProvider.OpencodeGo);
+    const controller = new AbortController();
+    const queued = refreshAiModels(EAiProvider.OpencodeGo, true, controller.signal);
+    controller.abort();
+    await queued;
+    release.resolve();
+    await running;
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  test("runs a forced refresh after an in-flight refresh that skipped the network", async () => {
+    liveModel = "completions-cached";
+    await refreshAiModels(EAiProvider.OpencodeGo, true);
+    fetchMock.mockClear();
+    liveModel = "completions-forced";
+    await Promise.all([
+      refreshAiModels(EAiProvider.OpencodeGo),
+      refreshAiModels(EAiProvider.OpencodeGo, true),
+    ]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(aiModels.getModel(EAiProvider.OpencodeGo, liveModel)).toBeDefined();
   });
 });

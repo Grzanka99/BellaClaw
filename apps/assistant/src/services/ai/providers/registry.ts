@@ -1,4 +1,4 @@
-import type { TOption } from "@bellaclaw/shared";
+import { logger, type TOption } from "@bellaclaw/shared";
 import {
   createModels,
   getSupportedThinkingLevels,
@@ -6,13 +6,13 @@ import {
   type Provider,
 } from "@earendil-works/pi-ai";
 import { openaiCodexProvider } from "@earendil-works/pi-ai/providers/openai-codex";
-import { opencodeGoProvider } from "@earendil-works/pi-ai/providers/opencode-go";
 import { openrouterProvider } from "@earendil-works/pi-ai/providers/openrouter";
 import { FileCredentialStore } from "../auth/file-credential-store";
 import type { TAiModelPreference, TAiModelPreferences } from "../model-preferences";
 import { getAiModelPreference } from "../model-preferences";
 import { EAiProvider, EModelPurpose } from "../types";
 import { ollamaProvider } from "./ollama";
+import { opencodeGoProvider } from "./opencode-go";
 
 type TAiModelPurposeRegistration = {
   model: string;
@@ -80,7 +80,12 @@ const AI_PROVIDER_REGISTRY: Record<EAiProvider, TAiProviderRegistration> = {
     getApiKey: () => undefined,
   },
   [EAiProvider.OpencodeGo]: {
-    createProvider: opencodeGoProvider,
+    createProvider: () =>
+      opencodeGoProvider(
+        Object.values(AI_PROVIDER_REGISTRY[EAiProvider.OpencodeGo].modelByPurpose).map(
+          (registration) => registration.model,
+        ),
+      ),
     modelByPurpose: {
       [EModelPurpose.Utility]: { model: "deepseek-v4-pro" },
       [EModelPurpose.Main]: { model: "grok-4.6", effort: "high" },
@@ -104,6 +109,50 @@ const AI_PROVIDER_REGISTRY: Record<EAiProvider, TAiProviderRegistration> = {
 };
 
 export const aiModels = createModels({ credentials: new FileCredentialStore() });
+let opencodeRefresh: TOption<{ force: boolean; promise: Promise<void> }>;
+
+export async function refreshAiModels(
+  provider: EAiProvider,
+  force = false,
+  signal?: AbortSignal,
+): Promise<void> {
+  if (provider !== EAiProvider.OpencodeGo || signal?.aborted) {
+    return;
+  }
+  // The refresh is shared, so a cancelled caller stops waiting without cancelling it.
+  const cancelled = Promise.withResolvers<void>();
+  const cancel = () => cancelled.resolve();
+  signal?.addEventListener("abort", cancel, { once: true });
+  try {
+    // A non-forced refresh may skip the network, so a forced caller runs its own afterwards.
+    if (force && opencodeRefresh !== undefined && !opencodeRefresh.force) {
+      await Promise.race([opencodeRefresh.promise, cancelled.promise]);
+      if (signal?.aborted) {
+        return;
+      }
+    }
+    if (opencodeRefresh === undefined) {
+      const promise = (async () => {
+        try {
+          const result = await aiModels.refresh({
+            providers: [provider],
+            force,
+            signal: AbortSignal.timeout(10_000),
+          });
+          if (result.errors.size > 0 || result.aborted) {
+            logger.warning("OpenCode Go catalog refresh failed; keeping the last known models");
+          }
+        } finally {
+          opencodeRefresh = undefined;
+        }
+      })();
+      opencodeRefresh = { force, promise };
+    }
+    await Promise.race([opencodeRefresh.promise, cancelled.promise]);
+  } finally {
+    signal?.removeEventListener("abort", cancel);
+  }
+}
 
 for (const providerId of Object.values(EAiProvider)) {
   const registration = AI_PROVIDER_REGISTRY[providerId];

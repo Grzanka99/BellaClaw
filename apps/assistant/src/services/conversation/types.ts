@@ -41,7 +41,7 @@ export const SConversationMessage: z.ZodType<Message> = z.discriminatedUnion("ro
           type: z.literal("toolCall"),
           id: z.string(),
           name: z.string(),
-          arguments: z.record(z.string(), z.unknown()),
+          arguments: z.record(z.string(), z.json()),
         }),
       ]),
     ),

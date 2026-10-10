@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, describe, expect, type Mock, mock, spyOn, test } from "bun:test";
+import { opencodeGoProvider } from "@earendil-works/pi-ai/providers/opencode-go";
 import { ECronJobStatus, ECronJobType } from "../../../lib/cron-engine";
 import { CalendarService } from "../../calendar";
 import { CronSingleton } from "../../cron";
@@ -7,6 +8,8 @@ import { Memory } from "../../memory";
 import { SettingsService, type TConfigUpdate } from "../../settings";
 import { DefaultConfigRecord, EConfigKey, type TConfigRecord } from "../../settings/schema";
 import { decodeAiModelPreferences, getAiModelPreference } from "../model-preferences";
+import { opencodeGoProvider as dynamicOpencodeGoProvider } from "../providers/opencode-go";
+import { aiModels } from "../providers/registry";
 import { EAiProvider, EModelPurpose } from "../types";
 import {
   createCalendarTools,
@@ -239,6 +242,110 @@ describe("production executable tools", () => {
       [EModelPurpose.Utility],
     );
     expect(settingsMock.setMany).not.toHaveBeenCalled();
+  });
+
+  test.each(["claude-haiku-5-5", "gpt-6-luna"])("lists and selects Go model %s", async (model) => {
+    const previousProvider = aiModels.getProvider(EAiProvider.OpencodeGo);
+    aiModels.setProvider(opencodeGoProvider());
+    const settingsMock = installSettingsMock({
+      ...DefaultConfigRecord,
+      [EConfigKey.AiProvider]: EAiProvider.OpencodeGo,
+    });
+    const verifySettings = mock(async () => undefined);
+    const tools = createSettingsTools({ ...context, verifySettings });
+    const read = tools.find((tool) => tool.name === "get-settings");
+    const update = tools.find((tool) => tool.name === "update-settings");
+
+    try {
+      const settings = await read?.execute("read", {});
+      expect(settings?.details).toMatchObject({
+        aiRuntime: {
+          availableModels: expect.arrayContaining([expect.objectContaining({ id: model })]),
+        },
+      });
+      const result = await update?.execute("select", { aiModel: model });
+      expect(result?.details).toMatchObject({
+        aiRuntime: { models: { [EModelPurpose.Main]: { model } } },
+      });
+      expect(verifySettings).toHaveBeenCalledTimes(1);
+      expect(settingsMock.setMany).toHaveBeenCalledTimes(1);
+    } finally {
+      if (previousProvider !== undefined) {
+        aiModels.setProvider(previousProvider);
+      }
+    }
+  });
+
+  test("fetches current Go models for direct selection and explicit listing", async () => {
+    const previousProvider = aiModels.getProvider(EAiProvider.OpencodeGo);
+    const previousApiKey = Bun.env.OPENCODE_API_KEY;
+    Bun.env.OPENCODE_API_KEY = "catalog-test-key";
+    aiModels.setProvider(dynamicOpencodeGoProvider([]));
+    const settingsMock = installSettingsMock({
+      ...DefaultConfigRecord,
+      [EConfigKey.AiProvider]: EAiProvider.OpencodeGo,
+    });
+    const verifySettings = mock(async () => undefined);
+    const tools = createSettingsTools({ ...context, verifySettings });
+    const read = tools.find((tool) => tool.name === "get-settings");
+    const update = tools.find((tool) => tool.name === "update-settings");
+    let currentModel = "completions-current";
+    const fetchMock: Mock<(input: Parameters<typeof fetch>[0]) => Promise<Response>> = spyOn(
+      globalThis,
+      "fetch",
+    );
+    fetchMock.mockImplementation(async (input) => {
+      if (String(input).endsWith("/models")) {
+        return Response.json({
+          data: [{ id: "grok-4.6" }, { id: "deepseek-v4-pro" }, { id: currentModel }],
+        });
+      }
+      return Response.json({
+        "opencode-go": {
+          models: {
+            [currentModel]: {
+              name: "Current model",
+              tool_call: true,
+              reasoning: false,
+              modalities: { input: ["text"], output: ["text"] },
+              limit: { context: 1000000, output: 64000 },
+              cost: { input: 1, output: 5 },
+            },
+          },
+        },
+      });
+    });
+    try {
+      const selected = await update?.execute("select", { aiModel: currentModel });
+      expect(selected?.details).toMatchObject({
+        aiRuntime: { models: { [EModelPurpose.Main]: { model: currentModel } } },
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      currentModel = "completions-listed";
+      const listed = await read?.execute("list", {});
+      expect(listed?.details).toMatchObject({
+        aiRuntime: {
+          availableModels: expect.arrayContaining([expect.objectContaining({ id: currentModel })]),
+        },
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(4);
+      currentModel = "completions-selected";
+      const refreshed = await update?.execute("select", { aiModel: currentModel });
+      expect(refreshed?.details).toMatchObject({
+        aiRuntime: { models: { [EModelPurpose.Main]: { model: currentModel } } },
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(6);
+      expect(settingsMock.setMany).toHaveBeenCalledTimes(2);
+      expect(verifySettings).toHaveBeenCalledTimes(2);
+      await Promise.all([read?.execute("list-a", {}), read?.execute("list-b", {})]);
+      expect(fetchMock).toHaveBeenCalledTimes(8);
+    } finally {
+      fetchMock.mockRestore();
+      Bun.env.OPENCODE_API_KEY = previousApiKey;
+      if (previousProvider !== undefined) {
+        aiModels.setProvider(previousProvider);
+      }
+    }
   });
 
   test("preserves and resets effort without returning the model catalog", async () => {

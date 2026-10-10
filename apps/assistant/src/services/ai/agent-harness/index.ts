@@ -1,7 +1,7 @@
 import { AppLogger, EBehaviorLogLevel, type TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
 import { createLogger, type TOption } from "@bellaclaw/shared";
 import type { AgentMessage, AgentTool } from "@earendil-works/pi-agent-core";
-import { Agent, convertToLlm } from "@earendil-works/pi-agent-core";
+import { Agent } from "@earendil-works/pi-agent-core";
 import {
   type Api,
   type AssistantMessage,
@@ -9,6 +9,7 @@ import {
   contentText,
   createAssistantMessageEventStream,
   hasApi,
+  type JsonValue,
   type Message,
   type Model,
   type SimpleStreamOptions,
@@ -26,6 +27,7 @@ import type {
   SamplingMessageContentBlock,
   ToolUseContent,
 } from "@modelcontextprotocol/sdk/types.js";
+import { z } from "zod";
 import {
   sanitizeErrorMessage,
   sanitizeToolCallArguments,
@@ -41,7 +43,7 @@ import { EConfigKey, type TConfigRecord } from "../../settings/schema";
 import { createPlatformInstructions } from "../instructions/platform";
 import { readXmlAndInjectConfig } from "../instructions/read-xml-and-inject-config";
 import { decodeAiModelPreferences, getAiModelPreference } from "../model-preferences";
-import { aiModels, getAiApiKey, getAiModelConfig } from "../providers/registry";
+import { aiModels, getAiApiKey, getAiModelConfig, refreshAiModels } from "../providers/registry";
 import { validateToolArguments } from "../tools/definition";
 import {
   createCalendarTools,
@@ -151,7 +153,7 @@ export class AgentHarness {
     signal?: AbortSignal;
   }): Promise<TOption<string>> {
     const startedAt = performance.now();
-    const modelConfig = this.resolveModel(args.settings, args.purpose);
+    const modelConfig = await this.resolveModel(args.settings, args.purpose, args.signal);
     const sessionId = this.createSessionId(
       modelConfig.model.provider,
       args.trace?.chatId,
@@ -275,7 +277,7 @@ export class AgentHarness {
     platform: TAgentRunArgs["platform"],
     trace?: TBehaviorTraceContext,
   ) {
-    const config = this.resolveModel(settings, EModelPurpose.Main);
+    const config = await this.resolveModel(settings, EModelPurpose.Main);
     const args = {
       name: EAgentName.Main,
       purpose: EModelPurpose.Main,
@@ -318,7 +320,7 @@ export class AgentHarness {
   private async run(
     args: TAgentRunArgs & { delegationCount: TOption<() => void> },
   ): Promise<TMainAgentRunResult> {
-    const modelConfig = this.resolveModel(args.settings, args.purpose);
+    const modelConfig = await this.resolveModel(args.settings, args.purpose, args.signal);
     const tools = await this.createTools(args);
     const systemPrompt = await this.createSystemPrompt(args, tools);
     let iterations = 0;
@@ -378,13 +380,6 @@ export class AgentHarness {
           agent.state.tools = nextTools;
         }
 
-        if (context.message.role !== "assistant") {
-          if (nextTools !== context.context.tools) {
-            return { context: { ...context.context, tools: nextTools } };
-          }
-          return undefined;
-        }
-
         const hasToolCall = context.message.content.some((content) => content.type === "toolCall");
 
         if (!hasToolCall) {
@@ -401,10 +396,16 @@ export class AgentHarness {
           forcedFinalAttempt = true;
           return {
             context: {
-              systemPrompt: `${context.context.systemPrompt}\n\nTool budget reached. Do not call tools. Give the final answer using available results.`,
               messages: context.context.messages,
               tools: [],
             },
+            messages: [
+              {
+                role: "system",
+                content: "Tool budget reached. Give the final answer using available results.",
+                timestamp: Date.now(),
+              },
+            ],
           };
         }
 
@@ -565,14 +566,20 @@ export class AgentHarness {
       stopReason,
       startedAt,
     );
-    let transcript = convertToLlm(agent.state.messages);
+    let transcript = (await agent.convertToLlm(agent.state.messages)).filter(
+      (message) => message.role !== "system",
+    );
     if (args.conversation !== undefined && args.conversation.summary.length > 0) {
       transcript = transcript.slice(1);
     }
     return { text: finalText, iterations, toolCallCount, stopReason, messages: transcript };
   }
 
-  private resolveModel(settings: TConfigRecord, purpose: EModelPurpose) {
+  private async resolveModel(
+    settings: TConfigRecord,
+    purpose: EModelPurpose,
+    signal?: AbortSignal,
+  ) {
     const provider = settings[EConfigKey.AiProvider];
     const preferences = decodeAiModelPreferences(settings[EConfigKey.AiModelPreferences]);
 
@@ -581,6 +588,7 @@ export class AgentHarness {
       case EAiProvider.Openrouter:
       case EAiProvider.Ollama:
       case EAiProvider.OpencodeGo:
+        await refreshAiModels(provider, false, signal);
         return getAiModelConfig(
           provider,
           purpose,
@@ -1019,7 +1027,7 @@ export class AgentHarness {
     if (params.toolChoice?.mode === "required") {
       throw new Error("MCP sampling toolChoice mode 'required' is not supported");
     }
-    const modelConfig = this.resolveModel(settings, EModelPurpose.SpecialistAccurate);
+    const modelConfig = await this.resolveModel(settings, EModelPurpose.SpecialistAccurate, signal);
     const tools = params.tools?.map((tool) => {
       return {
         name: tool.name,
@@ -1136,11 +1144,15 @@ export class AgentHarness {
           if (block.type === "text") {
             content.push({ type: "text", text: block.text });
           } else if (block.type === "tool_use") {
+            const input = z.record(z.string(), z.json()).safeParse(block.input);
+            if (!input.success) {
+              throw new Error("MCP sampling tool input must contain JSON values");
+            }
             content.push({
               type: "toolCall",
               id: block.id,
               name: block.name,
-              arguments: block.input,
+              arguments: input.data,
             });
           } else {
             content.push({ type: "text", text: this.describeMcpBlock(block) });
@@ -1180,12 +1192,20 @@ export class AgentHarness {
               resultContent.push({ type: "text", text: this.describeMcpBlock(item) });
             }
           }
+          let details: TOption<JsonValue>;
+          if (block.structuredContent !== undefined) {
+            const parsed = z.json().safeParse(block.structuredContent);
+            if (!parsed.success) {
+              throw new Error("MCP sampling structured content must contain JSON values");
+            }
+            details = parsed.data;
+          }
           messages.push({
             role: "toolResult",
             toolCallId: block.toolUseId,
             toolName: "mcp-sampling-tool",
             content: resultContent,
-            details: block.structuredContent,
+            details,
             isError: block.isError ?? false,
             timestamp,
           });
@@ -1446,6 +1466,7 @@ export class AgentHarness {
       success,
       durationMs: performance.now() - args.startedAt,
       summary: `model request completed cacheRead=${usage.cacheRead} inputTokens=${inputTokens}`,
+      error: sanitizeErrorMessage(args.message.errorMessage),
       metadata: {
         agentName: args.agentName ?? null,
         parentToolCallId: args.parentToolCallId ?? null,

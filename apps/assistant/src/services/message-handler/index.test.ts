@@ -1,10 +1,12 @@
 import { afterEach, describe, expect, mock, setSystemTime, test } from "bun:test";
 import type { Message } from "@earendil-works/pi-ai";
 import {
-  type Context,
   fauxAssistantMessage,
   fauxProvider,
+  getCurrentSystemPrompt,
+  getCurrentTools,
   type Model,
+  type TranscriptContext,
 } from "@earendil-works/pi-ai";
 import { convertResponsesMessages } from "@earendil-works/pi-ai/api/openai-responses-shared";
 import { AgentHarness } from "../ai/agent-harness";
@@ -230,18 +232,13 @@ describe("MessageHandler", () => {
       provider: EAiProvider.Openrouter,
       models: [{ id: "google/gemini-3.1-pro-preview", reasoning: true }],
     });
-    const requests: Array<{ context: Context; model: Model<string> }> = [];
+    const requests: Array<{ context: TranscriptContext; model: Model<string> }> = [];
     faux.setResponses([
       (context, _options, _state, model) => {
         requests.push({
           context: {
             ...context,
             messages: structuredClone(context.messages),
-            tools: context.tools?.map(({ name, description, parameters }) => ({
-              name,
-              description,
-              parameters,
-            })),
           },
           model,
         });
@@ -252,11 +249,6 @@ describe("MessageHandler", () => {
           context: {
             ...context,
             messages: structuredClone(context.messages),
-            tools: context.tools?.map(({ name, description, parameters }) => ({
-              name,
-              description,
-              parameters,
-            })),
           },
           model,
         });
@@ -307,8 +299,12 @@ describe("MessageHandler", () => {
       if (first === undefined || second === undefined) {
         throw new Error("Expected two captured requests");
       }
-      expect(second.context.systemPrompt).toBe(first.context.systemPrompt);
-      expect(second.context.tools).toEqual(first.context.tools);
+      expect(getCurrentSystemPrompt(second.context.messages)).toBe(
+        getCurrentSystemPrompt(first.context.messages),
+      );
+      expect(getCurrentTools(second.context.messages)).toEqual(
+        getCurrentTools(first.context.messages),
+      );
       const firstInput = convertResponsesMessages(first.model, first.context, new Set());
       const secondInput = convertResponsesMessages(second.model, second.context, new Set());
       expect(secondInput.slice(0, firstInput.length)).toEqual(firstInput);

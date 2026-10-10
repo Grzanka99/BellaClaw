@@ -9,7 +9,7 @@ import {
   setAiModelPreference,
   type TAiModelPreferences,
 } from "../../model-preferences";
-import { aiModels, getAiModelConfig } from "../../providers/registry";
+import { aiModels, getAiModelConfig, refreshAiModels } from "../../providers/registry";
 import { EAiProvider, EModelPurpose } from "../../types";
 import type { TToolExecutionContext } from "../executable";
 import { createAiRuntime, resolveAiProvider } from "../get-settings/handler";
@@ -148,6 +148,12 @@ export async function handleUpdateSettings(
     parsedArgs.aiReasoningEffort !== undefined ||
     parsedArgs.resetAiModel === true ||
     parsedArgs.resetAiReasoningEffort === true;
+  if (hasModelOperation || parsedArgs.aiProvider !== undefined) {
+    const forceRefresh =
+      parsedArgs.aiModel !== undefined &&
+      aiModels.getModel(provider, parsedArgs.aiModel) === undefined;
+    await refreshAiModels(provider, forceRefresh);
+  }
   let purpose: TOption<EModelPurpose>;
   const preferences = decodeAiModelPreferences(settings[EConfigKey.AiModelPreferences]);
   const fallbacks: Array<{ purpose: EModelPurpose; reason: string }> = [];
