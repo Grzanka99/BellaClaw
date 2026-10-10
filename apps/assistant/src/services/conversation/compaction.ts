@@ -5,7 +5,6 @@ import {
   contentText,
   type Model,
   type Models,
-  retryAssistantCall,
   type ThinkingLevel,
 } from "@earendil-works/pi-ai";
 import {
@@ -130,24 +129,19 @@ export async function compactConversation(
   const systemPrompt = await Bun.file(
     new URL("../ai/instructions/compaction.xml", import.meta.url),
   ).text();
-  const result = await retryAssistantCall(
-    () =>
-      models.completeSimple(
-        model,
+  const result = await models.completeSimple(
+    model,
+    {
+      systemPrompt,
+      messages: [
         {
-          systemPrompt,
-          messages: [
-            {
-              role: "user",
-              content: `Previous summary:\n${state.summary}\n\nConversation:\n${JSON.stringify(conversation)}`,
-              timestamp: Date.now(),
-            },
-          ],
+          role: "user",
+          content: `Previous summary:\n${state.summary}\n\nConversation:\n${JSON.stringify(conversation)}`,
+          timestamp: Date.now(),
         },
-        options,
-      ),
-    undefined,
-    options.signal,
+      ],
+    },
+    options,
   );
   if (result.stopReason === "error" || result.stopReason === "aborted") {
     throw new Error(result.errorMessage ?? "Conversation summarization failed");
