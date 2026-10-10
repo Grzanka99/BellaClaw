@@ -19,6 +19,7 @@ const CONTEXT_SOFT_LIMIT = 100_000;
 const TARGET_TOKENS = 25_000;
 const SUMMARY_RESERVE = 4_096;
 
+/** Summarize older complete turns without mutating the stored conversation. */
 export async function compactConversation(
   state: TConversation,
   models: Models,
@@ -101,11 +102,21 @@ export async function compactConversation(
             return block.thinking;
           }
           if (block.type === "toolCall") {
-            return `${block.name}(${JSON.stringify(block.arguments)})`;
+            return `toolCallId=${block.id} ${block.name}(${JSON.stringify(block.arguments)})`;
           }
           return "[Image]";
         })
         .join("\n");
+    }
+    if (message.role === "toolResult") {
+      return {
+        role: message.role,
+        timestamp: message.timestamp,
+        toolCallId: message.toolCallId,
+        toolName: message.toolName,
+        isError: message.isError,
+        content,
+      };
     }
     return { role: message.role, timestamp: message.timestamp, content };
   });
