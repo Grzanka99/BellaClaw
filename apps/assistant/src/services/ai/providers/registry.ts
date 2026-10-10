@@ -1,4 +1,4 @@
-import type { TOption } from "@bellaclaw/shared";
+import { logger, type TOption } from "@bellaclaw/shared";
 import {
   createModels,
   getSupportedThinkingLevels,
@@ -6,13 +6,13 @@ import {
   type Provider,
 } from "@earendil-works/pi-ai";
 import { openaiCodexProvider } from "@earendil-works/pi-ai/providers/openai-codex";
-import { opencodeGoProvider } from "@earendil-works/pi-ai/providers/opencode-go";
 import { openrouterProvider } from "@earendil-works/pi-ai/providers/openrouter";
 import { FileCredentialStore } from "../auth/file-credential-store";
 import type { TAiModelPreference, TAiModelPreferences } from "../model-preferences";
 import { getAiModelPreference } from "../model-preferences";
 import { EAiProvider, EModelPurpose } from "../types";
 import { ollamaProvider } from "./ollama";
+import { opencodeGoProvider } from "./opencode-go";
 
 type TAiModelPurposeRegistration = {
   model: string;
@@ -104,6 +104,39 @@ const AI_PROVIDER_REGISTRY: Record<EAiProvider, TAiProviderRegistration> = {
 };
 
 export const aiModels = createModels({ credentials: new FileCredentialStore() });
+let opencodeRefresh: TOption<Promise<void>>;
+
+export async function refreshAiModels(
+  provider: EAiProvider,
+  force = false,
+  signal?: AbortSignal,
+): Promise<void> {
+  if (provider !== EAiProvider.OpencodeGo || signal?.aborted) {
+    return;
+  }
+  if (opencodeRefresh !== undefined) {
+    return opencodeRefresh;
+  }
+  opencodeRefresh = (async () => {
+    const signals = [AbortSignal.timeout(10_000)];
+    if (signal !== undefined) {
+      signals.push(signal);
+    }
+    const result = await aiModels.refresh({
+      providers: [provider],
+      force,
+      signal: AbortSignal.any(signals),
+    });
+    if (result.errors.size > 0 || result.aborted) {
+      logger.warning("OpenCode Go catalog refresh failed; keeping the last known models");
+    }
+  })();
+  try {
+    await opencodeRefresh;
+  } finally {
+    opencodeRefresh = undefined;
+  }
+}
 
 for (const providerId of Object.values(EAiProvider)) {
   const registration = AI_PROVIDER_REGISTRY[providerId];
