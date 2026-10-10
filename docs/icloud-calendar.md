@@ -72,6 +72,8 @@ events, rather than constructing one. Events on read-only calendars cannot be ed
   conferencing, `THISANDFUTURE` overrides, or extra recurrence dates before the series start;
   changes to series times or rules with modified or deleted occurrences; and single-occurrence
   edits at a `THISANDFUTURE` boundary.
+- Invitations to single occurrences of a series kept in another calendar are listed and count
+  for availability, but cannot be updated or deleted.
 - Creating or rescheduling a start in the first instance of an autumn repeated hour is rejected
   if it cannot survive a timezone roundtrip. Use an explicit UTC start and `UTC` timezone instead.
 

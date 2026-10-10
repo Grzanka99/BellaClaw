@@ -37,9 +37,9 @@ export class ICalendarResource {
     }
     this.timezone = calendarTimezone ?? text(this.calendar, "x-wr-timezone") ?? "UTC";
     loadCalendarTimezones(this.calendar, this.timezone);
-    const master = this.calendar
-      .getAllSubcomponents("vevent")
-      .find((component) => !component.hasProperty("recurrence-id"));
+    const events = this.calendar.getAllSubcomponents("vevent");
+    // Invitations to single occurrences arrive without the series master.
+    const master = events.find((component) => !component.hasProperty("recurrence-id")) ?? events[0];
     if (master === undefined || !master.hasProperty("dtstart") || !master.hasProperty("uid")) {
       throw new Error("iCloud resource has no identifiable master event");
     }
@@ -83,6 +83,9 @@ export class ICalendarResource {
   }
 
   public event(calendarId: string, occurrence?: string, etag?: string): TCalendarEvent {
+    if (this.master.isRecurrenceException()) {
+      throw new Error("Occurrences detached from a series kept in another calendar are read-only");
+    }
     if (occurrence === undefined) {
       return mapICalendarEvent(
         this.filename,

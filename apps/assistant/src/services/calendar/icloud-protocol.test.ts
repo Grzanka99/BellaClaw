@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { calendarData, marchApril, weekly } from "./fixtures/ical-events";
+import { calendarData, invitedOccurrence, marchApril, weekly } from "./fixtures/ical-events";
 import { ICloudTestServer } from "./fixtures/icloud-server";
 import { ECalendarProvider } from "./types";
 
@@ -19,13 +19,13 @@ describe("iCloud over tsdav HTTP/XML", () => {
       description: "Notes <private>",
       start: "2026-03-29T09:00:00+02:00",
       durationMinutes: 45,
-      timezone: "Europe/Warsaw",
+      timezone: "Europe/Amsterdam",
     });
     expect(created).toMatchObject({
       provider: ECalendarProvider.ICloud,
       summary: "Lunch & planning",
       description: "Notes <private>",
-      start: { dateTime: "2026-03-29T07:00:00.000Z" },
+      start: { dateTime: "2026-03-29T07:00:00.000Z", timeZone: "Europe/Amsterdam" },
       end: { dateTime: "2026-03-29T07:45:00.000Z" },
     });
     expect(server.writes[0]?.headers.get("if-none-match")).toBe("*");
@@ -53,6 +53,17 @@ describe("iCloud over tsdav HTTP/XML", () => {
     });
     expect(server.writes[2]?.headers.get("if-match")).toBe(updated.etag);
     expect(await server.provider.listEvents(server.calendarId, marchApril)).toEqual([]);
+    // An invitation to one occurrence has no series master; it is listed but not editable.
+    server.seed(calendarData(invitedOccurrence), "invite.ics");
+    const invited = await server.provider.listEvents(server.calendarId, marchApril);
+    expect(invited.map((event) => event.start.dateTime)).toEqual(["2026-04-05T09:00:00.000Z"]);
+    await expect(
+      server.provider.deleteEvent(server.calendarId, {
+        userId: "chat-test",
+        eventId: invited[0]?.id ?? "",
+        scope: "occurrence",
+      }),
+    ).rejects.toThrow("read-only");
     const report = server.requests.find((request) => request.body.includes("calendar-query"));
     expect(report?.body).toContain('start="20260301T000000Z"');
     expect(report?.body).toContain('end="20260501T000000Z"');

@@ -39,6 +39,29 @@ export function listICalendarEvents(
       seen.add(event.id);
     }
   };
+  const appendOverrides = () => {
+    for (const component of resource.calendar.getAllSubcomponents("vevent")) {
+      if (component.hasProperty("recurrence-id")) {
+        const exception = new ICAL.Event(component);
+        append(
+          mapICalendarEvent(
+            resource.filename,
+            calendarId,
+            exception,
+            exception.startDate,
+            eventEnd(exception, exception.startDate),
+            resource.timezone,
+            exception.recurrenceId,
+            etag,
+          ),
+        );
+      }
+    }
+  };
+  if (resource.master.isRecurrenceException()) {
+    appendOverrides();
+    return events;
+  }
   if (!resource.master.isRecurring()) {
     const original = occurrenceKey(resource.master.startDate);
     const excluded = resource.master.component
@@ -96,22 +119,6 @@ export function listICalendarEvents(
   if (!completed) {
     throw new Error(`iCloud recurrence expansion exceeded ${MAX_OCCURRENCES} instances`);
   }
-  for (const component of resource.calendar.getAllSubcomponents("vevent")) {
-    if (component.hasProperty("recurrence-id")) {
-      const exception = new ICAL.Event(component);
-      append(
-        mapICalendarEvent(
-          resource.filename,
-          calendarId,
-          exception,
-          exception.startDate,
-          eventEnd(exception, exception.startDate),
-          resource.timezone,
-          exception.recurrenceId,
-          etag,
-        ),
-      );
-    }
-  }
+  appendOverrides();
   return events;
 }

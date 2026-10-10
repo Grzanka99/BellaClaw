@@ -56,6 +56,9 @@ export function occurrenceKey(value: ICAL.Time): string {
 
 export function loadMasterEvent(component: ICAL.Component): ICAL.Event {
   const master = new ICAL.Event(component, { exceptions: [] });
+  if (master.isRecurrenceException()) {
+    return master;
+  }
   for (const child of component.parent?.getAllSubcomponents("vevent") ?? []) {
     if (!child.hasProperty("recurrence-id")) {
       continue;
@@ -215,7 +218,10 @@ export function timezoneComponent(calendar: ICAL.Component, timezone: string): I
   if (!Array.isArray(block) || block[0] === undefined) {
     throw new Error(`Unsupported iCalendar timezone: ${timezone}`);
   }
-  calendar.addSubcomponent(new ICAL.Component(ICAL.parse(block[0])));
+  const component = new ICAL.Component(ICAL.parse(block[0]));
+  // The library answers aliases with the link target's block; keep the requested identifier.
+  component.updatePropertyWithValue("tzid", timezone);
+  calendar.addSubcomponent(component);
   return calendar.getTimeZoneByID(timezone);
 }
 

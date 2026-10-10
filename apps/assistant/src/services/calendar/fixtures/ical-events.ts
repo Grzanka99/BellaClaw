@@ -21,6 +21,13 @@ export const weekly = [
   "SUMMARY:Weekly planning",
 ];
 
+export const invitedOccurrence = [
+  "RECURRENCE-ID;TZID=Europe/Warsaw:20260405T090000",
+  "DTSTART;TZID=Europe/Warsaw:20260405T110000",
+  "DTEND;TZID=Europe/Warsaw:20260405T120000",
+  "SUMMARY:Invited once",
+];
+
 export const marchApril = {
   userId: "chat-test",
   timeMin: "2026-03-01T00:00:00Z",
