@@ -12,6 +12,7 @@ import { z } from "zod";
 
 const BASE_URL = "https://opencode.ai/zen/go";
 const CATALOG_TTL = 60 * 60 * 1000;
+const RETRY_COOLDOWN = 5 * 60 * 1000;
 const SModelList = z.object({ data: z.array(z.object({ id: z.string().min(1) })) });
 const SMetadata = z.object({
   "opencode-go": z.object({ models: z.record(z.string(), z.unknown()) }),
@@ -151,11 +152,21 @@ function modelFromMetadata(id: string, metadata: unknown): TOption<Model<Api>> {
   }
 }
 
-export function opencodeGoProvider(): Provider {
+export function opencodeGoProvider(requiredModelIds: readonly string[]): Provider {
   const bundled = bundledOpencodeGoProvider();
   const baseline = new Map(bundled.getModels().map((model) => [model.id, model]));
   let catalog: readonly Model<Api>[] = bundled.getModels();
   let checkedAt = 0;
+  let attemptedAt = 0;
+  // Required models must stay resolvable even when a catalog omits them.
+  const addRequiredModels = (models: Model<Api>[]) => {
+    for (const id of requiredModelIds) {
+      const model = baseline.get(id);
+      if (model !== undefined && !models.some((entry) => entry.id === id)) {
+        models.push(model);
+      }
+    }
+  };
   return {
     ...bundled,
     getModels: () => catalog,
@@ -164,18 +175,24 @@ export function opencodeGoProvider(): Provider {
       if (!context.allowNetwork) {
         if (context.stored !== undefined) {
           const stored = context.stored;
+          const models = stored.models.filter((model) => isModelType(model, "chat"));
+          addRequiredModels(models);
           await context.publish({
             update: () => {
-              catalog = stored.models.filter((model) => isModelType(model, "chat"));
+              catalog = models;
               checkedAt = stored.checkedAt ?? 0;
             },
           });
         }
         return;
       }
-      if (!context.force && Date.now() - checkedAt < CATALOG_TTL) {
+      if (
+        !context.force &&
+        (Date.now() - checkedAt < CATALOG_TTL || Date.now() - attemptedAt < RETRY_COOLDOWN)
+      ) {
         return;
       }
+      attemptedAt = Date.now();
       const responses = await Promise.all([
         fetch(`${BASE_URL}/v1/models`, { signal: context.signal }),
         fetch("https://models.dev/api.json", { signal: context.signal }),
@@ -203,6 +220,7 @@ export function opencodeGoProvider(): Provider {
       if (models.length === 0) {
         throw new Error("OpenCode Go catalog has no supported chat models");
       }
+      addRequiredModels(models);
       const fetchedAt = Date.now();
       await context.publish({
         persist: { models, checkedAt: fetchedAt },

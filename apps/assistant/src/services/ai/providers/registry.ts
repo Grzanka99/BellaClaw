@@ -80,7 +80,12 @@ const AI_PROVIDER_REGISTRY: Record<EAiProvider, TAiProviderRegistration> = {
     getApiKey: () => undefined,
   },
   [EAiProvider.OpencodeGo]: {
-    createProvider: opencodeGoProvider,
+    createProvider: () =>
+      opencodeGoProvider(
+        Object.values(AI_PROVIDER_REGISTRY[EAiProvider.OpencodeGo].modelByPurpose).map(
+          (registration) => registration.model,
+        ),
+      ),
     modelByPurpose: {
       [EModelPurpose.Utility]: { model: "deepseek-v4-pro" },
       [EModelPurpose.Main]: { model: "grok-4.6", effort: "high" },
@@ -104,7 +109,7 @@ const AI_PROVIDER_REGISTRY: Record<EAiProvider, TAiProviderRegistration> = {
 };
 
 export const aiModels = createModels({ credentials: new FileCredentialStore() });
-let opencodeRefresh: TOption<Promise<void>>;
+let opencodeRefresh: TOption<{ force: boolean; promise: Promise<void> }>;
 
 export async function refreshAiModels(
   provider: EAiProvider,
@@ -114,27 +119,38 @@ export async function refreshAiModels(
   if (provider !== EAiProvider.OpencodeGo || signal?.aborted) {
     return;
   }
-  if (opencodeRefresh !== undefined) {
-    return opencodeRefresh;
-  }
-  opencodeRefresh = (async () => {
-    const signals = [AbortSignal.timeout(10_000)];
-    if (signal !== undefined) {
-      signals.push(signal);
-    }
-    const result = await aiModels.refresh({
-      providers: [provider],
-      force,
-      signal: AbortSignal.any(signals),
-    });
-    if (result.errors.size > 0 || result.aborted) {
-      logger.warning("OpenCode Go catalog refresh failed; keeping the last known models");
-    }
-  })();
+  // The refresh is shared, so a cancelled caller stops waiting without cancelling it.
+  const cancelled = Promise.withResolvers<void>();
+  const cancel = () => cancelled.resolve();
+  signal?.addEventListener("abort", cancel, { once: true });
   try {
-    await opencodeRefresh;
+    // A non-forced refresh may skip the network, so a forced caller runs its own afterwards.
+    if (force && opencodeRefresh !== undefined && !opencodeRefresh.force) {
+      await Promise.race([opencodeRefresh.promise, cancelled.promise]);
+      if (signal?.aborted) {
+        return;
+      }
+    }
+    if (opencodeRefresh === undefined) {
+      const promise = (async () => {
+        try {
+          const result = await aiModels.refresh({
+            providers: [provider],
+            force,
+            signal: AbortSignal.timeout(10_000),
+          });
+          if (result.errors.size > 0 || result.aborted) {
+            logger.warning("OpenCode Go catalog refresh failed; keeping the last known models");
+          }
+        } finally {
+          opencodeRefresh = undefined;
+        }
+      })();
+      opencodeRefresh = { force, promise };
+    }
+    await Promise.race([opencodeRefresh.promise, cancelled.promise]);
   } finally {
-    opencodeRefresh = undefined;
+    signal?.removeEventListener("abort", cancel);
   }
 }
 

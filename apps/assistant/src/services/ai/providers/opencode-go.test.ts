@@ -46,7 +46,7 @@ function serveCatalog(ids: string[], models: Record<string, unknown>) {
 
 function collection(modelsStore = new InMemoryModelsStore()) {
   const models = createModels({ modelsStore });
-  models.setProvider(opencodeGoProvider());
+  models.setProvider(opencodeGoProvider([]));
   return models;
 }
 
@@ -150,6 +150,53 @@ describe("OpenCode Go discovery", () => {
     fetchMock.mockImplementation(async () => response());
     expect((await models.refresh({ force: true })).errors.has("opencode-go")).toBe(true);
     expect(models.getModels().map((model) => model.id)).toEqual(["completions-current"]);
+  });
+
+  test("waits out a cooldown after a failed refresh unless the refresh is forced", async () => {
+    fetchMock.mockRejectedValue(new Error("Offline"));
+    const models = collection();
+    await models.refresh();
+    await models.refresh();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    await models.refresh({ force: true });
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    const now = spyOn(Date, "now").mockReturnValue(Date.now() + 5 * 60 * 1000 + 1);
+    try {
+      await models.refresh();
+      expect(fetchMock).toHaveBeenCalledTimes(6);
+    } finally {
+      now.mockRestore();
+    }
+  });
+
+  test("keeps required bundled models that the live list omits", async () => {
+    serveCatalog(["completions-current"], { "completions-current": metadata });
+    const models = createModels();
+    models.setProvider(opencodeGoProvider(["grok-4.6"]));
+    await models.refresh();
+    expect(models.getModels().map((model) => model.id)).toEqual([
+      "completions-current",
+      "grok-4.6",
+    ]);
+    serveCatalog([], {});
+    expect((await models.refresh({ force: true })).errors.has("opencode-go")).toBe(true);
+    expect(models.getModels().map((model) => model.id)).toEqual([
+      "completions-current",
+      "grok-4.6",
+    ]);
+  });
+
+  test("adds required bundled models to a restored catalog that lacks them", async () => {
+    serveCatalog(["completions-current"], { "completions-current": metadata });
+    const store = new InMemoryModelsStore();
+    await collection(store).refresh();
+    const restored = createModels({ modelsStore: store });
+    restored.setProvider(opencodeGoProvider(["grok-4.6"]));
+    await restored.refresh({ allowNetwork: false });
+    expect(restored.getModels().map((model) => model.id)).toEqual([
+      "completions-current",
+      "grok-4.6",
+    ]);
   });
 
   test("keeps the bundled catalog when its first fetch fails", async () => {

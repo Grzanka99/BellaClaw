@@ -280,7 +280,7 @@ describe("production executable tools", () => {
     const previousProvider = aiModels.getProvider(EAiProvider.OpencodeGo);
     const previousApiKey = Bun.env.OPENCODE_API_KEY;
     Bun.env.OPENCODE_API_KEY = "catalog-test-key";
-    aiModels.setProvider(dynamicOpencodeGoProvider());
+    aiModels.setProvider(dynamicOpencodeGoProvider([]));
     const settingsMock = installSettingsMock({
       ...DefaultConfigRecord,
       [EConfigKey.AiProvider]: EAiProvider.OpencodeGo,
