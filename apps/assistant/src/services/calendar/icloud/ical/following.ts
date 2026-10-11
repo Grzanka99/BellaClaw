@@ -1,9 +1,9 @@
 import type { TOption } from "@bellaclaw/shared";
 import ICAL from "ical.js";
-import { ICalendarResource } from "./ical";
-import { eventEnd, eventTime, replaceRecurrence, stamp } from "./ical-time";
-import { countRuleOccurrencesBefore, splitRecurrence } from "./recurrence";
-import type { TUpdateEventPatch } from "./types";
+import { countRuleOccurrencesBefore, splitRecurrence } from "../../recurrence";
+import type { TUpdateEventPatch } from "../../types";
+import { ICalendarResource } from ".";
+import { eventEnd, eventTime, replaceRecurrence, stamp } from "./time";
 
 export function assertFollowingOrder(resource: ICalendarResource): void {
   for (const property of resource.master.component.getAllProperties("rdate")) {

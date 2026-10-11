@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { calendarAdapter, googleEvent, writeCalendarDatabase } from "./google-fixtures.test";
+import { calendarAdapter, googleEvent, writeCalendarDatabase } from "./fixtures.test";
 import type { GwsCalendarClient } from "./gws";
 
 const database = writeCalendarDatabase();

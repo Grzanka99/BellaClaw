@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { calendarData, invitedOccurrence, marchApril, weekly } from "./fixtures/ical-events";
-import { ICloudTestServer } from "./fixtures/icloud-server";
-import { ECalendarProvider } from "./types";
+import { ECalendarProvider } from "../types";
+import { calendarData, invitedOccurrence, marchApril, weekly } from "./fixtures/events";
+import { ICloudTestServer } from "./fixtures/server";
 
 describe("iCloud over tsdav HTTP/XML", () => {
   let server: ICloudTestServer;

@@ -1,8 +1,8 @@
 import type { LibSQLDatabase } from "drizzle-orm/libsql";
-import { CalendarAdapter, ECalendarProvider } from ".";
-import { GoogleCalendarProvider } from "./google";
+import { CalendarAdapter, ECalendarProvider } from "..";
+import { CalendarStore } from "../store";
+import { GoogleCalendarProvider } from ".";
 import type { GwsCalendarClient } from "./gws";
-import { CalendarStore } from "./store";
 
 export function googleEvent(id: string, extra: Record<string, unknown> = {}) {
   return {

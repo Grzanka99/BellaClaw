@@ -1,10 +1,7 @@
 import type { TOption } from "@bellaclaw/shared";
 import { repositoryPath } from "@bellaclaw/shared";
-import { normalizeEventTimes } from "./event-fields";
-import { applyPatch, assertMutableEvent, mapEvent } from "./google-events";
-import { isFirstOccurrence, splitGoogleFollowingEvent } from "./google-following";
-import { GwsCalendarClient } from "./gws";
-import { countRuleOccurrencesBefore, splitRecurrence } from "./recurrence";
+import { normalizeEventTimes } from "../event-fields";
+import { countRuleOccurrencesBefore, splitRecurrence } from "../recurrence";
 import {
   ECalendarProvider,
   type TCalendarEvent,
@@ -14,7 +11,10 @@ import {
   type TListEventsArguments,
   type TProviderCalendar,
   type TUpdateEventArguments,
-} from "./types";
+} from "../types";
+import { applyPatch, assertMutableEvent, mapEvent } from "./events";
+import { isFirstOccurrence, splitGoogleFollowingEvent } from "./following";
+import { GwsCalendarClient } from "./gws";
 
 export class GoogleCalendarProvider implements TCalendarProvider {
   public readonly provider = ECalendarProvider.Google;

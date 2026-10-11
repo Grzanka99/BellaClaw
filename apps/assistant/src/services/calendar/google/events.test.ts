@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { validateUpdateCalendarEventArgs } from "../ai/tools/update-calendar-event/handler";
-import { calendarAdapter, googleEvent, writeCalendarDatabase } from "./google-fixtures.test";
+import { validateUpdateCalendarEventArgs } from "../../ai/tools/update-calendar-event/handler";
+import { calendarAdapter, googleEvent, writeCalendarDatabase } from "./fixtures.test";
 import type { GwsCalendarClient } from "./gws";
 
 const database = writeCalendarDatabase();

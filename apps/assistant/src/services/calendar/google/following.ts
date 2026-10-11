@@ -1,8 +1,8 @@
 import type { TOption } from "@bellaclaw/shared";
-import { applyPatch, eventBody, mapEvent } from "./google-events";
+import { splitRecurrence } from "../recurrence";
+import type { TCalendarEvent, TUpdateEventArguments } from "../types";
+import { applyPatch, eventBody, mapEvent } from "./events";
 import type { GwsCalendarClient } from "./gws";
-import { splitRecurrence } from "./recurrence";
-import type { TCalendarEvent, TUpdateEventArguments } from "./types";
 
 function assertFollowingSplitSafe(event: TCalendarEvent): void {
   const excluded = [...event.unsupportedManagedFields];

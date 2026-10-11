@@ -1,9 +1,10 @@
 import type { TOption } from "@bellaclaw/shared";
 import ICAL from "ical.js";
-import { normalizeEventTimes, patchEvent } from "./event-fields";
-import { assertFollowingOrder, splitICalendarResource } from "./ical-following";
-import { listICalendarEvents } from "./ical-listing";
-import { mapICalendarEvent } from "./ical-mapping";
+import { normalizeEventTimes, patchEvent } from "../../event-fields";
+import type { TCalendarEvent, TCreateEventArguments, TUpdateEventPatch } from "../../types";
+import { assertFollowingOrder, splitICalendarResource } from "./following";
+import { listICalendarEvents } from "./listing";
+import { mapICalendarEvent } from "./mapping";
 import {
   calendarTime,
   eventEnd,
@@ -16,8 +17,7 @@ import {
   replaceRecurrence,
   stamp,
   text,
-} from "./ical-time";
-import type { TCalendarEvent, TCreateEventArguments, TUpdateEventPatch } from "./types";
+} from "./time";
 
 const RECURRENCE_PROPERTIES = ["rrule", "rdate", "exdate"];
 

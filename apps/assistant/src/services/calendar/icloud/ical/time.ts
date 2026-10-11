@@ -1,7 +1,7 @@
 import type { TOption } from "@bellaclaw/shared";
 import ICAL from "ical.js";
 import { tzlib_get_ical_block } from "timezones-ical-library";
-import type { TEventDateTime } from "./types";
+import type { TEventDateTime } from "../../types";
 
 export const MAX_OCCURRENCES = 50_000;
 const RECURRENCE_PROPERTIES = ["rrule", "rdate", "exdate"];

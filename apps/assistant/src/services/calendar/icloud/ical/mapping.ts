@@ -1,12 +1,12 @@
 import type { TOption } from "@bellaclaw/shared";
 import type ICAL from "ical.js";
-import { eventTime, occurrenceKey, recurrence, text } from "./ical-time";
 import {
   ECalendarProvider,
   type TCalendarEvent,
   type TCalendarPerson,
   type TEventDateTime,
-} from "./types";
+} from "../../types";
+import { eventTime, occurrenceKey, recurrence, text } from "./time";
 
 function person(property: ICAL.Property): TCalendarPerson {
   const value = property.getFirstValue();

@@ -1,7 +1,8 @@
 import ICAL from "ical.js";
-import { calendarBoundary } from "./event-fields";
-import type { ICalendarResource } from "./ical";
-import { mapICalendarEvent } from "./ical-mapping";
+import { calendarBoundary } from "../../event-fields";
+import type { TCalendarEvent } from "../../types";
+import type { ICalendarResource } from ".";
+import { mapICalendarEvent } from "./mapping";
 import {
   eventEnd,
   eventTime,
@@ -12,8 +13,7 @@ import {
   recurrenceIterator,
   timezoneComponent,
   zonedClock,
-} from "./ical-time";
-import type { TCalendarEvent } from "./types";
+} from "./time";
 
 export function listICalendarEvents(
   resource: ICalendarResource,

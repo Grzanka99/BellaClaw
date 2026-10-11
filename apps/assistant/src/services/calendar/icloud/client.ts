@@ -3,10 +3,10 @@ import { repositoryPath } from "@bellaclaw/shared";
 import ICAL from "ical.js";
 import { type DAVCalendar, type DAVCalendarObject, DAVClient } from "tsdav";
 import { z } from "zod";
+import type { TProviderCalendar } from "../types";
+import { assertResponse, requestOptions, resourceFilename } from "./http";
 import { ICalendarResource } from "./ical";
-import { assertResponse, requestOptions, resourceFilename } from "./icloud-http";
-import { fetchCalendarObject } from "./icloud-objects";
-import type { TProviderCalendar } from "./types";
+import { fetchCalendarObject } from "./objects";
 
 const SCredentials = z.object({
   username: z.string().min(1),

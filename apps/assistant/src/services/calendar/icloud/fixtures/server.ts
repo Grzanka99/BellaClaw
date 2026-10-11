@@ -1,7 +1,7 @@
 import type { TOption } from "@bellaclaw/shared";
 import { DAVClient } from "tsdav";
-import { ICloudCalendarProvider } from "../icloud";
-import { ICloudCalendarClient } from "../icloud-client";
+import { ICloudCalendarProvider } from "..";
+import { ICloudCalendarClient } from "../client";
 
 type TStoredObject = { data: string; etag: string };
 export type TDAVRequest = { method: string; path: string; body: string; headers: Headers };

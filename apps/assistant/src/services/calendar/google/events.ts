@@ -1,12 +1,12 @@
 import type { TOption } from "@bellaclaw/shared";
-import { patchEvent } from "./event-fields";
+import { patchEvent } from "../event-fields";
 import {
   ECalendarProvider,
   type TCalendarEvent,
   type TCalendarPerson,
   type TEventDateTime,
   type TUpdateEventPatch,
-} from "./types";
+} from "../types";
 
 function readString(value: unknown, key: string): TOption<string> {
   if (typeof value === "object" && value !== null) {

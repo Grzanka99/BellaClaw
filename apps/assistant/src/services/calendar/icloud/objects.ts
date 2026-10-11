@@ -1,6 +1,6 @@
 import type { TOption } from "@bellaclaw/shared";
 import type { DAVCalendar, DAVCalendarObject, DAVClient } from "tsdav";
-import { requestOptions, resourceFilename } from "./icloud-http";
+import { requestOptions, resourceFilename } from "./http";
 
 export class CalendarObjectNotFound extends Error {}
 

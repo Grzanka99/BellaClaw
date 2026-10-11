@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/libsql";
 import { CalendarAdapter } from "..";
-import { mapEvent } from "../google-events";
+import { mapEvent } from "../google/events";
 import { CalendarStore } from "../store";
 import type {
   ECalendarProvider,

@@ -2,14 +2,14 @@ import { describe, expect, test } from "bun:test";
 import { mkdir } from "node:fs/promises";
 import { repositoryPath } from "@bellaclaw/shared";
 import type { LibSQLDatabase } from "drizzle-orm/libsql";
-import { ECalendarProvider } from ".";
-import { GoogleCalendarProvider } from "./google";
+import { ECalendarProvider } from "..";
+import { GoogleCalendarProvider } from ".";
 import {
   calendarAdapter,
   googleEvent,
   selectingDatabase,
   writeCalendarDatabase,
-} from "./google-fixtures.test";
+} from "./fixtures.test";
 import type { GwsCalendarClient } from "./gws";
 
 const database = writeCalendarDatabase();
