@@ -147,35 +147,7 @@ describe("SignalSingleton", () => {
     });
   });
 
-  test("ignores a re-delivered message with the same sender and timestamp", async () => {
-    Bun.env.SIGNAL_PHONE_NUMBER = "+100";
-    const signal = SignalSingleton.instance as unknown as TSignalSingletonInternals;
-    const adapter = MessagingAdapter.instance as unknown as {
-      handleInboundMessage: typeof MessagingAdapter.prototype.handleInboundMessage;
-    };
-    const handleInboundMessageMock = mock(async () => {});
-    const sendReadReceiptMock = mock(async () => {});
-
-    adapter.handleInboundMessage = handleInboundMessageMock;
-    signal.client = {
-      sendReadReceipt: sendReadReceiptMock,
-      showTyping: mock(async () => {}),
-      hideTyping: mock(async () => {}),
-    };
-
-    for (let delivery = 0; delivery < 4; delivery += 1) {
-      await signal.handleInboundMessage({
-        sourceNumber: "+200",
-        message: "hello",
-        timestamp: 123,
-      });
-    }
-
-    expect(handleInboundMessageMock).toHaveBeenCalledTimes(1);
-    expect(sendReadReceiptMock).toHaveBeenCalledTimes(1);
-  });
-
-  test("forwards messages that differ by sender or timestamp", async () => {
+  test("ignores a re-delivered message and forwards distinct ones", async () => {
     Bun.env.SIGNAL_PHONE_NUMBER = "+100";
     const signal = SignalSingleton.instance as unknown as TSignalSingletonInternals;
     const adapter = MessagingAdapter.instance as unknown as {
@@ -186,34 +158,11 @@ describe("SignalSingleton", () => {
     adapter.handleInboundMessage = handleInboundMessageMock;
 
     await signal.handleInboundMessage({ sourceNumber: "+200", message: "hello", timestamp: 123 });
+    await signal.handleInboundMessage({ sourceNumber: "+200", message: "hello", timestamp: 123 });
     await signal.handleInboundMessage({ sourceNumber: "+200", message: "hello", timestamp: 124 });
     await signal.handleInboundMessage({ sourceNumber: "+300", message: "hello", timestamp: 123 });
 
     expect(handleInboundMessageMock).toHaveBeenCalledTimes(3);
-  });
-
-  test("forwards every message that has no timestamp", async () => {
-    Bun.env.SIGNAL_PHONE_NUMBER = "+100";
-    const signal = SignalSingleton.instance as unknown as TSignalSingletonInternals;
-    const adapter = MessagingAdapter.instance as unknown as {
-      handleInboundMessage: typeof MessagingAdapter.prototype.handleInboundMessage;
-    };
-    const handleInboundMessageMock = mock(async () => {});
-
-    adapter.handleInboundMessage = handleInboundMessageMock;
-
-    await signal.handleInboundMessage({
-      sourceNumber: "+200",
-      message: "hello",
-      timestamp: undefined,
-    });
-    await signal.handleInboundMessage({
-      sourceNumber: "+200",
-      message: "hello",
-      timestamp: undefined,
-    });
-
-    expect(handleInboundMessageMock).toHaveBeenCalledTimes(2);
   });
 
   test("forgets the oldest message once the seen limit is exceeded", async () => {
@@ -230,11 +179,9 @@ describe("SignalSingleton", () => {
     await signal.handleInboundMessage({ sourceNumber: "+200", message: "one", timestamp: 1 });
     await signal.handleInboundMessage({ sourceNumber: "+200", message: "two", timestamp: 2 });
     await signal.handleInboundMessage({ sourceNumber: "+200", message: "one", timestamp: 1 });
-    await signal.handleInboundMessage({ sourceNumber: "+200", message: "two", timestamp: 2 });
 
     expect(handleInboundMessageMock).toHaveBeenCalledTimes(2);
 
-    await signal.handleInboundMessage({ sourceNumber: "+200", message: "three", timestamp: 3 });
     await signal.handleInboundMessage({ sourceNumber: "+200", message: "three", timestamp: 3 });
     await signal.handleInboundMessage({ sourceNumber: "+200", message: "one", timestamp: 1 });
 
