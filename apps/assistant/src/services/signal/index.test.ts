@@ -11,6 +11,7 @@ type TSignalSingletonStatic = {
 type TSignalSingletonInternals = {
   retryDelayMs: number;
   setupBootGraceMs: number;
+  seenMessageKeysLimit: number;
   client: Pick<SignalClient, "sendReadReceipt" | "showTyping" | "hideTyping"> | undefined;
   handleInboundMessage: (message: {
     sourceNumber: string;
@@ -144,6 +145,47 @@ describe("SignalSingleton", () => {
         content: "hello",
       },
     });
+  });
+
+  test("ignores a re-delivered message and forwards distinct ones", async () => {
+    Bun.env.SIGNAL_PHONE_NUMBER = "+100";
+    const signal = SignalSingleton.instance as unknown as TSignalSingletonInternals;
+    const adapter = MessagingAdapter.instance as unknown as {
+      handleInboundMessage: typeof MessagingAdapter.prototype.handleInboundMessage;
+    };
+    const handleInboundMessageMock = mock(async () => {});
+
+    adapter.handleInboundMessage = handleInboundMessageMock;
+
+    await signal.handleInboundMessage({ sourceNumber: "+200", message: "hello", timestamp: 123 });
+    await signal.handleInboundMessage({ sourceNumber: "+200", message: "hello", timestamp: 123 });
+    await signal.handleInboundMessage({ sourceNumber: "+200", message: "hello", timestamp: 124 });
+    await signal.handleInboundMessage({ sourceNumber: "+300", message: "hello", timestamp: 123 });
+
+    expect(handleInboundMessageMock).toHaveBeenCalledTimes(3);
+  });
+
+  test("forgets the oldest message once the seen limit is exceeded", async () => {
+    Bun.env.SIGNAL_PHONE_NUMBER = "+100";
+    const signal = SignalSingleton.instance as unknown as TSignalSingletonInternals;
+    const adapter = MessagingAdapter.instance as unknown as {
+      handleInboundMessage: typeof MessagingAdapter.prototype.handleInboundMessage;
+    };
+    const handleInboundMessageMock = mock(async () => {});
+
+    adapter.handleInboundMessage = handleInboundMessageMock;
+    signal.seenMessageKeysLimit = 2;
+
+    await signal.handleInboundMessage({ sourceNumber: "+200", message: "one", timestamp: 1 });
+    await signal.handleInboundMessage({ sourceNumber: "+200", message: "two", timestamp: 2 });
+    await signal.handleInboundMessage({ sourceNumber: "+200", message: "one", timestamp: 1 });
+
+    expect(handleInboundMessageMock).toHaveBeenCalledTimes(2);
+
+    await signal.handleInboundMessage({ sourceNumber: "+200", message: "three", timestamp: 3 });
+    await signal.handleInboundMessage({ sourceNumber: "+200", message: "one", timestamp: 1 });
+
+    expect(handleInboundMessageMock).toHaveBeenCalledTimes(4);
   });
 
   test("does not wait for typing indicator before forwarding inbound messages", async () => {
