@@ -11,6 +11,8 @@ export class SignalSingleton implements TMessageTransport {
   private setupPromise: TOption<Promise<void>>;
   private retryDelayMs = 2000;
   private setupBootGraceMs = 30_000;
+  private seenMessageKeys = new Set<string>();
+  private seenMessageKeysLimit = 200;
   public platform = EMessagePlatform.Signal;
 
   private constructor() {}
@@ -124,6 +126,24 @@ export class SignalSingleton implements TMessageTransport {
 
     if (message.message.trim().length === 0) {
       return;
+    }
+
+    // NOTE: a sender retrying after a network drop re-delivers the same message under the
+    // same timestamp, and signal-cli passes every copy through.
+    if (message.timestamp !== undefined) {
+      const messageKey = `${message.sourceNumber}:${message.timestamp}`;
+      if (this.seenMessageKeys.has(messageKey)) {
+        this.logger.info("handleInboundMessage: duplicate Signal message ignored");
+        return;
+      }
+
+      this.seenMessageKeys.add(messageKey);
+      if (this.seenMessageKeys.size > this.seenMessageKeysLimit) {
+        const oldestKey = this.seenMessageKeys.values().next().value;
+        if (oldestKey !== undefined) {
+          this.seenMessageKeys.delete(oldestKey);
+        }
+      }
     }
 
     const client = this.client;
