@@ -1,10 +1,32 @@
 import type { TOption } from "@bellaclaw/shared";
 
 export type TCalendarAccess = "read" | "write";
-export type TGoogleAccessRole = "freeBusyReader" | "reader" | "writer" | "owner";
+export enum ECalendarProvider {
+  Google = "google",
+  ICloud = "icloud",
+}
+
+export type TProviderCalendar = {
+  calendarId: string;
+  summary: TOption<string>;
+  readable: boolean;
+  writable: boolean;
+};
+
+export type TCalendarProvider = {
+  provider: ECalendarProvider;
+  setup(): Promise<void>;
+  discoverCalendars(signal?: AbortSignal): Promise<TProviderCalendar[]>;
+  probeCalendar(calendarId: string, signal?: AbortSignal): Promise<TProviderCalendar>;
+  listEvents(calendarId: string, args: TListEventsArguments): Promise<TCalendarEvent[]>;
+  createEvent(calendarId: string, args: TCreateEventArguments): Promise<TCalendarEvent>;
+  updateEvent(calendarId: string, args: TUpdateEventArguments): Promise<TCalendarEvent>;
+  deleteEvent(calendarId: string, args: TDeleteEventArguments): Promise<void>;
+};
 export type TRecurrenceScope = "occurrence" | "following" | "series";
 
 export type TCalendar = {
+  provider: ECalendarProvider;
   calendarId: string;
   access: TCalendarAccess;
   addedAt: number;
@@ -31,6 +53,7 @@ export type TCalendarPerson = {
 };
 
 export type TCalendarEvent = {
+  provider: ECalendarProvider;
   calendarId: string;
   id: string;
   etag: TOption<string>;
@@ -69,6 +92,7 @@ export type TCalendarEvent = {
 };
 
 export type TCalendarFailure = {
+  provider: ECalendarProvider;
   calendarId: string;
   error: string;
 };
@@ -77,6 +101,7 @@ export type TListEventsArguments = {
   userId: string;
   timeMin: string;
   timeMax: string;
+  timezone?: string;
   query?: string;
   signal?: AbortSignal;
 };

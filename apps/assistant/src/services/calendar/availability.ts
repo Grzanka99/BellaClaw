@@ -1,41 +1,5 @@
-import type { TOption } from "@bellaclaw/shared";
+import { calendarBoundary } from "./event-fields";
 import type { TAvailabilityResult, TBusyInterval, TCalendarEvent, TCalendarFailure } from "./types";
-
-function localMidnight(date: string, timezone: string): number {
-  const target = Date.parse(`${date}T00:00:00Z`);
-  let candidate = target;
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    const parts = new Intl.DateTimeFormat("en-CA", {
-      timeZone: timezone,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      hourCycle: "h23",
-    }).formatToParts(new Date(candidate));
-    const values = new Map(parts.map((part) => [part.type, part.value]));
-    const represented = Date.parse(
-      `${values.get("year")}-${values.get("month")}-${values.get("day")}T${values.get("hour")}:${values.get("minute")}:${values.get("second")}Z`,
-    );
-    candidate += target - represented;
-  }
-  return candidate;
-}
-
-function eventBoundary(
-  value: { date: TOption<string>; dateTime: TOption<string> },
-  timezone: string,
-): number {
-  if (value.dateTime !== undefined) {
-    return Date.parse(value.dateTime);
-  }
-  if (value.date !== undefined) {
-    return localMidnight(value.date, timezone);
-  }
-  return Number.NaN;
-}
 
 export function calculateAvailability(
   events: TCalendarEvent[],
@@ -48,8 +12,8 @@ export function calculateAvailability(
   const candidates = events
     .filter((event) => event.status !== "cancelled" && event.transparency !== "transparent")
     .map((event) => ({
-      start: eventBoundary(event.start, timezone),
-      end: eventBoundary(event.end, timezone),
+      start: calendarBoundary(event.start, event.start.timeZone ?? timezone),
+      end: calendarBoundary(event.end, event.end.timeZone ?? timezone),
       event,
     }))
     .filter(
