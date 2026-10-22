@@ -286,16 +286,16 @@ export async function beginMcpAuth(chatId: string, profileId: string): Promise<s
 
 export async function getMcpAuthStatus(chatId: string, profileId: string): Promise<boolean> {
   const profile = await getMcpProfile(profileId);
-  if (profile.transport.type !== "http" || profile.transport.oauth === undefined) {
-    throw new Error(`MCP profile ${profileId} does not use OAuth`);
+  if (!usesChatCredentials(profile)) {
+    throw new Error(`MCP profile ${profileId} does not use OAuth or tokenAuth`);
   }
   return credentialStore.hasTokens(credentialKey(chatId, profile));
 }
 
 export async function disconnectMcpAuth(chatId: string, profileId: string): Promise<boolean> {
   const profile = await getMcpProfile(profileId);
-  if (profile.transport.type !== "http" || profile.transport.oauth === undefined) {
-    throw new Error(`MCP profile ${profileId} does not use OAuth`);
+  if (!usesChatCredentials(profile)) {
+    throw new Error(`MCP profile ${profileId} does not use OAuth or tokenAuth`);
   }
 
   const key = credentialKey(chatId, profile);
@@ -312,6 +312,43 @@ export async function disconnectMcpAuth(chatId: string, profileId: string): Prom
     await listener(chatId, profileId);
   }
   return deleted;
+}
+
+export async function saveMcpAuthToken(
+  chatId: string,
+  profileId: string,
+  token: string,
+): Promise<void> {
+  const profile = await getMcpProfile(profileId);
+  if (profile.transport.type !== "http" || !profile.transport.tokenAuth) {
+    throw new Error(`MCP profile ${profileId} does not use tokenAuth`);
+  }
+
+  const key = credentialKey(chatId, profile);
+  await authQueue(key).enqueue(() =>
+    credentialStore.saveTokens(key, { access_token: token, token_type: "bearer" }),
+  );
+  // Live sessions still send the previous token.
+  for (const listener of disconnectListeners) {
+    await listener(chatId, profileId);
+  }
+}
+
+export async function getMcpAuthToken(
+  chatId: string,
+  profile: TMcpProfile,
+): Promise<TOption<string>> {
+  if (profile.transport.type !== "http" || !profile.transport.tokenAuth) {
+    return undefined;
+  }
+
+  const tokens = await credentialStore.tokens(credentialKey(chatId, profile));
+  if (tokens === undefined) {
+    throw new Error(
+      `MCP profile ${profile.id} needs a token. Run !mcp-auth token ${profile.id} TOKEN`,
+    );
+  }
+  return tokens.access_token;
 }
 
 export function registerMcpAuthDisconnectListener(listener: TDisconnectListener): () => void {
@@ -463,19 +500,26 @@ function callbackUrl(): string {
   return new URL(CALLBACK_PATH, `${publicUrl.replace(/\/$/, "")}/`).toString();
 }
 
+function usesChatCredentials(profile: TMcpProfile): boolean {
+  return (
+    profile.transport.type === "http" &&
+    (profile.transport.oauth !== undefined || profile.transport.tokenAuth)
+  );
+}
+
 function credentialKey(chatId: string, profile: TMcpProfile): string {
-  if (profile.transport.type !== "http" || profile.transport.oauth === undefined) {
-    throw new Error(`MCP profile ${profile.id} does not use OAuth`);
+  if (profile.transport.type !== "http" || !usesChatCredentials(profile)) {
+    throw new Error(`MCP profile ${profile.id} does not use OAuth or tokenAuth`);
   }
 
-  const clientIdEnv = profile.transport.oauth.clientIdEnv;
-  const clientSecretEnv = profile.transport.oauth.clientSecretEnv;
+  const clientIdEnv = profile.transport.oauth?.clientIdEnv;
+  const clientSecretEnv = profile.transport.oauth?.clientSecretEnv;
   const fingerprint = createHash("sha256")
     .update(
       JSON.stringify({
         url: profile.transport.url,
-        scopes: profile.transport.oauth.scopes,
-        authorizationParams: profile.transport.oauth.authorizationParams,
+        scopes: profile.transport.oauth?.scopes,
+        authorizationParams: profile.transport.oauth?.authorizationParams,
         clientIdEnv,
         clientId: clientIdEnv === undefined ? undefined : Bun.env[clientIdEnv],
         clientSecretEnv,

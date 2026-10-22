@@ -23,23 +23,28 @@ export const SMcpProfile = z.object({
       args: z.array(z.string()).default([]),
       env: z.record(z.string(), z.string()).default({}),
     }),
-    z.object({
-      type: z.literal("http"),
-      url: z
-        .string()
-        .transform((url) =>
-          url.replace(/\$\{([A-Z][A-Z0-9_]*)(?::-([^}]*))?\}/g, (_match, name, fallback) => {
-            const value = Bun.env[name]?.trim();
-            if (value !== undefined && value.length > 0) {
-              return value;
-            }
-            return fallback ?? "";
-          }),
-        )
-        .pipe(z.url()),
-      headers: z.record(z.string(), z.string()).default({}),
-      oauth: SOAuth.optional(),
-    }),
+    z
+      .object({
+        type: z.literal("http"),
+        url: z
+          .string()
+          .transform((url) =>
+            url.replace(/\$\{([A-Z][A-Z0-9_]*)(?::-([^}]*))?\}/g, (_match, name, fallback) => {
+              const value = Bun.env[name]?.trim();
+              if (value !== undefined && value.length > 0) {
+                return value;
+              }
+              return fallback ?? "";
+            }),
+          )
+          .pipe(z.url()),
+        headers: z.record(z.string(), z.string()).default({}),
+        oauth: SOAuth.optional(),
+        tokenAuth: z.boolean().default(false),
+      })
+      .refine((transport) => transport.oauth === undefined || !transport.tokenAuth, {
+        message: "MCP profile cannot use both oauth and tokenAuth",
+      }),
   ]),
   tools: z.array(z.string()).optional(),
   contextArguments: z.record(z.string(), z.enum(["chatId", "turnId"])).default({}),

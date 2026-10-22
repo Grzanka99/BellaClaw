@@ -4,8 +4,21 @@
       "id": "logs",
       "description": "Inspect BellaClaw failures, turn latency, and model prompt-cache usage.",
       "instructions": "Use the log server to answer operational questions. Recently means the last hour. Last call means the previous completed conversational turn. Cache hit rate means the previous ten completed user turns in the current chat, including specialist calls. Use server aggregates; never average percentages or sum overlapping durations. Distinguish measured timings from inferred causes. The runtime supplies current chat and diagnostic turn identifiers. Resources and explicitly requested server prompt templates are available.",
-      "transport": { "type": "http", "url": "${BELLACLAW_LOGS_MCP_URL:-http://127.0.0.1:8989/mcp}" },
+      "transport": {
+        "type": "http",
+        "url": "${BELLACLAW_LOGS_MCP_URL:-http://127.0.0.1:8989/mcp}"
+      },
       "contextArguments": { "chatId": "chatId", "excludeTurnId": "turnId" }
+    },
+    {
+      "id": "vault",
+      "description": "Read, search, and edit the user's Obsidian notes.",
+      "instructions": "Use the vault server for the user's Obsidian notes. Paths are vault-relative, such as \"Projects/Plan.md\". Search or list before guessing a path. Read a note before changing it; prefer edit_note or append_to_note over rewriting the whole note, and pass the hash from read_note as expected_hash to write_note. Move or delete notes only when the user asked for it. If the server reports a missing or rejected token, tell the user to run !mcp-auth token vault TOKEN with a token from `mcp-vault token create`.",
+      "transport": {
+        "type": "http",
+        "url": "${BELLACLAW_VAULT_MCP_URL:-http://127.0.0.1:8787/mcp}",
+        "tokenAuth": true
+      }
     }
   ]
 }

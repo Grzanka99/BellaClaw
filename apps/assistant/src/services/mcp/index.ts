@@ -9,7 +9,12 @@ import {
   ResourceUpdatedNotificationSchema,
   ToolListChangedNotificationSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { createMcpAuthFetch, getMcpAuthProvider, registerMcpAuthDisconnectListener } from "./auth";
+import {
+  createMcpAuthFetch,
+  getMcpAuthProvider,
+  getMcpAuthToken,
+  registerMcpAuthDisconnectListener,
+} from "./auth";
 import { getMcpProfile } from "./config";
 import { discoverTools, requestOptions, type TMcpToolContext } from "./tools";
 import type { TMcpOpenArgs, TMcpSession } from "./types";
@@ -76,10 +81,15 @@ export class McpService {
         stderr: "ignore",
       });
     } else {
+      const headers = { ...profile.transport.headers };
+      const token = await getMcpAuthToken(args.chatId, profile);
+      if (token !== undefined) {
+        headers.Authorization = `Bearer ${token}`;
+      }
       transport = new StreamableHTTPClientTransport(new URL(profile.transport.url), {
         authProvider: await getMcpAuthProvider(args.chatId, profile),
         fetch: createMcpAuthFetch(args.chatId, profile.id),
-        requestInit: { headers: profile.transport.headers },
+        requestInit: { headers },
       });
     }
     let closed = false;

@@ -6,7 +6,7 @@ not a new agent or tool implementation.
 
 ## Configure profiles
 
-The repository includes `mcp.json` with the logs profile enabled. It needs no OAuth connection:
+The repository includes `mcp.json` with the logs and vault profiles enabled. Logs needs no OAuth connection:
 Main and ScheduledTask can use it as soon as the log viewer is running. `bun run dev` uses the
 local viewer at `127.0.0.1:8989`; Compose supplies `http://log-viewer:8989/mcp` automatically.
 MCP connections open when needed rather than occupying a permanent session for each chat.
@@ -32,7 +32,9 @@ Each profile contains:
 | `requestTimeoutMs` | Request timeout allowance, default 120000 |
 | `inputTimeoutMs` | User-input wait allowance, default 900000 |
 
-HTTP URLs can use `${ENV_NAME:-fallback}` to select an endpoint at runtime.
+HTTP URLs can use `${ENV_NAME:-fallback}` to select an endpoint at runtime. Set
+`"tokenAuth": true` on an HTTP transport when each chat supplies its own bearer token (see
+[Per-chat tokens](#per-chat-tokens)); it cannot be combined with `oauth`.
 
 The stdio command is executed directly with an argument array. Its process receives the SDK's
 minimal default environment plus the profile's `env` values. HTTP headers are operator supplied.
@@ -67,6 +69,7 @@ Commands use the existing `!` prefix:
 !mcp-prompts logs
 !mcp-prompt logs diagnose-turn {"turnId":"message:…","chatId":"discord:…"}
 !mcp-auth connect PROFILE
+!mcp-auth token PROFILE TOKEN
 !mcp-auth status PROFILE
 !mcp-auth disconnect PROFILE
 ```
@@ -113,6 +116,36 @@ live connections for the profile.
 OAuth belongs to the HTTP MCP connection. A server may separately use URL elicitation for its
 own upstream-account onboarding. The assistant shows that URL to the user; it does not collect
 those credentials in chat.
+
+## Per-chat tokens
+
+For an HTTP profile with `"tokenAuth": true`, each chat runs `!mcp-auth token PROFILE TOKEN`.
+The token is sent as `Authorization: Bearer TOKEN` on that chat's connections only. It is stored
+with the OAuth credentials and bound to the profile URL, so changing the URL requires a new token.
+Saving a new token closes the chat's live connections for the profile. `status` and `disconnect`
+work as for OAuth. Commands are answered directly: the token never reaches the model, the
+conversation history or the behavior logs. It does stay in the chat platform's message history,
+so prefer a direct message and a token you can revoke.
+
+## Obsidian vault
+
+The `vault` profile connects to an [mcp-vault](https://github.com/Grzanka99/vault-sync-and-mcp)
+server, which syncs an Obsidian vault and exposes it over MCP. The profile uses
+`BELLACLAW_VAULT_MCP_URL` when set, otherwise `http://127.0.0.1:8787/mcp`. With Compose, point it
+at an address the container can reach, such as `http://host.containers.internal:8787/mcp`.
+
+Create a token on the vault server and give it to the chat:
+
+```sh
+pnpm server token create USERNAME bellaclaw
+```
+
+```text
+!mcp-auth token vault mv_…
+```
+
+On the same machine, the contents of the server's `data/local-agent.token` also work. Revoke
+a token with `pnpm server token revoke ID`.
 
 ## Logs server
 
