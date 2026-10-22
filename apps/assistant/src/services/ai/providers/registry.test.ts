@@ -55,9 +55,9 @@ describe("AI provider registry", () => {
     });
     expect(getAiModelConfigs(EAiProvider.OpencodeGo, {})).toMatchObject({
       [EModelPurpose.Utility]: { model: "deepseek-v4-pro" },
-      [EModelPurpose.Main]: { model: "grok-4.6" },
+      [EModelPurpose.Main]: { model: "grok-4.7" },
       [EModelPurpose.Specialist]: { model: "deepseek-v4-pro" },
-      [EModelPurpose.SpecialistAccurate]: { model: "grok-4.6" },
+      [EModelPurpose.SpecialistAccurate]: { model: "grok-4.7" },
       [EModelPurpose.ScheduledTask]: { model: "deepseek-v4-pro" },
     });
     expect(getAiModelConfigs(EAiProvider.Ollama, {})).toMatchObject({
@@ -202,7 +202,7 @@ describe("OpenCode Go catalog refresh", () => {
     Bun.env.OPENCODE_API_KEY = "catalog-test-key";
     previousProvider = aiModels.getProvider(EAiProvider.OpencodeGo);
     await dropStoredCatalog();
-    aiModels.setProvider(opencodeGoProvider(["grok-4.6", "deepseek-v4-pro"]));
+    aiModels.setProvider(opencodeGoProvider(["grok-4.7", "deepseek-v4-pro"]));
     fetchMock = spyOn(globalThis, "fetch");
     fetchMock.mockImplementation(async (input) => catalogResponse(input));
   });
