@@ -599,7 +599,7 @@ describe("AgentHarness", () => {
     Bun.env.OPENCODE_API_KEY = "opencode-test-key";
     const opencode = fauxProvider({
       provider: EAiProvider.OpencodeGo,
-      models: [{ id: "grok-4.6", reasoning: true }],
+      models: [{ id: "grok-4.7", reasoning: true }],
     });
     aiModels.setProvider(opencode.provider);
     const expectedSessionId = new Bun.CryptoHasher("sha256", "opencode-test-key")
@@ -720,7 +720,7 @@ describe("AgentHarness", () => {
     const opencode = fauxProvider({
       provider: EAiProvider.OpencodeGo,
       models: [
-        { id: "grok-4.6", reasoning: true },
+        { id: "grok-4.7", reasoning: true },
         { id: "deepseek-v4-pro", reasoning: true },
       ],
     });
@@ -817,7 +817,7 @@ describe("AgentHarness", () => {
     Bun.env.OPENCODE_API_KEY = "opencode-test-key";
     const opencode = fauxProvider({
       provider: EAiProvider.OpencodeGo,
-      models: [{ id: "grok-4.6", reasoning: true }],
+      models: [{ id: "grok-4.7", reasoning: true }],
     });
     aiModels.setProvider(opencode.provider);
     const expectedSessionId = new Bun.CryptoHasher("sha256", "opencode-test-key")
@@ -855,7 +855,7 @@ describe("AgentHarness", () => {
     delete Bun.env.OPENCODE_API_KEY;
     const opencode = fauxProvider({
       provider: EAiProvider.OpencodeGo,
-      models: [{ id: "grok-4.6", reasoning: true }],
+      models: [{ id: "grok-4.7", reasoning: true }],
     });
     opencode.setResponses([fauxAssistantMessage("must not stream")]);
     aiModels.setProvider(opencode.provider);

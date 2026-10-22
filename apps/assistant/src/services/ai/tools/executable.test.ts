@@ -297,7 +297,7 @@ describe("production executable tools", () => {
     fetchMock.mockImplementation(async (input) => {
       if (String(input).endsWith("/models")) {
         return Response.json({
-          data: [{ id: "grok-4.6" }, { id: "deepseek-v4-pro" }, { id: currentModel }],
+          data: [{ id: "grok-4.7" }, { id: "deepseek-v4-pro" }, { id: currentModel }],
         });
       }
       return Response.json({

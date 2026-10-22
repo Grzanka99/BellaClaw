@@ -10,7 +10,7 @@ import {
 import { opencodeGoProvider as bundledOpencodeGoProvider } from "@earendil-works/pi-ai/providers/opencode-go";
 import { z } from "zod";
 
-const BASE_URL = "https://opencode.ai/zen/go";
+const BASE_URL = "https://opencode.ai/inference/go";
 const CATALOG_TTL = 60 * 60 * 1000;
 const RETRY_COOLDOWN = 5 * 60 * 1000;
 const SModelList = z.object({ data: z.array(z.object({ id: z.string().min(1) })) });

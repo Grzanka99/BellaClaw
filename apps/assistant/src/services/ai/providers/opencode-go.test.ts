@@ -87,12 +87,12 @@ describe("OpenCode Go discovery", () => {
     );
     expect(models.getModel("opencode-go", "anthropic-current")).toMatchObject({
       api: "anthropic-messages",
-      baseUrl: "https://opencode.ai/zen/go",
+      baseUrl: "https://opencode.ai/inference/go",
       compat: { forceAdaptiveThinking: true, supportsTemperature: false },
     });
     expect(models.getModel("opencode-go", "responses-current")).toMatchObject({
       api: "openai-responses",
-      baseUrl: "https://opencode.ai/zen/go/v1",
+      baseUrl: "https://opencode.ai/inference/go/v1",
       compat: { sessionAffinityFormat: "openai-nosession" },
     });
     const model = models.getModel("opencode-go", "completions-current");
@@ -172,17 +172,17 @@ describe("OpenCode Go discovery", () => {
   test("keeps required bundled models that the live list omits", async () => {
     serveCatalog(["completions-current"], { "completions-current": metadata });
     const models = createModels();
-    models.setProvider(opencodeGoProvider(["grok-4.6"]));
+    models.setProvider(opencodeGoProvider(["grok-4.7"]));
     await models.refresh();
     expect(models.getModels().map((model) => model.id)).toEqual([
       "completions-current",
-      "grok-4.6",
+      "grok-4.7",
     ]);
     serveCatalog([], {});
     expect((await models.refresh({ force: true })).errors.has("opencode-go")).toBe(true);
     expect(models.getModels().map((model) => model.id)).toEqual([
       "completions-current",
-      "grok-4.6",
+      "grok-4.7",
     ]);
   });
 
@@ -191,11 +191,11 @@ describe("OpenCode Go discovery", () => {
     const store = new InMemoryModelsStore();
     await collection(store).refresh();
     const restored = createModels({ modelsStore: store });
-    restored.setProvider(opencodeGoProvider(["grok-4.6"]));
+    restored.setProvider(opencodeGoProvider(["grok-4.7"]));
     await restored.refresh({ allowNetwork: false });
     expect(restored.getModels().map((model) => model.id)).toEqual([
       "completions-current",
-      "grok-4.6",
+      "grok-4.7",
     ]);
   });
 
@@ -243,7 +243,7 @@ describe("OpenCode Go discovery", () => {
     );
     expect(reply.content).toEqual([{ type: "text", text: "Hello" }]);
     expect(reply.stopReason).toBe("stop");
-    expect(request?.url).toBe("https://opencode.ai/zen/go/v1/chat/completions");
+    expect(request?.url).toBe("https://opencode.ai/inference/go/v1/chat/completions");
     expect(request?.headers.get("x-opencode-session")).toBe("conversation-session");
     expect(request?.headers.get("authorization")).toBe("Bearer catalog-test-key");
   });
