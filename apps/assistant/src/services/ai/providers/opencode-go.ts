@@ -122,6 +122,7 @@ function modelFromMetadata(id: string, metadata: unknown): TOption<Model<Api>> {
         compat: {
           supportsTemperature: source.temperature,
           forceAdaptiveThinking: thinkingLevelMap !== undefined,
+          supportsMidConvoEffort: thinkingLevelMap !== undefined,
         },
       };
     case "@ai-sdk/openai":
@@ -154,8 +155,18 @@ function modelFromMetadata(id: string, metadata: unknown): TOption<Model<Api>> {
 
 export function opencodeGoProvider(requiredModelIds: readonly string[]): Provider {
   const bundled = bundledOpencodeGoProvider();
-  const baseline = new Map(bundled.getModels().map((model) => [model.id, model]));
-  let catalog: readonly Model<Api>[] = bundled.getModels();
+  const baseline = new Map<string, Model<Api>>();
+  for (const model of bundled.getModels()) {
+    if (model.api === "anthropic-messages" && model.reasoning) {
+      baseline.set(model.id, {
+        ...model,
+        compat: { ...model.compat, supportsMidConvoEffort: true },
+      });
+    } else {
+      baseline.set(model.id, model);
+    }
+  }
+  let catalog: readonly Model<Api>[] = [...baseline.values()];
   let checkedAt = 0;
   let attemptedAt = 0;
   // Required models must stay resolvable even when a catalog omits them.

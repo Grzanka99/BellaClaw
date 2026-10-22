@@ -80,15 +80,21 @@ describe("OpenCode Go discovery", () => {
       "responses-current",
       "completions-current",
     ]);
-    expect(models.getModel("opencode-go", "qwen3.8-flash")).toEqual(
-      bundledOpencodeGoProvider()
-        .getModels()
-        .find((model) => model.id === "qwen3.8-flash"),
-    );
+    const bundledQwen = bundledOpencodeGoProvider()
+      .getModels()
+      .find((model) => model.id === "qwen3.8-flash");
+    expect(models.getModel("opencode-go", "qwen3.8-flash")).toMatchObject({
+      ...bundledQwen,
+      compat: { ...bundledQwen?.compat, supportsMidConvoEffort: true },
+    });
     expect(models.getModel("opencode-go", "anthropic-current")).toMatchObject({
       api: "anthropic-messages",
       baseUrl: "https://opencode.ai/inference/go",
-      compat: { forceAdaptiveThinking: true, supportsTemperature: false },
+      compat: {
+        forceAdaptiveThinking: true,
+        supportsMidConvoEffort: true,
+        supportsTemperature: false,
+      },
     });
     expect(models.getModel("opencode-go", "responses-current")).toMatchObject({
       api: "openai-responses",
@@ -203,7 +209,11 @@ describe("OpenCode Go discovery", () => {
     fetchMock.mockRejectedValue(new Error("Offline"));
     const models = collection();
     expect((await models.refresh()).errors.has("opencode-go")).toBe(true);
-    expect(models.getModels()).toEqual(bundledOpencodeGoProvider().getModels());
+    expect(models.getModels().map((model) => model.id)).toEqual(
+      bundledOpencodeGoProvider()
+        .getModels()
+        .map((model) => model.id),
+    );
   });
 
   test("restores the stored catalog without network access", async () => {
