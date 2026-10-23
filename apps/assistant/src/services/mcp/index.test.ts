@@ -65,8 +65,10 @@ describe("MCP runtime", () => {
   test("loads the default logs profile for local and Compose URLs", async () => {
     const configPath = Bun.env.BELLACLAW_MCP_CONFIG;
     const previousLogsUrl = Bun.env.BELLACLAW_LOGS_MCP_URL;
+    const previousVaultUrl = Bun.env.BELLACLAW_VAULT_MCP_URL;
     delete Bun.env.BELLACLAW_MCP_CONFIG;
     delete Bun.env.BELLACLAW_LOGS_MCP_URL;
+    delete Bun.env.BELLACLAW_VAULT_MCP_URL;
     try {
       const localProfiles = await loadMcpProfiles();
       expect(localProfiles.map((profile) => profile.id)).toEqual(["logs", "vault"]);
@@ -94,6 +96,9 @@ describe("MCP runtime", () => {
         delete Bun.env.BELLACLAW_LOGS_MCP_URL;
       } else {
         Bun.env.BELLACLAW_LOGS_MCP_URL = previousLogsUrl;
+      }
+      if (previousVaultUrl !== undefined) {
+        Bun.env.BELLACLAW_VAULT_MCP_URL = previousVaultUrl;
       }
     }
   });
@@ -398,6 +403,7 @@ describe("MCP runtime", () => {
       await configure({
         type: "http",
         url: `http://127.0.0.1:${http.port}/mcp`,
+        headers: { authorization: "Bearer operator-token" },
         tokenAuth: true,
       });
       await expect(service.open({ chatId: "a", profileId: "fixture" })).rejects.toThrow(

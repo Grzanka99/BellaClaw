@@ -81,10 +81,10 @@ export class McpService {
         stderr: "ignore",
       });
     } else {
-      const headers = { ...profile.transport.headers };
+      const headers = new Headers(profile.transport.headers);
       const token = await getMcpAuthToken(args.chatId, profile);
       if (token !== undefined) {
-        headers.Authorization = `Bearer ${token}`;
+        headers.set("Authorization", `Bearer ${token}`);
       }
       transport = new StreamableHTTPClientTransport(new URL(profile.transport.url), {
         authProvider: await getMcpAuthProvider(args.chatId, profile),
