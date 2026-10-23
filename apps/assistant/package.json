@@ -10,6 +10,7 @@
     "check": "bunx @biomejs/biome check .",
     "db": "bun --env-file=../../.env --bun drizzle-kit",
     "dev": "bun run auth:seed-local && bun --env-file=../../.env run --watch src/index.ts",
+    "embeddings:rebuild": "bun --env-file=../../.env run scripts/rebuild-embeddings.ts",
     "start": "bun --env-file=../../.env run src/index.ts",
     "test": "bun test",
     "typecheck": "bunx tsc --noEmit"

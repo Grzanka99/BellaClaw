@@ -3,7 +3,7 @@ import { z } from "zod";
 import { EMBEDDING_DIMENSIONS } from "../database/schema";
 
 const DEFAULT_BASE_URL = "http://localhost:11434";
-const EMBEDDING_MODEL = "paraphrase-multilingual";
+const DEFAULT_MODEL = "embeddinggemma-2:270m-f32-text";
 const MAX_INPUT_LENGTH = 800;
 const REQUEST_TIMEOUT_MS = 30_000;
 
@@ -17,6 +17,7 @@ export class EmbeddingClient {
   // NOTE: deliberately not OLLAMA_BASE_URL — that one points at the Ollama LLM provider, which
   // may be a different host that serves no embedding model
   private baseUrl = (Bun.env.BELLACLAW_EMBEDDING_BASE_URL ?? DEFAULT_BASE_URL).replace(/\/+$/, "");
+  public readonly model = Bun.env.BELLACLAW_EMBEDDING_MODEL?.trim() || DEFAULT_MODEL;
 
   private constructor() {}
 
@@ -46,7 +47,7 @@ export class EmbeddingClient {
           "content-type": "application/json",
         },
         body: JSON.stringify({
-          model: EMBEDDING_MODEL,
+          model: this.model,
           input: cappedInputs,
         }),
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
