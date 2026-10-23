@@ -4,6 +4,7 @@ import { EmbeddingClient } from ".";
 
 const originalFetch = globalThis.fetch;
 const originalBaseUrl = Bun.env.BELLACLAW_EMBEDDING_BASE_URL;
+const originalModel = Bun.env.BELLACLAW_EMBEDDING_MODEL;
 
 type TEmbeddingClientStatic = {
   _instance: TOption<EmbeddingClient>;
@@ -23,6 +24,7 @@ function embeddingResponse(embeddings: number[][]): Response {
 describe("EmbeddingClient", () => {
   beforeEach(() => {
     Bun.env.BELLACLAW_EMBEDDING_BASE_URL = "http://embedding.test:11434";
+    delete Bun.env.BELLACLAW_EMBEDDING_MODEL;
     EmbeddingClientWithInternals._instance = undefined;
   });
 
@@ -35,6 +37,30 @@ describe("EmbeddingClient", () => {
     } else {
       Bun.env.BELLACLAW_EMBEDDING_BASE_URL = originalBaseUrl;
     }
+
+    if (originalModel === undefined) {
+      delete Bun.env.BELLACLAW_EMBEDDING_MODEL;
+    } else {
+      Bun.env.BELLACLAW_EMBEDDING_MODEL = originalModel;
+    }
+  });
+
+  test("uses the embedding model configured in the environment", async () => {
+    Bun.env.BELLACLAW_EMBEDDING_MODEL = "another-embedding-model";
+    const fetchMock = mock(async () => embeddingResponse([makeEmbedding(1)]));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    await EmbeddingClient.instance.embed("The user prefers short answers.");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://embedding.test:11434/api/embed",
+      expect.objectContaining({
+        body: JSON.stringify({
+          model: "another-embedding-model",
+          input: ["The user prefers short answers."],
+        }),
+      }),
+    );
   });
 
   test("returns 768-dimensional embeddings", async () => {
@@ -54,7 +80,7 @@ describe("EmbeddingClient", () => {
         "content-type": "application/json",
       },
       body: JSON.stringify({
-        model: "paraphrase-multilingual",
+        model: "embeddinggemma-2:270m-f32-text",
         input: ["pierwszy", "second"],
       }),
       signal: expect.any(AbortSignal),
@@ -73,7 +99,7 @@ describe("EmbeddingClient", () => {
         "content-type": "application/json",
       },
       body: JSON.stringify({
-        model: "paraphrase-multilingual",
+        model: "embeddinggemma-2:270m-f32-text",
         input: ["a".repeat(800), "b".repeat(800)],
       }),
       signal: expect.any(AbortSignal),

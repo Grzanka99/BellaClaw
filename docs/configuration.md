@@ -30,6 +30,8 @@ BellaClaw.
 | --- | --- | --- |
 | `OPENROUTER_API_KEY` | — | Required when the active provider is `openrouter`. |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama server URL. |
+| `BELLACLAW_EMBEDDING_BASE_URL` | `http://localhost:11434` | Separate Ollama endpoint for embeddings; Compose uses `http://ollama:11434`. |
+| `BELLACLAW_EMBEDDING_MODEL` | `embeddinggemma-2:270m-f32-text` | Embedding model returning 768 dimensions. |
 | `TAVILY_API_KEY` | — | Enables web search. |
 | `BELLACLAW_AI_CREDENTIALS_PATH` | `.secrets/pi-auth.json` | Pi credential-store path. |
 
@@ -42,6 +44,55 @@ The default provider is `opencode-go`. You can ask BellaClaw in chat to switch b
 
 OpenAI Codex uses stored OAuth credentials instead of an API key. See
 [Deployment](deployment.md#openai-codex-subscription).
+
+## Embeddings
+
+**Default:** `embeddinggemma-2:270m-f32-text` — text-only FP32, 768 dimensions.
+Tested with Ollama 0.40.8 in Podman, on CPU.
+
+### Import the model once
+
+1. Convert `google/embeddinggemma-2` with
+   [llama.cpp's converter](https://github.com/ggml-org/llama.cpp/blob/master/convert_hf_to_gguf.py).
+2. Use `--outtype f32 --outfile embeddinggemma-2-270m-f32.gguf`.
+3. Import the GGUF into Ollama:
+
+```bash
+podman compose pull ollama
+podman compose up -d ollama
+podman cp embeddinggemma-2-270m-f32.gguf bellaclaw-ollama:/tmp/embeddinggemma-2-270m-f32.gguf
+podman exec -i bellaclaw-ollama sh -c 'cat > /tmp/Modelfile' <<'EOF'
+FROM /tmp/embeddinggemma-2-270m-f32.gguf
+PARAMETER num_ctx 8192
+PARAMETER num_thread 2
+PARAMETER num_gpu 0
+EOF
+podman exec bellaclaw-ollama ollama create embeddinggemma-2:270m-f32-text -f /tmp/Modelfile
+```
+
+### Rebuild fact embeddings
+
+Back up the database first. To use another model, set `BELLACLAW_EMBEDDING_MODEL` in `.env`.
+
+Stop the assistant, keep Ollama running, then rebuild:
+
+```bash
+podman compose stop bellaclaw
+podman compose build bellaclaw
+bun run server:rebuild-embeddings
+podman compose up -d bellaclaw
+```
+
+- Reuses existing fact text and the app's embedding client.
+- Rebuilds all facts, including superseded and forgotten ones.
+- Updates vectors in one transaction. Other data stays intact.
+- Failure keeps the previous vectors. Fix the cause and rerun.
+
+**Host command:** Set the endpoint in `.env`, then run:
+
+```bash
+bun run --cwd apps/assistant embeddings:rebuild
+```
 
 ## Messaging
 

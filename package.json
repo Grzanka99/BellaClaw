@@ -16,6 +16,7 @@
     "logs:ui": "bun run --cwd apps/log-viewer start",
     "server:down": "podman compose --profile signal down",
     "server:init": "bun run auth:seed-local && podman compose --profile signal build && podman compose --profile signal up -d",
+    "server:rebuild-embeddings": "podman compose run --rm --no-deps bellaclaw bun run --cwd apps/assistant embeddings:rebuild",
     "server:reset-auth": "bun run --cwd apps/assistant auth:reset-local",
     "server:update": "bun run auth:seed-local && podman compose --profile signal build --no-cache && podman compose --profile signal up -d --force-recreate",
     "start": "turbo run start",
