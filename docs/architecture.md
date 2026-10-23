@@ -44,7 +44,7 @@ Main can use web tools and delegate to:
 
 | Specialist | Responsibility |
 | --- | --- |
-| Calendar | Read and manage Google Calendar events and calendar access. |
+| Calendar | Read and manage Google and iCloud events through the calendar adapter. |
 | Memory | Search and manage stored conversation facts. |
 | Settings | Read and update per-chat settings. |
 | Scheduling | Create, update, list, and remove reminders or recurring tasks. |

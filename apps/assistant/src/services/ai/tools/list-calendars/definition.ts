@@ -5,6 +5,6 @@ export const LIST_CALENDARS_TOOL = "list-calendars";
 
 export const listCalendarsTool = createToolDefinition(
   LIST_CALENDARS_TOOL,
-  "List configured calendars with stored access, live Google summaries, and per-source errors.",
+  "List configured calendars with stored access, live provider summaries, and per-source errors.",
   SListCalendarsArgs,
 );

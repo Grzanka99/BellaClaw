@@ -26,7 +26,10 @@
     "discord.js": "^14.25.1",
     "drizzle-orm": "^0.45.2",
     "entities": "^7.0.1",
+    "ical.js": "^2.2.1",
     "rrule": "2.8.1",
+    "timezones-ical-library": "^2.3.2",
+    "tsdav": "^2.4.0",
     "turndown": "^7.2.4",
     "typebox": "1.1.38",
     "zod": "^4.3.6"

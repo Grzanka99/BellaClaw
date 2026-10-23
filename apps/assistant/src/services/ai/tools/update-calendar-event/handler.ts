@@ -1,4 +1,5 @@
 import { type Static, Type } from "@earendil-works/pi-ai";
+import { validateRecurrence } from "../../../calendar/event-fields";
 import type { TUpdateEventPatch } from "../../../calendar/types";
 import {
   SCreateCalendarEventArgs,
@@ -77,8 +78,8 @@ export function validateUpdateCalendarEventArgs(args: TUpdateCalendarEventArgs):
       transparency,
       recurrence,
     });
-  } else if (recurrence?.some((line) => !/^(RRULE|RDATE|EXDATE)(?:;[^:]*)?:/.test(line))) {
-    throw new Error("Recurrence lines must start with RRULE:, RDATE:, or EXDATE:");
+  } else if (recurrence !== undefined) {
+    validateRecurrence(recurrence);
   }
 
   return patch;
