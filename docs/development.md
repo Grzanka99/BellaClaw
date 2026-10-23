@@ -75,3 +75,12 @@ bunx @biomejs/biome check . --write
 
 The assistant owns its Drizzle test preload. Behavior-log and viewer tests run independently and do
 not initialize the assistant database.
+
+## GitHub Actions
+
+- Tests + lint: PRs and pushes to `main`.
+- Bun: version from `package.json`; frozen installs, lifecycle scripts disabled.
+- PR security: OpenCode Go, `opencode-go/glm-5.3-flash`, `max`.
+- Security review skips drafts, forks, and Dependabot PRs.
+- Setup: install OpenCode GitHub App; set `OPENCODE_API_KEY` Actions secret to Go API key.
+- Findings: PR comments only; no workflow failure.
