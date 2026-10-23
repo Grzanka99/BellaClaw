@@ -1,12 +1,5 @@
 import { AppLogger, EBehaviorLogLevel, type TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
-import type { TOption } from "@bellaclaw/shared";
-import {
-  type Api,
-  contentText,
-  type Model,
-  type Models,
-  type ThinkingLevel,
-} from "@earendil-works/pi-ai";
+import { type Api, contentText, type Model, type Models } from "@earendil-works/pi-ai";
 import {
   calculateContextTokens,
   estimateMessageTokens,
@@ -23,7 +16,6 @@ export async function compactConversation(
   state: TConversation,
   models: Models,
   model: Model<Api>,
-  thinkingLevel: TOption<ThinkingLevel>,
   fixedTokens: number,
   trace?: TBehaviorTraceContext,
 ) {
@@ -122,7 +114,8 @@ export async function compactConversation(
   const options = {
     maxTokens: Math.min(Math.floor(0.8 * SUMMARY_RESERVE), model.maxTokens),
     signal: AbortSignal.timeout(120_000),
-    reasoning: thinkingLevel,
+    // Thinking shares the maxTokens cap and can leave no room for the summary text.
+    reasoning: undefined,
     cacheRetention: "none",
     sessionId: crypto.randomUUID(),
   } satisfies Parameters<Models["completeSimple"]>[2];
@@ -146,9 +139,13 @@ export async function compactConversation(
   if (result.stopReason === "error" || result.stopReason === "aborted") {
     throw new Error(result.errorMessage ?? "Conversation summarization failed");
   }
+  const diagnostics = `stopReason=${result.stopReason}, output=${result.usage.output}, reasoning=${result.usage.reasoning ?? "n/a"}`;
+  if (result.stopReason === "length") {
+    throw new Error(`Compaction summary hit the token cap (${diagnostics})`);
+  }
   const summary = contentText(result.content);
   if (summary.trim().length === 0) {
-    throw new Error("Compaction returned an empty summary");
+    throw new Error(`Compaction returned an empty summary (${diagnostics})`);
   }
   const compacted: TConversation = {
     ...state,

@@ -8,6 +8,7 @@ import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import { Value } from "typebox/value";
+import { disconnectMcpAuth, getMcpAuthStatus, saveMcpAuthToken } from "./auth";
 import { loadMcpProfiles } from "./config";
 import { mcpResult } from "./content";
 import { createFixtureServer } from "./fixtures/server";
@@ -64,14 +65,21 @@ describe("MCP runtime", () => {
   test("loads the default logs profile for local and Compose URLs", async () => {
     const configPath = Bun.env.BELLACLAW_MCP_CONFIG;
     const previousLogsUrl = Bun.env.BELLACLAW_LOGS_MCP_URL;
+    const previousVaultUrl = Bun.env.BELLACLAW_VAULT_MCP_URL;
     delete Bun.env.BELLACLAW_MCP_CONFIG;
     delete Bun.env.BELLACLAW_LOGS_MCP_URL;
+    delete Bun.env.BELLACLAW_VAULT_MCP_URL;
     try {
       const localProfiles = await loadMcpProfiles();
-      expect(localProfiles.map((profile) => profile.id)).toEqual(["logs"]);
+      expect(localProfiles.map((profile) => profile.id)).toEqual(["logs", "vault"]);
       expect(localProfiles[0]?.transport).toMatchObject({
         type: "http",
         url: "http://127.0.0.1:8989/mcp",
+      });
+      expect(localProfiles[1]?.transport).toMatchObject({
+        type: "http",
+        url: "http://127.0.0.1:8787/mcp",
+        tokenAuth: true,
       });
 
       Bun.env.BELLACLAW_LOGS_MCP_URL = "http://log-viewer:8989/mcp";
@@ -88,6 +96,9 @@ describe("MCP runtime", () => {
         delete Bun.env.BELLACLAW_LOGS_MCP_URL;
       } else {
         Bun.env.BELLACLAW_LOGS_MCP_URL = previousLogsUrl;
+      }
+      if (previousVaultUrl !== undefined) {
+        Bun.env.BELLACLAW_VAULT_MCP_URL = previousVaultUrl;
       }
     }
   });
@@ -109,6 +120,13 @@ describe("MCP runtime", () => {
       oauth: { clientSecretEnv: "SECRET" },
     });
     await expect(loadMcpProfiles()).rejects.toThrow("clientSecretEnv requires clientIdEnv");
+    await configure({
+      type: "http",
+      url: "https://example.com/mcp",
+      oauth: {},
+      tokenAuth: true,
+    });
+    await expect(loadMcpProfiles()).rejects.toThrow("cannot use both oauth and tokenAuth");
   });
 
   test("stdio paginates tools, preserves schemas, isolates context and reports server errors", async () => {
@@ -359,6 +377,62 @@ describe("MCP runtime", () => {
       await service.close();
       await http.stop(true);
       await fixture.close();
+    }
+  });
+
+  test("token profiles send each chat's own bearer token", async () => {
+    const previousCredentialsPath = Bun.env.BELLACLAW_MCP_CREDENTIALS_PATH;
+    Bun.env.BELLACLAW_MCP_CREDENTIALS_PATH = join(directory, "credentials.json");
+    const authorizations = new Set<string>();
+    // Stateless like the Obsidian vault server: a fresh server and transport per request.
+    const http = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      fetch: async (request) => {
+        authorizations.add(request.headers.get("authorization") ?? "");
+        const fixture = createFixtureServer();
+        const transport = new WebStandardStreamableHTTPServerTransport({
+          sessionIdGenerator: undefined,
+          enableJsonResponse: true,
+        });
+        await fixture.connect(transport);
+        return transport.handleRequest(request);
+      },
+    });
+    try {
+      await configure({
+        type: "http",
+        url: `http://127.0.0.1:${http.port}/mcp`,
+        headers: { authorization: "Bearer operator-token" },
+        tokenAuth: true,
+      });
+      await expect(service.open({ chatId: "a", profileId: "fixture" })).rejects.toThrow(
+        "Run !mcp-auth token fixture TOKEN",
+      );
+      expect(authorizations.size).toBe(0);
+
+      await saveMcpAuthToken("a", "fixture", "token-a");
+      await saveMcpAuthToken("b", "fixture", "token-b");
+      const first = await service.open({ chatId: "a", profileId: "fixture" });
+      expect(authorizations).toEqual(new Set(["Bearer token-a"]));
+      await saveMcpAuthToken("a", "fixture", "token-a2");
+      expect(first.signal.aborted).toBe(true);
+
+      const second = await service.open({ chatId: "b", profileId: "fixture" });
+      expect(authorizations).toEqual(new Set(["Bearer token-a", "Bearer token-b"]));
+      await second.close();
+
+      expect(await disconnectMcpAuth("b", "fixture")).toBe(true);
+      expect(await getMcpAuthStatus("b", "fixture")).toBe(false);
+      expect(await getMcpAuthStatus("a", "fixture")).toBe(true);
+    } finally {
+      await service.close();
+      await http.stop(true);
+      if (previousCredentialsPath === undefined) {
+        delete Bun.env.BELLACLAW_MCP_CREDENTIALS_PATH;
+      } else {
+        Bun.env.BELLACLAW_MCP_CREDENTIALS_PATH = previousCredentialsPath;
+      }
     }
   });
 

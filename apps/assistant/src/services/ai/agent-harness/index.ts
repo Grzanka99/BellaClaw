@@ -302,10 +302,6 @@ export class AgentHarness {
         ).length) /
         4,
     );
-    let thinking = config.effort;
-    if (thinking === "off") {
-      thinking = undefined;
-    }
     const sessionId = this.createSessionId(config.model.provider, chatId, platform);
     const model = {
       ...config.model,
@@ -314,7 +310,7 @@ export class AgentHarness {
         ...sessionHeaders(config.model.provider, sessionId),
       },
     };
-    return compactConversation(state, aiModels, model, thinking, fixedTokens, trace);
+    return compactConversation(state, aiModels, model, fixedTokens, trace);
   }
 
   private async run(
@@ -689,6 +685,21 @@ export class AgentHarness {
       );
     }
 
+    if (args.name === EAgentName.Scheduling) {
+      let profiles: Awaited<ReturnType<typeof loadMcpProfiles>> = [];
+      try {
+        profiles = await loadMcpProfiles();
+      } catch (error) {
+        this.logger.warning(`MCP profiles unavailable to Scheduling: ${String(error)}`);
+      }
+      if (profiles.length > 0) {
+        const summary = profiles
+          .map((profile) => `${profile.id}: ${profile.description}`)
+          .join("\n");
+        parts.push(`<scheduled_task_mcp_profiles>\n${summary}\n</scheduled_task_mcp_profiles>`);
+      }
+    }
+
     const platformInstructions = createPlatformInstructions(args.platform);
 
     if (platformInstructions !== undefined) {
@@ -927,9 +938,9 @@ export class AgentHarness {
               inputTimeoutMs: profile.inputTimeoutMs,
               controller,
               close: () => session.close(),
-              run: (runSignal, elicit) => {
+              run: async (runSignal, elicit) => {
                 forwardElicitation = elicit;
-                return this.run({
+                const result = await this.run({
                   ...args,
                   name: EAgentName.Mcp,
                   purpose: EModelPurpose.SpecialistAccurate,
@@ -942,6 +953,13 @@ export class AgentHarness {
                   delegationCount: undefined,
                   mcp: { profile: session.profile, tools: session.tools },
                 });
+                // Main gets the answer, not the specialist transcript.
+                return {
+                  text: result.text,
+                  iterations: result.iterations,
+                  toolCallCount: result.toolCallCount,
+                  stopReason: result.stopReason,
+                };
               },
             });
             return this.mcpStatusResult(status);
