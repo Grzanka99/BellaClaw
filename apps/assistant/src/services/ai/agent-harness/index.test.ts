@@ -960,6 +960,109 @@ describe("AgentHarness", () => {
     }
   });
 
+  test("returns only the MCP specialist answer to Main", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "bellaclaw-agent-harness-"));
+    const configPath = join(directory, "mcp.json");
+    await Bun.write(
+      configPath,
+      JSON.stringify({
+        profiles: [
+          {
+            id: "fixture",
+            description: "Fixture",
+            instructions: "Use fixture",
+            transport: {
+              type: "stdio",
+              command: process.execPath,
+              args: [join(import.meta.dir, "../../mcp/fixtures/server.ts")],
+            },
+          },
+        ],
+      }),
+    );
+    Bun.env.BELLACLAW_MCP_CONFIG = configPath;
+    let toolResult = "";
+    faux.setResponses([
+      fauxAssistantMessage(
+        fauxToolCall(
+          "delegate-mcp",
+          { profileId: "fixture", task: "Read the note", context: "none" },
+          { id: "mcp-delegate" },
+        ),
+      ),
+      fauxAssistantMessage("Specialist answer"),
+      (context) => {
+        const message = context.messages.find((candidate) => candidate.role === "toolResult");
+        toolResult = JSON.stringify(message?.content);
+        return fauxAssistantMessage("Done");
+      },
+    ]);
+    try {
+      await AgentHarness.instance.runMain({
+        prompt: "Check my notes",
+        history: [],
+        chatId: "discord:1",
+        settings: { ...DefaultConfigRecord, [EConfigKey.AiProvider]: EAiProvider.Openrouter },
+        currentTimeContext: undefined,
+        platform: EMessagePlatform.Discord,
+        trace: undefined,
+        signal: undefined,
+      });
+      expect(toolResult).toContain("Specialist answer");
+      expect(toolResult).not.toContain("Delegated task");
+      expect(toolResult).not.toContain("messages");
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("tells Scheduling which MCP profiles scheduled tasks can use", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "bellaclaw-agent-harness-"));
+    const configPath = join(directory, "mcp.json");
+    await Bun.write(
+      configPath,
+      JSON.stringify({
+        profiles: [
+          {
+            id: "vault",
+            description: "Edit notes",
+            instructions: "Use the vault",
+            transport: { type: "http", url: "http://127.0.0.1:8787/mcp" },
+          },
+        ],
+      }),
+    );
+    Bun.env.BELLACLAW_MCP_CONFIG = configPath;
+    let schedulingPrompt = "";
+    faux.setResponses([
+      fauxAssistantMessage(
+        fauxToolCall("delegate-scheduling", { task: "Every minute" }, { id: "profiles-delegate" }),
+      ),
+      (context) => {
+        schedulingPrompt = getCurrentSystemPrompt(context.messages) ?? "";
+        return fauxAssistantMessage("Scheduled");
+      },
+      fauxAssistantMessage("Done"),
+    ]);
+    try {
+      await AgentHarness.instance.runMain({
+        prompt: "Append to my note every minute",
+        history: [],
+        chatId: "discord:1",
+        settings: { ...DefaultConfigRecord, [EConfigKey.AiProvider]: EAiProvider.Openrouter },
+        currentTimeContext: undefined,
+        platform: EMessagePlatform.Discord,
+        trace: undefined,
+        signal: undefined,
+      });
+      expect(schedulingPrompt).toContain(
+        "<scheduled_task_mcp_profiles>\nvault: Edit notes\n</scheduled_task_mcp_profiles>",
+      );
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   test("passes time context with specialist and scheduled task messages", async () => {
     const prompts: Array<TranscriptContext["messages"]> = [];
     faux.setResponses([

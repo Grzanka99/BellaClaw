@@ -13,7 +13,7 @@
     {
       "id": "vault",
       "description": "Read, search, and edit the user's Obsidian notes.",
-      "instructions": "Use the vault server for the user's Obsidian notes. Paths are vault-relative, such as \"Projects/Plan.md\". Search or list before guessing a path. Read a note before changing it; prefer edit_note or append_to_note over rewriting the whole note, and pass the hash from read_note as expected_hash to write_note. Move or delete notes only when the user asked for it. If the server reports a missing or rejected token, tell the user to run !mcp-auth token vault TOKEN with a token from `mcp-vault token create`.",
+      "instructions": "Use the vault server for the user's Obsidian notes. Paths are vault-relative, such as \"Projects/Plan.md\". Search or list before guessing a path. Read a note before changing it; prefer edit_note or append_to_note over rewriting the whole note, and pass the hash from read_note as expected_hash to write_note. Move or delete notes only when the user asked for it.",
       "transport": {
         "type": "http",
         "url": "${BELLACLAW_VAULT_MCP_URL:-http://127.0.0.1:8787/mcp}",
