@@ -302,10 +302,6 @@ export class AgentHarness {
         ).length) /
         4,
     );
-    let thinking = config.effort;
-    if (thinking === "off") {
-      thinking = undefined;
-    }
     const sessionId = this.createSessionId(config.model.provider, chatId, platform);
     const model = {
       ...config.model,
@@ -314,7 +310,7 @@ export class AgentHarness {
         ...sessionHeaders(config.model.provider, sessionId),
       },
     };
-    return compactConversation(state, aiModels, model, thinking, fixedTokens, trace);
+    return compactConversation(state, aiModels, model, fixedTokens, trace);
   }
 
   private async run(
