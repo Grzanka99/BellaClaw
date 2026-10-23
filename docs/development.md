@@ -75,3 +75,14 @@ bunx @biomejs/biome check . --write
 
 The assistant owns its Drizzle test preload. Behavior-log and viewer tests run independently and do
 not initialize the assistant database.
+
+## GitHub Actions
+
+The Tests and Lint workflows run on pull requests and pushes to `main`, using the Bun version in
+`package.json` and frozen dependency installs.
+
+OpenCode automatically posts a security review on non-draft pull requests from this repository.
+It uses `opencode-go/glm-5.3-flash` with the `max` variant. The OpenCode GitHub App must be installed
+on the repository, and the `OPENCODE_API_KEY` Actions secret must contain an OpenCode Go API key.
+Fork and Dependabot pull requests skip this review because they cannot access that secret.
+Security findings are advisory PR comments; they do not fail the workflow.
