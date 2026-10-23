@@ -78,11 +78,9 @@ not initialize the assistant database.
 
 ## GitHub Actions
 
-The Tests and Lint workflows run on pull requests and pushes to `main`, using the Bun version in
-`package.json` and frozen dependency installs.
-
-OpenCode automatically posts a security review on non-draft pull requests from this repository.
-It uses `opencode-go/glm-5.3-flash` with the `max` variant. The OpenCode GitHub App must be installed
-on the repository, and the `OPENCODE_API_KEY` Actions secret must contain an OpenCode Go API key.
-Fork and Dependabot pull requests skip this review because they cannot access that secret.
-Security findings are advisory PR comments; they do not fail the workflow.
+- Tests + lint: PRs and pushes to `main`.
+- Bun: version from `package.json`; frozen installs.
+- PR security: OpenCode Go, `opencode-go/glm-5.3-flash`, `max`.
+- Security review skips drafts, forks, and Dependabot PRs.
+- Setup: install OpenCode GitHub App; set `OPENCODE_API_KEY` Actions secret to Go API key.
+- Findings: PR comments only; no workflow failure.
