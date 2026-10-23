@@ -131,8 +131,8 @@ so prefer a direct message and a token you can revoke.
 
 The `vault` profile connects to an [mcp-vault](https://github.com/Grzanka99/vault-sync-and-mcp)
 server, which syncs an Obsidian vault and exposes it over MCP. The profile uses
-`BELLACLAW_VAULT_MCP_URL` when set, otherwise `http://127.0.0.1:8787/mcp`. With Compose, point it
-at an address the container can reach, such as `http://host.containers.internal:8787/mcp`.
+`BELLACLAW_VAULT_MCP_URL` when set, otherwise `http://127.0.0.1:8787/mcp`. `.env.example` sets the
+Compose address `http://host.containers.internal:8787/mcp`; clear it for `bun run dev`.
 
 Create a token on the vault server and give it to the chat:
 
