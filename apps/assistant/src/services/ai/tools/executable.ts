@@ -166,7 +166,7 @@ export function createSchedulingTools(context: TToolExecutionContext) {
       executionMode: SEQUENTIAL,
       execute: async (_toolCallId: string, args: unknown) => {
         const parsedArgs = validateToolArguments(SScheduleOnceArgs, args);
-        const validatedArgs = validateScheduleOnceArgs(parsedArgs);
+        const validatedArgs = validateScheduleOnceArgs(parsedArgs, ownerTimezone);
         const result = await CronSingleton.instance.createOnce({
           ...validatedArgs,
           scope: requireChatId(context.chatId),
@@ -206,7 +206,9 @@ export function createSchedulingTools(context: TToolExecutionContext) {
       executionMode: SEQUENTIAL,
       execute: async (_toolCallId: string, args: unknown) => {
         const parsedArgs = validateToolArguments(SUpdateCronJobArgs, args);
-        return textResult(await handleUpdateCronJob(requireChatId(context.chatId), parsedArgs));
+        return textResult(
+          await handleUpdateCronJob(requireChatId(context.chatId), parsedArgs, ownerTimezone),
+        );
       },
     },
     {

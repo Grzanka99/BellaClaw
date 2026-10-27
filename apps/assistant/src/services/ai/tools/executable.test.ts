@@ -143,13 +143,13 @@ describe("production executable tools", () => {
     await expect(
       tool?.execute("call", {
         name: "missing-content",
-        fireAt: "2026-08-01T10:00:00+02:00",
+        fireAt: "2026-08-01T10:00:00",
       }),
     ).rejects.toThrow("Provide reminderText, reminderPromptData, or taskPrompt");
 
     await tool?.execute("call", {
       name: "direct",
-      fireAt: "2026-08-01T10:00:00+02:00",
+      fireAt: "2026-08-01T10:00:00",
       reminderText: "Call Mum",
       reminderFallbackText: "Reminder unavailable",
     });

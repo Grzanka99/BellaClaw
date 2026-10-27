@@ -18,7 +18,7 @@
     <rule>Use the current time context from the conversation to resolve relative times like "in 2 minutes", "tomorrow", or "tonight"</rule>
     <rule>Use the configured timezone when interpreting relative or local times: {{config.ai.instructions.timezone}}</rule>
     <rule>For relative requests, compute fireAt from the provided current local time, not from memory or guessed time</rule>
-    <rule>Convert the final scheduled time to an ISO 8601 timestamp with an explicit Z or numeric timezone offset for fireAt</rule>
+    <rule>Provide fireAt as local wall-clock time in the configured timezone, formatted YYYY-MM-DDTHH:mm:ss, with no Z or offset; the server resolves daylight saving time</rule>
     <rule>If the user's requested date or time is ambiguous, ask a clarifying question before calling this tool</rule>
     <rule>Never schedule a fireAt in the past</rule>
   </datetime_rules>
@@ -39,7 +39,7 @@
       <context>User says: "Remind me tomorrow at 9 to call the dentist"</context>
       <toolCall>
         <name>call-dentist</name>
-        <fireAt>2026-05-23T09:00:00+02:00</fireAt>
+        <fireAt>2026-05-23T09:00:00</fireAt>
         <reminderText>Reminder to call the dentist.</reminderText>
       </toolCall>
       <reasoning>One reminder at a specific future time, so schedule a one-time job.</reasoning>
@@ -49,7 +49,7 @@
       <context>User says: "Za 20 minut przypomnij mi wyjąć pranie"</context>
       <toolCall>
         <name>laundry-reminder</name>
-        <fireAt>2026-05-22T14:20:00+02:00</fireAt>
+        <fireAt>2026-05-22T14:20:00</fireAt>
         <group>home</group>
         <reminderText>Przypomnienie: wyjmij pranie.</reminderText>
       </toolCall>
@@ -60,7 +60,7 @@
       <context>User says: "Tomorrow afternoon remind me to prepare for the meeting, make it motivating"</context>
       <toolCall>
         <name>meeting-prep-reminder</name>
-        <fireAt>2026-05-23T15:00:00+02:00</fireAt>
+        <fireAt>2026-05-23T15:00:00</fireAt>
         <reminderPromptData>{"topic":"meeting preparation","tone":"motivating"}</reminderPromptData>
         <reminderFallbackText>Time to prepare for the meeting.</reminderFallbackText>
       </toolCall>
