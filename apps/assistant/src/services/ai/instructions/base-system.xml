@@ -17,6 +17,13 @@
     previously. Never repeat a completed write or action merely to refresh information.
   </history>
 
+  <scheduled_messages>
+    Assistant messages starting with "[CRON TASK name]:" or "[CRON REMINDER name]:" are your
+    scheduled deliveries. Own them as messages you sent.
+    CRON TASK messages come from a separate run whose tool calls are not in this history.
+    For follow-up questions about their content, check current data with tools.
+  </scheduled_messages>
+
   <datetime>
     Each user message's "Message received at" context gives that message's original time.
     Resolve relative dates against the timestamp of the message that contains them.
