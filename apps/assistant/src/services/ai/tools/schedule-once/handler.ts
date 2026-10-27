@@ -2,7 +2,9 @@ import { type Static, Type } from "@earendil-works/pi-ai";
 import type { TCronJob } from "../../../../lib/cron-engine";
 import {
   countCronContentModes,
+  LOCAL_FIRE_AT_PATTERN,
   normalizeCronContentFields,
+  parseLocalFireAt,
   validateCronFallbackPairing,
 } from "../cron-content";
 
@@ -12,8 +14,9 @@ export const SScheduleOnceArgs = Type.Object(
       description: "Unique one-time job name used to reference, update, or cancel it",
     }),
     fireAt: Type.String({
-      format: "date-time",
-      description: "Future ISO 8601 date-time with an explicit timezone",
+      pattern: LOCAL_FIRE_AT_PATTERN,
+      description:
+        "Future local date-time in the owner's timezone, YYYY-MM-DDTHH:mm[:ss], no offset",
     }),
     group: Type.Optional(
       Type.String({ description: "Optional group label stored with the cron job" }),
@@ -43,7 +46,7 @@ export const SScheduleOnceArgs = Type.Object(
 export type TScheduleOnceArgs = Static<typeof SScheduleOnceArgs>;
 export type TScheduleOnceResult = TCronJob;
 
-export function validateScheduleOnceArgs(rawArgs: TScheduleOnceArgs) {
+export function validateScheduleOnceArgs(rawArgs: TScheduleOnceArgs, timezone: string) {
   const args = { ...rawArgs, ...normalizeCronContentFields(rawArgs) };
   const contentModeCount = countCronContentModes(args);
 
@@ -59,6 +62,6 @@ export function validateScheduleOnceArgs(rawArgs: TScheduleOnceArgs) {
 
   return {
     ...args,
-    fireAt: new Date(args.fireAt),
+    fireAt: parseLocalFireAt(args.fireAt, timezone),
   };
 }

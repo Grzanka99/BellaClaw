@@ -4,7 +4,9 @@ import { ECronJobType } from "../../../../lib/cron-engine";
 import { CronSingleton } from "../../../cron";
 import {
   countCronContentModes,
+  LOCAL_FIRE_AT_PATTERN,
   normalizeCronContentFields,
+  parseLocalFireAt,
   validateCronFallbackPairing,
 } from "../cron-content";
 
@@ -15,7 +17,10 @@ export const SUpdateCronJobArgs = Type.Object(
       Type.String({ description: "New 5-field cron expression for a recurring reminder" }),
     ),
     fireAt: Type.Optional(
-      Type.String({ format: "date-time", description: "New future ISO 8601 date-time" }),
+      Type.String({
+        pattern: LOCAL_FIRE_AT_PATTERN,
+        description: "New future local date-time in the owner's timezone, YYYY-MM-DDTHH:mm[:ss]",
+      }),
     ),
     group: Type.Optional(
       Type.String({ description: "New group label; omit to preserve the current group" }),
@@ -44,6 +49,7 @@ type TValidatedUpdateCronJobArgs = Omit<TUpdateCronJobArgs, "fireAt"> & {
 
 export function validateUpdateCronJobArgs(
   rawArgs: TUpdateCronJobArgs,
+  timezone: string,
 ): TValidatedUpdateCronJobArgs {
   const args = { ...rawArgs, ...normalizeCronContentFields(rawArgs) };
 
@@ -65,12 +71,16 @@ export function validateUpdateCronJobArgs(
 
   return {
     ...rest,
-    fireAt: new Date(fireAt),
+    fireAt: parseLocalFireAt(fireAt, timezone),
   };
 }
 
-export async function handleUpdateCronJob(chatId: string, parsedArgs: TUpdateCronJobArgs) {
-  const validatedArgs = validateUpdateCronJobArgs(parsedArgs);
+export async function handleUpdateCronJob(
+  chatId: string,
+  parsedArgs: TUpdateCronJobArgs,
+  timezone: string,
+) {
+  const validatedArgs = validateUpdateCronJobArgs(parsedArgs, timezone);
   const existing = await CronSingleton.instance.get(validatedArgs.name, chatId);
 
   if (existing === undefined) {

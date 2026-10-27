@@ -50,13 +50,41 @@ describe("AI tool arguments", () => {
     expect(Value.Check(SSearchMemoryArgs, { query: "facts", limit: 26 })).toBe(false);
   });
 
-  test("converts explicit-offset schedule dates", () => {
-    const once = validateScheduleOnceArgs({
-      name: "offset-reminder",
-      fireAt: "2026-07-13T12:00:00+02:00",
-      reminderText: "Reminder",
-    });
-    expect(once.fireAt).toEqual(new Date("2026-07-13T10:00:00.000Z"));
+  test("resolves local schedule dates with the offset valid at fire time", () => {
+    const summer = validateScheduleOnceArgs(
+      { name: "summer-reminder", fireAt: "2026-07-13T12:00:00", reminderText: "Reminder" },
+      "Europe/Warsaw",
+    );
+    expect(summer.fireAt).toEqual(new Date("2026-07-13T10:00:00.000Z"));
+
+    const winter = validateScheduleOnceArgs(
+      { name: "winter-reminder", fireAt: "2026-10-27T08:00", reminderText: "Reminder" },
+      "Europe/Warsaw",
+    );
+    expect(winter.fireAt).toEqual(new Date("2026-10-27T07:00:00.000Z"));
+
+    const update = validateUpdateCronJobArgs(
+      { name: "winter-reminder", fireAt: "2026-10-25T03:30:00" },
+      "Europe/Warsaw",
+    );
+    expect(update.fireAt).toEqual(new Date("2026-10-25T02:30:00.000Z"));
+  });
+
+  test("rejects local schedule dates that do not exist", () => {
+    for (const fireAt of ["2027-04-31T10:00:00", "2027-02-29T10:00", "2027-03-28T02:30:00"]) {
+      expect(() =>
+        validateScheduleOnceArgs({ name: "x", fireAt, reminderText: "Reminder" }, "Europe/Warsaw"),
+      ).toThrow("does not exist in Europe/Warsaw");
+    }
+  });
+
+  test("rejects schedule dates with an offset", () => {
+    expect(Value.Check(SScheduleOnceArgs, { name: "x", fireAt: "2026-07-13T12:00:00Z" })).toBe(
+      false,
+    );
+    expect(
+      Value.Check(SUpdateCronJobArgs, { name: "x", fireAt: "2026-07-13T12:00:00+02:00" }),
+    ).toBe(false);
   });
 
   test("does not count blank schedule content as a second content mode", () => {
@@ -67,12 +95,15 @@ describe("AI tool arguments", () => {
       taskFallbackText: "   ",
     };
 
-    const once = validateScheduleOnceArgs({
-      name: "blank-fields-reminder",
-      fireAt: "2026-07-13T12:00:00+02:00",
-      reminderText: "Reminder",
-      ...blanks,
-    });
+    const once = validateScheduleOnceArgs(
+      {
+        name: "blank-fields-reminder",
+        fireAt: "2026-07-13T12:00:00",
+        reminderText: "Reminder",
+        ...blanks,
+      },
+      "Europe/Warsaw",
+    );
     expect(once.reminderText).toBe("Reminder");
     expect(once.taskPrompt).toBeUndefined();
 
@@ -87,15 +118,18 @@ describe("AI tool arguments", () => {
   });
 
   test("treats blank cron job updates as absent instead of content edits", () => {
-    const update = validateUpdateCronJobArgs({
-      name: "daily-news",
-      group: "",
-      reminderText: "   ",
-      reminderPromptData: "",
-      reminderFallbackText: "",
-      taskPrompt: "",
-      taskFallbackText: "",
-    });
+    const update = validateUpdateCronJobArgs(
+      {
+        name: "daily-news",
+        group: "",
+        reminderText: "   ",
+        reminderPromptData: "",
+        reminderFallbackText: "",
+        taskPrompt: "",
+        taskFallbackText: "",
+      },
+      "Europe/Warsaw",
+    );
 
     expect(update.group).toBeUndefined();
     expect(update.reminderText).toBeUndefined();
@@ -117,11 +151,14 @@ describe("AI tool arguments", () => {
       }),
     ).toThrow("taskFallbackText is required");
     expect(() =>
-      validateUpdateCronJobArgs({
-        name: "daily-news",
-        pattern: "0 8 * * *",
-        fireAt: "2026-07-13T10:00:00Z",
-      }),
+      validateUpdateCronJobArgs(
+        {
+          name: "daily-news",
+          pattern: "0 8 * * *",
+          fireAt: "2026-07-13T10:00:00",
+        },
+        "Europe/Warsaw",
+      ),
     ).toThrow("Provide either pattern or fireAt");
   });
 
@@ -210,13 +247,13 @@ describe("validateToolArguments", () => {
         schema: SScheduleOnceArgs,
         args: { name: "x", fireAt: "tomorrow at 5pm", reminderText: "Reminder" },
         path: "/fireAt",
-        reason: 'must match format "date-time"',
+        reason: "must match pattern",
       },
       {
         schema: SScheduleOnceArgs,
         args: {
           name: "x",
-          fireAt: "2026-09-01T10:00:00Z",
+          fireAt: "2026-09-01T10:00:00",
           reminderText: "Reminder",
           group: null,
         },

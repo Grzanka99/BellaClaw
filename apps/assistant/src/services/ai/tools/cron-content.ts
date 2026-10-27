@@ -60,3 +60,48 @@ export function validateCronFallbackPairing(args: TCronContentFields): void {
     throw new Error("taskFallbackText requires taskPrompt");
   }
 }
+
+export const LOCAL_FIRE_AT_PATTERN = "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(:\\d{2})?$";
+
+function formatLocalDateTime(timestamp: number, timezone: string): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date(timestamp));
+  const values = new Map(parts.map((part) => [part.type, part.value]));
+
+  return `${values.get("year")}-${values.get("month")}-${values.get("day")}T${values.get("hour")}:${values.get("minute")}:${values.get("second")}`;
+}
+
+function getTimezoneOffsetMs(timestamp: number, timezone: string): number {
+  return Date.parse(`${formatLocalDateTime(timestamp, timezone)}Z`) - timestamp;
+}
+
+/**
+ * Models get the UTC offset wrong around DST changes, so fireAt is local wall
+ * time and the offset valid at that moment is resolved here.
+ */
+export function parseLocalFireAt(fireAt: string, timezone: string): Date {
+  const wallTime = Date.parse(`${fireAt}Z`);
+
+  if (Number.isNaN(wallTime)) {
+    throw new Error(`Invalid fireAt: ${fireAt}`);
+  }
+
+  const firstOffset = getTimezoneOffsetMs(wallTime, timezone);
+  const secondOffset = getTimezoneOffsetMs(wallTime - firstOffset, timezone);
+  const resolved = wallTime - secondOffset;
+
+  // Rejects normalized calendar dates (April 31) and times skipped by a DST change.
+  if (!formatLocalDateTime(resolved, timezone).startsWith(fireAt)) {
+    throw new Error(`fireAt ${fireAt} does not exist in ${timezone}`);
+  }
+
+  return new Date(resolved);
+}
