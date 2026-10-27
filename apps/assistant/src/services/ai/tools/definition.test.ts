@@ -70,6 +70,14 @@ describe("AI tool arguments", () => {
     expect(update.fireAt).toEqual(new Date("2026-10-25T02:30:00.000Z"));
   });
 
+  test("rejects local schedule dates that do not exist", () => {
+    for (const fireAt of ["2027-04-31T10:00:00", "2027-02-29T10:00", "2027-03-28T02:30:00"]) {
+      expect(() =>
+        validateScheduleOnceArgs({ name: "x", fireAt, reminderText: "Reminder" }, "Europe/Warsaw"),
+      ).toThrow("does not exist in Europe/Warsaw");
+    }
+  });
+
   test("rejects schedule dates with an offset", () => {
     expect(Value.Check(SScheduleOnceArgs, { name: "x", fireAt: "2026-07-13T12:00:00Z" })).toBe(
       false,

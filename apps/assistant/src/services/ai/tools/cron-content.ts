@@ -63,7 +63,7 @@ export function validateCronFallbackPairing(args: TCronContentFields): void {
 
 export const LOCAL_FIRE_AT_PATTERN = "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(:\\d{2})?$";
 
-function getTimezoneOffsetMs(timestamp: number, timezone: string): number {
+function formatLocalDateTime(timestamp: number, timezone: string): string {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: timezone,
     year: "numeric",
@@ -75,11 +75,12 @@ function getTimezoneOffsetMs(timestamp: number, timezone: string): number {
     hourCycle: "h23",
   }).formatToParts(new Date(timestamp));
   const values = new Map(parts.map((part) => [part.type, part.value]));
-  const represented = Date.parse(
-    `${values.get("year")}-${values.get("month")}-${values.get("day")}T${values.get("hour")}:${values.get("minute")}:${values.get("second")}Z`,
-  );
 
-  return represented - timestamp;
+  return `${values.get("year")}-${values.get("month")}-${values.get("day")}T${values.get("hour")}:${values.get("minute")}:${values.get("second")}`;
+}
+
+function getTimezoneOffsetMs(timestamp: number, timezone: string): number {
+  return Date.parse(`${formatLocalDateTime(timestamp, timezone)}Z`) - timestamp;
 }
 
 /**
@@ -95,6 +96,12 @@ export function parseLocalFireAt(fireAt: string, timezone: string): Date {
 
   const firstOffset = getTimezoneOffsetMs(wallTime, timezone);
   const secondOffset = getTimezoneOffsetMs(wallTime - firstOffset, timezone);
+  const resolved = wallTime - secondOffset;
 
-  return new Date(wallTime - secondOffset);
+  // Rejects normalized calendar dates (April 31) and times skipped by a DST change.
+  if (!formatLocalDateTime(resolved, timezone).startsWith(fireAt)) {
+    throw new Error(`fireAt ${fireAt} does not exist in ${timezone}`);
+  }
+
+  return new Date(resolved);
 }
