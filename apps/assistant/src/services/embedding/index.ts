@@ -1,4 +1,4 @@
-import { rm } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createLogger, type TOption } from "@bellaclaw/shared";
@@ -102,7 +102,8 @@ export class EmbeddingClient {
   }
 
   private async importModel(url: string): Promise<boolean> {
-    const path = join(tmpdir(), `bellaclaw-embedding-${Date.now()}.gguf`);
+    const directory = await mkdtemp(join(tmpdir(), "bellaclaw-embedding-"));
+    const path = join(directory, "model.gguf");
 
     try {
       this.logger.info(`importModel: downloading ${url}`);
@@ -162,7 +163,7 @@ export class EmbeddingClient {
       this.logger.info(`importModel: created ${this.model}`);
       return true;
     } finally {
-      await rm(path, { force: true });
+      await rm(directory, { recursive: true, force: true });
     }
   }
 
