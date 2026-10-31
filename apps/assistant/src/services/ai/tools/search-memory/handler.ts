@@ -13,7 +13,7 @@ export async function handleSearchMemory(
   chatId: string,
   args: TSearchMemoryArgs,
 ): Promise<TSearchMemoryResult> {
-  const embedding = await EmbeddingClient.instance.embed(args.query);
+  const embedding = await EmbeddingClient.instance.embedQuery(args.query);
   if (embedding === undefined) {
     throw new Error("Embedding service unavailable");
   }

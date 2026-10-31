@@ -28,10 +28,13 @@ import {
 
 const FACT_WINDOW_SIZE = 6;
 const FACT_CONTEXT_SIZE = 6;
-const MAX_FACT_COSINE_DISTANCE = 0.7;
-// NOTE: contradictions are semantically distant, not near-duplicates: two timezone values
-// measured 0.45 apart, so a restatement-sized window never offered them as candidates
-const MAX_SUPERSESSION_COSINE_DISTANCE = 0.5;
+// NOTE: both cutoffs are tuned for EmbeddingGemma 2 with its task prefixes, using Polish queries on
+// English and Polish facts. Its distances sit in a narrow band, so a different model or prefix
+// needs new values
+const MAX_FACT_COSINE_DISTANCE = 0.31;
+// NOTE: every test contradiction was within 0.22; the extra room keeps recall, and the model still
+// decides which candidates are really superseded
+const MAX_SUPERSESSION_COSINE_DISTANCE = 0.24;
 const SUPERSESSION_CANDIDATE_LIMIT = 10;
 const SQueryEmbedding = z.array(z.number()).length(EMBEDDING_DIMENSIONS);
 

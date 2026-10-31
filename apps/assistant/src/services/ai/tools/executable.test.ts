@@ -470,9 +470,9 @@ describe("production executable tools", () => {
         distance: 0.1,
       },
     ];
-    const embed = mock(async () => vector);
+    const embedQuery = mock(async () => vector);
     const searchFacts = mock(async () => facts);
-    (EmbeddingClient as unknown as { _instance: unknown })._instance = { embed };
+    (EmbeddingClient as unknown as { _instance: unknown })._instance = { embedQuery };
     (Memory as unknown as { _instance: unknown })._instance = {
       searchFacts,
       loadLiveFactWindow: async () => ({
@@ -485,19 +485,19 @@ describe("production executable tools", () => {
 
     const result = await tool?.execute("call", { query: "What does the user drink?", limit: 4 });
 
-    expect(embed).toHaveBeenCalledWith("What does the user drink?");
+    expect(embedQuery).toHaveBeenCalledWith("What does the user drink?");
     expect(searchFacts).toHaveBeenCalledWith("discord:1", vector, 4);
     expect(result?.details).toEqual({ facts });
   });
 
   test("requires a chat owner before searching memory", async () => {
-    const embed = mock(async () => [0.1]);
-    (EmbeddingClient as unknown as { _instance: unknown })._instance = { embed };
+    const embedQuery = mock(async () => [0.1]);
+    (EmbeddingClient as unknown as { _instance: unknown })._instance = { embedQuery };
     const tool = createMemoryTools({ ...context, chatId: undefined })[0];
 
     await expect(tool?.execute("call", { query: "preferences" })).rejects.toThrow(
       "This tool requires a chat owner",
     );
-    expect(embed).not.toHaveBeenCalled();
+    expect(embedQuery).not.toHaveBeenCalled();
   });
 });

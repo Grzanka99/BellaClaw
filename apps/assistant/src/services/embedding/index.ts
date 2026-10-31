@@ -3,9 +3,15 @@ import { z } from "zod";
 import { EMBEDDING_DIMENSIONS } from "../database/schema";
 
 const DEFAULT_BASE_URL = "http://localhost:11434";
-const EMBEDDING_MODEL = "paraphrase-multilingual";
+const DEFAULT_MODEL = "embeddinggemma-2:270m";
 const MAX_INPUT_LENGTH = 800;
 const REQUEST_TIMEOUT_MS = 30_000;
+const PULL_TIMEOUT_MS = 30 * 60_000;
+const READY_ATTEMPTS = 30;
+const READY_RETRY_DELAY_MS = 1_000;
+// NOTE: EmbeddingGemma task prefixes; the search cutoffs in services/memory depend on them
+const DOCUMENT_PREFIX = "title: none | text: ";
+const QUERY_PREFIX = "task: search result | query: ";
 
 const SEmbeddingResponse = z.object({
   embeddings: z.array(z.array(z.number())),
@@ -17,6 +23,7 @@ export class EmbeddingClient {
   // NOTE: deliberately not OLLAMA_BASE_URL — that one points at the Ollama LLM provider, which
   // may be a different host that serves no embedding model
   private baseUrl = (Bun.env.BELLACLAW_EMBEDDING_BASE_URL ?? DEFAULT_BASE_URL).replace(/\/+$/, "");
+  public readonly model = Bun.env.BELLACLAW_EMBEDDING_MODEL?.trim() || DEFAULT_MODEL;
 
   private constructor() {}
 
@@ -28,6 +35,49 @@ export class EmbeddingClient {
     return EmbeddingClient._instance;
   }
 
+  public async pullModel(): Promise<boolean> {
+    try {
+      await this.waitForServer();
+      const response = await fetch(`${this.baseUrl}/api/pull`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          model: this.model,
+          stream: false,
+        }),
+        signal: AbortSignal.timeout(PULL_TIMEOUT_MS),
+      });
+
+      if (!response.ok) {
+        this.logger.error(
+          `pullModel: /api/pull returned ${response.status}: ${await response.text()}`,
+        );
+        return false;
+      }
+
+      return true;
+    } catch (error) {
+      this.logger.error(`pullModel: request failed: ${String(error)}`);
+      return false;
+    }
+  }
+
+  // NOTE: the rebuild can start right after Compose starts Ollama, before its API is listening
+  private async waitForServer(): Promise<void> {
+    for (let attempt = 1; attempt < READY_ATTEMPTS; attempt += 1) {
+      try {
+        await fetch(`${this.baseUrl}/api/version`, {
+          signal: AbortSignal.timeout(READY_RETRY_DELAY_MS),
+        });
+        return;
+      } catch {
+        await Bun.sleep(READY_RETRY_DELAY_MS);
+      }
+    }
+  }
+
   public async embed(input: string): Promise<TOption<number[]>> {
     const embeddings = await this.embedMany([input]);
     if (embeddings === undefined) {
@@ -37,16 +87,29 @@ export class EmbeddingClient {
     return embeddings[0];
   }
 
+  public async embedQuery(query: string): Promise<TOption<number[]>> {
+    const embeddings = await this.embedWithPrefix(QUERY_PREFIX, [query]);
+    if (embeddings === undefined) {
+      return undefined;
+    }
+
+    return embeddings[0];
+  }
+
   public async embedMany(inputs: string[]): Promise<TOption<number[][]>> {
+    return this.embedWithPrefix(DOCUMENT_PREFIX, inputs);
+  }
+
+  private async embedWithPrefix(prefix: string, inputs: string[]): Promise<TOption<number[][]>> {
     try {
-      const cappedInputs = inputs.map((input) => input.slice(0, MAX_INPUT_LENGTH));
+      const cappedInputs = inputs.map((input) => `${prefix}${input.slice(0, MAX_INPUT_LENGTH)}`);
       const response = await fetch(`${this.baseUrl}/api/embed`, {
         method: "POST",
         headers: {
           "content-type": "application/json",
         },
         body: JSON.stringify({
-          model: EMBEDDING_MODEL,
+          model: this.model,
           input: cappedInputs,
         }),
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),

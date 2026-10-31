@@ -17,12 +17,14 @@ cp .env.example .env
 Fill in the required values from [Configuration](configuration.md), then run:
 
 ```bash
-podman compose up -d --build
+podman compose build
+bun run server:rebuild-embeddings
 ```
 
-The services restart unless stopped.
+The services restart unless stopped. The rebuild pulls the embedding model into Ollama and
+re-embeds any stored facts before the assistant starts.
 
-This command starts:
+This starts:
 
 - `bellaclaw`
 - `log-viewer`
@@ -38,8 +40,9 @@ The package scripts include the Signal profile:
 
 | Command | Action |
 | --- | --- |
-| `bun run server:init` | Seed optional Codex auth, build, and start all services. |
+| `bun run server:init` | Seed optional Codex auth, build, rebuild embeddings, and start all services. |
 | `bun run server:update` | Preserve auth, rebuild without cache, and recreate all services. |
+| `bun run server:rebuild-embeddings` | Stop the assistant, pull the embedding model, re-embed all facts, and start the assistant on the current image. |
 | `bun run server:down` | Stop all services, including the Signal profile. |
 | `bun run server:reset-auth` | Replace Pi credentials from `.secrets/auth.json`. |
 
