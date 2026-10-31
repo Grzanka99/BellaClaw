@@ -30,6 +30,9 @@ BellaClaw.
 | --- | --- | --- |
 | `OPENROUTER_API_KEY` | — | Required when the active provider is `openrouter`. |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama server URL. |
+| `BELLACLAW_EMBEDDING_BASE_URL` | `http://localhost:11434` | Ollama server for embeddings; Compose uses `http://ollama:11434`. |
+| `BELLACLAW_EMBEDDING_MODEL` | `bellaclaw/embeddinggemma-2:270m-bf16-text` | Ollama embedding model. Must return 768 dimensions. |
+| `BELLACLAW_EMBEDDING_MODEL_URL` | EmbeddingGemma 2 BF16 GGUF | GGUF to import when the model is missing. Blank pulls from the Ollama library. Only used with a custom model. |
 | `TAVILY_API_KEY` | — | Enables web search. |
 | `BELLACLAW_AI_CREDENTIALS_PATH` | `.secrets/pi-auth.json` | Pi credential-store path. |
 
@@ -42,6 +45,29 @@ The default provider is `opencode-go`. You can ask BellaClaw in chat to switch b
 
 OpenAI Codex uses stored OAuth credentials instead of an API key. See
 [Deployment](deployment.md#openai-codex-subscription).
+
+## Embeddings
+
+The default model is EmbeddingGemma 2, text only, at its native BF16 precision, 768 dimensions.
+It comes from llama.cpp's [text-only GGUF](https://huggingface.co/ggml-org/embeddinggemma-2-GGUF).
+Ollama's own BF16 tags need the MLX runtime, which Linux CPUs do not have.
+
+Stored fact vectors only match the model that created them. To switch models, set
+`BELLACLAW_EMBEDDING_MODEL` in `.env`, then rebuild. If Ollama does not have the model yet, the
+rebuild imports it from `BELLACLAW_EMBEDDING_MODEL_URL`, or pulls it from the Ollama library when
+that is blank. Then it re-embeds every fact.
+
+```bash
+# Compose: stops the assistant, rebuilds, starts it again
+bun run server:rebuild-embeddings
+
+# Local: stop the assistant first
+bun run embeddings:rebuild
+```
+
+- The new model must also return 768 dimensions.
+- EmbeddingGemma 2 needs a recent Ollama; run `podman compose pull ollama` on older installs.
+- On failure, the stored vectors stay unchanged. Fix the cause and run it again.
 
 ## Messaging
 

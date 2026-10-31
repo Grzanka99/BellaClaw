@@ -1,9 +1,12 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { createHash } from "node:crypto";
 import type { TOption } from "@bellaclaw/shared";
 import { EmbeddingClient } from ".";
 
 const originalFetch = globalThis.fetch;
 const originalBaseUrl = Bun.env.BELLACLAW_EMBEDDING_BASE_URL;
+const originalModel = Bun.env.BELLACLAW_EMBEDDING_MODEL;
+const originalModelUrl = Bun.env.BELLACLAW_EMBEDDING_MODEL_URL;
 
 type TEmbeddingClientStatic = {
   _instance: TOption<EmbeddingClient>;
@@ -23,6 +26,8 @@ function embeddingResponse(embeddings: number[][]): Response {
 describe("EmbeddingClient", () => {
   beforeEach(() => {
     Bun.env.BELLACLAW_EMBEDDING_BASE_URL = "http://embedding.test:11434";
+    delete Bun.env.BELLACLAW_EMBEDDING_MODEL;
+    delete Bun.env.BELLACLAW_EMBEDDING_MODEL_URL;
     EmbeddingClientWithInternals._instance = undefined;
   });
 
@@ -34,6 +39,18 @@ describe("EmbeddingClient", () => {
       delete Bun.env.BELLACLAW_EMBEDDING_BASE_URL;
     } else {
       Bun.env.BELLACLAW_EMBEDDING_BASE_URL = originalBaseUrl;
+    }
+
+    if (originalModel === undefined) {
+      delete Bun.env.BELLACLAW_EMBEDDING_MODEL;
+    } else {
+      Bun.env.BELLACLAW_EMBEDDING_MODEL = originalModel;
+    }
+
+    if (originalModelUrl === undefined) {
+      delete Bun.env.BELLACLAW_EMBEDDING_MODEL_URL;
+    } else {
+      Bun.env.BELLACLAW_EMBEDDING_MODEL_URL = originalModelUrl;
     }
   });
 
@@ -54,7 +71,7 @@ describe("EmbeddingClient", () => {
         "content-type": "application/json",
       },
       body: JSON.stringify({
-        model: "paraphrase-multilingual",
+        model: "bellaclaw/embeddinggemma-2:270m-bf16-text",
         input: ["pierwszy", "second"],
       }),
       signal: expect.any(AbortSignal),
@@ -73,11 +90,131 @@ describe("EmbeddingClient", () => {
         "content-type": "application/json",
       },
       body: JSON.stringify({
-        model: "paraphrase-multilingual",
+        model: "bellaclaw/embeddinggemma-2:270m-bf16-text",
         input: ["a".repeat(800), "b".repeat(800)],
       }),
       signal: expect.any(AbortSignal),
     });
+  });
+
+  test("uses the model from BELLACLAW_EMBEDDING_MODEL", async () => {
+    Bun.env.BELLACLAW_EMBEDDING_MODEL = "other-model";
+    const fetchMock = mock(async () => embeddingResponse([makeEmbedding(1)]));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    await EmbeddingClient.instance.embedMany(["hello"]);
+
+    expect(fetchMock).toHaveBeenCalledWith("http://embedding.test:11434/api/embed", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "other-model",
+        input: ["hello"],
+      }),
+      signal: expect.any(AbortSignal),
+    });
+  });
+
+  test("ensureModel does not pull a model that is already available", async () => {
+    const fetchMock = mock(async () => Response.json({}));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    await expect(EmbeddingClient.instance.ensureModel()).resolves.toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith("http://embedding.test:11434/api/show", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "bellaclaw/embeddinggemma-2:270m-bf16-text",
+      }),
+      signal: expect.any(AbortSignal),
+    });
+  });
+
+  test("ensureModel imports the default GGUF when the model is missing", async () => {
+    const gguf = new Uint8Array([1, 2, 3, 4]);
+    const digest = `sha256:${createHash("sha256").update(gguf).digest("hex")}`;
+    const fetchMock = mock(async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/api/show")) {
+        return Response.json({ error: "not found" }, { status: 404 });
+      }
+
+      if (url.endsWith(`/api/blobs/${digest}`)) {
+        const uploaded = new Uint8Array(await new Response(init?.body).arrayBuffer());
+        expect(uploaded).toEqual(gguf);
+        return new Response(null, { status: 201 });
+      }
+
+      if (url.endsWith("/api/create")) {
+        return Response.json({ status: "success" });
+      }
+
+      return new Response(gguf);
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    await expect(EmbeddingClient.instance.ensureModel()).resolves.toBe(true);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://huggingface.co/ggml-org/embeddinggemma-2-GGUF/resolve/main/embeddinggemma-2-BF16.gguf",
+      { signal: expect.any(AbortSignal) },
+    );
+    expect(fetchMock).toHaveBeenCalledWith("http://embedding.test:11434/api/create", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "bellaclaw/embeddinggemma-2:270m-bf16-text",
+        files: { "model.gguf": digest },
+        stream: false,
+      }),
+      signal: expect.any(AbortSignal),
+    });
+  });
+
+  test("ensureModel pulls a missing model that has no BELLACLAW_EMBEDDING_MODEL_URL", async () => {
+    Bun.env.BELLACLAW_EMBEDDING_MODEL = "other-model";
+    const fetchMock = mock(async (url: string) => {
+      if (url.endsWith("/api/show")) {
+        return Response.json({ error: "not found" }, { status: 404 });
+      }
+
+      return Response.json({ status: "success" });
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    await expect(EmbeddingClient.instance.ensureModel()).resolves.toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledWith("http://embedding.test:11434/api/pull", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "other-model",
+        stream: false,
+      }),
+      signal: expect.any(AbortSignal),
+    });
+  });
+
+  test("ensureModel returns false when the pull fails", async () => {
+    Bun.env.BELLACLAW_EMBEDDING_MODEL = "other-model";
+    const fetchMock = mock(async () => Response.json({ error: "not found" }, { status: 500 }));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    await expect(EmbeddingClient.instance.ensureModel()).resolves.toBe(false);
+  });
+
+  test("ensureModel returns false when the GGUF download fails", async () => {
+    const fetchMock = mock(async () => new Response("missing", { status: 404 }));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    await expect(EmbeddingClient.instance.ensureModel()).resolves.toBe(false);
   });
 
   test("returns undefined for non-2xx responses", async () => {
