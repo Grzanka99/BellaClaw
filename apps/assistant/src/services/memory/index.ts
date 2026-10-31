@@ -28,8 +28,9 @@ import {
 
 const FACT_WINDOW_SIZE = 6;
 const FACT_CONTEXT_SIZE = 6;
-// NOTE: both cutoffs are tuned on Polish facts for EmbeddingGemma 2 with its task prefixes. Its
-// distances sit in a narrow band, so a different model or prefix needs new values
+// NOTE: both cutoffs are tuned for EmbeddingGemma 2 with its task prefixes, using Polish queries on
+// English and Polish facts. Its distances sit in a narrow band, so a different model or prefix
+// needs new values
 const MAX_FACT_COSINE_DISTANCE = 0.31;
 // NOTE: every test contradiction was within 0.22; the extra room keeps recall, and the model still
 // decides which candidates are really superseded

@@ -65,7 +65,7 @@ if (import.meta.main) {
   const client = EmbeddingClient.instance;
 
   logger.info(`Rebuilding fact embeddings with ${client.model}`);
-  if (await client.ensureModel()) {
+  if (await client.pullModel()) {
     try {
       const count = await new FactEmbeddingRebuilder().rebuild();
       logger.info(`Rebuilt ${count} fact embeddings with ${client.model}`);
@@ -74,7 +74,7 @@ if (import.meta.main) {
       process.exitCode = 1;
     }
   } else {
-    logger.error(`Embedding model ${client.model} is not available`);
+    logger.error(`Failed to pull ${client.model}`);
     process.exitCode = 1;
   }
 }
