@@ -15,6 +15,9 @@ const MAX_INPUT_LENGTH = 800;
 const REQUEST_TIMEOUT_MS = 30_000;
 const PULL_TIMEOUT_MS = 30 * 60_000;
 const DOWNLOAD_LOG_STEP_BYTES = 100_000_000;
+// NOTE: EmbeddingGemma task prefixes; the search cutoffs in services/memory depend on them
+const DOCUMENT_PREFIX = "title: none | text: ";
+const QUERY_PREFIX = "task: search result | query: ";
 
 const SEmbeddingResponse = z.object({
   embeddings: z.array(z.array(z.number())),
@@ -172,9 +175,22 @@ export class EmbeddingClient {
     return embeddings[0];
   }
 
+  public async embedQuery(query: string): Promise<TOption<number[]>> {
+    const embeddings = await this.embedWithPrefix(QUERY_PREFIX, [query]);
+    if (embeddings === undefined) {
+      return undefined;
+    }
+
+    return embeddings[0];
+  }
+
   public async embedMany(inputs: string[]): Promise<TOption<number[][]>> {
+    return this.embedWithPrefix(DOCUMENT_PREFIX, inputs);
+  }
+
+  private async embedWithPrefix(prefix: string, inputs: string[]): Promise<TOption<number[][]>> {
     try {
-      const cappedInputs = inputs.map((input) => input.slice(0, MAX_INPUT_LENGTH));
+      const cappedInputs = inputs.map((input) => `${prefix}${input.slice(0, MAX_INPUT_LENGTH)}`);
       const response = await fetch(`${this.baseUrl}/api/embed`, {
         method: "POST",
         headers: {

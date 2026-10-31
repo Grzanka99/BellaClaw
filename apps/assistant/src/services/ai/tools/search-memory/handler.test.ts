@@ -29,23 +29,23 @@ describe("handleSearchMemory", () => {
         distance: 0.1,
       },
     ];
-    const embed = mock(async () => vector);
+    const embedQuery = mock(async () => vector);
     const searchFacts = mock(async () => facts);
-    EmbeddingClientWithInternals._instance = { embed };
+    EmbeddingClientWithInternals._instance = { embedQuery };
     MemoryWithInternals._instance = { searchFacts };
 
     const result = await handleSearchMemory("chat-1", { query: "What does the user drink?" });
 
-    expect(embed).toHaveBeenCalledWith("What does the user drink?");
+    expect(embedQuery).toHaveBeenCalledWith("What does the user drink?");
     expect(searchFacts).toHaveBeenCalledWith("chat-1", vector, 10);
     expect(result).toEqual({ facts });
   });
 
   test("uses a custom result limit", async () => {
     const vector = [0.3];
-    const embed = mock(async () => vector);
+    const embedQuery = mock(async () => vector);
     const searchFacts = mock(async () => []);
-    EmbeddingClientWithInternals._instance = { embed };
+    EmbeddingClientWithInternals._instance = { embedQuery };
     MemoryWithInternals._instance = { searchFacts };
 
     await handleSearchMemory("chat-2", { query: "travel plans", limit: 4 });
@@ -54,9 +54,9 @@ describe("handleSearchMemory", () => {
   });
 
   test("throws when the embedding service is unavailable", async () => {
-    const embed = mock(async () => undefined);
+    const embedQuery = mock(async () => undefined);
     const searchFacts = mock(async () => []);
-    EmbeddingClientWithInternals._instance = { embed };
+    EmbeddingClientWithInternals._instance = { embedQuery };
     MemoryWithInternals._instance = { searchFacts };
 
     await expect(handleSearchMemory("chat-3", { query: "preferences" })).rejects.toThrow(
@@ -66,11 +66,11 @@ describe("handleSearchMemory", () => {
   });
 
   test("translates memory errors", async () => {
-    const embed = mock(async () => [0.4]);
+    const embedQuery = mock(async () => [0.4]);
     const searchFacts = mock(async () => {
       throw new Error("database unavailable");
     });
-    EmbeddingClientWithInternals._instance = { embed };
+    EmbeddingClientWithInternals._instance = { embedQuery };
     MemoryWithInternals._instance = { searchFacts };
 
     await expect(handleSearchMemory("chat-4", { query: "important facts" })).rejects.toThrow(

@@ -66,6 +66,8 @@ bun run embeddings:rebuild
 ```
 
 - The new model must also return 768 dimensions.
+- The task prefixes and search cutoffs are tuned for EmbeddingGemma 2. Another model needs new
+  values in `services/embedding` and `services/memory`.
 - EmbeddingGemma 2 needs a recent Ollama; run `podman compose pull ollama` on older installs.
 - On failure, the stored vectors stay unchanged. Fix the cause and run it again.
 

@@ -147,13 +147,13 @@ describe("Memory", () => {
           },
           {
             text: "Ceramics are on Tuesdays.",
-            embedding: embedding(0.31, Math.sqrt(1 - 0.31 ** 2)),
+            embedding: embedding(0.7, Math.sqrt(1 - 0.7 ** 2)),
             sourceMessageId: 2,
             supersedesFactIds: [],
           },
           {
             text: "An unrelated detail.",
-            embedding: embedding(0.29, Math.sqrt(1 - 0.29 ** 2)),
+            embedding: embedding(0.68, Math.sqrt(1 - 0.68 ** 2)),
             sourceMessageId: 3,
             supersedesFactIds: [],
           },
@@ -200,7 +200,7 @@ describe("Memory", () => {
         throw new Error("Expected two ordered fact search results");
       }
       expect(closestResult.distance).toBeCloseTo(0);
-      expect(secondResult.distance).toBeCloseTo(0.69);
+      expect(secondResult.distance).toBeCloseTo(0.3);
 
       const candidates = await memory.findLiveFactCandidates("chat-a", embedding(1));
       expect(candidates.map((fact) => fact.text)).toEqual(["The bicycle is named Comet."]);

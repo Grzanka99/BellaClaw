@@ -72,7 +72,7 @@ describe("EmbeddingClient", () => {
       },
       body: JSON.stringify({
         model: "bellaclaw/embeddinggemma-2:270m-bf16-text",
-        input: ["pierwszy", "second"],
+        input: ["title: none | text: pierwszy", "title: none | text: second"],
       }),
       signal: expect.any(AbortSignal),
     });
@@ -91,7 +91,7 @@ describe("EmbeddingClient", () => {
       },
       body: JSON.stringify({
         model: "bellaclaw/embeddinggemma-2:270m-bf16-text",
-        input: ["a".repeat(800), "b".repeat(800)],
+        input: [`title: none | text: ${"a".repeat(800)}`, `title: none | text: ${"b".repeat(800)}`],
       }),
       signal: expect.any(AbortSignal),
     });
@@ -111,7 +111,7 @@ describe("EmbeddingClient", () => {
       },
       body: JSON.stringify({
         model: "other-model",
-        input: ["hello"],
+        input: ["title: none | text: hello"],
       }),
       signal: expect.any(AbortSignal),
     });
@@ -252,6 +252,25 @@ describe("EmbeddingClient", () => {
     globalThis.fetch = fetchMock as unknown as typeof fetch;
 
     await expect(EmbeddingClient.instance.embedMany(["hello"])).resolves.toBeUndefined();
+  });
+
+  test("embedQuery uses the search query prefix", async () => {
+    const embedding = makeEmbedding(0.75);
+    const fetchMock = mock(async () => embeddingResponse([embedding]));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    await expect(EmbeddingClient.instance.embedQuery("gdzie mieszkam")).resolves.toEqual(embedding);
+    expect(fetchMock).toHaveBeenCalledWith("http://embedding.test:11434/api/embed", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "bellaclaw/embeddinggemma-2:270m-bf16-text",
+        input: ["task: search result | query: gdzie mieszkam"],
+      }),
+      signal: expect.any(AbortSignal),
+    });
   });
 
   test("embed returns the first embedding", async () => {
