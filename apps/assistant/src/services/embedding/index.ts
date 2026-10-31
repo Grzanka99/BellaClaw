@@ -7,6 +7,8 @@ const DEFAULT_MODEL = "embeddinggemma-2:270m";
 const MAX_INPUT_LENGTH = 800;
 const REQUEST_TIMEOUT_MS = 30_000;
 const PULL_TIMEOUT_MS = 30 * 60_000;
+const READY_ATTEMPTS = 30;
+const READY_RETRY_DELAY_MS = 1_000;
 // NOTE: EmbeddingGemma task prefixes; the search cutoffs in services/memory depend on them
 const DOCUMENT_PREFIX = "title: none | text: ";
 const QUERY_PREFIX = "task: search result | query: ";
@@ -35,6 +37,7 @@ export class EmbeddingClient {
 
   public async pullModel(): Promise<boolean> {
     try {
+      await this.waitForServer();
       const response = await fetch(`${this.baseUrl}/api/pull`, {
         method: "POST",
         headers: {
@@ -58,6 +61,20 @@ export class EmbeddingClient {
     } catch (error) {
       this.logger.error(`pullModel: request failed: ${String(error)}`);
       return false;
+    }
+  }
+
+  // NOTE: the rebuild can start right after Compose starts Ollama, before its API is listening
+  private async waitForServer(): Promise<void> {
+    for (let attempt = 1; attempt < READY_ATTEMPTS; attempt += 1) {
+      try {
+        await fetch(`${this.baseUrl}/api/version`, {
+          signal: AbortSignal.timeout(READY_RETRY_DELAY_MS),
+        });
+        return;
+      } catch {
+        await Bun.sleep(READY_RETRY_DELAY_MS);
+      }
     }
   }
 

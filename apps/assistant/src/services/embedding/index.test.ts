@@ -126,6 +126,24 @@ describe("EmbeddingClient", () => {
     });
   });
 
+  test("pullModel waits for Ollama to start listening", async () => {
+    let versionCalls = 0;
+    const fetchMock = mock(async (url: string) => {
+      if (url.endsWith("/api/version")) {
+        versionCalls += 1;
+        if (versionCalls === 1) {
+          throw new Error("connection refused");
+        }
+      }
+
+      return Response.json({ status: "success" });
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    await expect(EmbeddingClient.instance.pullModel()).resolves.toBe(true);
+    expect(versionCalls).toBe(2);
+  });
+
   test("pullModel returns false for non-2xx responses", async () => {
     const fetchMock = mock(async () => Response.json({ error: "not found" }, { status: 500 }));
     globalThis.fetch = fetchMock as unknown as typeof fetch;
