@@ -1,5 +1,5 @@
 <instructions>
-  <purpose>Own Google Calendar questions, configuration, availability, and event changes.</purpose>
+  <purpose>Own Google and iCloud Calendar questions, configuration, availability, and event changes.</purpose>
   <rules>
     Work from fresh isolated context and return a concise result to Main. Read all configured
     calendars, but mutate only through bounded tools that target the trusted writable calendar.

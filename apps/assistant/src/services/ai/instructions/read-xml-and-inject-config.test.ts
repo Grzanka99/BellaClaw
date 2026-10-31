@@ -45,6 +45,6 @@ describe("readXmlAndInjectConfig", () => {
     expect(result).toContain(DefaultConfigRecord[EConfigKey.AiInstructionsAssistantName]);
     expect(result).not.toContain("{{config.");
     expect(result).not.toContain("{{commands}}");
-    expect(result).toContain("!calendar_add-write CALENDAR_ID");
+    expect(result).toContain("!calendar_add-write PROVIDER CALENDAR_ID");
   });
 });

@@ -5,7 +5,6 @@ import { stopMcpAuthServer } from "../services/mcp/auth";
 
 for (const [path, name] of [
   ["../services/authorization", "AuthorizationService"],
-  ["../services/calendar", "CalendarService"],
   ["../services/discord", "DiscordSingleton"],
   ["../services/messaging", "MessagingAdapter"],
   ["../services/signal", "SignalSingleton"],
@@ -14,6 +13,14 @@ for (const [path, name] of [
     mock.module(path, () => ({ [name]: { instance: { setup: async () => undefined } } }));
   }
 }
+mock.module("../services/calendar", () => ({
+  CalendarAdapter: {
+    instance: {
+      registerProvider: () => undefined,
+      setup: async () => undefined,
+    },
+  },
+}));
 mock.module("../services/message-handler", () => ({
   MessageHandler: { scheduleFactDrainForAllChats: async () => undefined },
 }));

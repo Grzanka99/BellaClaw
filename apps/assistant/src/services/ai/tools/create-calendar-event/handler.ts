@@ -1,4 +1,6 @@
 import { type Static, Type } from "@earendil-works/pi-ai";
+import { z } from "zod";
+import { isCalendarDate, validateRecurrence } from "../../../calendar/event-fields";
 
 const STransparency = Type.Union([Type.Literal("opaque"), Type.Literal("transparent")]);
 
@@ -25,7 +27,7 @@ export const SCreateCalendarEventArgs = Type.Object(
     recurrence: Type.Optional(
       Type.Array(Type.String({ minLength: 1 }), {
         minItems: 1,
-        description: "Google-native RRULE, RDATE, or EXDATE lines",
+        description: "iCalendar RRULE, RDATE, or EXDATE lines",
       }),
     ),
   },
@@ -34,35 +36,32 @@ export const SCreateCalendarEventArgs = Type.Object(
 
 export type TCreateCalendarEventArgs = Static<typeof SCreateCalendarEventArgs>;
 
-const ALL_DAY = /^\d{4}-\d{2}-\d{2}$/;
-const EXPLICIT_TIMEZONE = /T.*(?:Z|[+-]\d{2}:\d{2})$/;
-const RECURRENCE = /^(RRULE|RDATE|EXDATE)(?:;[^:]*)?:/;
+const SDateTime = z.iso.datetime({ offset: true });
 
 function allDayTimestamp(value: string, field: string): number {
-  const timestamp = Date.parse(`${value}T00:00:00Z`);
-  if (Number.isNaN(timestamp) || new Date(timestamp).toISOString().slice(0, 10) !== value) {
+  if (!isCalendarDate(value)) {
     throw new Error(`${field} must be a valid calendar date`);
   }
-  return timestamp;
+  return Date.parse(`${value}T00:00:00Z`);
 }
 
 export function validateCreateCalendarEventArgs(
   args: TCreateCalendarEventArgs,
 ): TCreateCalendarEventArgs {
-  const startAllDay = ALL_DAY.test(args.start);
+  const startAllDay = args.start.length === 10;
   let startTimestamp: number;
   if (startAllDay) {
     startTimestamp = allDayTimestamp(args.start, "start");
   } else {
     startTimestamp = Date.parse(args.start);
-    if (!EXPLICIT_TIMEZONE.test(args.start) || Number.isNaN(startTimestamp)) {
+    if (!SDateTime.safeParse(args.start).success || Number.isNaN(startTimestamp)) {
       throw new Error(
         "start must be YYYY-MM-DD or an RFC 3339 date-time with an explicit timezone",
       );
     }
   }
   if (args.end !== undefined) {
-    const endAllDay = ALL_DAY.test(args.end);
+    const endAllDay = args.end.length === 10;
 
     if (startAllDay !== endAllDay) {
       throw new Error("start and end must both be all-day dates or timed date-times");
@@ -72,7 +71,7 @@ export function validateCreateCalendarEventArgs(
       endTimestamp = allDayTimestamp(args.end, "end");
     } else {
       endTimestamp = Date.parse(args.end);
-      if (!EXPLICIT_TIMEZONE.test(args.end) || Number.isNaN(endTimestamp)) {
+      if (!SDateTime.safeParse(args.end).success || Number.isNaN(endTimestamp)) {
         throw new Error("end must be an RFC 3339 date-time with an explicit timezone");
       }
     }
@@ -86,8 +85,8 @@ export function validateCreateCalendarEventArgs(
   if (startAllDay && args.durationMinutes !== undefined) {
     throw new Error("All-day events do not accept durationMinutes");
   }
-  if (args.recurrence?.some((line) => !RECURRENCE.test(line))) {
-    throw new Error("Recurrence lines must start with RRULE:, RDATE:, or EXDATE:");
+  if (args.recurrence !== undefined) {
+    validateRecurrence(args.recurrence);
   }
 
   return args;

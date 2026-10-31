@@ -84,7 +84,7 @@ Compose stores:
 
 - Behavior logs in the `bellaclaw-data` volume
 - Signal link state in the `signal-cli-data` volume
-- AI and Google credentials in the host `.secrets/` directory
+- AI and calendar credentials in the host `.secrets/` directory
 
 Published ports:
 
