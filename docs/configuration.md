@@ -58,7 +58,7 @@ rebuild imports it from `BELLACLAW_EMBEDDING_MODEL_URL`, or pulls it from the Ol
 that is blank. Then it re-embeds every fact.
 
 ```bash
-# Compose: stops the assistant, rebuilds, starts it again
+# Compose: stops the assistant, rebuilds, recreates it from the current image
 bun run server:rebuild-embeddings
 
 # Local: stop the assistant first
@@ -69,7 +69,10 @@ bun run embeddings:rebuild
 - The task prefixes and search cutoffs are tuned for EmbeddingGemma 2. Another model needs new
   values in `services/embedding` and `services/memory`.
 - EmbeddingGemma 2 needs a recent Ollama; run `podman compose pull ollama` on older installs.
-- On failure, the stored vectors stay unchanged. Fix the cause and run it again.
+- On failure, the stored vectors stay unchanged and the assistant stays stopped. Fix the cause and
+  run it again, or run `podman compose start bellaclaw` to go back to the previous container.
+- When deploying a model change with new code, build first and rebuild instead of running
+  `server:update`, so new code never runs against old vectors.
 
 ## Messaging
 

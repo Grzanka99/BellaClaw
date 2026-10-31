@@ -18,9 +18,11 @@ Fill in the required values from [Configuration](configuration.md), then run:
 
 ```bash
 podman compose up -d --build
+bun run server:rebuild-embeddings
 ```
 
-The services restart unless stopped.
+The services restart unless stopped. The second command installs the embedding model into Ollama;
+memory search and fact extraction fail until it has run.
 
 This command starts:
 
@@ -38,8 +40,9 @@ The package scripts include the Signal profile:
 
 | Command | Action |
 | --- | --- |
-| `bun run server:init` | Seed optional Codex auth, build, and start all services. |
+| `bun run server:init` | Seed optional Codex auth, build, start all services, and install the embedding model. |
 | `bun run server:update` | Preserve auth, rebuild without cache, and recreate all services. |
+| `bun run server:rebuild-embeddings` | Stop the assistant, install the embedding model if missing, re-embed all facts, and start the assistant on the current image. |
 | `bun run server:down` | Stop all services, including the Signal profile. |
 | `bun run server:reset-auth` | Replace Pi credentials from `.secrets/auth.json`. |
 
