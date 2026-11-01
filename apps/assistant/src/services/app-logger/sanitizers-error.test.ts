@@ -28,8 +28,33 @@ describe("app logger sanitizer errors", () => {
       error: "No job found with name: private-health-reminder",
     });
 
-    expect(error).toBe("update-cron-job failed");
+    expect(error).toBe("update-cron-job failed: job-not-found");
     expect(error).not.toContain("private-health-reminder");
+  });
+
+  test("logs a fixed code for pre-execution cron validation failures", () => {
+    const error = sanitizeToolResultError({
+      toolCallId: "tool-call-1",
+      toolName: "update-cron-job",
+      success: false,
+      data: undefined,
+      error:
+        'Validation failed for tool "update-cron-job":\n  - fireAt: invalid\n\nReceived arguments:\n{"reminderText":"private note"}',
+    });
+
+    expect(error).toBe("update-cron-job failed: invalid-arguments");
+  });
+
+  test("drops unknown cron tool errors", () => {
+    const error = sanitizeToolResultError({
+      toolCallId: "tool-call-1",
+      toolName: "schedule-once",
+      success: false,
+      data: undefined,
+      error: "private-health-reminder exploded",
+    });
+
+    expect(error).toBe("schedule-once failed");
   });
 
   test("redacts configured provider API keys from errors", () => {

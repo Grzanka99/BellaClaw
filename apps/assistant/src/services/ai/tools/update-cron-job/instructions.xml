@@ -17,12 +17,17 @@
 
   <usage_rules>
     <rule>Use list-cron-jobs first when the existing reminder name or type is uncertain</rule>
-    <rule>Always confirm the exact schedule or content change with the user before calling this tool</rule>
+    <rule>The delegated request is the confirmation; never ask the user to confirm before calling this tool</rule>
     <rule>Use pattern only for existing recurring reminders</rule>
     <rule>Use fireAt only for existing one-time reminders</rule>
     <rule>Provide fireAt as local wall-clock time in the configured timezone, formatted YYYY-MM-DDTHH:mm:ss, with no Z or offset; the server resolves daylight saving time</rule>
     <rule>Never set fireAt in the past</rule>
+    <rule>For a content-only update, send only name and the new content fields; omit pattern and fireAt</rule>
+    <rule>Never fill an unused field with a placeholder, an empty string, or the current time</rule>
     <rule>When changing generated reminder content, provide reminderPromptData and reminderFallbackText together</rule>
+    <rule>Pass reminderPromptData as a serialized JSON string, not as a nested object</rule>
+    <rule>Use generated reminder content when the wording should differ on each firing; reminderText repeats unchanged</rule>
+    <rule>After a failed update, change the arguments according to the error before calling again; an identical retry ends the run</rule>
     <rule>When changing direct reminder content, provide reminderText only</rule>
     <rule>When changing autonomous task content, provide taskPrompt and taskFallbackText together</rule>
     <rule>A supplied content mode replaces and clears the previous content mode</rule>
@@ -56,6 +61,16 @@
         <reminderText>Reminder: prepare notes for standup.</reminderText>
       </toolCall>
       <reasoning>The reminder schedule stays unchanged and the direct reminder content is replaced.</reasoning>
+    </example>
+
+    <example>
+      <context>User says: "Make my weekly plant reminder different and more creative every time"</context>
+      <toolCall>
+        <name>water-plants</name>
+        <reminderPromptData>{\"topic\":\"watering the plants\",\"style\":\"creative, different every week\"}</reminderPromptData>
+        <reminderFallbackText>Time to water the plants.</reminderFallbackText>
+      </toolCall>
+      <reasoning>Fresh wording is generated at each firing, and the omitted pattern keeps the schedule unchanged.</reasoning>
     </example>
   </examples>
 
