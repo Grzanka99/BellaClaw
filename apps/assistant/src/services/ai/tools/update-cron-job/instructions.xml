@@ -67,7 +67,7 @@
       <context>User says: "Make my weekly plant reminder different and more creative every time"</context>
       <toolCall>
         <name>water-plants</name>
-        <reminderPromptData>{\"topic\":\"watering the plants\",\"style\":\"creative, different every week\"}</reminderPromptData>
+        <reminderPromptData>{"topic":"watering the plants","style":"creative, different every week"}</reminderPromptData>
         <reminderFallbackText>Time to water the plants.</reminderFallbackText>
       </toolCall>
       <reasoning>Fresh wording is generated at each firing, and the omitted pattern keeps the schedule unchanged.</reasoning>
