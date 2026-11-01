@@ -255,7 +255,7 @@ describe("production executable tools", () => {
       return { tool, createRecurring, createOnce };
     }
 
-    test("rejects the exact incident call with a corrective error", async () => {
+    test("rejects fireAt on recurring jobs", async () => {
       const { tool, createRecurring } = installJob(recurringJob);
 
       await expect(
