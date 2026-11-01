@@ -45,6 +45,46 @@ describe("app logger sanitizer errors", () => {
     expect(error).toBe("update-cron-job failed: invalid-arguments");
   });
 
+  test("maps each known cron error to its code without private values", () => {
+    for (const [message, code] of [
+      ["cancel failed: No job found with name: private-job", "job-not-found"],
+      ["Provide either pattern or fireAt, not both", "conflicting-schedule-fields"],
+      ["Provide reminderText, reminderPromptData, or taskPrompt", "missing-content"],
+      [
+        "Provide only one of reminderText, reminderPromptData, or taskPrompt",
+        "conflicting-content-modes",
+      ],
+      [
+        "reminderFallbackText is required when reminderPromptData is set",
+        "invalid-fallback-pairing",
+      ],
+      ["taskFallbackText requires taskPrompt", "invalid-fallback-pairing"],
+      ["Invalid fireAt: private-job", "invalid-fire-at"],
+      ["fireAt must be local time, YYYY-MM-DDTHH:mm[:ss], with no Z or offset", "invalid-fire-at"],
+      ["fireAt can only update one-time reminders; omit fireAt", "fire-at-on-recurring-job"],
+      ["fireAt 2027-03-28T02:30:00 does not exist in Europe/Warsaw", "nonexistent-fire-at"],
+      ["pattern can only update recurring reminders; omit pattern", "pattern-on-one-time-job"],
+      ["create failed: fireAt must be in the future", "fire-at-in-past"],
+      [
+        "create failed: Job 'private-job' already exists. Set overwrite: true",
+        "job-already-exists",
+      ],
+      ["create failed: Cron pattern '0 0 31 2 *' cannot be scheduled", "unschedulable-pattern"],
+      ["create failed: Job 'private-job' is no longer active.", "create-failed"],
+      ["cancel failed: Error: private-job", "cancel-failed"],
+    ] as const) {
+      const error = sanitizeToolResultError({
+        toolCallId: "tool-call-1",
+        toolName: "update-cron-job",
+        success: false,
+        data: undefined,
+        error: message,
+      });
+
+      expect(error).toBe(`update-cron-job failed: ${code}`);
+    }
+  });
+
   test("drops unknown cron tool errors", () => {
     const error = sanitizeToolResultError({
       toolCallId: "tool-call-1",
