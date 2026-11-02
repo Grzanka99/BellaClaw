@@ -94,7 +94,6 @@ describe("production executable tools", () => {
         location: undefined,
         start: "2026-08-01T10:00:00+02:00",
         end: undefined,
-        durationMinutes: undefined,
         timezone: undefined,
         transparency: undefined,
         recurrence: undefined,

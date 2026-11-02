@@ -2,10 +2,11 @@
   <purpose>Create an event on the structurally protected writable calendar.</purpose>
   <tool><name>create-calendar-event</name><description>Creates timed, all-day, or Google-native recurring events. It cannot select a calendar.</description></tool>
   <usage_rules>
-    <rule>A date without a time is all-day. If a timed start has no end or duration, the service defaults to one hour.</rule>
+    <rule>A date without a time is all-day. If a timed start has no end, the service defaults to one hour.</rule>
+    <rule>When the user gives a duration, compute end from start yourself. Omit end when the user gives neither an end nor a duration.</rule>
     <rule>Clarify materially ambiguous dates or starts before calling.</rule>
     <rule>Use the configured timezone unless the user specifies another.</rule>
     <rule>Use only RRULE:, RDATE:, and EXDATE: recurrence lines.</rule>
   </usage_rules>
-  <examples><example><context>Create an all-day event called Holiday on 2026-08-01.</context><toolCall><summary>Holiday</summary><start>2026-08-01</start></toolCall></example></examples>
+  <examples><example><context>Create an all-day event called Holiday on 2026-08-01.</context><toolCall><summary>Holiday</summary><start>2026-08-01</start></toolCall></example><example><context>Create a 90-minute Dentist visit on 2026-11-17 at 08:30 in Europe/Warsaw.</context><toolCall><summary>Dentist</summary><start>2026-11-17T08:30:00+01:00</start><end>2026-11-17T10:00:00+01:00</end></toolCall></example></examples>
 </instructions>

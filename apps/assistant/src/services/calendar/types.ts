@@ -93,7 +93,6 @@ export type TCreateEventArguments = {
   location?: string;
   start: string;
   end?: string;
-  durationMinutes?: number;
   timezone: string;
   transparency?: "opaque" | "transparent";
   recurrence?: string[];
@@ -106,7 +105,6 @@ export type TUpdateEventPatch = {
   location?: string;
   start?: string;
   end?: string;
-  durationMinutes?: number;
   timezone?: string;
   transparency?: "opaque" | "transparent";
   recurrence?: string[];

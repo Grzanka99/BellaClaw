@@ -200,15 +200,11 @@ function nextDate(date: string): string {
 function normalizeEventTimes(
   start: string,
   end: TOption<string>,
-  durationMinutes: TOption<number>,
   timezone: string,
 ): { start: Record<string, unknown>; end: Record<string, unknown> } {
   if (/^\d{4}-\d{2}-\d{2}$/.test(start)) {
     if (end !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(end)) {
       throw new Error("All-day event end must also be a date");
-    }
-    if (durationMinutes !== undefined) {
-      throw new Error("All-day events do not accept durationMinutes");
     }
     return {
       start: { date: start },
@@ -222,11 +218,7 @@ function normalizeEventTimes(
   }
   let endValue = end;
   if (endValue === undefined) {
-    const minutes = durationMinutes ?? 60;
-    if (!Number.isFinite(minutes) || minutes <= 0) {
-      throw new Error("durationMinutes must be positive");
-    }
-    endValue = new Date(startTimestamp + minutes * 60_000).toISOString();
+    endValue = new Date(startTimestamp + 60 * 60_000).toISOString();
   }
   const endTimestamp = Date.parse(endValue);
   if (Number.isNaN(endTimestamp) || endTimestamp <= startTimestamp) {
@@ -358,13 +350,11 @@ function applyPatch(
   }
   if (patch.start !== undefined) {
     let end = patch.end;
-    if (end === undefined && patch.durationMinutes === undefined) {
+    if (end === undefined) {
       const patchIsAllDay = /^\d{4}-\d{2}-\d{2}$/.test(patch.start);
       if (patchIsAllDay) {
         if (currentEvent.start.date === undefined || currentEvent.end.date === undefined) {
-          throw new Error(
-            "Changing between timed and all-day events requires an explicit end or duration",
-          );
+          throw new Error("Changing between timed and all-day events requires an explicit end");
         }
         const currentStart = Date.parse(`${currentEvent.start.date}T00:00:00Z`);
         const currentEnd = Date.parse(`${currentEvent.end.date}T00:00:00Z`);
@@ -382,9 +372,7 @@ function applyPatch(
         end = new Date(newStart + duration).toISOString().slice(0, 10);
       } else {
         if (currentEvent.start.dateTime === undefined || currentEvent.end.dateTime === undefined) {
-          throw new Error(
-            "Changing between all-day and timed events requires an explicit end or duration",
-          );
+          throw new Error("Changing between all-day and timed events requires an explicit end");
         }
         const currentStart = Date.parse(currentEvent.start.dateTime);
         const currentEnd = Date.parse(currentEvent.end.dateTime);
@@ -402,15 +390,11 @@ function applyPatch(
       }
     }
     const timezone = patch.timezone ?? currentEvent.start.timeZone ?? "UTC";
-    const times = normalizeEventTimes(patch.start, end, patch.durationMinutes, timezone);
+    const times = normalizeEventTimes(patch.start, end, timezone);
     body.start = times.start;
     body.end = times.end;
-  } else if (
-    patch.end !== undefined ||
-    patch.durationMinutes !== undefined ||
-    patch.timezone !== undefined
-  ) {
-    throw new Error("Updating end, duration, or timezone requires start");
+  } else if (patch.end !== undefined || patch.timezone !== undefined) {
+    throw new Error("Updating end or timezone requires start");
   }
 }
 
@@ -663,7 +647,7 @@ export class CalendarService {
 
   public async createEvent(args: TCreateEventArguments): Promise<TCalendarEvent> {
     const calendarId = await this.requireWriteCalendarId(args.userId);
-    const times = normalizeEventTimes(args.start, args.end, args.durationMinutes, args.timezone);
+    const times = normalizeEventTimes(args.start, args.end, args.timezone);
     const body: Record<string, unknown> = {
       summary: args.summary,
       start: times.start,
