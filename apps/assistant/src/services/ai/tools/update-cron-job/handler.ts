@@ -3,8 +3,8 @@ import type { TCronJob } from "../../../../lib/cron-engine";
 import { ECronJobType } from "../../../../lib/cron-engine";
 import { CronSingleton } from "../../../cron";
 import {
+  absentIfBlank,
   countCronContentModes,
-  LOCAL_FIRE_AT_PATTERN,
   normalizeCronContentFields,
   parseLocalFireAt,
   validateCronFallbackPairing,
@@ -14,12 +14,15 @@ export const SUpdateCronJobArgs = Type.Object(
   {
     name: Type.String({ description: "Unique name of the existing cron job to update" }),
     pattern: Type.Optional(
-      Type.String({ description: "New 5-field cron expression for a recurring reminder" }),
+      Type.String({
+        description:
+          "New 5-field cron expression for a recurring job; omit to keep the current schedule",
+      }),
     ),
     fireAt: Type.Optional(
       Type.String({
-        pattern: LOCAL_FIRE_AT_PATTERN,
-        description: "New future local date-time in the owner's timezone, YYYY-MM-DDTHH:mm[:ss]",
+        description:
+          "New future local date-time for a one-time job in the owner's timezone, YYYY-MM-DDTHH:mm[:ss]; omit for recurring jobs and to keep the current time",
       }),
     ),
     group: Type.Optional(
@@ -43,15 +46,13 @@ export const SUpdateCronJobArgs = Type.Object(
 export type TUpdateCronJobArgs = Static<typeof SUpdateCronJobArgs>;
 export type TUpdateCronJobResult = TCronJob;
 
-type TValidatedUpdateCronJobArgs = Omit<TUpdateCronJobArgs, "fireAt"> & {
-  fireAt?: Date;
-};
-
-export function validateUpdateCronJobArgs(
-  rawArgs: TUpdateCronJobArgs,
-  timezone: string,
-): TValidatedUpdateCronJobArgs {
-  const args = { ...rawArgs, ...normalizeCronContentFields(rawArgs) };
+export function validateUpdateCronJobArgs(rawArgs: TUpdateCronJobArgs): TUpdateCronJobArgs {
+  const args = {
+    ...rawArgs,
+    ...normalizeCronContentFields(rawArgs),
+    pattern: absentIfBlank(rawArgs.pattern),
+    fireAt: absentIfBlank(rawArgs.fireAt),
+  };
 
   if (args.pattern !== undefined && args.fireAt !== undefined) {
     throw new Error("Provide either pattern or fireAt, not both");
@@ -63,16 +64,7 @@ export function validateUpdateCronJobArgs(
 
   validateCronFallbackPairing(args);
 
-  const { fireAt, ...rest } = args;
-
-  if (fireAt === undefined) {
-    return rest;
-  }
-
-  return {
-    ...rest,
-    fireAt: parseLocalFireAt(fireAt, timezone),
-  };
+  return args;
 }
 
 export async function handleUpdateCronJob(
@@ -80,7 +72,7 @@ export async function handleUpdateCronJob(
   parsedArgs: TUpdateCronJobArgs,
   timezone: string,
 ) {
-  const validatedArgs = validateUpdateCronJobArgs(parsedArgs, timezone);
+  const validatedArgs = validateUpdateCronJobArgs(parsedArgs);
   const existing = await CronSingleton.instance.get(validatedArgs.name, chatId);
 
   if (existing === undefined) {
@@ -116,7 +108,7 @@ export async function handleUpdateCronJob(
   if (existing.type === ECronJobType.Recurring) {
     if (validatedArgs.fireAt !== undefined) {
       throw new Error(
-        "fireAt can only update one-time reminders; use pattern for recurring reminders",
+        "fireAt can only update one-time reminders; omit fireAt for this recurring reminder and use pattern only to change its schedule",
       );
     }
 
@@ -149,15 +141,21 @@ export async function handleUpdateCronJob(
 
   if (validatedArgs.pattern !== undefined) {
     throw new Error(
-      "pattern can only update recurring reminders; use fireAt for one-time reminders",
+      "pattern can only update recurring reminders; omit pattern for this one-time reminder and use fireAt only to change its time",
     );
+  }
+
+  let fireAt = existing.nextRunAt;
+
+  if (validatedArgs.fireAt !== undefined) {
+    fireAt = parseLocalFireAt(validatedArgs.fireAt, timezone);
   }
 
   const result = await CronSingleton.instance.createOnce({
     name: existing.name,
     scope: chatId,
     group: validatedArgs.group ?? existing.group,
-    fireAt: validatedArgs.fireAt ?? existing.nextRunAt,
+    fireAt,
     reminderText,
     reminderPromptData,
     reminderFallbackText,

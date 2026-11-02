@@ -30,6 +30,27 @@ const CRON_TOOL_NAMES = new Set([
   "update-cron-job",
 ]);
 
+/**
+ * Cron errors can quote job names and reminder content, so only fixed codes reach the logs.
+ */
+const CRON_TOOL_ERROR_CODES: ReadonlyArray<readonly [RegExp, string]> = [
+  [/^(Validation failed for tool|Invalid tool arguments:)/, "invalid-arguments"],
+  [/^(cancel failed: )?No job found with name:/, "job-not-found"],
+  [/^Provide either pattern or fireAt/, "conflicting-schedule-fields"],
+  [/^Provide reminderText/, "missing-content"],
+  [/^Provide only one of/, "conflicting-content-modes"],
+  [/^(reminderFallbackText|taskFallbackText) (is required|requires)/, "invalid-fallback-pairing"],
+  [/^(Invalid fireAt|fireAt must be local)/, "invalid-fire-at"],
+  [/^fireAt can only update/, "fire-at-on-recurring-job"],
+  [/^fireAt .* does not exist in /, "nonexistent-fire-at"],
+  [/^pattern can only update/, "pattern-on-one-time-job"],
+  [/^create failed: fireAt must be in the future/, "fire-at-in-past"],
+  [/^create failed: Job '.*' already exists/, "job-already-exists"],
+  [/^create failed: Cron pattern '.*' cannot be scheduled/, "unschedulable-pattern"],
+  [/^create failed:/, "create-failed"],
+  [/^cancel failed:/, "cancel-failed"],
+];
+
 export function sanitizeErrorMessage(error: TOption<string>): TOption<string> {
   if (error === undefined) {
     return undefined;
@@ -209,6 +230,12 @@ export function sanitizeToolResultError(result: TNormalizedToolResult): TOption<
   }
 
   if (CRON_TOOL_NAMES.has(result.toolName)) {
+    for (const [pattern, code] of CRON_TOOL_ERROR_CODES) {
+      if (pattern.test(result.error)) {
+        return `${result.toolName} failed: ${code}`;
+      }
+    }
+
     return `${result.toolName} failed`;
   }
 

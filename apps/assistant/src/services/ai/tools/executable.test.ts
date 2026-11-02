@@ -208,6 +208,130 @@ describe("production executable tools", () => {
     );
   });
 
+  describe("update-cron-job schedule fields", () => {
+    const recurringJob = {
+      id: 1,
+      name: "water-plants",
+      scope: "discord:1",
+      group: undefined,
+      type: ECronJobType.Recurring,
+      pattern: "0 11 * * 6",
+      status: ECronJobStatus.Active,
+      nextRunAt: new Date("2026-11-07T10:00:00.000Z"),
+      lastRunAt: undefined,
+      createdAt: new Date(),
+      finishedAt: undefined,
+      finishedReason: undefined,
+      timezone: "Europe/Warsaw",
+      reminderText: "Water the plants",
+      reminderPromptData: undefined,
+      reminderFallbackText: "Water the plants",
+      taskPrompt: undefined,
+      taskFallbackText: undefined,
+    };
+    const oneTimeJob = {
+      ...recurringJob,
+      type: ECronJobType.OneTime,
+      pattern: undefined,
+    };
+    const generatedContent = {
+      reminderPromptData: '{"topic":"plants"}',
+      reminderFallbackText: "Time to water the plants",
+    };
+
+    function installJob(job: typeof recurringJob | typeof oneTimeJob) {
+      const createRecurring = mock(async (args) => ({ ...job, ...args }));
+      const createOnce = mock(async (args) => ({ ...job, ...args }));
+      (CronSingleton as unknown as { _instance: unknown })._instance = {
+        get: mock(async () => job),
+        createRecurring,
+        createOnce,
+      };
+      const tool = createSchedulingTools(context).find(
+        (candidate) => candidate.name === "update-cron-job",
+      );
+
+      return { tool, createRecurring, createOnce };
+    }
+
+    test("rejects fireAt on recurring jobs", async () => {
+      const { tool, createRecurring } = installJob(recurringJob);
+
+      await expect(
+        tool?.execute("call", {
+          name: "water-plants",
+          pattern: "",
+          fireAt: "2026-10-10T18:35:06+02:00",
+          group: "",
+          reminderText: "",
+          taskPrompt: "",
+          taskFallbackText: "",
+          ...generatedContent,
+        }),
+      ).rejects.toThrow("omit fireAt for this recurring reminder");
+      expect(createRecurring).not.toHaveBeenCalled();
+    });
+
+    test("saves the corrected content-only call and keeps the schedule", async () => {
+      const { tool, createRecurring } = installJob(recurringJob);
+
+      await tool?.execute("call", { name: "water-plants", ...generatedContent });
+
+      expect(createRecurring).toHaveBeenCalledWith(
+        expect.objectContaining({
+          pattern: "0 11 * * 6",
+          timezone: "Europe/Warsaw",
+          reminderText: undefined,
+          overwrite: true,
+          ...generatedContent,
+        }),
+      );
+    });
+
+    test("treats blank schedule fields as omitted", async () => {
+      const { tool, createRecurring } = installJob(recurringJob);
+
+      await tool?.execute("call", {
+        name: "water-plants",
+        pattern: "",
+        fireAt: "",
+        ...generatedContent,
+      });
+
+      expect(createRecurring).toHaveBeenCalledWith(
+        expect.objectContaining({ pattern: "0 11 * * 6", ...generatedContent }),
+      );
+    });
+
+    test("resolves fireAt for one-time jobs after loading the job", async () => {
+      const { tool, createOnce } = installJob(oneTimeJob);
+
+      await tool?.execute("call", { name: "water-plants", fireAt: "2026-12-25T03:30:00" });
+
+      expect(createOnce).toHaveBeenCalledWith(
+        expect.objectContaining({ fireAt: new Date("2026-12-25T02:30:00.000Z") }),
+      );
+    });
+
+    test("rejects an offset fireAt on one-time jobs", async () => {
+      const { tool, createOnce } = installJob(oneTimeJob);
+
+      await expect(
+        tool?.execute("call", { name: "water-plants", fireAt: "2026-12-25T03:30:00+01:00" }),
+      ).rejects.toThrow("no Z or offset");
+      expect(createOnce).not.toHaveBeenCalled();
+    });
+
+    test("rejects a pattern on one-time jobs", async () => {
+      const { tool, createOnce } = installJob(oneTimeJob);
+
+      await expect(
+        tool?.execute("call", { name: "water-plants", pattern: "0 8 * * *" }),
+      ).rejects.toThrow("omit pattern for this one-time reminder");
+      expect(createOnce).not.toHaveBeenCalled();
+    });
+  });
+
   test("propagates service failures as model-visible tool errors", async () => {
     (CronSingleton as unknown as { _instance: unknown })._instance = {
       cancel: mock(async () => ({ operation: "cancel", error: "database unavailable" })),

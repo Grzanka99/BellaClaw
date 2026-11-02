@@ -9,7 +9,7 @@ type TCronContentFields = {
   taskFallbackText?: string;
 };
 
-function absentIfBlank(value?: string): TOption<string> {
+export function absentIfBlank(value?: string): TOption<string> {
   if (value === undefined || value.trim() === "") {
     return undefined;
   }
@@ -88,6 +88,10 @@ function getTimezoneOffsetMs(timestamp: number, timezone: string): number {
  * time and the offset valid at that moment is resolved here.
  */
 export function parseLocalFireAt(fireAt: string, timezone: string): Date {
+  if (!new RegExp(LOCAL_FIRE_AT_PATTERN).test(fireAt)) {
+    throw new Error("fireAt must be local time, YYYY-MM-DDTHH:mm[:ss], with no Z or offset");
+  }
+
   const wallTime = Date.parse(`${fireAt}Z`);
 
   if (Number.isNaN(wallTime)) {
