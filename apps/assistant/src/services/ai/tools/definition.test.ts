@@ -62,12 +62,6 @@ describe("AI tool arguments", () => {
       "Europe/Warsaw",
     );
     expect(winter.fireAt).toEqual(new Date("2026-10-27T07:00:00.000Z"));
-
-    const update = validateUpdateCronJobArgs(
-      { name: "winter-reminder", fireAt: "2026-10-25T03:30:00" },
-      "Europe/Warsaw",
-    );
-    expect(update.fireAt).toEqual(new Date("2026-10-25T02:30:00.000Z"));
   });
 
   test("rejects local schedule dates that do not exist", () => {
@@ -82,9 +76,6 @@ describe("AI tool arguments", () => {
     expect(Value.Check(SScheduleOnceArgs, { name: "x", fireAt: "2026-07-13T12:00:00Z" })).toBe(
       false,
     );
-    expect(
-      Value.Check(SUpdateCronJobArgs, { name: "x", fireAt: "2026-07-13T12:00:00+02:00" }),
-    ).toBe(false);
   });
 
   test("does not count blank schedule content as a second content mode", () => {
@@ -118,19 +109,20 @@ describe("AI tool arguments", () => {
   });
 
   test("treats blank cron job updates as absent instead of content edits", () => {
-    const update = validateUpdateCronJobArgs(
-      {
-        name: "daily-news",
-        group: "",
-        reminderText: "   ",
-        reminderPromptData: "",
-        reminderFallbackText: "",
-        taskPrompt: "",
-        taskFallbackText: "",
-      },
-      "Europe/Warsaw",
-    );
+    const update = validateUpdateCronJobArgs({
+      name: "daily-news",
+      pattern: "",
+      fireAt: "  ",
+      group: "",
+      reminderText: "   ",
+      reminderPromptData: "",
+      reminderFallbackText: "",
+      taskPrompt: "",
+      taskFallbackText: "",
+    });
 
+    expect(update.pattern).toBeUndefined();
+    expect(update.fireAt).toBeUndefined();
     expect(update.group).toBeUndefined();
     expect(update.reminderText).toBeUndefined();
     expect(update.taskPrompt).toBeUndefined();
@@ -151,14 +143,11 @@ describe("AI tool arguments", () => {
       }),
     ).toThrow("taskFallbackText is required");
     expect(() =>
-      validateUpdateCronJobArgs(
-        {
-          name: "daily-news",
-          pattern: "0 8 * * *",
-          fireAt: "2026-07-13T10:00:00",
-        },
-        "Europe/Warsaw",
-      ),
+      validateUpdateCronJobArgs({
+        name: "daily-news",
+        pattern: "0 8 * * *",
+        fireAt: "2026-07-13T10:00:00",
+      }),
     ).toThrow("Provide either pattern or fireAt");
   });
 
