@@ -47,6 +47,7 @@ const EXPECTED_TOOL_NAMES: Record<EAgentName, readonly string[]> = {
     "web-fetch",
     "list-calendar-events",
     "find-calendar-availability",
+    "list-cron-jobs",
   ],
 };
 
