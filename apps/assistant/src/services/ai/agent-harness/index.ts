@@ -744,6 +744,7 @@ export class AgentHarness {
               tool.name === "list-calendar-events" || tool.name === "find-calendar-availability"
             );
           }),
+          ...createSchedulingTools(context).filter((tool) => tool.name === "list-cron-jobs"),
           ...(await this.createMcpDelegationTools(args)),
         ];
     }
