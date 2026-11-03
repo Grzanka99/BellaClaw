@@ -1,6 +1,6 @@
 # Google Calendar
 
-BellaClaw can modify one calendar and read additional calendars.
+BellaClaw can modify one calendar per chat, chosen from Google or iCloud, and read additional calendars from both providers. Setting another writable calendar replaces the previous one.
 
 Calendar setup is optional. When it is missing or invalid, BellaClaw still starts but calendar tools
 remain unavailable.
@@ -26,7 +26,7 @@ remain unavailable.
 7. Send the calendar ID to BellaClaw as a chat command:
 
    ```text
-   !calendar_add-write your-calendar-id
+   !calendar_add-write google your-calendar-id
    ```
 
 Each chat has its own writable calendar. BellaClaw verifies that the calendar has exact `writer`
@@ -40,7 +40,7 @@ For each extra calendar:
 2. Send the calendar ID to BellaClaw as a chat command:
 
    ```text
-   !calendar_add-read your-calendar-id
+   !calendar_add-read google your-calendar-id
    ```
 
 BellaClaw verifies `reader`, `writer`, or `owner` access before saving it, and always stores the
@@ -54,3 +54,5 @@ Ask BellaClaw in chat to list or remove read-only calendars.
 - Event reminders use the writable calendar's defaults
 
 The service-account key stays under `.secrets/`, which Git and the container build context exclude.
+
+For iCloud setup, see [iCloud Calendar](icloud-calendar.md).

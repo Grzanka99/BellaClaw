@@ -9,6 +9,7 @@ import {
   text,
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
+import { ECalendarProvider } from "../calendar/types";
 
 export const EMBEDDING_DIMENSIONS = 768;
 
@@ -136,12 +137,16 @@ export const calendarsTable = sqliteTable(
   "calendars",
   {
     userId: text("userId").notNull().default(""),
+    provider: text("provider")
+      .$type<ECalendarProvider>()
+      .notNull()
+      .default(ECalendarProvider.Google),
     calendarId: text("calendarId").notNull(),
     access: text("access").notNull(),
     addedAt: integer("addedAt").notNull(),
   },
   (table) => [
-    primaryKey({ columns: [table.userId, table.calendarId] }),
+    primaryKey({ columns: [table.userId, table.provider, table.calendarId] }),
     check("calendars_access_check", sql`${table.access} in ('read', 'write')`),
     uniqueIndex("calendars_single_write_unique")
       .on(table.userId)

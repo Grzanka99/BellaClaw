@@ -1,6 +1,7 @@
 import type { TOption } from "@bellaclaw/shared";
 import { calendarAddReadCommand } from "./calendar-add-read";
 import { calendarAddWriteCommand } from "./calendar-add-write";
+import { calendarDiscoverCommand } from "./calendar-discover";
 import { mcpAuthCommand } from "./mcp-auth";
 import { mcpPromptCommand, mcpPromptsCommand } from "./mcp-prompts";
 import { COMMAND_PREFIX, type TCommand, type TCommandResult } from "./types";
@@ -8,6 +9,7 @@ import { COMMAND_PREFIX, type TCommand, type TCommandResult } from "./types";
 const REGISTERED_COMMANDS: TCommand[] = [
   calendarAddWriteCommand,
   calendarAddReadCommand,
+  calendarDiscoverCommand,
   mcpAuthCommand,
   mcpPromptsCommand,
   mcpPromptCommand,

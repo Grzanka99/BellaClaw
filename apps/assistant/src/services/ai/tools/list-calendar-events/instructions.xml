@@ -1,6 +1,6 @@
 <instructions>
   <purpose>Read events from all configured calendars in a bounded range.</purpose>
-  <tool><name>list-calendar-events</name><description>Returns full Google-permitted event details and per-source failures.</description></tool>
+  <tool><name>list-calendar-events</name><description>Returns full provider-permitted event details and per-source failures.</description></tool>
   <usage_rules>
     <rule>Always provide explicit RFC 3339 range bounds derived using the configured timezone.</rule>
     <rule>Use this to resolve an exact writable event ID before update or deletion.</rule>

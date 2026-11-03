@@ -85,15 +85,17 @@ bun run embeddings:rebuild
 
 See [Messaging](messaging.md) for setup steps.
 
-## Google Calendar
+## Calendars
 
-Calendar needs a service-account key at `.secrets/google-calendar-service-account.json`. Without it,
-BellaClaw starts with calendar features unavailable.
+Google needs a service-account key at `.secrets/google-calendar-service-account.json`. iCloud needs
+the dedicated Apple account and app-specific password in `.secrets/icloud-calendar.json`.
+Missing credentials disable only that provider.
 
-The writable calendar is configured per chat with the `!calendar_add-write CALENDAR_ID` command, not
-through an environment variable.
+Each chat has one writable calendar total, configured with
+`!calendar_add-write google|icloud CALENDAR_ID`. Add read-only calendars with
+`!calendar_add-read google|icloud CALENDAR_ID`.
 
-See [Google Calendar](google-calendar.md).
+See [Google Calendar](google-calendar.md) and [iCloud Calendar](icloud-calendar.md).
 
 ## Behavior Logs
 

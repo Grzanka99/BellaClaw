@@ -3,7 +3,8 @@ import { realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname } from "node:path";
 import { repositoryPath } from "@bellaclaw/shared";
-import { createGwsWorkingDirectory, GwsCalendarClient, gwsEnvironment } from "./gws";
+import { GwsCalendarClient } from "./gws";
+import { createGwsWorkingDirectory, gwsEnvironment } from "./gws-runner";
 
 describe("gws environment", () => {
   test("removes credentials that could override the fixed service account file", () => {

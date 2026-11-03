@@ -1,6 +1,8 @@
 import { AppLogger, EBehaviorLogLevel } from "@bellaclaw/behavior-logs";
 import { AuthorizationService } from "./services/authorization";
-import { CalendarService } from "./services/calendar";
+import { CalendarAdapter } from "./services/calendar";
+import { GoogleCalendarProvider } from "./services/calendar/google";
+import { ICloudCalendarProvider } from "./services/calendar/icloud";
 import { DiscordSingleton } from "./services/discord";
 import { McpService } from "./services/mcp";
 import {
@@ -43,8 +45,10 @@ async function init(): Promise<void> {
       startMcpAuthServer();
     }
     await AuthorizationService.instance.setup();
+    CalendarAdapter.instance.registerProvider(new GoogleCalendarProvider());
+    CalendarAdapter.instance.registerProvider(new ICloudCalendarProvider());
     await Promise.all([
-      CalendarService.instance.setup(),
+      CalendarAdapter.instance.setup(),
       DiscordSingleton.instance.setup(),
       SignalSingleton.instance.setup(),
     ]);

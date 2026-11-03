@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { calculateAvailability } from "./availability";
-import type { TCalendarEvent } from "./types";
+import { ECalendarProvider, type TCalendarEvent } from "./types";
 
 function event(
   id: string,
@@ -10,6 +10,7 @@ function event(
   transparency?: string,
 ): TCalendarEvent {
   return {
+    provider: ECalendarProvider.Google,
     calendarId: "calendar",
     id,
     etag: undefined,
@@ -57,7 +58,7 @@ describe("calendar availability", () => {
         event("free", "2026-07-25T12:00:00Z", "2026-07-25T13:00:00Z", undefined, "transparent"),
         event("gone", "2026-07-25T14:00:00Z", "2026-07-25T15:00:00Z", "cancelled"),
       ],
-      [{ calendarId: "revoked", error: "forbidden" }],
+      [{ provider: ECalendarProvider.Google, calendarId: "revoked", error: "forbidden" }],
       "2026-07-25T08:00:00Z",
       "2026-07-25T16:00:00Z",
       "UTC",
@@ -68,15 +69,17 @@ describe("calendar availability", () => {
     expect(result.busy[0]?.end).toBe("2026-07-25T11:00:00.000Z");
     expect(result.busy[0]?.events).toHaveLength(2);
     expect(result.free).toEqual([]);
-    expect(result.failures).toEqual([{ calendarId: "revoked", error: "forbidden" }]);
+    expect(result.failures).toEqual([
+      { provider: ECalendarProvider.Google, calendarId: "revoked", error: "forbidden" },
+    ]);
   });
 
   test("does not claim free slots when every source failed", () => {
     const result = calculateAvailability(
       [],
       [
-        { calendarId: "one", error: "forbidden" },
-        { calendarId: "two", error: "unavailable" },
+        { provider: ECalendarProvider.Google, calendarId: "one", error: "forbidden" },
+        { provider: ECalendarProvider.Google, calendarId: "two", error: "unavailable" },
       ],
       "2026-07-25T08:00:00Z",
       "2026-07-25T16:00:00Z",

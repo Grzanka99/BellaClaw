@@ -5,5 +5,5 @@
     <rule>List calendars first unless the user supplied one exact configured ID.</rule>
     <rule>Clarify when multiple calendars could match. Never infer deletion.</rule>
   </usage_rules>
-  <examples><example><context>User explicitly asks to remove family@example.com.</context><toolCall><calendarId>family@example.com</calendarId></toolCall></example></examples>
+  <examples><example><context>User explicitly asks to remove family@example.com.</context><toolCall><provider>google</provider><calendarId>family@example.com</calendarId></toolCall></example></examples>
 </instructions>
