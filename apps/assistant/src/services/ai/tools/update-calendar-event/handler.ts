@@ -20,7 +20,6 @@ export const SUpdateCalendarEventArgs = Type.Object(
     location: Type.Optional(SCreateCalendarEventArgs.properties.location),
     start: Type.Optional(SCreateCalendarEventArgs.properties.start),
     end: Type.Optional(SCreateCalendarEventArgs.properties.end),
-    durationMinutes: Type.Optional(SCreateCalendarEventArgs.properties.durationMinutes),
     timezone: Type.Optional(SCreateCalendarEventArgs.properties.timezone),
     transparency: Type.Optional(SCreateCalendarEventArgs.properties.transparency),
     recurrence: Type.Optional(SCreateCalendarEventArgs.properties.recurrence),
@@ -39,7 +38,6 @@ export function validateUpdateCalendarEventArgs(args: TUpdateCalendarEventArgs):
     location,
     start,
     end,
-    durationMinutes,
     timezone,
     transparency,
     recurrence,
@@ -50,7 +48,6 @@ export function validateUpdateCalendarEventArgs(args: TUpdateCalendarEventArgs):
     location,
     start,
     end,
-    durationMinutes,
     timezone,
     transparency,
     recurrence,
@@ -59,18 +56,14 @@ export function validateUpdateCalendarEventArgs(args: TUpdateCalendarEventArgs):
   if (Object.values(patch).every((value) => value === undefined)) {
     throw new Error("Provide at least one event field to update");
   }
-  if (
-    start === undefined &&
-    (end !== undefined || durationMinutes !== undefined || timezone !== undefined)
-  ) {
-    throw new Error("Updating end, durationMinutes, or timezone requires start");
+  if (start === undefined && (end !== undefined || timezone !== undefined)) {
+    throw new Error("Updating end or timezone requires start");
   }
   if (start !== undefined) {
     validateCreateCalendarEventArgs({
       summary: summary ?? "validation",
       start,
       end,
-      durationMinutes,
       timezone,
       description,
       location,

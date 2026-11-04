@@ -168,6 +168,13 @@ describe("AI tool arguments", () => {
     ]) {
       expect(Value.Check(schema, args)).toBe(true);
     }
+    expect(
+      Value.Check(SCreateCalendarEventArgs, {
+        summary: "Event",
+        start: "2026-08-01T10:00:00+02:00",
+        durationMinutes: 30,
+      }),
+    ).toBe(false);
 
     expect(() =>
       validateCreateCalendarEventArgs({
@@ -182,13 +189,6 @@ describe("AI tool arguments", () => {
         end: "2026-02-30",
       }),
     ).toThrow("end must be a valid calendar date");
-    expect(() =>
-      validateCreateCalendarEventArgs({
-        summary: "Holiday",
-        start: "2026-08-01",
-        durationMinutes: 30,
-      }),
-    ).toThrow("All-day events do not accept durationMinutes");
     expect(() =>
       validateCreateCalendarEventArgs({
         summary: "Meeting",

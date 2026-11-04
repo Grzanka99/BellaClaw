@@ -14,10 +14,10 @@ export const SCreateCalendarEventArgs = Type.Object(
     end: Type.Optional(
       Type.String({
         minLength: 1,
-        description: "Exclusive all-day date or timed RFC 3339 end",
+        description:
+          "Exclusive all-day date or timed RFC 3339 end with an explicit timezone. Omit for a one-hour timed event or a single-day all-day event",
       }),
     ),
-    durationMinutes: Type.Optional(Type.Integer({ minimum: 1 })),
     timezone: Type.Optional(
       Type.String({ minLength: 1, description: "IANA timezone; defaults to owner timezone" }),
     ),
@@ -79,12 +79,6 @@ export function validateCreateCalendarEventArgs(
     if (endTimestamp <= startTimestamp) {
       throw new Error("end must be after start");
     }
-  }
-  if (args.end !== undefined && args.durationMinutes !== undefined) {
-    throw new Error("Provide end or durationMinutes, not both");
-  }
-  if (startAllDay && args.durationMinutes !== undefined) {
-    throw new Error("All-day events do not accept durationMinutes");
   }
   if (args.recurrence?.some((line) => !RECURRENCE.test(line))) {
     throw new Error("Recurrence lines must start with RRULE:, RDATE:, or EXDATE:");

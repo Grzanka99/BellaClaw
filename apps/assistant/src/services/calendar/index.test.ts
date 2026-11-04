@@ -86,7 +86,6 @@ describe("CalendarService mutation boundary", () => {
         location: undefined,
         start: "2026-07-25T09:00:00Z",
         end: undefined,
-        durationMinutes: undefined,
         timezone: "UTC",
         transparency: undefined,
         recurrence: undefined,
@@ -154,7 +153,6 @@ describe("CalendarService mutation boundary", () => {
       location: undefined,
       start: "2026-07-25T09:00:00Z",
       end: undefined,
-      durationMinutes: undefined,
       timezone: "UTC",
       transparency: undefined,
       recurrence: undefined,
@@ -163,6 +161,7 @@ describe("CalendarService mutation boundary", () => {
 
     expect(calls[0]?.calendarId).toBe("trusted-writer");
     expect(calls[0]?.body.reminders).toEqual({ useDefault: true });
+    expect(calls[0]?.body.end).toEqual({ dateTime: "2026-07-25T10:00:00.000Z", timeZone: "UTC" });
   });
 
   test("preserves a timed event duration when moving only its start", async () => {
@@ -289,7 +288,6 @@ describe("CalendarService mutation boundary", () => {
       location: undefined,
       start: undefined,
       end: undefined,
-      durationMinutes: undefined,
       timezone: undefined,
       transparency: undefined,
       recurrence: undefined,
@@ -385,7 +383,7 @@ describe("CalendarService mutation boundary", () => {
 
       await expect(
         service.updateEvent({ userId: "user-1", eventId: "instance", scope: "following", patch }),
-      ).rejects.toThrow("requires an explicit end or duration");
+      ).rejects.toThrow("requires an explicit end");
       expect(writes).toEqual([]);
       expect(master).toHaveProperty("recurrence", recurrence);
     });
@@ -590,7 +588,6 @@ describe("CalendarService mutation boundary", () => {
           location: undefined,
           start: undefined,
           end: undefined,
-          durationMinutes: undefined,
           timezone: undefined,
           transparency: undefined,
           recurrence: undefined,
