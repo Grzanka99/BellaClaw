@@ -19,6 +19,8 @@ jobs:
       github.event.pull_request.user.login != 'dependabot[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      SECURITY_REVIEW_MODEL: opencode-go/glm-5.3-flash
     permissions:
       id-token: write # Required for OpenCode GitHub App token exchange.
       contents: read
@@ -35,7 +37,7 @@ jobs:
         env:
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
         with:
-          model: opencode-go/glm-5.3-flash
+          model: ${{ env.SECURITY_REVIEW_MODEL }}
           variant: max
           prompt: |
             Review this pull request for security vulnerabilities introduced by its changes.
@@ -47,8 +49,44 @@ jobs:
 
             Response style (adhd + caveman):
             - Lead with findings. Keep review terse; short words and fragments are fine.
-            - One bullet per finding: severity, file:line, concrete exploit -> fix.
+            - Order findings by severity: C (critical), H (high), M (medium), L (low).
+            - Number findings sequentially across all severities, starting at 1; for example,
+              C1, H2, L3. Do not restart numbering for each severity.
+            - Give each finding one bold summary line: **<ID> — <issue and consequence>.**
+            - Follow each summary with a collapsed <details> section labeled "Agent details".
+              Inside it, include a fenced YAML block with location, issue, trigger, impact,
+              fix, and verify fields. Include concrete code evidence in issue and the
+              exploit prerequisites in trigger. Details must let an agent act on the finding.
             - Drop filler, articles, praise, preambles, recaps, tables, and emojis.
             - Preserve exact technical terms, code symbols, paths, and error strings.
             - Use full sentences when compression could make security advice ambiguous.
-            - If no vulnerabilities are found, say only: "No security issues found."
+            - End every response with a blank line and this model tag on its own line:
+              [${{ env.SECURITY_REVIEW_MODEL }}]
+            - If the review completes with no findings, write exactly "No security issues found"
+              followed by a blank line and the model tag. Add no other text or punctuation.
+            - If the review cannot be completed, state the limitation instead of claiming
+              no security issues were found; still include the model tag.
+
+            Finding template (replace placeholders with evidence from this PR):
+
+            **<ID> — <issue and consequence>.**
+
+            <details>
+            <summary>Agent details</summary>
+
+            ```yaml
+            location: |-
+              <file:line>
+            issue: |-
+              <vulnerability and concrete code evidence>
+            trigger: |-
+              <exploit path and prerequisites>
+            impact: |-
+              <security consequence>
+            fix: |-
+              <specific remediation>
+            verify: |-
+              <test or check that demonstrates the fix>
+            ```
+
+            </details>
