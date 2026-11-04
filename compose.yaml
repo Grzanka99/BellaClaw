@@ -33,9 +33,6 @@ services:
 
   log-viewer:
     image: bellaclaw:local
-    build:
-      context: .
-      dockerfile: Containerfile
     container_name: bellaclaw-log-viewer
     restart: unless-stopped
     environment:
