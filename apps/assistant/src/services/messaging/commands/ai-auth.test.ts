@@ -1,17 +1,22 @@
-import { afterEach, beforeEach, expect, test } from "bun:test";
+import { afterEach, beforeEach, expect, type Mock, spyOn, test } from "bun:test";
 import { createProvider, type Provider } from "@earendil-works/pi-ai";
 import { openAICodexResponsesApi } from "@earendil-works/pi-ai/api/openai-codex-responses.lazy";
 import { registerAiAuthChannel } from "../../ai/auth";
 import { aiCredentials, aiModels } from "../../ai/providers/registry";
 import { EAiProvider } from "../../ai/types";
+import { AuthorizationService } from "../../authorization";
 import { aiAuthCommand } from "./ai-auth";
 
 let previousProvider: Provider | undefined;
 let sent: { chatId: string; text: string }[];
 let approve: () => void;
+let authorizedChats: Mock<() => Promise<string[]>>;
 
 beforeEach(() => {
   sent = [];
+  authorizedChats = spyOn(AuthorizationService.instance, "listAuthorizedChatIds").mockResolvedValue(
+    ["discord:1", "discord:2"],
+  );
   registerAiAuthChannel({
     listChatIds: async () => [],
     send: async (chatId, text) => {
@@ -63,6 +68,7 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+  authorizedChats.mockRestore();
   await aiCredentials.delete(EAiProvider.OpenaiCodex);
   if (previousProvider !== undefined) {
     aiModels.setProvider(previousProvider);
@@ -104,4 +110,14 @@ test("rejects unknown actions and providers", async () => {
 
   expect(await aiAuthCommand.handler("discord:1", "login openrouter")).toBe(usage);
   expect(await aiAuthCommand.handler("discord:1", "refresh openai-codex")).toBe(usage);
+});
+
+test("refuses chats that are not activated", async () => {
+  expect(await aiAuthCommand.handler("discord:stranger", "login openai-codex")).toBe(
+    "AI authentication requires BELLACLAW_ACTIVATION_TOKEN and an activated chat.",
+  );
+  expect(await aiAuthCommand.handler("discord:stranger", "logout openai-codex")).toBe(
+    "AI authentication requires BELLACLAW_ACTIVATION_TOKEN and an activated chat.",
+  );
+  expect(sent).toEqual([]);
 });

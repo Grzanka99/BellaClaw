@@ -5,6 +5,7 @@ import {
   getAiAuthStatus,
   logoutAi,
 } from "../../ai/auth";
+import { AuthorizationService } from "../../authorization";
 import type { TCommand } from "./types";
 
 const USAGE = `Usage: !ai-auth login|status|logout PROVIDER (${AI_OAUTH_PROVIDERS.join(", ")})`;
@@ -29,6 +30,11 @@ export const aiAuthCommand: TCommand = {
 
     if (providerId === undefined) {
       return USAGE;
+    }
+
+    // The login is shared, so it must not be changeable while the activation gate is disabled.
+    if (!(await AuthorizationService.instance.listAuthorizedChatIds()).includes(chatId)) {
+      return "AI authentication requires BELLACLAW_ACTIVATION_TOKEN and an activated chat.";
     }
 
     try {
