@@ -45,7 +45,9 @@ Start BellaClaw:
 bun run start
 ```
 
-This starts both the assistant and the behavior-log viewer. Then send the bot a Discord DM:
+This starts both the assistant and the behavior-log viewer. Set `BELLACLAW_ACTIVATION_TOKEN` in `.env`
+before starting, then send that token to the bot in a Discord DM to activate the chat (see
+[Messaging](docs/messaging.md#activation)). Then log in:
 
 ```text
 !ai-auth login opencode-go

@@ -5,7 +5,7 @@ import { join } from "node:path";
 Bun.env.BELLACLAW_DATABASE_MODE = "test";
 Bun.env.BELLACLAW_AI_CREDENTIALS_PATH = join(
   tmpdir(),
-  `bellaclaw-test-pi-auth-${process.pid}.json`,
+  `bellaclaw-test-pi-auth-${crypto.randomUUID()}.json`,
 );
 
 await rm("./test.db", { force: true });

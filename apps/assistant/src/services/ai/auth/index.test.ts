@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { createModels, createProvider, type OAuthCredential } from "@earendil-works/pi-ai";
 import { openAICodexResponsesApi } from "@earendil-works/pi-ai/api/openai-codex-responses.lazy";
 import { EAiProvider } from "../types";
-import { checkAiOAuth, registerAiAuthChannel } from ".";
+import { checkAiOAuth, EAiAuthState, getAiAuthState, registerAiAuthChannel } from ".";
 import { FileCredentialStore } from "./file-credential-store";
 
 let directory: string;
@@ -143,4 +143,12 @@ test("retries an alert that no chat received", async () => {
       text: "AI login needed:\n- opencode-go: not connected. Run !ai-auth login opencode-go",
     },
   ]);
+});
+
+test("treats a rate-limited refresh as transient", async () => {
+  const { models } = await createTestModels(() =>
+    Promise.reject(new Error("OpenCode token refresh failed (429)")),
+  );
+
+  expect(await getAiAuthState(EAiProvider.OpenaiCodex, models)).toBe(EAiAuthState.Unavailable);
 });

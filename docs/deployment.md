@@ -47,13 +47,15 @@ The package scripts include the Signal profile:
 
 ## AI Provider Login
 
-After the first start, log in from any activated chat:
+Set `BELLACLAW_ACTIVATION_TOKEN` before the first start, then activate a chat by sending it the
+token (see [Messaging](messaging.md#activation)). Log in from that chat:
 
 ```text
 !ai-auth login opencode-go
 ```
 
-Credentials are stored in `.secrets/pi-auth.json` and survive restarts. See
+Credentials are stored at `BELLACLAW_AI_CREDENTIALS_PATH` (`.secrets/pi-auth.json` in Compose) and
+survive restarts. See
 [Configuration](configuration.md#ai-and-web) for the other providers and commands.
 
 ## Data and Ports

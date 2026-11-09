@@ -112,6 +112,15 @@ describe("app logger sanitizer errors", () => {
     expect(error).not.toContain("opencode-secret-token");
   });
 
+  test("masks a secret that contains another registered secret whole", () => {
+    registerRedactedSecret("short-token");
+    registerRedactedSecret("short-token-with-suffix");
+
+    expect(sanitizeErrorMessage("failed with short-token-with-suffix")).toBe(
+      "failed with [REDACTED]",
+    );
+  });
+
   test("drops raw provider payload and reasoning metadata from HTTP errors", () => {
     const directError = sanitizeErrorMessage(
       '400: {"message":"invalid request","metadata":{"raw":"private prompt","reasoning":"private reasoning"}}',

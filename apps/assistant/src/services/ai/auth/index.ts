@@ -64,7 +64,7 @@ function isRejectedRefresh(error: unknown): boolean {
   let cause: unknown = error.cause;
 
   while (cause instanceof Error) {
-    if (/\(4\d\d\)|invalid_grant|invalid_refresh_token/.test(cause.message)) {
+    if (/\(4(?!29)\d\d\)|invalid_grant|invalid_refresh_token/.test(cause.message)) {
       return true;
     }
     cause = cause.cause;
@@ -223,14 +223,20 @@ export async function beginAiLogin(chatId: string, providerId: EAiProvider): Pro
 }
 
 export async function getAiAuthStatus(providerId: EAiProvider): Promise<string> {
-  const credential = await aiCredentials.read(providerId);
+  const state = await getAiAuthState(providerId);
 
-  if (credential?.type !== "oauth") {
-    return `${providerId}: not connected.`;
+  if (state === EAiAuthState.LoginExpired) {
+    return `${providerId}: login expired. ${loginHint(providerId)}.`;
   }
 
-  if (alertedProviders.has(providerId)) {
-    return `${providerId}: login expired. ${loginHint(providerId)}.`;
+  if (state === EAiAuthState.Unavailable) {
+    return `${providerId}: login could not be checked right now. Try again later.`;
+  }
+
+  const credential = await aiCredentials.read(providerId);
+
+  if (state === EAiAuthState.NotConnected || credential?.type !== "oauth") {
+    return `${providerId}: not connected.`;
   }
 
   return `${providerId}: connected with OAuth, access token expires ${new Date(credential.expires).toISOString()}.`;

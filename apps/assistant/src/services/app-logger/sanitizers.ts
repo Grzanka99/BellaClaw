@@ -667,7 +667,10 @@ export function registerRedactedSecret(secret: string) {
 
 function redactSecrets(value: string): string {
   let redacted = value;
-  const secrets = [Bun.env.OPENROUTER_API_KEY, ...registeredSecrets];
+  // Longest first, so a secret that contains another one is masked whole.
+  const secrets = [Bun.env.OPENROUTER_API_KEY, ...registeredSecrets].toSorted(
+    (left, right) => (right?.length ?? 0) - (left?.length ?? 0),
+  );
 
   for (const secret of secrets) {
     if (secret !== undefined && secret.length > 0) {
