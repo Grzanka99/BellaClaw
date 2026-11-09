@@ -38,11 +38,11 @@ describe("AI provider registry", () => {
 
   test("maps every role purpose to its configured model", () => {
     expect(getAiModelConfigs(EAiProvider.OpenaiCodex, {})).toMatchObject({
-      [EModelPurpose.Utility]: { model: "gpt-5.6-luna" },
-      [EModelPurpose.Main]: { model: "gpt-5.6-sol" },
-      [EModelPurpose.Specialist]: { model: "gpt-5.6-luna" },
-      [EModelPurpose.SpecialistAccurate]: { model: "gpt-5.6-luna" },
-      [EModelPurpose.ScheduledTask]: { model: "gpt-5.6-luna" },
+      [EModelPurpose.Utility]: { model: "gpt-6.1-terra" },
+      [EModelPurpose.Main]: { model: "gpt-6.1-terra" },
+      [EModelPurpose.Specialist]: { model: "gpt-6.1-terra" },
+      [EModelPurpose.SpecialistAccurate]: { model: "gpt-6.1-terra" },
+      [EModelPurpose.ScheduledTask]: { model: "gpt-6.1-terra" },
     });
     expect(getAiModelConfigs(EAiProvider.Openrouter, {})).toMatchObject({
       [EModelPurpose.Utility]: { model: "openai/gpt-5.4-nano" },
@@ -68,20 +68,14 @@ describe("AI provider registry", () => {
   });
 
   test("pairs each model purpose with its reasoning effort", () => {
-    expect(getAiModelConfig(EAiProvider.OpenaiCodex, EModelPurpose.Utility).effort).toBe("medium");
-    expect(getAiModelConfig(EAiProvider.OpenaiCodex, EModelPurpose.Main).effort).toBe("medium");
     expect(
       getAiModelConfig(EAiProvider.OpenaiCodex, EModelPurpose.Main, {
-        model: "gpt-5.6-sol",
+        model: "gpt-6.1-terra",
       }).effort,
     ).toBe("medium");
 
-    for (const purpose of [
-      EModelPurpose.Specialist,
-      EModelPurpose.SpecialistAccurate,
-      EModelPurpose.ScheduledTask,
-    ]) {
-      expect(getAiModelConfig(EAiProvider.OpenaiCodex, purpose).effort).toBe("max");
+    for (const purpose of Object.values(EModelPurpose)) {
+      expect(getAiModelConfig(EAiProvider.OpenaiCodex, purpose).effort).toBe("medium");
     }
 
     expect(getAiModelConfig(EAiProvider.Openrouter, EModelPurpose.Utility).effort).toBe("medium");

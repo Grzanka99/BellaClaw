@@ -588,6 +588,62 @@ describe("AgentHarness", () => {
     }
   });
 
+  test("sends the Codex service tier with full stream options when sampling MCP", async () => {
+    const complete = spyOn(aiModels, "complete").mockResolvedValue(fauxAssistantMessage("sampled"));
+    const completeSimple = spyOn(aiModels, "completeSimple").mockResolvedValue(
+      fauxAssistantMessage("sampled"),
+    );
+    const harness = AgentHarness.instance as unknown as {
+      sampleMcp(
+        request: CreateMessageRequest["params"],
+        settings: typeof DefaultConfigRecord,
+        chatId: TOption<string>,
+        platform: TOption<EMessagePlatform>,
+        trace: TOption<TBehaviorTraceContext>,
+        parentToolCallId: string,
+        iteration: number,
+        signal: AbortSignal,
+      ): Promise<CreateMessageResult | CreateMessageResultWithTools>;
+    };
+
+    try {
+      await harness.sampleMcp(
+        {
+          messages: [{ role: "user", content: { type: "text", text: "MCP request" } }],
+          maxTokens: 100,
+        },
+        {
+          ...DefaultConfigRecord,
+          [EConfigKey.AiProvider]: EAiProvider.OpenaiCodex,
+          [EConfigKey.AiModelPreferences]: JSON.stringify({
+            [EAiProvider.OpenaiCodex]: {
+              [EModelPurpose.SpecialistAccurate]: {
+                model: "gpt-6.1-terra",
+                effort: "high",
+                serviceTier: "priority",
+              },
+            },
+          }),
+        },
+        "discord:1",
+        EMessagePlatform.Discord,
+        undefined,
+        "delegate-call",
+        1,
+        new AbortController().signal,
+      );
+      expect(completeSimple).not.toHaveBeenCalled();
+      expect(complete).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "gpt-6.1-terra" }),
+        expect.anything(),
+        expect.objectContaining({ reasoningEffort: "high", serviceTier: "priority" }),
+      );
+    } finally {
+      complete.mockRestore();
+      completeSimple.mockRestore();
+    }
+  });
+
   test("sends the conversation's OpenCode session header when sampling MCP", async () => {
     const opencode = fauxProvider({
       provider: EAiProvider.OpencodeGo,

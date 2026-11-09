@@ -520,6 +520,43 @@ describe("production executable tools", () => {
     expect(settingsMock.setMany).toHaveBeenCalledTimes(2);
   });
 
+  test("selects a service tier and rejects it for unsupported models", async () => {
+    const settingsMock = installSettingsMock({
+      ...DefaultConfigRecord,
+      [EConfigKey.AiProvider]: EAiProvider.OpenaiCodex,
+    });
+    const verifySettings = mock(async () => undefined);
+    const tool = createSettingsTools({ ...context, verifySettings }).find(
+      (candidate) => candidate.name === "update-settings",
+    );
+
+    const fast = await tool?.execute("call", {
+      aiModel: "gpt-6.1-terra",
+      aiReasoningEffort: "high",
+      aiServiceTier: "priority",
+      aiModelPurpose: EModelPurpose.ScheduledTask,
+    });
+    expect(fast?.details).toMatchObject({
+      aiRuntime: {
+        models: {
+          [EModelPurpose.ScheduledTask]: {
+            model: "gpt-6.1-terra",
+            effort: "high",
+            serviceTier: "priority",
+          },
+        },
+      },
+    });
+    await expect(
+      tool?.execute("call", {
+        aiProvider: EAiProvider.Openrouter,
+        aiModel: "openai/gpt-5.4-mini",
+        aiServiceTier: "priority",
+      }),
+    ).rejects.toThrow("Service tier is unsupported by openai/gpt-5.4-mini");
+    expect(settingsMock.setMany).toHaveBeenCalledTimes(1);
+  });
+
   test("checks distinct model/effort pairs concurrently before saving a provider", async () => {
     const settingsMock = installSettingsMock(DefaultConfigRecord);
     const verifySettings = mock(async (_settings: TConfigRecord, _purposes: EModelPurpose[]) => {
@@ -532,7 +569,7 @@ describe("production executable tools", () => {
       (candidate) => candidate.name === "update-settings",
     );
 
-    await tool?.execute("call", { aiProvider: EAiProvider.OpenaiCodex });
+    await tool?.execute("call", { aiProvider: EAiProvider.Openrouter });
 
     expect(verifySettings.mock.calls.map(([, purposes]) => purposes)).toEqual([
       [EModelPurpose.Utility],
@@ -577,7 +614,7 @@ describe("production executable tools", () => {
 
     const result = await tool?.execute("call", { aiProvider: EAiProvider.OpenaiCodex });
 
-    expect(verifySettings).toHaveBeenCalledTimes(5);
+    expect(verifySettings).toHaveBeenCalledTimes(4);
     expect(retries).toEqual([EModelPurpose.Main, EModelPurpose.Specialist]);
     expect(remainingPreferences).toEqual([[EModelPurpose.Specialist], []]);
     expect(result?.details).toMatchObject({

@@ -20,7 +20,7 @@
     <rule>This tool takes no arguments. Always pass an empty object.</rule>
     <rule>After receiving the settings, present them to the user in a clear, human-readable way in the user's language.</rule>
     <rule>Do not invent settings that are not present in the returned record.</rule>
-    <rule>When listing models, use aiRuntime.availableModels. Include the name, exact ID, and supportedEfforts.</rule>
+    <rule>When listing models, use aiRuntime.availableModels. Include the name, exact ID, supportedEfforts, and whether it supports service tiers.</rule>
     <rule>Only the active provider's models are returned. Do not claim this is a live provider API refresh.</rule>
   </usage_rules>
 
@@ -28,10 +28,10 @@
     The result contains two objects:
     - settings — the effective flat settings map, including ai.provider, internal ai.modelPreferences, and ai.instructions.* preferences
     - aiRuntime.provider — the active provider resolved from settings
-    - aiRuntime.models — the effective model ID and reasoning effort for Utility, Main, Specialist, SpecialistAccurate, and ScheduledTask
-    - aiRuntime.availableModels — Pi catalog entries for the active provider, each with name, exact ID, and supportedEfforts
+    - aiRuntime.models — the effective model ID, reasoning effort, and service tier for Utility, Main, Specialist, SpecialistAccurate, and ScheduledTask
+    - aiRuntime.availableModels — Pi catalog entries for the active provider, each with name, exact ID, supportedEfforts, and supportsServiceTier
 
-    An effort value of default means the model/provider default. Present effective selections from aiRuntime.models.
+    An effort or serviceTier value of default means the model/provider default. Service tier priority is fast mode; flex is cheaper and slower. Present effective selections from aiRuntime.models.
     Do not expose the raw ai.modelPreferences JSON unless the user explicitly asks for it.
   </result_fields>
 

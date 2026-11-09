@@ -12,6 +12,7 @@ import {
   type JsonValue,
   type Message,
   type Model,
+  type ModelThinkingLevel,
   type SimpleStreamOptions,
   type ThinkingLevel,
 } from "@earendil-works/pi-ai";
@@ -52,8 +53,18 @@ import { McpRunRegistry, type TMcpRunStatus } from "../../mcp/runs";
 import { EConfigKey, type TConfigRecord } from "../../settings/schema";
 import { createPlatformInstructions } from "../instructions/platform";
 import { readXmlAndInjectConfig } from "../instructions/read-xml-and-inject-config";
-import { decodeAiModelPreferences, getAiModelPreference } from "../model-preferences";
-import { aiModels, getAiApiKey, getAiModelConfig, refreshAiModels } from "../providers/registry";
+import {
+  decodeAiModelPreferences,
+  getAiModelPreference,
+  type TAiServiceTier,
+} from "../model-preferences";
+import {
+  aiModels,
+  getAiApiKey,
+  getAiModelConfig,
+  refreshAiModels,
+  supportsAiServiceTier,
+} from "../providers/registry";
 import { validateToolArguments } from "../tools/definition";
 import {
   createCalendarTools,
@@ -106,6 +117,30 @@ function withSession(
     sessionId,
     headers: { ...options.headers, ...sessionHeaders(provider, sessionId) },
   };
+}
+
+// Simple requests cannot carry a service tier or Codex effort "none"; these need full stream options.
+function createAiStreamOptions(
+  model: Model<Api>,
+  options: SimpleStreamOptions,
+  effort: TOption<ModelThinkingLevel>,
+  serviceTier: TOption<TAiServiceTier>,
+) {
+  const isCodexEffortOff = effort === "off" && hasApi(model, "openai-codex-responses");
+
+  if (!isCodexEffortOff && (serviceTier === undefined || !supportsAiServiceTier(model))) {
+    return undefined;
+  }
+
+  let reasoningEffort: TOption<ThinkingLevel | "none">;
+
+  if (isCodexEffortOff) {
+    reasoningEffort = "none";
+  } else if (effort !== "off") {
+    reasoningEffort = effort;
+  }
+
+  return { ...options, reasoningEffort, serviceTier };
 }
 
 export class AgentHarness {
@@ -196,12 +231,15 @@ export class AgentHarness {
         modelConfig.model.provider,
         sessionId,
       );
+      const streamOptions = createAiStreamOptions(
+        modelConfig.model,
+        options,
+        modelConfig.effort,
+        modelConfig.serviceTier,
+      );
 
-      if (modelConfig.effort === "off" && hasApi(modelConfig.model, "openai-codex-responses")) {
-        result = await aiModels.complete(modelConfig.model, context, {
-          ...options,
-          reasoningEffort: "none",
-        });
+      if (streamOptions !== undefined) {
+        result = await aiModels.complete(modelConfig.model, context, streamOptions);
       } else {
         result = await aiModels.completeSimple(modelConfig.model, context, {
           ...options,
@@ -367,12 +405,15 @@ export class AgentHarness {
         iterations += 1;
         requestStartedAt = performance.now();
         const requestOptions = withSession(options ?? {}, model.provider, sessionId);
+        const streamOptions = createAiStreamOptions(
+          model,
+          requestOptions,
+          modelConfig.effort,
+          modelConfig.serviceTier,
+        );
 
-        if (modelConfig.effort === "off" && hasApi(model, "openai-codex-responses")) {
-          return aiModels.stream(model, context, {
-            ...requestOptions,
-            reasoningEffort: "none",
-          });
+        if (streamOptions !== undefined) {
+          return aiModels.stream(model, context, streamOptions);
         }
 
         return aiModels.streamSimple(model, context, requestOptions);
@@ -1097,11 +1138,14 @@ export class AgentHarness {
       sessionId,
     );
     let result: Awaited<ReturnType<typeof aiModels.completeSimple>>;
-    if (modelConfig.effort === "off" && hasApi(modelConfig.model, "openai-codex-responses")) {
-      result = await aiModels.complete(modelConfig.model, context, {
-        ...options,
-        reasoningEffort: "none",
-      });
+    const streamOptions = createAiStreamOptions(
+      modelConfig.model,
+      options,
+      modelConfig.effort,
+      modelConfig.serviceTier,
+    );
+    if (streamOptions !== undefined) {
+      result = await aiModels.complete(modelConfig.model, context, streamOptions);
     } else {
       result = await aiModels.completeSimple(modelConfig.model, context, {
         ...options,
