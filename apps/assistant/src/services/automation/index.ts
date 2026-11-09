@@ -94,6 +94,14 @@ export class AutomationService {
     return this.requireDraft(row);
   }
 
+  public async deleteDraft(scope: string, draftId: number): Promise<void> {
+    await this.queue.enqueue(async () => {
+      await this.db
+        .delete(automationDraftsTable)
+        .where(and(eq(automationDraftsTable.id, draftId), eq(automationDraftsTable.scope, scope)));
+    });
+  }
+
   public async getDraft(scope: string, draftId: number): Promise<TOption<TAutomationDraft>> {
     const row = await this.queue.enqueue(async () => {
       return this.db

@@ -23,6 +23,9 @@ export async function handleAutomationPreview(
   const report = await previewAutomationDraft(draft, options);
 
   if (report.outcome === EAutomationRunOutcome.Failed) {
+    // Only a successful preview may leave a draft that automation-save can make live.
+    await AutomationService.instance.deleteDraft(chatId, draft.id);
+
     return {
       success: false,
       error: report.error,

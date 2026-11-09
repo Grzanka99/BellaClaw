@@ -68,6 +68,7 @@ describe("handleAutomationPreview", () => {
 
     expect(result.success).toBe(false);
     expect("previewId" in result).toBe(false);
+    expect(await AutomationService.instance.getDraft("discord:1", 1)).toBeUndefined();
     expect(result).toMatchObject({ fetched: [], logs: ["before failure"] });
     if ("error" in result) {
       expect(result.error).toContain("no forecast");
