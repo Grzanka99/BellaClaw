@@ -96,19 +96,12 @@ const AI_PROVIDER_REGISTRY: Record<EAiProvider, TAiProviderRegistration> = {
       },
       [EModelPurpose.ScheduledTask]: { model: "deepseek-v4-pro", effort: "high" },
     },
-    getApiKey: () => {
-      const apiKey = Bun.env.OPENCODE_API_KEY;
-
-      if (apiKey === undefined || apiKey.trim().length === 0) {
-        throw new Error("Missing required environment variable OPENCODE_API_KEY");
-      }
-
-      return apiKey;
-    },
+    getApiKey: () => undefined,
   },
 };
 
-export const aiModels = createModels({ credentials: new FileCredentialStore() });
+export const aiCredentials = new FileCredentialStore();
+export const aiModels = createModels({ credentials: aiCredentials });
 let opencodeRefresh: TOption<{ force: boolean; promise: Promise<void> }>;
 
 export async function refreshAiModels(

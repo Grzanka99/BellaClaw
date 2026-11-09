@@ -10,7 +10,7 @@ import {
 } from "@earendil-works/pi-ai";
 import { convertResponsesMessages } from "@earendil-works/pi-ai/api/openai-responses-shared";
 import { AgentHarness } from "../ai/agent-harness";
-import { aiModels } from "../ai/providers/registry";
+import { aiCredentials, aiModels } from "../ai/providers/registry";
 import { EAiProvider, ERole } from "../ai/types";
 import type { TConversation } from "../conversation/types";
 import { Memory } from "../memory";
@@ -698,6 +698,12 @@ describe("MessageHandler", () => {
     "serialized-tool-call",
     "forced-finalization-failed",
   ])("does not persist or replay a rejected %s transcript", async (stopReason) => {
+    await aiCredentials.modify(EAiProvider.OpencodeGo, async () => ({
+      type: "oauth",
+      access: "access",
+      refresh: "refresh",
+      expires: Date.now() + 60 * 60 * 1000,
+    }));
     const { handler, internals } = setupHandler("discord:2", "unused");
     internals.ai.runMain = mock(async () => ({
       text: undefined,
@@ -731,5 +737,26 @@ describe("MessageHandler", () => {
     expect(JSON.stringify(internals.ai.runMain.mock.calls[1]?.[0].history)).not.toContain(
       "rejected transcript",
     );
+    await aiCredentials.delete(EAiProvider.OpencodeGo);
+  });
+
+  test("replies with the login command when the selected provider is not connected", async () => {
+    const { handler, internals } = setupHandler("discord:3", "unused");
+    internals.ai.runMain = mock(async () => ({
+      text: undefined,
+      iterations: 1,
+      toolCallCount: 0,
+      stopReason: "error",
+      messages: [],
+    }));
+
+    expect(
+      await handler.handleMessage({
+        chatId: "discord:3",
+        receivedAt: new Date(),
+        message: { content: "hello" },
+        author: { type: ERole.User },
+      }),
+    ).toBe("opencode-go is not connected. Run !ai-auth login opencode-go.");
   });
 });

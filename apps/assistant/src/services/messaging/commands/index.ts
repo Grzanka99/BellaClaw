@@ -1,4 +1,5 @@
 import type { TOption } from "@bellaclaw/shared";
+import { aiAuthCommand } from "./ai-auth";
 import { calendarAddReadCommand } from "./calendar-add-read";
 import { calendarAddWriteCommand } from "./calendar-add-write";
 import { mcpAuthCommand } from "./mcp-auth";
@@ -11,6 +12,7 @@ const REGISTERED_COMMANDS: TCommand[] = [
   mcpAuthCommand,
   mcpPromptsCommand,
   mcpPromptCommand,
+  aiAuthCommand,
 ];
 
 export function formatCommandList(): string {

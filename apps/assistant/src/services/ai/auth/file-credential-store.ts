@@ -3,8 +3,9 @@ import { repositoryPath } from "@bellaclaw/shared";
 import type { Credential, CredentialInfo, CredentialStore } from "@earendil-works/pi-ai";
 import { z } from "zod";
 import { writeJsonAtomically } from "../../../lib/atomic-json";
+import { registerRedactedSecret } from "../../app-logger/sanitizers";
 
-export const LOCAL_AI_CREDENTIALS_PATH = repositoryPath(".secrets/pi-auth.json");
+const LOCAL_AI_CREDENTIALS_PATH = repositoryPath(".secrets/pi-auth.json");
 let defaultAiCredentialsPath = LOCAL_AI_CREDENTIALS_PATH;
 const configuredAiCredentialsPath = Bun.env.BELLACLAW_AI_CREDENTIALS_PATH?.trim();
 
@@ -29,6 +30,16 @@ const SOAuthCredential = z.looseObject({
 
 const SCredential = z.discriminatedUnion("type", [SApiKeyCredential, SOAuthCredential]);
 export const SCredentials = z.record(z.string(), SCredential);
+
+// Keeps stored tokens and keys out of behavior logs.
+function registerCredentialSecrets(credential: Credential) {
+  if (credential.type === "oauth") {
+    registerRedactedSecret(credential.access);
+    registerRedactedSecret(credential.refresh);
+  } else if (credential.key !== undefined && credential.key.length > 0) {
+    registerRedactedSecret(credential.key);
+  }
+}
 
 export class FileCredentialStore implements CredentialStore {
   private writeChain: Promise<void> = Promise.resolve();
@@ -64,6 +75,7 @@ export class FileCredentialStore implements CredentialStore {
 
       credentials[providerId] = next;
       await writeJsonAtomically(this.path, credentials);
+      registerCredentialSecrets(next);
       return next;
     });
   }
@@ -101,6 +113,10 @@ export class FileCredentialStore implements CredentialStore {
 
     if (!parsed.success) {
       throw new Error(`Invalid AI credentials file: ${this.path}`);
+    }
+
+    for (const credential of Object.values(parsed.data)) {
+      registerCredentialSecrets(credential);
     }
 
     return parsed.data;

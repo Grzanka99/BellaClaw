@@ -1,10 +1,13 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { sanitizeErrorMessage, sanitizeToolResultError } from "./sanitizers";
+import {
+  registerRedactedSecret,
+  sanitizeErrorMessage,
+  sanitizeToolResultError,
+} from "./sanitizers";
 
 const originalOpenrouterApiKey = Bun.env.OPENROUTER_API_KEY;
-const originalOpencodeApiKey = Bun.env.OPENCODE_API_KEY;
 
-function restoreEnv(name: "OPENROUTER_API_KEY" | "OPENCODE_API_KEY", value: string | undefined) {
+function restoreEnv(name: "OPENROUTER_API_KEY", value: string | undefined) {
   if (value === undefined) {
     delete Bun.env[name];
     return;
@@ -16,7 +19,6 @@ function restoreEnv(name: "OPENROUTER_API_KEY" | "OPENCODE_API_KEY", value: stri
 describe("app logger sanitizer errors", () => {
   afterEach(() => {
     restoreEnv("OPENROUTER_API_KEY", originalOpenrouterApiKey);
-    restoreEnv("OPENCODE_API_KEY", originalOpencodeApiKey);
   });
 
   test("redacts failed cron tool errors", () => {
@@ -97,17 +99,26 @@ describe("app logger sanitizer errors", () => {
     expect(error).toBe("schedule-once failed");
   });
 
-  test("redacts configured provider API keys from errors", () => {
+  test("redacts configured provider API keys and stored OAuth tokens from errors", () => {
     Bun.env.OPENROUTER_API_KEY = "openrouter-secret-key";
-    Bun.env.OPENCODE_API_KEY = "opencode-secret-key";
+    registerRedactedSecret("opencode-secret-token");
 
     const error = sanitizeErrorMessage(
-      "OpenRouter openrouter-secret-key failed; OpenCode opencode-secret-key failed",
+      "OpenRouter openrouter-secret-key failed; OpenCode opencode-secret-token failed",
     );
 
     expect(error).toBe("OpenRouter [REDACTED] failed; OpenCode [REDACTED] failed");
     expect(error).not.toContain("openrouter-secret-key");
-    expect(error).not.toContain("opencode-secret-key");
+    expect(error).not.toContain("opencode-secret-token");
+  });
+
+  test("masks a secret that contains another registered secret whole", () => {
+    registerRedactedSecret("short-token");
+    registerRedactedSecret("short-token-with-suffix");
+
+    expect(sanitizeErrorMessage("failed with short-token-with-suffix")).toBe(
+      "failed with [REDACTED]",
+    );
   });
 
   test("drops raw provider payload and reasoning metadata from HTTP errors", () => {

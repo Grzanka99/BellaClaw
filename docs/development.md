@@ -23,9 +23,6 @@ Start both apps with file watching:
 bun run dev
 ```
 
-Dev mode tries to seed `.secrets/pi-auth.json` from `.secrets/auth.json`. It skips this step when the
-source file is absent and preserves existing Pi credentials.
-
 Run one workspace from the repository root:
 
 ```bash

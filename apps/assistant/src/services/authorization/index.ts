@@ -53,6 +53,14 @@ export class AuthorizationService {
     return this.setupPromise;
   }
 
+  public async listAuthorizedChatIds(): Promise<string[]> {
+    await this.setup();
+
+    return [...this.cache.values()]
+      .filter((state) => state.status === EAuthorizationStatus.Authorized)
+      .map((state) => state.chatId);
+  }
+
   public async authorize(chatId: string, content: string): Promise<TAuthorizationResult> {
     await this.setup();
 

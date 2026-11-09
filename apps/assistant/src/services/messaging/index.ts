@@ -67,15 +67,19 @@ export class MessagingAdapter {
   }
 
   public async sendMcpConnectedMessage(chatId: string, profileId: string): Promise<void> {
+    await this.sendNotice(chatId, `Connected MCP profile ${profileId}.`);
+  }
+
+  public async sendNotice(chatId: string, text: string): Promise<void> {
     const owner = parseCanonicalChatKey(chatId);
     if (owner === undefined) {
-      throw new Error("Unknown chat platform for MCP connection notification");
+      throw new Error("Unknown chat platform for notice");
     }
     const transport = this.transports.get(owner.platform);
     if (transport === undefined) {
-      throw new Error("Chat transport is unavailable for MCP connection notification");
+      throw new Error("Chat transport is unavailable for notice");
     }
-    await transport.sendText(owner.chatId, `Connected MCP profile ${profileId}.`);
+    await transport.sendText(owner.chatId, text);
   }
 
   public async handleInboundMessage(message: TPlatformMessage) {

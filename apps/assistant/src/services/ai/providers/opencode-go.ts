@@ -9,6 +9,7 @@ import {
 } from "@earendil-works/pi-ai";
 import { opencodeGoProvider as bundledOpencodeGoProvider } from "@earendil-works/pi-ai/providers/opencode-go";
 import { z } from "zod";
+import { opencodeOAuth } from "../auth/opencode-oauth";
 
 const BASE_URL = "https://opencode.ai/inference/go";
 const CATALOG_TTL = 60 * 60 * 1000;
@@ -180,6 +181,7 @@ export function opencodeGoProvider(requiredModelIds: readonly string[]): Provide
   };
   return {
     ...bundled,
+    auth: { oauth: opencodeOAuth },
     getModels: () => catalog,
     getAllModels: () => catalog,
     refreshModels: async (context) => {

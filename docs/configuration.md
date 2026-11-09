@@ -17,7 +17,6 @@ These values are required for the Discord + OpenCode Go quick start:
 | Variable | Purpose |
 | --- | --- |
 | `DISCORD_TOKEN` | Discord bot token. Without it, Discord is disabled. |
-| `OPENCODE_API_KEY` | API key for the default `opencode-go` provider. |
 | `TURSO_CONNECTION_URL` | libSQL/Turso database URL. |
 | `TURSO_AUTH_TOKEN` | libSQL/Turso authentication token. |
 
@@ -42,8 +41,22 @@ The default provider is `opencode-go`. You can ask BellaClaw in chat to switch b
 - `openrouter`
 - `ollama`
 
-OpenAI Codex uses stored OAuth credentials instead of an API key. See
-[Deployment](deployment.md#openai-codex-subscription).
+`opencode-go` and `openai-codex` use subscription OAuth instead of API keys. Log in from any
+activated chat. `!ai-auth` needs `BELLACLAW_ACTIVATION_TOKEN`, because the login is shared:
+
+```text
+!ai-auth login opencode-go
+!ai-auth login openai-codex
+!ai-auth status PROVIDER
+!ai-auth logout PROVIDER
+```
+
+`login` replies with a link and a device code, then confirms in the same chat when the login
+completes. OpenAI Codex device-code login may first need to be enabled in ChatGPT security
+settings. All chats share one login per provider, stored in `BELLACLAW_AI_CREDENTIALS_PATH`.
+
+BellaClaw refreshes stored logins every hour. When a provider rejects a refresh, or the selected
+provider has no login, BellaClaw sends one alert to every activated chat with the command to run.
 
 ## Embeddings
 

@@ -401,9 +401,15 @@ describe("production executable tools", () => {
 
   test("fetches current Go models for direct selection and explicit listing", async () => {
     const previousProvider = aiModels.getProvider(EAiProvider.OpencodeGo);
-    const previousApiKey = Bun.env.OPENCODE_API_KEY;
-    Bun.env.OPENCODE_API_KEY = "catalog-test-key";
-    aiModels.setProvider(dynamicOpencodeGoProvider([]));
+    aiModels.setProvider({
+      ...dynamicOpencodeGoProvider([]),
+      auth: {
+        apiKey: {
+          name: "Test key",
+          resolve: async () => ({ auth: { apiKey: "catalog-test-key" } }),
+        },
+      },
+    });
     const settingsMock = installSettingsMock({
       ...DefaultConfigRecord,
       [EConfigKey.AiProvider]: EAiProvider.OpencodeGo,
@@ -464,7 +470,6 @@ describe("production executable tools", () => {
       expect(fetchMock).toHaveBeenCalledTimes(8);
     } finally {
       fetchMock.mockRestore();
-      Bun.env.OPENCODE_API_KEY = previousApiKey;
       if (previousProvider !== undefined) {
         aiModels.setProvider(previousProvider);
       }
