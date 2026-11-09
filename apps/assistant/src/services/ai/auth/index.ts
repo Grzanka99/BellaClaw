@@ -174,14 +174,24 @@ export async function checkAiOAuth(models: Models = aiModels): Promise<void> {
 }
 
 // Starts a device-code login and resolves with the instructions for the user.
-export async function beginAiLogin(chatId: string, providerId: EAiProvider): Promise<string> {
+// When no other OAuth provider is connected, the new login becomes the chat's AI provider.
+export async function beginAiLogin(
+  chatId: string,
+  providerId: EAiProvider,
+  models: Models = aiModels,
+): Promise<string> {
+  const otherStates = Promise.all(
+    AI_OAUTH_PROVIDERS.filter((provider) => provider !== providerId).map((provider) =>
+      getAiAuthState(provider, models),
+    ),
+  );
   pendingLogins.get(providerId)?.abort(new Error("Replaced by a newer login"));
   const controller = new AbortController();
   pendingLogins.set(providerId, controller);
   const instructions = Promise.withResolvers<string>();
   let instructionsSent = false;
 
-  aiModels
+  models
     .login(providerId, "oauth", {
       signal: controller.signal,
       prompt: async (prompt) => {
@@ -203,7 +213,18 @@ export async function beginAiLogin(chatId: string, providerId: EAiProvider): Pro
     .then(
       async () => {
         alertedProviders.delete(providerId);
-        await send(chatId, `Connected ${providerId}.`);
+        let text = `Connected ${providerId}.`;
+
+        if (!(await otherStates).includes(EAiAuthState.Connected)) {
+          try {
+            await SettingsService.instance.set(chatId, EConfigKey.AiProvider, providerId);
+            text = `Connected ${providerId}. It is now this chat's AI provider.`;
+          } catch (error) {
+            logger.error(`AI auth: failed to select ${providerId} for ${chatId}: ${String(error)}`);
+          }
+        }
+
+        await send(chatId, text);
       },
       async (error) => {
         instructions.reject(error);

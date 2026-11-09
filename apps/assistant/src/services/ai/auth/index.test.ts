@@ -1,11 +1,13 @@
-import { afterEach, beforeEach, expect, test } from "bun:test";
+import { afterEach, beforeEach, expect, mock, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createModels, createProvider, type OAuthCredential } from "@earendil-works/pi-ai";
 import { openAICodexResponsesApi } from "@earendil-works/pi-ai/api/openai-codex-responses.lazy";
+import { SettingsService } from "../../settings";
+import { EConfigKey } from "../../settings/schema";
 import { EAiProvider } from "../types";
-import { checkAiOAuth, EAiAuthState, getAiAuthState, registerAiAuthChannel } from ".";
+import { beginAiLogin, checkAiOAuth, EAiAuthState, getAiAuthState, registerAiAuthChannel } from ".";
 import { FileCredentialStore } from "./file-credential-store";
 
 let directory: string;
@@ -38,7 +40,19 @@ async function createTestModels(
         auth: {
           oauth: {
             name: "Test OAuth",
-            login: () => Promise.reject(new Error("Login is not supported")),
+            login: async (interaction) => {
+              interaction.notify({
+                type: "device_code",
+                userCode: "CODE",
+                verificationUri: "https://example.test/device",
+              });
+              return {
+                type: "oauth",
+                access: "login-access",
+                refresh: "login-refresh",
+                expires: Date.now() + 60 * 60 * 1000,
+              };
+            },
             refresh,
             toAuth: async (credential) => ({ apiKey: credential.access }),
           },
@@ -151,4 +165,45 @@ test("treats a rate-limited refresh as transient", async () => {
   );
 
   expect(await getAiAuthState(EAiProvider.OpenaiCodex, models)).toBe(EAiAuthState.Unavailable);
+});
+
+test.each([
+  [false, "Connected openai-codex. It is now this chat's AI provider."],
+  [true, "Connected openai-codex."],
+])("selects the first connected provider for the chat (other connected: %p)", async (otherConnected, reply) => {
+  const { models, store } = await createTestModels(() =>
+    Promise.reject(new Error("token refresh failed (401): invalid_grant")),
+  );
+  if (otherConnected) {
+    await store.modify(EAiProvider.OpencodeGo, async () => ({
+      type: "oauth",
+      access: "go-access",
+      refresh: "go-refresh",
+      expires: Date.now() + 60 * 60 * 1000,
+    }));
+  }
+  const set = mock(async () => ({}));
+  (SettingsService as unknown as { _instance: unknown })._instance = { set };
+  const delivered = Promise.withResolvers<void>();
+  registerAiAuthChannel({
+    listChatIds: async () => [],
+    send: async (chatId, text) => {
+      sent.push({ chatId, text });
+      delivered.resolve();
+    },
+  });
+
+  await beginAiLogin("discord:login", EAiProvider.OpenaiCodex, models);
+  await delivered.promise;
+
+  expect(sent).toEqual([{ chatId: "discord:login", text: reply }]);
+  if (otherConnected) {
+    expect(set).not.toHaveBeenCalled();
+  } else {
+    expect(set).toHaveBeenCalledWith(
+      "discord:login",
+      EConfigKey.AiProvider,
+      EAiProvider.OpenaiCodex,
+    );
+  }
 });

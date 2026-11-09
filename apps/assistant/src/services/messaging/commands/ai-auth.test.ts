@@ -83,7 +83,9 @@ test("logs in with a device code and confirms in the chat", async () => {
   approve();
   await Bun.sleep(10);
 
-  expect(sent).toEqual([{ chatId: "discord:1", text: "Connected openai-codex." }]);
+  expect(sent).toEqual([
+    { chatId: "discord:1", text: "Connected openai-codex. It is now this chat's AI provider." },
+  ]);
   expect(await aiAuthCommand.handler("discord:1", "status openai-codex")).toBe(
     "openai-codex: connected with OAuth, access token expires 2030-01-01T00:00:00.000Z.",
   );
@@ -102,7 +104,9 @@ test("cancels a pending login when a new one starts", async () => {
   approve();
   await Bun.sleep(10);
 
-  expect(sent).toEqual([{ chatId: "discord:2", text: "Connected openai-codex." }]);
+  expect(sent).toEqual([
+    { chatId: "discord:2", text: "Connected openai-codex. It is now this chat's AI provider." },
+  ]);
 });
 
 test("rejects unknown actions and providers", async () => {
