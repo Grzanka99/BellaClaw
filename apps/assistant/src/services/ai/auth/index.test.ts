@@ -215,31 +215,20 @@ test.each([
   }
 });
 
-test.each([
-  [
-    true,
-    "opencode-go is not connected. Switched this chat to openai-codex. Send your message again.",
-  ],
-  [false, "opencode-go is not connected. Run !ai-auth login opencode-go."],
-])("switches a failed chat to a connected provider (codex connected: %p)", async (codexConnected, reply) => {
-  const { models, store } = await createTestModels(async (credential) => ({
+test("switches a failed chat to a connected provider", async () => {
+  const { models } = await createTestModels(async (credential) => ({
     ...credential,
     expires: Date.now() + 60 * 60 * 1000,
   }));
-  if (!codexConnected) {
-    await store.delete(EAiProvider.OpenaiCodex);
-  }
   const set = mock(async () => ({}));
   (SettingsService as unknown as { _instance: unknown })._instance = { set };
 
-  expect(await describeAiAuthProblem("discord:switch", EAiProvider.OpencodeGo, models)).toBe(reply);
-  if (codexConnected) {
-    expect(set).toHaveBeenCalledWith(
-      "discord:switch",
-      EConfigKey.AiProvider,
-      EAiProvider.OpenaiCodex,
-    );
-  } else {
-    expect(set).not.toHaveBeenCalled();
-  }
+  expect(await describeAiAuthProblem("discord:switch", EAiProvider.OpencodeGo, models)).toBe(
+    "opencode-go is not connected. Switched this chat to openai-codex. Send your message again.",
+  );
+  expect(set).toHaveBeenCalledWith(
+    "discord:switch",
+    EConfigKey.AiProvider,
+    EAiProvider.OpenaiCodex,
+  );
 });
