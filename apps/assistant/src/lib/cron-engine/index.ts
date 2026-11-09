@@ -102,6 +102,11 @@ export class CronScheduler extends EventEmitter {
           nextRunAt = args.fireAt;
         }
 
+        let automationIds: TOption<string>;
+        if (args.automationIds !== undefined && args.automationIds.length > 0) {
+          automationIds = JSON.stringify(args.automationIds);
+        }
+
         const rowValues = {
           name: args.name,
           scope: normalizedScope,
@@ -120,6 +125,7 @@ export class CronScheduler extends EventEmitter {
           finishedAt: null,
           finishedReason: null,
           timezone: effectiveTimezone ?? null,
+          automationIds: automationIds ?? null,
         };
 
         if (existing && args.overwrite === true) {
@@ -257,6 +263,65 @@ export class CronScheduler extends EventEmitter {
   public async get(name: string, scope?: string): Promise<TOption<TCronJob>> {
     return this.queue.enqueue(async () => {
       return this.getJobByNormalizedScope(name, this.normalizeScope(scope));
+    });
+  }
+
+  public async removeAutomation(
+    scope: string,
+    automationId: number,
+  ): Promise<{ updatedJobs: string[]; cancelledJobs: string[] }> {
+    return this.queue.enqueue(async () => {
+      const updatedJobs: string[] = [];
+      const cancelledJobs: string[] = [];
+      const rows = await this.db
+        .select()
+        .from(cronEngineJobsTable)
+        .where(
+          and(
+            eq(cronEngineJobsTable.scope, this.normalizeScope(scope)),
+            eq(cronEngineJobsTable.status, ECronJobStatus.Active),
+          ),
+        );
+
+      for (const row of rows) {
+        const job = this.parseJobRow(row);
+        if (!job || !job.automationIds.includes(automationId)) {
+          continue;
+        }
+
+        const remainingIds = job.automationIds.filter((id) => id !== automationId);
+        const hasOtherContent =
+          job.taskPrompt !== undefined ||
+          job.reminderText !== undefined ||
+          job.reminderPromptData !== undefined;
+
+        if (remainingIds.length === 0 && !hasOtherContent) {
+          await this.db
+            .update(cronEngineJobsTable)
+            .set({
+              status: ECronJobStatus.Cancelled,
+              finishedAt: Date.now(),
+              finishedReason: ECronFinishedReason.Unscheduled,
+            })
+            .where(eq(cronEngineJobsTable.id, job.id));
+          this.stopTimer(job.id);
+          cancelledJobs.push(job.name);
+          continue;
+        }
+
+        let automationIds: TOption<string>;
+        if (remainingIds.length > 0) {
+          automationIds = JSON.stringify(remainingIds);
+        }
+
+        await this.db
+          .update(cronEngineJobsTable)
+          .set({ automationIds: automationIds ?? null })
+          .where(eq(cronEngineJobsTable.id, job.id));
+        updatedJobs.push(job.name);
+      }
+
+      return { updatedJobs, cancelledJobs };
     });
   }
 
@@ -501,6 +566,7 @@ export class CronScheduler extends EventEmitter {
         reminderFallbackText: firedJob.reminderFallbackText,
         taskPrompt: firedJob.taskPrompt,
         taskFallbackText: firedJob.taskFallbackText,
+        automationIds: firedJob.automationIds,
         lastRunAt: firedJob.lastRunAt,
         nextRunAt: firedJob.nextRunAt,
         createdAt: firedJob.createdAt,

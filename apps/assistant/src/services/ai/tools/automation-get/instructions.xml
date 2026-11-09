@@ -1,0 +1,20 @@
+<instructions>
+  <purpose>Read one saved automation's details.</purpose>
+  <tool>
+    <name>automation-get</name>
+    <description>
+      Returns the summary plus config, state, and updatedAt. Returns source only when
+      includeSource is true.
+    </description>
+  </tool>
+  <usage_rules>
+    <rule>Set includeSource only when you are about to edit or fix the script.</rule>
+    <rule>To fix a failing automation, read lastError together with the source, then preview a corrected version under the same name.</rule>
+  </usage_rules>
+  <examples>
+    <example>
+      <context>User says: "the weather automation broke, fix it"</context>
+      <toolCall><name>warsaw-weather</name><includeSource>true</includeSource></toolCall>
+    </example>
+  </examples>
+</instructions>

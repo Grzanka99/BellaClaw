@@ -112,6 +112,7 @@ export const cronEngineJobsTable = sqliteTable(
     finishedAt: integer("finishedAt"),
     finishedReason: text("finishedReason"),
     timezone: text("timezone"),
+    automationIds: text("automationIds"),
   },
   (table) => [
     uniqueIndex("cron_engine_jobs_name_scope_unique")
@@ -119,6 +120,39 @@ export const cronEngineJobsTable = sqliteTable(
       .where(sql`${table.status} = 'active'`),
   ],
 );
+
+export const automationsTable = sqliteTable(
+  "automations",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    scope: text("scope").notNull(),
+    name: text("name").notNull(),
+    instructions: text("instructions"),
+    source: text("source").notNull(),
+    config: text("config").notNull(),
+    allowedOrigins: text("allowedOrigins").notNull(),
+    outputCapBytes: integer("outputCapBytes").notNull().default(16384),
+    state: text("state"),
+    status: text("status").notNull().default("active"),
+    failureCount: integer("failureCount").notNull().default(0),
+    lastError: text("lastError"),
+    createdAt: integer("createdAt").notNull(),
+    updatedAt: integer("updatedAt").notNull(),
+  },
+  (table) => [uniqueIndex("automations_scope_name_unique").on(table.scope, table.name)],
+);
+
+export const automationDraftsTable = sqliteTable("automation_drafts", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  scope: text("scope").notNull(),
+  name: text("name").notNull(),
+  instructions: text("instructions"),
+  source: text("source").notNull(),
+  config: text("config").notNull(),
+  allowedOrigins: text("allowedOrigins").notNull(),
+  outputCapBytes: integer("outputCapBytes").notNull(),
+  createdAt: integer("createdAt").notNull(),
+});
 
 export const userConfigsTable = sqliteTable(
   "user_configs",

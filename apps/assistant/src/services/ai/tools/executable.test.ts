@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, type Mock, mock, spyOn, test } from "bun:test";
 import { opencodeGoProvider } from "@earendil-works/pi-ai/providers/opencode-go";
 import { ECronJobStatus, ECronJobType } from "../../../lib/cron-engine";
+import { AutomationService } from "../../automation";
 import { CalendarService } from "../../calendar";
 import { CronSingleton } from "../../cron";
 import { EmbeddingClient } from "../../embedding";
@@ -22,9 +23,11 @@ const context = {
   chatId: "discord:1",
   settings: DefaultConfigRecord,
   verifySettings: mock(async () => undefined),
+  trace: undefined,
 };
 
 function reset() {
+  (AutomationService as unknown as { _instance: unknown })._instance = undefined;
   (CalendarService as unknown as { _instance: unknown })._instance = undefined;
   (CronSingleton as unknown as { _instance: unknown })._instance = undefined;
   (EmbeddingClient as unknown as { _instance: unknown })._instance = undefined;
@@ -183,6 +186,7 @@ describe("production executable tools", () => {
       reminderFallbackText: "Existing fallback",
       taskPrompt: undefined,
       taskFallbackText: undefined,
+      automationIds: [],
     };
     const createRecurring = mock(async (args) => ({ ...existing, ...args }));
     (CronSingleton as unknown as { _instance: unknown })._instance = {
@@ -228,6 +232,7 @@ describe("production executable tools", () => {
       reminderFallbackText: "Water the plants",
       taskPrompt: undefined,
       taskFallbackText: undefined,
+      automationIds: [],
     };
     const oneTimeJob = {
       ...recurringJob,
@@ -329,6 +334,153 @@ describe("production executable tools", () => {
         tool?.execute("call", { name: "water-plants", pattern: "0 8 * * *" }),
       ).rejects.toThrow("omit pattern for this one-time reminder");
       expect(createOnce).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("cron automations", () => {
+    const automationIdsByName = new Map([
+      ["weather", 1],
+      ["bus", 2],
+    ]);
+    const taskJob = {
+      id: 1,
+      name: "briefing",
+      scope: "discord:1",
+      group: undefined,
+      type: ECronJobType.Recurring,
+      pattern: "0 8 * * *",
+      status: ECronJobStatus.Active,
+      nextRunAt: new Date("2026-08-01T06:00:00.000Z"),
+      lastRunAt: undefined,
+      createdAt: new Date(),
+      finishedAt: undefined,
+      finishedReason: undefined,
+      timezone: "Europe/Warsaw",
+      reminderText: undefined,
+      reminderPromptData: undefined,
+      reminderFallbackText: undefined,
+      taskPrompt: "Write my briefing",
+      taskFallbackText: "Briefing unavailable",
+      automationIds: [1],
+    };
+    const rawJob = {
+      ...taskJob,
+      taskPrompt: undefined,
+      taskFallbackText: undefined,
+    };
+
+    function installCron(job: typeof taskJob | typeof rawJob) {
+      const createRecurring = mock(async (args) => ({ ...job, ...args }));
+      (CronSingleton as unknown as { _instance: unknown })._instance = {
+        get: mock(async () => job),
+        list: mock(async () => [job]),
+        createRecurring,
+      };
+      (AutomationService as unknown as { _instance: unknown })._instance = {
+        resolveNames: mock(async (_scope: string, names: string[]) =>
+          names.map((name) => automationIdsByName.get(name) ?? 0),
+        ),
+        getByIds: mock(async () => [
+          { id: 1, name: "weather" },
+          { id: 2, name: "bus" },
+        ]),
+      };
+      const tools = createSchedulingTools(context);
+
+      return {
+        createRecurring,
+        schedule: tools.find((candidate) => candidate.name === "schedule-recurring"),
+        update: tools.find((candidate) => candidate.name === "update-cron-job"),
+        list: tools.find((candidate) => candidate.name === "list-cron-jobs"),
+      };
+    }
+
+    test("schedules automations alone and resolves their names to ids", async () => {
+      const { schedule, createRecurring } = installCron(rawJob);
+
+      await schedule?.execute("call", {
+        name: "bus-morning",
+        pattern: "0 7 * * 1-5",
+        automations: [" bus ", "weather", "bus", ""],
+      });
+
+      expect(createRecurring).toHaveBeenCalledWith(
+        expect.objectContaining({ name: "bus-morning", automationIds: [2, 1] }),
+      );
+      expect(createRecurring.mock.calls[0]?.[0]).not.toHaveProperty("automations");
+    });
+
+    test("rejects automations combined with a reminder", async () => {
+      const { schedule, createRecurring } = installCron(rawJob);
+
+      await expect(
+        schedule?.execute("call", {
+          name: "bus-morning",
+          pattern: "0 7 * * 1-5",
+          reminderText: "Bus",
+          automations: ["bus"],
+        }),
+      ).rejects.toThrow("automations can only be combined with taskPrompt");
+      await expect(
+        schedule?.execute("call", { name: "empty", pattern: "0 7 * * *", automations: [] }),
+      ).rejects.toThrow("Provide reminderText, reminderPromptData, or taskPrompt");
+      expect(createRecurring).not.toHaveBeenCalled();
+    });
+
+    test("update keeps, replaces, and clears the automation list", async () => {
+      const { update, createRecurring } = installCron(taskJob);
+
+      await update?.execute("call", { name: "briefing", pattern: "0 9 * * *" });
+      await update?.execute("call", { name: "briefing", automations: ["bus", "weather"] });
+      await update?.execute("call", { name: "briefing", automations: [] });
+
+      expect(createRecurring.mock.calls.map((call) => call[0].automationIds)).toEqual([
+        [1],
+        [2, 1],
+        [],
+      ]);
+    });
+
+    test("update requires clearing automations when switching to a reminder", async () => {
+      const { update, createRecurring } = installCron(taskJob);
+
+      await expect(
+        update?.execute("call", { name: "briefing", reminderText: "Read the news" }),
+      ).rejects.toThrow("pass automations: [] to remove its automations");
+      await update?.execute("call", {
+        name: "briefing",
+        reminderText: "Read the news",
+        automations: [],
+      });
+
+      expect(createRecurring).toHaveBeenCalledTimes(1);
+      expect(createRecurring).toHaveBeenCalledWith(
+        expect.objectContaining({
+          reminderText: "Read the news",
+          taskPrompt: undefined,
+          automationIds: [],
+        }),
+      );
+    });
+
+    test("update rejects removing every automation from a job without content", async () => {
+      const { update, createRecurring } = installCron(rawJob);
+
+      await expect(update?.execute("call", { name: "briefing", automations: [] })).rejects.toThrow(
+        "removing all automations would leave this job without content",
+      );
+      expect(createRecurring).not.toHaveBeenCalled();
+    });
+
+    test("lists attached automations by name", async () => {
+      const { list } = installCron({ ...taskJob, automationIds: [2, 1] });
+
+      const result = await list?.execute("call", {});
+
+      expect(result?.details).toEqual([
+        expect.objectContaining({ name: "briefing", automations: ["bus", "weather"] }),
+      ]);
+      expect(JSON.stringify(result?.details)).not.toContain("automationIds");
     });
   });
 

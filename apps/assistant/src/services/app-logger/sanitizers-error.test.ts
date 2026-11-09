@@ -61,6 +61,12 @@ describe("app logger sanitizer errors", () => {
         "invalid-fallback-pairing",
       ],
       ["taskFallbackText requires taskPrompt", "invalid-fallback-pairing"],
+      [
+        "automations can only be combined with taskPrompt, not with reminders",
+        "automations-without-task",
+      ],
+      ["Unknown automations: private-automation", "unknown-automation"],
+      ["Nothing to preview: provide automations or a taskPrompt", "missing-content"],
       ["Invalid fireAt: private-job", "invalid-fire-at"],
       ["fireAt must be local time, YYYY-MM-DDTHH:mm[:ss], with no Z or offset", "invalid-fire-at"],
       ["fireAt can only update one-time reminders; omit fireAt", "fire-at-on-recurring-job"],

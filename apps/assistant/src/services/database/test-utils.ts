@@ -31,3 +31,15 @@ export async function resetMessageAuthorizationsTable() {
 
   await db.run(sql`DELETE FROM message_authorizations`);
 }
+
+export async function resetAutomationsTables() {
+  if (Bun.env.BELLACLAW_DATABASE_MODE !== "test" && Bun.env.NODE_ENV !== "test") {
+    throw new Error("resetAutomationsTables can only run in test database mode");
+  }
+
+  const db = DatabaseConnector.instance.database;
+
+  await db.run(sql`DELETE FROM automation_drafts`);
+  await db.run(sql`DELETE FROM automations`);
+  await db.run(sql`DELETE FROM sqlite_sequence WHERE name IN ('automations', 'automation_drafts')`);
+}

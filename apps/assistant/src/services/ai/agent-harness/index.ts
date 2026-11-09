@@ -56,6 +56,7 @@ import { decodeAiModelPreferences, getAiModelPreference } from "../model-prefere
 import { aiModels, getAiApiKey, getAiModelConfig, refreshAiModels } from "../providers/registry";
 import { validateToolArguments } from "../tools/definition";
 import {
+  createAutomationTools,
   createCalendarTools,
   createMemoryTools,
   createSchedulingTools,
@@ -75,6 +76,7 @@ const BASE_INSTRUCTIONS_PATH = "./src/services/ai/instructions/base-system.xml";
 const SEQUENTIAL: "sequential" = "sequential";
 const PARALLEL: "parallel" = "parallel";
 const AGENT_INSTRUCTIONS: Record<EAgentName, string> = {
+  [EAgentName.Automations]: "./src/services/ai/agents/automations/instructions.xml",
   [EAgentName.Calendar]: "./src/services/ai/agents/calendar/instructions.xml",
   [EAgentName.Main]: "./src/services/ai/agents/main/instructions.xml",
   [EAgentName.Mcp]: "./src/services/ai/agents/mcp/instructions.xml",
@@ -724,8 +726,11 @@ export class AgentHarness {
       chatId: args.chatId,
       settings: args.settings,
       verifySettings: this.verifySettings.bind(this),
+      trace: args.trace,
     };
     switch (args.name) {
+      case EAgentName.Automations:
+        return [...createAutomationTools(context), ...createWebTools()];
       case EAgentName.Calendar:
         return [...createCalendarTools(context), ...createWebTools()];
       case EAgentName.Main:
@@ -745,7 +750,13 @@ export class AgentHarness {
         return createSettingsTools(context);
       case EAgentName.Scheduling:
         return [...createSchedulingTools(context), ...createWebTools()];
-      case EAgentName.ScheduledTask:
+      case EAgentName.ScheduledTask: {
+        let mcpTools: AgentTool[] = [];
+
+        if (args.withoutMcp !== true) {
+          mcpTools = await this.createMcpDelegationTools(args);
+        }
+
         return [
           ...createMemoryTools(context).filter((tool) => tool.name === "search-memory"),
           ...createWebTools(),
@@ -755,8 +766,9 @@ export class AgentHarness {
             );
           }),
           ...createSchedulingTools(context).filter((tool) => tool.name === "list-cron-jobs"),
-          ...(await this.createMcpDelegationTools(args)),
+          ...mcpTools,
         ];
+      }
     }
   }
 
@@ -772,30 +784,42 @@ export class AgentHarness {
       label: string;
       target: EAgentName;
       purpose: EModelPurpose;
+      maxIterations: number;
     }> = [
       {
         name: "delegate-calendar",
         label: "Delegate calendar",
         target: EAgentName.Calendar,
         purpose: EModelPurpose.SpecialistAccurate,
+        maxIterations: 12,
       },
       {
         name: "delegate-memory",
         label: "Delegate memory",
         target: EAgentName.Memory,
         purpose: EModelPurpose.Specialist,
+        maxIterations: 12,
       },
       {
         name: "delegate-settings",
         label: "Delegate settings",
         target: EAgentName.Settings,
         purpose: EModelPurpose.Specialist,
+        maxIterations: 12,
       },
       {
         name: "delegate-scheduling",
         label: "Delegate scheduling",
         target: EAgentName.Scheduling,
         purpose: EModelPurpose.SpecialistAccurate,
+        maxIterations: 12,
+      },
+      {
+        name: "delegate-automations",
+        label: "Delegate automations",
+        target: EAgentName.Automations,
+        purpose: EModelPurpose.SpecialistAccurate,
+        maxIterations: 20,
       },
     ];
 
@@ -803,7 +827,11 @@ export class AgentHarness {
       let executionMode: typeof SEQUENTIAL | typeof PARALLEL = PARALLEL;
       let description = `Run the ${delegate.target} specialist for this focused task`;
 
-      if (delegate.target === EAgentName.Calendar || delegate.target === EAgentName.Scheduling) {
+      if (
+        delegate.target === EAgentName.Calendar ||
+        delegate.target === EAgentName.Scheduling ||
+        delegate.target === EAgentName.Automations
+      ) {
         executionMode = SEQUENTIAL;
       }
 
@@ -835,7 +863,7 @@ export class AgentHarness {
             prompt: `Original user message:\n${args.prompt}\n\nDelegated task:\n${parsedParameters.task}`,
             history: undefined,
             conversation: undefined,
-            maxIterations: 12,
+            maxIterations: delegate.maxIterations,
             parentToolCallId: toolCallId,
             delegationCount: undefined,
             signal: delegationSignal,

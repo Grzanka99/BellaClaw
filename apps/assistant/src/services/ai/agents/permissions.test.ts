@@ -10,6 +10,17 @@ import type { TAgentRunArgs } from "../agent-harness/types";
 import { EModelPurpose } from "../types";
 
 const EXPECTED_TOOL_NAMES: Record<EAgentName, readonly string[]> = {
+  [EAgentName.Automations]: [
+    "automation-list",
+    "automation-get",
+    "automation-preview",
+    "automation-save",
+    "automation-run",
+    "automation-set-status",
+    "automation-delete",
+    "web-search",
+    "web-fetch",
+  ],
   [EAgentName.Calendar]: [
     "list-calendars",
     "remove-readonly-calendar",
@@ -28,6 +39,7 @@ const EXPECTED_TOOL_NAMES: Record<EAgentName, readonly string[]> = {
     "delegate-memory",
     "delegate-settings",
     "delegate-scheduling",
+    "delegate-automations",
   ],
   [EAgentName.Mcp]: [],
   [EAgentName.Memory]: ["search-memory", "remember-memory", "forget-memory"],
@@ -37,6 +49,7 @@ const EXPECTED_TOOL_NAMES: Record<EAgentName, readonly string[]> = {
     "schedule-once",
     "schedule-recurring",
     "update-cron-job",
+    "preview-cron-job",
     "unschedule-cron-job",
     "web-search",
     "web-fetch",
@@ -95,6 +108,12 @@ describe("agent permissions", () => {
         for (const tool of tools) {
           if (
             tool.name === "delegate-scheduling" ||
+            tool.name === "delegate-automations" ||
+            tool.name === "automation-preview" ||
+            tool.name === "automation-save" ||
+            tool.name === "automation-run" ||
+            tool.name === "automation-set-status" ||
+            tool.name === "automation-delete" ||
             tool.name === "remember-memory" ||
             tool.name === "forget-memory" ||
             tool.name === "delegate-calendar" ||

@@ -18,6 +18,28 @@ export enum ECronFinishedReason {
   Overwritten = "overwritten",
 }
 
+const SAutomationIds = z.array(z.number().int().positive());
+
+function parseAutomationIdsColumn(value: string | null): number[] {
+  if (value === null) {
+    return [];
+  }
+
+  let json: unknown;
+  try {
+    json = JSON.parse(value);
+  } catch {
+    return [];
+  }
+
+  const parsed = SAutomationIds.safeParse(json);
+  if (!parsed.success) {
+    return [];
+  }
+
+  return parsed.data;
+}
+
 const SReminderContentJobFields = z.object({
   reminderText: z
     .string()
@@ -39,6 +61,7 @@ const SReminderContentJobFields = z.object({
     .string()
     .nullable()
     .transform((value) => value ?? undefined),
+  automationIds: z.string().nullable().transform(parseAutomationIdsColumn),
 });
 
 const SReminderContentArgsBase = z.object({
@@ -47,6 +70,7 @@ const SReminderContentArgsBase = z.object({
   reminderFallbackText: z.string().optional(),
   taskPrompt: z.string().optional(),
   taskFallbackText: z.string().optional(),
+  automationIds: SAutomationIds.optional(),
 });
 
 function validateReminderContentArgs(
@@ -98,6 +122,18 @@ function validateReminderContentArgs(
       code: z.ZodIssueCode.custom,
       message: "taskFallbackText requires taskPrompt",
       path: ["taskFallbackText"],
+    });
+  }
+
+  if (
+    value.automationIds !== undefined &&
+    value.automationIds.length > 0 &&
+    (value.reminderText !== undefined || value.reminderPromptData !== undefined)
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "automationIds can only be combined with taskPrompt",
+      path: ["automationIds"],
     });
   }
 }
@@ -198,6 +234,7 @@ export type TCronJobContext = {
   reminderFallbackText: TOption<string>;
   taskPrompt: TOption<string>;
   taskFallbackText: TOption<string>;
+  automationIds: number[];
   lastRunAt: TOption<Date>;
   nextRunAt: Date;
   createdAt: Date;

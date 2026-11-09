@@ -7,6 +7,7 @@ type TCronContentFields = {
   reminderFallbackText?: string;
   taskPrompt?: string;
   taskFallbackText?: string;
+  automations?: string[];
 };
 
 export function absentIfBlank(value?: string): TOption<string> {
@@ -30,7 +31,60 @@ export function normalizeCronContentFields(args: TCronContentFields): TCronConte
     reminderFallbackText: absentIfBlank(args.reminderFallbackText),
     taskPrompt: absentIfBlank(args.taskPrompt),
     taskFallbackText: absentIfBlank(args.taskFallbackText),
+    automations: normalizeAutomationNames(args.automations),
   };
+}
+
+/**
+ * Trims names and drops blanks and duplicates. An omitted list stays omitted
+ * because an explicit empty list means "no automations" on updates.
+ */
+function normalizeAutomationNames(names?: string[]): TOption<string[]> {
+  if (names === undefined) {
+    return undefined;
+  }
+
+  const normalized = new Set<string>();
+  for (const name of names) {
+    const trimmed = name.trim();
+    if (trimmed.length > 0) {
+      normalized.add(trimmed);
+    }
+  }
+
+  return [...normalized];
+}
+
+/**
+ * Validates the content of a new job: one content mode, automations alone
+ * (their text outputs are sent as written), or automations with taskPrompt.
+ */
+export function validateNewCronJobContent(args: TCronContentFields): void {
+  const contentModeCount = countCronContentModes(args);
+  const automationCount = args.automations?.length ?? 0;
+
+  if (contentModeCount === 0 && automationCount === 0) {
+    throw new Error(
+      "Provide reminderText, reminderPromptData, or taskPrompt, or attach automations",
+    );
+  }
+
+  if (contentModeCount > 1) {
+    throw new Error("Provide only one of reminderText, reminderPromptData, or taskPrompt");
+  }
+
+  validateCronFallbackPairing(args);
+  validateCronAutomationsPairing(args);
+}
+
+export function validateCronAutomationsPairing(args: TCronContentFields): void {
+  if (
+    args.automations !== undefined &&
+    args.automations.length > 0 &&
+    (args.reminderText !== undefined || args.reminderPromptData !== undefined)
+  ) {
+    throw new Error("automations can only be combined with taskPrompt, not with reminders");
+  }
 }
 
 export function countCronContentModes(args: TCronContentFields): number {

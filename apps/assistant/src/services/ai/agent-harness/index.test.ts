@@ -1502,6 +1502,8 @@ describe("AgentHarness", () => {
     expect(memory?.execute("call-31", { task: "remember" })).rejects.toThrow(
       "Root delegation limit reached",
     );
+    const automations = tools.find((tool) => tool.name === "delegate-automations");
+    expect(automations?.executionMode).toBe("sequential");
     expect(harness.run).toHaveBeenCalledTimes(30);
     expect(harness.run).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1526,6 +1528,22 @@ describe("AgentHarness", () => {
     const blankTool = blankTools.find((tool) => tool.name === "delegate-memory");
     expect(blankTool?.execute("blank", { task: "remember" })).rejects.toThrow(
       "specialist returned no final response",
+    );
+
+    harness.run = mock(async () => ({
+      text: "preview ready",
+      iterations: 1,
+      toolCallCount: 0,
+      stopReason: "completed",
+    }));
+    const automationTool = blankTools.find((tool) => tool.name === "delegate-automations");
+    await automationTool?.execute("automation-call", { task: "preview weather" });
+    expect(harness.run).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: EAgentName.Automations,
+        purpose: EModelPurpose.SpecialistAccurate,
+        maxIterations: 20,
+      }),
     );
     harness.run = originalRun;
   });

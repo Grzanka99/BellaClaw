@@ -23,8 +23,11 @@ import {
   EAuthorizationDecision,
   type TAuthorizationResult,
 } from "../authorization";
+import { AutomationService } from "../automation";
 import { ConversationStore } from "../conversation";
 import { conversationMessages, type TConversation } from "../conversation/types";
+import { CronSingleton } from "../cron";
+import { resetAutomationsTables } from "../database/test-utils";
 import { Memory } from "../memory";
 import { EMemoryImportance } from "../memory/types";
 import { MessageHandler } from "../message-handler";
@@ -71,6 +74,7 @@ function cron(overrides: Partial<TCronJobContext> = {}): TCronJobContext {
     reminderFallbackText: undefined,
     taskPrompt: undefined,
     taskFallbackText: undefined,
+    automationIds: [],
     lastRunAt: undefined,
     nextRunAt: new Date("2026-07-24T08:00:00.000Z"),
     createdAt: new Date("2026-07-01T08:00:00.000Z"),
@@ -118,6 +122,42 @@ function setupConversationHandler(chatId: string) {
     message: { content: "Hello" },
   };
   return { handler, runMain, compactConversation, message };
+}
+
+async function saveAutomation(name: string, source: string) {
+  const draft = await AutomationService.instance.createDraft({
+    scope: "signal:+100",
+    name,
+    source,
+    config: {},
+    allowedOrigins: [],
+  });
+
+  return AutomationService.instance.saveDraft("signal:+100", draft.id);
+}
+
+function setupAutomationDelivery() {
+  (SettingsService as unknown as { _instance: unknown })._instance = {
+    getAll: mock(async () => DefaultConfigRecord),
+  };
+  const save = mock(async () => undefined);
+  Object.assign(MessageHandler.getInstance("signal:+100"), {
+    conversations: { saveDeliveredMessage: save },
+  });
+  const sendText = mock(async () => undefined);
+  const adapter = MessagingAdapter.instance;
+  adapter.registerTransport({ platform: EMessagePlatform.Signal, sendText });
+  const internals = adapter as unknown as TAdapterInternals;
+  const prompts: string[] = [];
+  internals.ai = {
+    completeText: mock(async () => undefined),
+    runScheduledTask: mock(async (args: { prompt: string }) => {
+      prompts.push(args.prompt);
+      return { text: "Your briefing.", stopReason: "completed", iterations: 1, toolCallCount: 0 };
+    }),
+  };
+
+  return { save, sendText, internals, prompts };
 }
 
 async function waitForCall(callback: ReturnType<typeof mock>) {
@@ -602,6 +642,123 @@ describe("MessagingAdapter", () => {
       expect.any(Number),
     );
     expect(internals.runningCronTaskKeys.size).toBe(0);
+  });
+
+  describe("cron jobs with automations", () => {
+    beforeEach(async () => {
+      await resetAutomationsTables();
+    });
+
+    afterEach(() => {
+      CronSingleton.instance.destroy();
+    });
+
+    test("sends raw automation text as written and saves it as a cron task", async () => {
+      const bus = await saveAutomation(
+        "bus",
+        "export default async () => ({ kind: 'text', text: 'Bus at 7:05' })",
+      );
+      const quiet = await saveAutomation(
+        "quiet",
+        "export default async () => ({ kind: 'silent' })",
+      );
+      const tram = await saveAutomation(
+        "tram",
+        "export default async () => ({ kind: 'text', text: 'Tram at 7:10' })",
+      );
+      const { save, sendText, internals } = setupAutomationDelivery();
+      const job = cron({ reminderText: undefined, automationIds: [tram.id, quiet.id, bus.id] });
+
+      const first = internals.handleCronFire(job);
+      await Promise.resolve();
+      await internals.handleCronFire(job);
+      await first;
+
+      expect(sendText).toHaveBeenCalledTimes(1);
+      expect(sendText).toHaveBeenCalledWith("+100", "Tram at 7:10\n\nBus at 7:05");
+      expect(save).toHaveBeenCalledWith(
+        "signal:+100",
+        EMessagePlatform.Signal,
+        "[CRON TASK daily]: Tram at 7:10\n\nBus at 7:05",
+        expect.any(Number),
+      );
+      expect(internals.ai.runScheduledTask).not.toHaveBeenCalled();
+      expect(internals.runningCronTaskKeys.size).toBe(0);
+    });
+
+    test("sends nothing when no automation returns text", async () => {
+      const quiet = await saveAutomation(
+        "quiet",
+        "export default async () => ({ kind: 'silent' })",
+      );
+      const metrics = await saveAutomation(
+        "metrics",
+        "export default async () => ({ kind: 'data', data: { value: 1 } })",
+      );
+      const { save, sendText, internals } = setupAutomationDelivery();
+
+      await internals.handleCronFire(
+        cron({ reminderText: undefined, automationIds: [quiet.id, metrics.id] }),
+      );
+
+      expect(sendText).not.toHaveBeenCalled();
+      expect(save).not.toHaveBeenCalled();
+    });
+
+    test("passes automation outputs to the scheduled task agent", async () => {
+      const metrics = await saveAutomation(
+        "metrics",
+        "export default async () => ({ kind: 'data', data: { value: 1 } })",
+      );
+      const { save, sendText, internals, prompts } = setupAutomationDelivery();
+
+      await internals.handleCronFire(
+        cron({
+          reminderText: undefined,
+          taskPrompt: "Prepare briefing.",
+          taskFallbackText: "Briefing unavailable.",
+          automationIds: [metrics.id],
+        }),
+      );
+
+      expect(prompts[0]).toContain("Prepare briefing.\n\n<automation_outputs>");
+      expect(prompts[0]).toContain('"data": {');
+      expect(sendText).toHaveBeenCalledWith("+100", "Your briefing.");
+      expect(save).toHaveBeenCalledWith(
+        "signal:+100",
+        EMessagePlatform.Signal,
+        "[CRON TASK daily]: Your briefing.",
+        expect.any(Number),
+      );
+    });
+
+    test("sends one fixed notice when a run pauses an automation", async () => {
+      const broken = await saveAutomation(
+        "broken",
+        "export default async () => { throw new Error('boom'); }",
+      );
+      await AutomationService.instance.recordFailure(broken.id, "boom");
+      await AutomationService.instance.recordFailure(broken.id, "boom");
+      const { save, sendText, internals } = setupAutomationDelivery();
+      const job = cron({ reminderText: undefined, automationIds: [broken.id] });
+
+      await internals.handleCronFire(job);
+      await internals.handleCronFire(job);
+
+      expect(sendText).toHaveBeenCalledTimes(1);
+      expect(sendText).toHaveBeenCalledWith(
+        "+100",
+        expect.stringMatching(
+          /^Automation "broken" was paused after 3 failed runs: .*boom.*\. Ask me to fix it\.$/,
+        ),
+      );
+      expect(save).toHaveBeenCalledWith(
+        "signal:+100",
+        EMessagePlatform.Signal,
+        expect.stringMatching(/^\[CRON TASK daily\]: Automation "broken" was paused/),
+        expect.any(Number),
+      );
+    });
   });
 
   test("waits for a still-connecting transport before giving up on a cron delivery", async () => {

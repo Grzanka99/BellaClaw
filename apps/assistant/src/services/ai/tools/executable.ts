@@ -1,12 +1,32 @@
+import type { TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
 import type { TOption } from "@bellaclaw/shared";
 import { fetchWeb, searchWeb } from "../../../lib/web";
+import { AutomationService } from "../../automation";
 import { CalendarService } from "../../calendar";
 import { CronSingleton } from "../../cron";
 import { MessageHandler } from "../../message-handler";
 import { SettingsService } from "../../settings";
 import { EConfigKey, type TConfigRecord } from "../../settings/schema";
+import { AgentHarness } from "../agent-harness";
 import { refreshAiModels } from "../providers/registry";
 import type { EModelPurpose } from "../types";
+import { automationDeleteTool, SAutomationDeleteArgs } from "./automation-delete/definition";
+import { handleAutomationDelete } from "./automation-delete/handler";
+import { automationGetTool, SAutomationGetArgs } from "./automation-get/definition";
+import { handleAutomationGet } from "./automation-get/handler";
+import { automationListTool, SAutomationListArgs } from "./automation-list/definition";
+import { handleAutomationList } from "./automation-list/handler";
+import { automationPreviewTool, SAutomationPreviewArgs } from "./automation-preview/definition";
+import { handleAutomationPreview } from "./automation-preview/handler";
+import { automationRunTool, SAutomationRunArgs } from "./automation-run/definition";
+import { handleAutomationRun } from "./automation-run/handler";
+import { automationSaveTool, SAutomationSaveArgs } from "./automation-save/definition";
+import { handleAutomationSave } from "./automation-save/handler";
+import {
+  automationSetStatusTool,
+  SAutomationSetStatusArgs,
+} from "./automation-set-status/definition";
+import { handleAutomationSetStatus } from "./automation-set-status/handler";
 import { createCalendarEventTool } from "./create-calendar-event/definition";
 import {
   SCreateCalendarEventArgs,
@@ -32,6 +52,9 @@ import {
 import { listCalendarsTool } from "./list-calendars/definition";
 import { SListCalendarsArgs } from "./list-calendars/handler";
 import { listCronJobsTool } from "./list-cron-jobs/definition";
+import { handleListCronJobs } from "./list-cron-jobs/handler";
+import { previewCronJobTool } from "./preview-cron-job/definition";
+import { handlePreviewCronJob, SPreviewCronJobArgs } from "./preview-cron-job/handler";
 import { rememberMemoryTool, SRememberMemoryArgs } from "./remember-memory/definition";
 import { handleRememberMemory } from "./remember-memory/handler";
 import { removeReadonlyCalendarTool } from "./remove-readonly-calendar/definition";
@@ -67,6 +90,7 @@ export type TToolExecutionContext = {
   chatId: TOption<string>;
   settings: TConfigRecord;
   verifySettings: (settings: TConfigRecord, purposes: EModelPurpose[]) => Promise<TOption<string>>;
+  trace: TOption<TBehaviorTraceContext>;
 };
 
 function textResult(details: unknown) {
@@ -157,8 +181,7 @@ export function createSchedulingTools(context: TToolExecutionContext) {
     {
       ...listCronJobsTool,
       label: "List cron jobs",
-      execute: async () =>
-        textResult(await CronSingleton.instance.list(requireChatId(context.chatId))),
+      execute: async () => textResult(await handleListCronJobs(requireChatId(context.chatId))),
     },
     {
       ...scheduleOnceTool,
@@ -166,10 +189,15 @@ export function createSchedulingTools(context: TToolExecutionContext) {
       executionMode: SEQUENTIAL,
       execute: async (_toolCallId: string, args: unknown) => {
         const parsedArgs = validateToolArguments(SScheduleOnceArgs, args);
-        const validatedArgs = validateScheduleOnceArgs(parsedArgs, ownerTimezone);
+        const { automations, ...validatedArgs } = validateScheduleOnceArgs(
+          parsedArgs,
+          ownerTimezone,
+        );
+        const chatId = requireChatId(context.chatId);
         const result = await CronSingleton.instance.createOnce({
           ...validatedArgs,
-          scope: requireChatId(context.chatId),
+          automationIds: await AutomationService.instance.resolveNames(chatId, automations ?? []),
+          scope: chatId,
           timezone: ownerTimezone,
         });
 
@@ -186,10 +214,12 @@ export function createSchedulingTools(context: TToolExecutionContext) {
       executionMode: SEQUENTIAL,
       execute: async (_toolCallId: string, args: unknown) => {
         const parsedArgs = validateToolArguments(SScheduleRecurringArgs, args);
-        const validatedArgs = validateScheduleRecurringArgs(parsedArgs);
+        const { automations, ...validatedArgs } = validateScheduleRecurringArgs(parsedArgs);
+        const chatId = requireChatId(context.chatId);
         const result = await CronSingleton.instance.createRecurring({
           ...validatedArgs,
-          scope: requireChatId(context.chatId),
+          automationIds: await AutomationService.instance.resolveNames(chatId, automations ?? []),
+          scope: chatId,
           timezone: ownerTimezone,
         });
 
@@ -208,6 +238,21 @@ export function createSchedulingTools(context: TToolExecutionContext) {
         const parsedArgs = validateToolArguments(SUpdateCronJobArgs, args);
         return textResult(
           await handleUpdateCronJob(requireChatId(context.chatId), parsedArgs, ownerTimezone),
+        );
+      },
+    },
+    {
+      ...previewCronJobTool,
+      label: "Preview cron job",
+      execute: async (_toolCallId: string, args: unknown, signal?: AbortSignal) => {
+        const parsedArgs = validateToolArguments(SPreviewCronJobArgs, args);
+        return textResult(
+          await handlePreviewCronJob(
+            requireChatId(context.chatId),
+            parsedArgs,
+            AgentHarness.instance,
+            { timezone: ownerTimezone, trace: context.trace, signal },
+          ),
         );
       },
     },
@@ -350,6 +395,88 @@ export function createWebTools() {
       execute: async (_toolCallId: string, args: unknown, signal?: AbortSignal) => {
         const parsedArgs = validateWebFetchArgs(validateToolArguments(SWebFetchArgs, args));
         return textResult(await fetchWeb(parsedArgs, signal));
+      },
+    },
+  ];
+}
+
+export function createAutomationTools(context: TToolExecutionContext) {
+  const ownerTimezone = context.settings[EConfigKey.AiInstructionsTimezone];
+
+  return [
+    {
+      ...automationListTool,
+      label: "List automations",
+      execute: async (_toolCallId: string, args: unknown) => {
+        validateToolArguments(SAutomationListArgs, args);
+        return textResult(await handleAutomationList(requireChatId(context.chatId)));
+      },
+    },
+    {
+      ...automationGetTool,
+      label: "Get automation",
+      execute: async (_toolCallId: string, args: unknown) => {
+        const parsedArgs = validateToolArguments(SAutomationGetArgs, args);
+        return textResult(await handleAutomationGet(requireChatId(context.chatId), parsedArgs));
+      },
+    },
+    {
+      ...automationPreviewTool,
+      label: "Preview automation",
+      executionMode: SEQUENTIAL,
+      execute: async (_toolCallId: string, args: unknown, signal?: AbortSignal) => {
+        const parsedArgs = validateToolArguments(SAutomationPreviewArgs, args);
+        return textResult(
+          await handleAutomationPreview(requireChatId(context.chatId), parsedArgs, {
+            timezone: ownerTimezone,
+            trace: context.trace,
+            signal,
+          }),
+        );
+      },
+    },
+    {
+      ...automationSaveTool,
+      label: "Save automation",
+      executionMode: SEQUENTIAL,
+      execute: async (_toolCallId: string, args: unknown) => {
+        const parsedArgs = validateToolArguments(SAutomationSaveArgs, args);
+        return textResult(await handleAutomationSave(requireChatId(context.chatId), parsedArgs));
+      },
+    },
+    {
+      ...automationRunTool,
+      label: "Run automation",
+      executionMode: SEQUENTIAL,
+      execute: async (_toolCallId: string, args: unknown, signal?: AbortSignal) => {
+        const parsedArgs = validateToolArguments(SAutomationRunArgs, args);
+        return textResult(
+          await handleAutomationRun(requireChatId(context.chatId), parsedArgs, {
+            timezone: ownerTimezone,
+            trace: context.trace,
+            signal,
+          }),
+        );
+      },
+    },
+    {
+      ...automationSetStatusTool,
+      label: "Set automation status",
+      executionMode: SEQUENTIAL,
+      execute: async (_toolCallId: string, args: unknown) => {
+        const parsedArgs = validateToolArguments(SAutomationSetStatusArgs, args);
+        return textResult(
+          await handleAutomationSetStatus(requireChatId(context.chatId), parsedArgs),
+        );
+      },
+    },
+    {
+      ...automationDeleteTool,
+      label: "Delete automation",
+      executionMode: SEQUENTIAL,
+      execute: async (_toolCallId: string, args: unknown) => {
+        const parsedArgs = validateToolArguments(SAutomationDeleteArgs, args);
+        return textResult(await handleAutomationDelete(requireChatId(context.chatId), parsedArgs));
       },
     },
   ];

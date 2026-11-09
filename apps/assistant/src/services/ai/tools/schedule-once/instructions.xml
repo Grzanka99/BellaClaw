@@ -28,9 +28,14 @@
     <rule>Use this tool for non-repeating reminders; use schedule-recurring when the user asks for repetition</rule>
     <rule>Choose clear, descriptive names for jobs so they can be easily referenced later</rule>
     <rule>If a one-time job with the same name already exists, set overwrite to true only if the user explicitly agrees to replace it</rule>
-    <rule>Provide exactly one mode: reminderText; reminderPromptData plus reminderFallbackText; or taskPrompt plus taskFallbackText</rule>
+    <rule>Provide exactly one mode: reminderText; reminderPromptData plus reminderFallbackText; or taskPrompt plus taskFallbackText; a job with automations may omit the mode</rule>
     <rule>Use taskPrompt for work requiring tools at firing time; use reminderPromptData for fresh wording without tools</rule>
     <rule>Pass reminderPromptData as a serialized JSON string, not as a nested object</rule>
+    <rule>automations attaches saved automations by name; they run in list order at firing time</rule>
+    <rule>automations without a content mode: the automations' text outputs are sent exactly as written, joined in order; data outputs are not sent, and if no automation returns text nothing is sent</rule>
+    <rule>automations with taskPrompt plus taskFallbackText: the scheduled task reads the automation outputs and writes the message; use this when outputs need interpretation, combination, or data formatting</rule>
+    <rule>Never combine automations with reminderText or reminderPromptData</rule>
+    <rule>Before creating a job with automations, dry-run it with preview-cron-job and wait for the user's confirmation</rule>
     <rule>Inform the user of the scheduled fire time after successfully scheduling</rule>
   </usage_rules>
 

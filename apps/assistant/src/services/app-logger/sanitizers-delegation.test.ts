@@ -17,6 +17,7 @@ describe("delegation log sanitizers", () => {
     "delegate-calendar",
     "delegate-settings",
     "delegate-scheduling",
+    "delegate-automations",
   ])("keeps bounded useful %s previews while redacting secrets", (toolName) => {
     Bun.env.OPENROUTER_API_KEY = "super-secret";
     const longText = `summarize super-secret ${"detail ".repeat(80)}`;

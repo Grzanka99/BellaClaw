@@ -12,7 +12,7 @@ import { SettingsService } from "../services/settings";
 import { DefaultConfigRecord, EConfigKey, type TConfigRecord } from "../services/settings/schema";
 
 type TReminderAi = Pick<AgentHarness, "completeText">;
-type TScheduledTaskAi = Pick<AgentHarness, "runScheduledTask">;
+export type TScheduledTaskAi = Pick<AgentHarness, "runScheduledTask">;
 
 export type TScheduledTaskResult = {
   text: TOption<string>;
@@ -24,7 +24,7 @@ export type TScheduledTaskResult = {
 
 const logger = createLogger("REMINDER");
 
-async function resolveCronScopeContext(ctx: TCronJobContext, logPrefix: string) {
+export async function resolveCronScopeContext(ctx: TCronJobContext, logPrefix: string) {
   let timezone: TOption<string> = ctx.timezone;
   let settings: TConfigRecord = DefaultConfigRecord;
   let platform: TOption<EMessagePlatform>;
@@ -124,6 +124,7 @@ export async function generateScheduledTaskText(
   ctx: TCronJobContext,
   ai: TScheduledTaskAi,
   trace?: TBehaviorTraceContext,
+  automationOutputs?: string,
 ): Promise<TScheduledTaskResult> {
   const startedAt = performance.now();
 
@@ -142,9 +143,14 @@ export async function generateScheduledTaskText(
     "generateScheduledTaskText",
   );
 
+  let prompt = ctx.taskPrompt;
+  if (automationOutputs !== undefined) {
+    prompt = `${prompt}\n\n${automationOutputs}`;
+  }
+
   try {
     const result = await ai.runScheduledTask({
-      prompt: ctx.taskPrompt,
+      prompt,
       history: undefined,
       currentTimeContext: `Scheduled firing context JSON:\n${JSON.stringify(createFiringContext(ctx.nextRunAt, timezone))}`,
       chatId: ctx.scope,

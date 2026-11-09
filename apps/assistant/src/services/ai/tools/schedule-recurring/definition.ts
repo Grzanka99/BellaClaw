@@ -5,6 +5,6 @@ export const SCHEDULE_RECURRING_TOOL = "schedule-recurring" as const;
 
 export const scheduleRecurringTool = createToolDefinition(
   SCHEDULE_RECURRING_TOOL,
-  "Schedule a recurring reminder or autonomous task requiring tools using a 5-field cron pattern. Provide exactly one content mode: reminderText; reminderPromptData with reminderFallbackText; or taskPrompt with taskFallbackText.",
+  "Schedule a recurring reminder or autonomous task requiring tools using a 5-field cron pattern. Provide exactly one content mode: reminderText; reminderPromptData with reminderFallbackText; or taskPrompt with taskFallbackText. automations may be attached alone (their text outputs are sent as written) or with taskPrompt (their outputs feed the task).",
   SScheduleRecurringArgs,
 );

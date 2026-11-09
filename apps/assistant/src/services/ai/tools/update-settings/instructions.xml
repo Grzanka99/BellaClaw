@@ -39,7 +39,7 @@
     <rule>Model operations apply to Main unless the user explicitly names another existing purpose.</rule>
     <rule>A model must belong to the active provider. A combined explicit provider/model request is allowed and applied atomically.</rule>
     <rule>Call get-settings first when the user asks which models are available or does not provide an exact model ID.</rule>
-    <rule>Utility controls memory distillation. Specialist controls Memory and Settings. SpecialistAccurate controls Calendar and Scheduling. ScheduledTask controls autonomous scheduled work. Reminder-text generation continues to use Main.</rule>
+    <rule>Utility controls memory distillation. Specialist controls Memory and Settings. SpecialistAccurate controls Calendar, Scheduling, and Automations. ScheduledTask controls autonomous scheduled work. Reminder-text generation continues to use Main.</rule>
     <rule>
       If the user's message contains BOTH a settings change AND a normal task (mixed intent),
       apply only the settings change with this tool and then ask the user to resend the normal

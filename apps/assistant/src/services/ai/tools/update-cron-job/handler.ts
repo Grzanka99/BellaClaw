@@ -1,12 +1,14 @@
-import { obj, opt, type Static, str } from "@earendil-works/pi-schema";
+import { arr, obj, opt, type Static, str } from "@earendil-works/pi-schema";
 import type { TCronJob } from "../../../../lib/cron-engine";
 import { ECronJobType } from "../../../../lib/cron-engine";
+import { AutomationService } from "../../../automation";
 import { CronSingleton } from "../../../cron";
 import {
   absentIfBlank,
   countCronContentModes,
   normalizeCronContentFields,
   parseLocalFireAt,
+  validateCronAutomationsPairing,
   validateCronFallbackPairing,
 } from "../cron-content";
 
@@ -30,6 +32,12 @@ export const SUpdateCronJobArgs = obj({
   reminderFallbackText: opt(str({ description: "Fallback text required with reminderPromptData" })),
   taskPrompt: opt(str({ description: "New autonomous web task objective" })),
   taskFallbackText: opt(str({ description: "Fallback text required with taskPrompt" })),
+  automations: opt(
+    arr(str(), {
+      description:
+        "New ordered list of saved automation names; replaces the current list, an empty list removes all automations; omit to keep them",
+    }),
+  ),
 });
 
 export type TUpdateCronJobArgs = Static<typeof SUpdateCronJobArgs>;
@@ -52,6 +60,7 @@ export function validateUpdateCronJobArgs(rawArgs: TUpdateCronJobArgs): TUpdateC
   }
 
   validateCronFallbackPairing(args);
+  validateCronAutomationsPairing(args);
 
   return args;
 }
@@ -73,6 +82,14 @@ export async function handleUpdateCronJob(
   let reminderFallbackText = existing.reminderFallbackText;
   let taskPrompt = existing.taskPrompt;
   let taskFallbackText = existing.taskFallbackText;
+  let automationIds = existing.automationIds;
+
+  if (validatedArgs.automations !== undefined) {
+    automationIds = await AutomationService.instance.resolveNames(
+      chatId,
+      validatedArgs.automations,
+    );
+  }
 
   if (validatedArgs.reminderText !== undefined) {
     reminderText = validatedArgs.reminderText;
@@ -92,6 +109,26 @@ export async function handleUpdateCronJob(
     reminderFallbackText = undefined;
     taskPrompt = validatedArgs.taskPrompt;
     taskFallbackText = validatedArgs.taskFallbackText ?? existing.taskFallbackText;
+  }
+
+  if (
+    automationIds.length > 0 &&
+    (reminderText !== undefined || reminderPromptData !== undefined)
+  ) {
+    throw new Error(
+      "automations can only be combined with taskPrompt, not with reminders; to turn this job into a reminder also pass automations: [] to remove its automations",
+    );
+  }
+
+  if (
+    reminderText === undefined &&
+    reminderPromptData === undefined &&
+    taskPrompt === undefined &&
+    automationIds.length === 0
+  ) {
+    throw new Error(
+      "Provide reminderText, reminderPromptData, or taskPrompt, or attach automations; removing all automations would leave this job without content",
+    );
   }
 
   if (existing.type === ECronJobType.Recurring) {
@@ -117,6 +154,7 @@ export async function handleUpdateCronJob(
       reminderFallbackText,
       taskPrompt,
       taskFallbackText,
+      automationIds,
       overwrite: true,
       timezone: existing.timezone,
     });
@@ -150,6 +188,7 @@ export async function handleUpdateCronJob(
     reminderFallbackText,
     taskPrompt,
     taskFallbackText,
+    automationIds,
     overwrite: true,
     timezone: existing.timezone,
   });

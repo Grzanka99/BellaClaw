@@ -24,6 +24,7 @@ const ERROR_MAX_CHARS = 300;
 const CONTENT_PREVIEW_MAX_CHARS = 240;
 const CRON_TOOL_NAMES = new Set([
   "list-cron-jobs",
+  "preview-cron-job",
   "schedule-once",
   "schedule-recurring",
   "unschedule-cron-job",
@@ -40,6 +41,9 @@ const CRON_TOOL_ERROR_CODES: ReadonlyArray<readonly [RegExp, string]> = [
   [/^Provide reminderText/, "missing-content"],
   [/^Provide only one of/, "conflicting-content-modes"],
   [/^(reminderFallbackText|taskFallbackText) (is required|requires)/, "invalid-fallback-pairing"],
+  [/^automations can only be combined/, "automations-without-task"],
+  [/^Unknown automations:/, "unknown-automation"],
+  [/^Nothing to preview/, "missing-content"],
   [/^(Invalid fireAt|fireAt must be local)/, "invalid-fire-at"],
   [/^fireAt can only update/, "fire-at-on-recurring-job"],
   [/^fireAt .* does not exist in /, "nonexistent-fire-at"],
@@ -139,7 +143,8 @@ export function sanitizeToolCallArguments(toolCall: TToolCall): TSanitizedLogDet
     case "delegate-memory":
     case "delegate-calendar":
     case "delegate-settings":
-    case "delegate-scheduling": {
+    case "delegate-scheduling":
+    case "delegate-automations": {
       const task = readString(args, "task");
       return {
         summary: `${toolName} args taskChars=${task?.length ?? 0}`,
@@ -215,7 +220,8 @@ export function sanitizeToolResult(result: TNormalizedToolResult): TSanitizedLog
     case "delegate-memory":
     case "delegate-calendar":
     case "delegate-settings":
-    case "delegate-scheduling": {
+    case "delegate-scheduling":
+    case "delegate-automations": {
       return sanitizeDelegationResult(result.toolName, data);
     }
     default: {
@@ -287,6 +293,10 @@ function sanitizeCronToolArguments(
   addLength(metadata, "reminderFallbackTextChars", reminderFallbackText);
   addLength(metadata, "taskPromptChars", taskPrompt);
   addLength(metadata, "taskFallbackTextChars", taskFallbackText);
+
+  if (Array.isArray(args.automations)) {
+    metadata.automationCount = args.automations.length;
+  }
 
   return { summary: parts.join(" "), metadata };
 }
@@ -449,6 +459,13 @@ function buildCronJobMetadata(job: Record<string, unknown>): TBehaviorMetadata {
   const reminderFallbackText = readString(job, "reminderFallbackText");
   const taskPrompt = readString(job, "taskPrompt");
   const taskFallbackText = readString(job, "taskFallbackText");
+  let automationCount = 0;
+
+  if (Array.isArray(job.automationIds)) {
+    automationCount = job.automationIds.length;
+  } else if (Array.isArray(job.automations)) {
+    automationCount = job.automations.length;
+  }
 
   if (name !== undefined) {
     metadata.jobNameChars = name.length;
@@ -484,9 +501,15 @@ function buildCronJobMetadata(job: Record<string, unknown>): TBehaviorMetadata {
     metadata.contentMode = "generated-reminder";
   } else if (reminderText !== undefined) {
     metadata.contentMode = "direct-reminder";
+  } else if (automationCount > 0) {
+    metadata.contentMode = "automations";
   }
   addLength(metadata, "taskPromptChars", taskPrompt);
   addLength(metadata, "taskFallbackTextChars", taskFallbackText);
+
+  if (automationCount > 0) {
+    metadata.automationCount = automationCount;
+  }
 
   return metadata;
 }

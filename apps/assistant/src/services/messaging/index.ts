@@ -8,6 +8,10 @@ import {
 import type { TOption } from "@bellaclaw/shared";
 import { createLogger, type TLogger } from "@bellaclaw/shared";
 import {
+  createAutomationPausedNotices,
+  runCronJobAutomations,
+} from "../../handlers/cron-automations";
+import {
   generateReminderText,
   generateScheduledTaskText,
   type TScheduledTaskResult,
@@ -26,6 +30,7 @@ import {
   EAuthorizationDecision,
   type TAuthorizationResult,
 } from "../authorization";
+import { EAutomationRunMode, runSavedAutomation } from "../automation/runner";
 import { CronSingleton } from "../cron";
 import { EMemoryImportance } from "../memory/types";
 import { MessageHandler } from "../message-handler";
@@ -290,7 +295,7 @@ export class MessagingAdapter {
       return;
     }
 
-    if (ctx.taskPrompt !== undefined) {
+    if (ctx.taskPrompt !== undefined || ctx.automationIds.length > 0) {
       const taskKey = JSON.stringify([canonicalChatId, ctx.name]);
 
       if (this.runningCronTaskKeys.has(taskKey)) {
@@ -346,7 +351,33 @@ export class MessagingAdapter {
     let text: TOption<string>;
     let memoryPrefix = "CRON REMINDER";
 
-    if (ctx.taskPrompt !== undefined) {
+    if (ctx.automationIds.length > 0) {
+      const result = await runCronJobAutomations(
+        ctx,
+        canonicalChatId,
+        this.ai,
+        (automation, options) => runSavedAutomation(automation, EAutomationRunMode.Cron, options),
+        trace,
+      );
+      text = result.text;
+      memoryPrefix = "CRON TASK";
+
+      if (result.taskResult !== undefined) {
+        logCronTaskCompleted(trace, result.taskResult);
+      }
+
+      for (const notice of createAutomationPausedNotices(result.reports)) {
+        await this.deliverCronText(
+          ctx,
+          canonicalChatId,
+          parsedScope,
+          transport,
+          trace,
+          memoryPrefix,
+          notice,
+        );
+      }
+    } else if (ctx.taskPrompt !== undefined) {
       const taskResult = await generateScheduledTaskText(ctx, this.ai, trace);
       text = taskResult.text;
       memoryPrefix = "CRON TASK";
@@ -385,7 +416,15 @@ export class MessagingAdapter {
       return;
     }
 
-    const sendError = await this.sendText(transport, parsedScope.chatId, text, trace);
+    const sendError = await this.deliverCronText(
+      ctx,
+      canonicalChatId,
+      parsedScope,
+      transport,
+      trace,
+      memoryPrefix,
+      text,
+    );
     if (sendError !== undefined) {
       logHandlerCompleted(
         trace,
@@ -397,6 +436,32 @@ export class MessagingAdapter {
         sendError,
       );
       return;
+    }
+
+    logHandlerCompleted(
+      trace,
+      "cron-fire",
+      handlerStart,
+      true,
+      text.length,
+      "completed",
+      undefined,
+    );
+  }
+
+  /** Sends one cron message and records it in the chat history once delivered. */
+  private async deliverCronText(
+    ctx: TCronJobContext,
+    canonicalChatId: string,
+    parsedScope: { platform: EMessagePlatform; chatId: string },
+    transport: TMessageTransport,
+    trace: TBehaviorTraceContext,
+    memoryPrefix: string,
+    text: string,
+  ): Promise<TOption<string>> {
+    const sendError = await this.sendText(transport, parsedScope.chatId, text, trace);
+    if (sendError !== undefined) {
+      return sendError;
     }
 
     const deliveredAt = Date.now();
@@ -430,15 +495,7 @@ export class MessagingAdapter {
       );
     }
 
-    logHandlerCompleted(
-      trace,
-      "cron-fire",
-      handlerStart,
-      true,
-      text.length,
-      "completed",
-      undefined,
-    );
+    return undefined;
   }
 }
 
