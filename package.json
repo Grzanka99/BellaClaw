@@ -17,7 +17,7 @@
     "server:down": "podman compose --profile signal down",
     "server:init": "podman compose --profile signal build && bun run server:rebuild-embeddings && podman compose --profile signal up -d",
     "server:rebuild-embeddings": "podman compose stop bellaclaw && podman compose run --rm bellaclaw bun run --cwd apps/assistant embeddings:rebuild && podman compose up -d --force-recreate bellaclaw",
-    "server:update": "podman compose --profile signal build --no-cache && podman compose --profile signal up -d --force-recreate",
+    "server:update": "podman compose --profile signal build --no-cache && podman compose --profile signal up -d --force-recreate && podman image prune -f",
     "start": "turbo run start",
     "test": "turbo run test",
     "typecheck": "turbo run typecheck"

@@ -41,7 +41,7 @@ The package scripts include the Signal profile:
 | Command | Action |
 | --- | --- |
 | `bun run server:init` | Build, rebuild embeddings, and start all services. |
-| `bun run server:update` | Rebuild without cache and recreate all services. |
+| `bun run server:update` | Rebuild without cache, recreate all services, and remove dangling images. |
 | `bun run server:rebuild-embeddings` | Stop the assistant, pull the embedding model, re-embed all facts, and start the assistant on the current image. |
 | `bun run server:down` | Stop all services, including the Signal profile. |
 
