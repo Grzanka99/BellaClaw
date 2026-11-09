@@ -1,11 +1,19 @@
-import { afterEach, beforeEach, expect, test } from "bun:test";
+import { afterEach, beforeEach, expect, mock, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createModels, createProvider, type OAuthCredential } from "@earendil-works/pi-ai";
 import { openAICodexResponsesApi } from "@earendil-works/pi-ai/api/openai-codex-responses.lazy";
+import { SettingsService } from "../../settings";
+import { EConfigKey } from "../../settings/schema";
 import { EAiProvider } from "../types";
-import { checkAiOAuth, EAiAuthState, getAiAuthState, registerAiAuthChannel } from ".";
+import {
+  checkAiOAuth,
+  describeAiAuthProblem,
+  EAiAuthState,
+  getAiAuthState,
+  registerAiAuthChannel,
+} from ".";
 import { FileCredentialStore } from "./file-credential-store";
 
 let directory: string;
@@ -151,4 +159,22 @@ test("treats a rate-limited refresh as transient", async () => {
   );
 
   expect(await getAiAuthState(EAiProvider.OpenaiCodex, models)).toBe(EAiAuthState.Unavailable);
+});
+
+test("switches a failed chat to a connected provider", async () => {
+  const { models } = await createTestModels(async (credential) => ({
+    ...credential,
+    expires: Date.now() + 60 * 60 * 1000,
+  }));
+  const set = mock(async () => ({}));
+  (SettingsService as unknown as { _instance: unknown })._instance = { set };
+
+  expect(await describeAiAuthProblem("discord:switch", EAiProvider.OpencodeGo, models)).toBe(
+    "opencode-go is not connected. Switched this chat to openai-codex. Send your message again.",
+  );
+  expect(set).toHaveBeenCalledWith(
+    "discord:switch",
+    EConfigKey.AiProvider,
+    EAiProvider.OpenaiCodex,
+  );
 });

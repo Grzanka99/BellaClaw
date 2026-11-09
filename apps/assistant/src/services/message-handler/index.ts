@@ -130,7 +130,10 @@ export class MessageHandler {
       if (aiRes.text === undefined) {
         this.logger.warning("handleMessage: AI returned no final response");
         let reply = "Something went wrong.";
-        const authProblem = await describeAiAuthProblem(settings[EConfigKey.AiProvider]);
+        const authProblem = await describeAiAuthProblem(
+          message.chatId,
+          settings[EConfigKey.AiProvider],
+        );
 
         if (authProblem !== undefined) {
           reply = authProblem;
