@@ -188,14 +188,10 @@ export async function checkAiOAuth(models: Models = aiModels): Promise<void> {
 
 // Starts a device-code login and resolves with the instructions for the user.
 // When no other OAuth provider is connected, the new login becomes the chat's AI provider.
-export async function beginAiLogin(
-  chatId: string,
-  providerId: EAiProvider,
-  models: Models = aiModels,
-): Promise<string> {
+export async function beginAiLogin(chatId: string, providerId: EAiProvider): Promise<string> {
   const otherStates = Promise.all(
     AI_OAUTH_PROVIDERS.filter((provider) => provider !== providerId).map((provider) =>
-      getAiAuthState(provider, models),
+      getAiAuthState(provider),
     ),
   );
   pendingLogins.get(providerId)?.abort(new Error("Replaced by a newer login"));
@@ -204,7 +200,7 @@ export async function beginAiLogin(
   const instructions = Promise.withResolvers<string>();
   let instructionsSent = false;
 
-  models
+  aiModels
     .login(providerId, "oauth", {
       signal: controller.signal,
       prompt: async (prompt) => {

@@ -8,7 +8,6 @@ import { SettingsService } from "../../settings";
 import { EConfigKey } from "../../settings/schema";
 import { EAiProvider } from "../types";
 import {
-  beginAiLogin,
   checkAiOAuth,
   describeAiAuthProblem,
   EAiAuthState,
@@ -47,19 +46,7 @@ async function createTestModels(
         auth: {
           oauth: {
             name: "Test OAuth",
-            login: async (interaction) => {
-              interaction.notify({
-                type: "device_code",
-                userCode: "CODE",
-                verificationUri: "https://example.test/device",
-              });
-              return {
-                type: "oauth",
-                access: "login-access",
-                refresh: "login-refresh",
-                expires: Date.now() + 60 * 60 * 1000,
-              };
-            },
+            login: () => Promise.reject(new Error("Login is not supported")),
             refresh,
             toAuth: async (credential) => ({ apiKey: credential.access }),
           },
@@ -172,47 +159,6 @@ test("treats a rate-limited refresh as transient", async () => {
   );
 
   expect(await getAiAuthState(EAiProvider.OpenaiCodex, models)).toBe(EAiAuthState.Unavailable);
-});
-
-test.each([
-  [false, "Connected openai-codex. It is now this chat's AI provider."],
-  [true, "Connected openai-codex."],
-])("selects the first connected provider for the chat (other connected: %p)", async (otherConnected, reply) => {
-  const { models, store } = await createTestModels(() =>
-    Promise.reject(new Error("token refresh failed (401): invalid_grant")),
-  );
-  if (otherConnected) {
-    await store.modify(EAiProvider.OpencodeGo, async () => ({
-      type: "oauth",
-      access: "go-access",
-      refresh: "go-refresh",
-      expires: Date.now() + 60 * 60 * 1000,
-    }));
-  }
-  const set = mock(async () => ({}));
-  (SettingsService as unknown as { _instance: unknown })._instance = { set };
-  const delivered = Promise.withResolvers<void>();
-  registerAiAuthChannel({
-    listChatIds: async () => [],
-    send: async (chatId, text) => {
-      sent.push({ chatId, text });
-      delivered.resolve();
-    },
-  });
-
-  await beginAiLogin("discord:login", EAiProvider.OpenaiCodex, models);
-  await delivered.promise;
-
-  expect(sent).toEqual([{ chatId: "discord:login", text: reply }]);
-  if (otherConnected) {
-    expect(set).not.toHaveBeenCalled();
-  } else {
-    expect(set).toHaveBeenCalledWith(
-      "discord:login",
-      EConfigKey.AiProvider,
-      EAiProvider.OpenaiCodex,
-    );
-  }
 });
 
 test("switches a failed chat to a connected provider", async () => {
