@@ -114,3 +114,33 @@ test("does not alert on transient refresh failures", async () => {
 
   expect(sent).toEqual([]);
 });
+
+test("retries an alert that no chat received", async () => {
+  const { models } = await createTestModels(() =>
+    Promise.reject(new Error("token refresh failed (401): invalid_grant")),
+  );
+  let failSend = true;
+  registerAiAuthChannel({
+    listChatIds: async () => ["discord:retry-alert"],
+    send: async (chatId, text) => {
+      if (failSend) {
+        throw new Error("transport down");
+      }
+      sent.push({ chatId, text });
+    },
+  });
+
+  await models.logout(EAiProvider.OpenaiCodex);
+  await models.logout(EAiProvider.OpencodeGo);
+  await checkAiOAuth(models);
+  failSend = false;
+  await checkAiOAuth(models);
+  await checkAiOAuth(models);
+
+  expect(sent).toEqual([
+    {
+      chatId: "discord:retry-alert",
+      text: "AI login needed:\n- opencode-go: not connected. Run !ai-auth login opencode-go",
+    },
+  ]);
+});

@@ -41,16 +41,18 @@ function loginHint(providerId: EAiProvider): string {
   return `Run !ai-auth login ${providerId}`;
 }
 
-async function send(chatId: string, text: string) {
+async function send(chatId: string, text: string): Promise<boolean> {
   if (channel === undefined) {
     logger.warning(`AI auth: no chat channel to send notice to ${chatId}`);
-    return;
+    return false;
   }
 
   try {
     await channel.send(chatId, text);
+    return true;
   } catch (error) {
     logger.error(`AI auth: failed to send notice to ${chatId}: ${String(error)}`);
+    return false;
   }
 }
 
@@ -127,7 +129,7 @@ export async function checkAiOAuth(models: Models = aiModels): Promise<void> {
   }
 
   const problems: string[] = [];
-  let hasNewProblem = false;
+  const newProblemProviders: EAiProvider[] = [];
 
   for (const providerId of AI_OAUTH_PROVIDERS) {
     const state = await getAiAuthState(providerId, models);
@@ -145,20 +147,29 @@ export async function checkAiOAuth(models: Models = aiModels): Promise<void> {
       problems.push(problem);
 
       if (!alertedProviders.has(providerId)) {
-        hasNewProblem = true;
-        alertedProviders.add(providerId);
+        newProblemProviders.push(providerId);
       }
     }
   }
 
-  if (!hasNewProblem) {
+  if (newProblemProviders.length === 0) {
     return;
   }
 
   const text = `AI login needed:\n${problems.map((problem) => `- ${problem}`).join("\n")}`;
+  let delivered = false;
 
   for (const chatId of chatIds) {
-    await send(chatId, text);
+    if (await send(chatId, text)) {
+      delivered = true;
+    }
+  }
+
+  // Retry next check when no chat received the alert.
+  if (delivered) {
+    for (const providerId of newProblemProviders) {
+      alertedProviders.add(providerId);
+    }
   }
 }
 
