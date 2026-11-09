@@ -1,122 +1,41 @@
-/** @jsxImportSource hono/jsx */
+/** @jsxImportSource hono/jsx/dom */
 
-import {
+import type {
   EBehaviorLogLevel,
-  type TBehaviorLogSearchQuery,
-  type TLogFilterOptions,
-  type TLogPage,
-  type TLogReaderError,
-  type TPersistedBehaviorLogEvent,
-  type TRecentTurn,
+  TBehaviorLogSearchQuery,
+  TLogFilterOptions,
+  TLogReaderError,
+  TPersistedBehaviorLogEvent,
+  TRecentTurn,
 } from "@bellaclaw/behavior-logs";
 import type { TOption } from "@bellaclaw/shared";
-import type { PropsWithChildren } from "hono/jsx";
-import { buildLogUrl } from "./query";
-import { SModelRequestUsage } from "./types";
+import { type PropsWithChildren, useEffect, useRef, useState } from "hono/jsx/dom";
+import * as z from "zod/mini";
+import { buildLogUrl } from "./url";
 
 const SLOW_EVENT_THRESHOLD_MS = 5_000;
+const THEME_STORAGE_KEY = "bellaclaw-log-viewer-theme";
 
-export function Document(props: PropsWithChildren) {
+/* Runtime imports from behavior-logs would bundle full zod; `satisfies` keeps this list exhaustive. */
+const LOG_LEVELS = {
+  info: "info",
+  warning: "warning",
+  error: "error",
+  message: "message",
+} satisfies Record<EBehaviorLogLevel, string>;
+
+const SModelRequestUsage = z.object({
+  input: z.number().check(z.nonnegative()),
+  output: z.number().check(z.nonnegative()),
+  cacheRead: z.number().check(z.nonnegative()),
+  cacheWrite: z.number().check(z.nonnegative()),
+  inputTokens: z.number().check(z.nonnegative()),
+  cacheHitPercent: z.nullable(z.number().check(z.gte(0), z.lte(100))),
+});
+
+export function ErrorPage(props: { error: TLogReaderError; onRetry: () => void }) {
   return (
-    <html lang="en">
-      <head>
-        <meta charset="utf-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <meta name="color-scheme" content="dark light" />
-        <title>BellaClaw Logs</title>
-        <link rel="icon" href="data:," />
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `{
-  const savedTheme = localStorage.getItem("bellaclaw-log-viewer-theme");
-
-  if (savedTheme === "light" || savedTheme === "dark") {
-    document.documentElement.dataset.theme = savedTheme;
-  }
-}`,
-          }}
-        ></script>
-        <link rel="stylesheet" href="/assets/styles.css" />
-        <script src="/assets/htmx.min.js" defer></script>
-        <script src="/assets/app.js" defer></script>
-      </head>
-      <body>{props.children}</body>
-    </html>
-  );
-}
-
-export function HomePage(props: {
-  dbPath: string;
-  query: TBehaviorLogSearchQuery;
-  page: TLogPage;
-}) {
-  const newest = props.page.events[0];
-  let afterCreatedAt = props.query.until;
-  let afterId = 0;
-
-  if (newest !== undefined) {
-    afterCreatedAt = newest.createdAtMs;
-    afterId = newest.id;
-  }
-
-  return (
-    <div id="app-shell" class="log-viewer-shell">
-      <div class="sticky-top">
-        <PageHeader dbPath={props.dbPath} query={props.query} />
-        <div id="transient-warning" class="transient-warning" hidden></div>
-        <SearchForm query={props.query} filters={props.page.filters} />
-      </div>
-      <div class="workspace-grid">
-        <RecentTurns turns={props.page.recentTurns} query={props.query} />
-        <main class="event-workspace">
-          <div class="results-heading">
-            <div class="results-title">
-              <strong>{props.page.events.length} events</strong>
-              {props.query.turnId !== undefined && (
-                <span>
-                  Turn <code>{shortenId(props.query.turnId)}</code>
-                </span>
-              )}
-            </div>
-            <div class="results-actions">
-              {props.query.live && (
-                <LivePoller
-                  query={props.query}
-                  afterCreatedAt={afterCreatedAt}
-                  afterId={afterId}
-                  warning={undefined}
-                />
-              )}
-              <span class="sort-label">Newest first</span>
-            </div>
-          </div>
-          <div id="events-list">
-            <EventRows
-              events={props.page.events}
-              query={props.query}
-              selectedEventId={newest?.id}
-            />
-            <LoadMore query={props.query} events={props.page.events} hasMore={props.page.hasMore} />
-          </div>
-        </main>
-        <EventInspector event={newest} query={props.query} />
-      </div>
-    </div>
-  );
-}
-
-export function ErrorPage(props: { error: TLogReaderError; retryUrl: string }) {
-  return (
-    <div
-      id="app-shell"
-      class="error-shell"
-      role="alert"
-      hx-get={props.retryUrl}
-      hx-trigger="every 5s"
-      hx-select="#app-shell"
-      hx-target="#app-shell"
-      hx-swap="outerHTML"
-    >
+    <div class="error-shell" role="alert">
       <div class="error-card">
         <p class="error-kicker">DATABASE {props.error.kind.toUpperCase()}</p>
         <h1>{props.error.message}</h1>
@@ -134,9 +53,9 @@ export function ErrorPage(props: { error: TLogReaderError; retryUrl: string }) {
           <pre>{props.error.detail}</pre>
         </details>
         <div class="error-actions">
-          <a class="button" href={props.retryUrl}>
+          <button class="button" type="button" onClick={props.onRetry}>
             Retry now
-          </a>
+          </button>
           <span>Retrying automatically every 5 seconds</span>
         </div>
       </div>
@@ -144,55 +63,7 @@ export function ErrorPage(props: { error: TLogReaderError; retryUrl: string }) {
   );
 }
 
-export function EventPageFragment(props: {
-  query: TBehaviorLogSearchQuery;
-  events: TPersistedBehaviorLogEvent[];
-  hasMore: boolean;
-}) {
-  return (
-    <>
-      <EventRows events={props.events} query={props.query} selectedEventId={undefined} />
-      <LoadMore query={props.query} events={props.events} hasMore={props.hasMore} />
-    </>
-  );
-}
-
-export function LivePoller(props: {
-  query: TBehaviorLogSearchQuery;
-  afterCreatedAt: number;
-  afterId: number;
-  events?: TPersistedBehaviorLogEvent[];
-  warning: TOption<string>;
-}) {
-  const endpoint = buildLogUrl(props.query, {
-    includeUntil: true,
-    includeCursor: false,
-    live: true,
-    path: "/fragments/live",
-  });
-  const pollUrl = `${endpoint}&afterCreatedAt=${props.afterCreatedAt}&afterId=${props.afterId}`;
-  return (
-    <div
-      id="live-status"
-      class="live-status"
-      hx-get={pollUrl}
-      hx-trigger="every 5s"
-      hx-target="#live-status"
-      hx-swap="outerHTML"
-    >
-      <span class="live-dot"></span>
-      {props.warning === undefined && <span>Live · 5s</span>}
-      {props.warning !== undefined && <span class="warning-text">{props.warning}</span>}
-      {props.events !== undefined && props.events.length > 0 && (
-        <template data-live-events>
-          <EventRows events={props.events} query={props.query} selectedEventId={undefined} />
-        </template>
-      )}
-    </div>
-  );
-}
-
-function PageHeader(props: { dbPath: string; query: TBehaviorLogSearchQuery }) {
+export function PageHeader(props: { dbPath: string; query: TBehaviorLogSearchQuery }) {
   const refreshUrl = buildLogUrl(props.query, {
     includeUntil: false,
     includeCursor: false,
@@ -219,10 +90,7 @@ function PageHeader(props: { dbPath: string; query: TBehaviorLogSearchQuery }) {
         <p class="db-path">{props.dbPath}</p>
       </div>
       <nav class="header-actions" aria-label="Log actions">
-        <button class="button secondary theme-toggle" type="button" data-theme-toggle>
-          <span class="theme-toggle-icon" aria-hidden="true"></span>
-          <span data-theme-label>Theme</span>
-        </button>
+        <ThemeToggle />
         <a class="button secondary" href={refreshUrl}>
           ↻ Refresh
         </a>
@@ -235,18 +103,75 @@ function PageHeader(props: { dbPath: string; query: TBehaviorLogSearchQuery }) {
   );
 }
 
-function SearchForm(props: { query: TBehaviorLogSearchQuery; filters: TLogFilterOptions }) {
+function ThemeToggle() {
+  const [theme, setTheme] = useState(getActiveTheme);
+
+  useEffect(() => {
+    const media = matchMedia("(prefers-color-scheme: light)");
+    const onChange = () => setTheme(getActiveTheme());
+    media.addEventListener("change", onChange);
+    return () => media.removeEventListener("change", onChange);
+  }, []);
+
+  let nextTheme = "dark";
+  let nextThemeLabel = "Dark mode";
+  let icon = "◐";
+
+  if (theme === "dark") {
+    nextTheme = "light";
+    nextThemeLabel = "Light mode";
+    icon = "☼";
+  }
+
+  const label = `Use ${nextTheme} mode`;
+  const toggle = () => {
+    document.documentElement.dataset.theme = nextTheme;
+    localStorage.setItem(THEME_STORAGE_KEY, nextTheme);
+    setTheme(nextTheme);
+  };
+
   return (
-    <form
-      class="search-panel"
-      method="get"
-      action="/"
-      hx-get="/"
-      hx-target="#app-shell"
-      hx-select="#app-shell"
-      hx-swap="outerHTML"
-      hx-push-url="true"
+    <button
+      class="button secondary theme-toggle"
+      type="button"
+      aria-label={label}
+      title={label}
+      onClick={toggle}
     >
+      <span class="theme-toggle-icon" aria-hidden="true">
+        {icon}
+      </span>
+      <span>{nextThemeLabel}</span>
+    </button>
+  );
+}
+
+export function SearchForm(props: {
+  query: TBehaviorLogSearchQuery;
+  filters: TLogFilterOptions;
+  phone: boolean;
+  onSearch: (url: string) => void;
+}) {
+  const submit = (event: Event) => {
+    event.preventDefault();
+
+    if (!(event.currentTarget instanceof HTMLFormElement)) {
+      return;
+    }
+
+    const params = new URLSearchParams();
+
+    for (const [key, value] of new FormData(event.currentTarget)) {
+      if (typeof value === "string" && value !== "") {
+        params.set(key, value);
+      }
+    }
+
+    props.onSearch(`/?${params.toString()}`);
+  };
+
+  return (
+    <form class="search-panel" onSubmit={submit}>
       {props.query.live && <input type="hidden" name="live" value="1" />}
       <div class="primary-filters">
         <label class="search-box">
@@ -260,78 +185,50 @@ function SearchForm(props: { query: TBehaviorLogSearchQuery; filters: TLogFilter
             placeholder="Search events, turns, tools, metadata…"
           />
         </label>
-        <details class="filter-drawer" data-mobile-collapse open>
+        <details class="filter-drawer" open={!props.phone}>
           <summary>Filters</summary>
           <div class="filter-drawer-body">
-            <FilterSelect label="Time range" name="range" compact>
-              <option value="15m" selected={props.query.range === "15m"}>
-                Last 15 minutes
-              </option>
-              <option value="1h" selected={props.query.range === "1h"}>
-                Last hour
-              </option>
-              <option value="24h" selected={props.query.range === "24h"}>
-                Last 24 hours
-              </option>
-              <option value="7d" selected={props.query.range === "7d"}>
-                Last 7 days
-              </option>
-              <option value="all" selected={props.query.range === "all"}>
-                All history
-              </option>
+            <FilterSelect label="Time range" name="range" value={props.query.range} compact>
+              <option value="15m">Last 15 minutes</option>
+              <option value="1h">Last hour</option>
+              <option value="24h">Last 24 hours</option>
+              <option value="7d">Last 7 days</option>
+              <option value="all">All history</option>
             </FilterSelect>
-            <FilterSelect label="Level" name="level" compact>
-              <option value="" selected={props.query.level === undefined}>
-                All levels
-              </option>
-              {Object.values(EBehaviorLogLevel).map((level) => (
-                <option value={level} selected={props.query.level === level}>
-                  {level}
-                </option>
+            <FilterSelect label="Level" name="level" value={props.query.level ?? ""} compact>
+              <option value="">All levels</option>
+              {Object.values(LOG_LEVELS).map((level) => (
+                <option value={level}>{level}</option>
               ))}
             </FilterSelect>
-            <FilterSelect label="Result" name="success" compact>
-              <option value="" selected={props.query.success === undefined}>
-                All results
-              </option>
-              <option value="success" selected={props.query.success === "success"}>
-                Success
-              </option>
-              <option value="failure" selected={props.query.success === "failure"}>
-                Failure
-              </option>
+            <FilterSelect label="Result" name="success" value={props.query.success ?? ""} compact>
+              <option value="">All results</option>
+              <option value="success">Success</option>
+              <option value="failure">Failure</option>
             </FilterSelect>
             <details class="advanced-filters">
               <summary>+ More filters</summary>
               <div class="advanced-filter-grid">
-                <FilterSelect label="Event" name="event" compact={undefined}>
-                  <option value="" selected={props.query.event === undefined}>
-                    Any event
-                  </option>
+                <FilterSelect label="Event" name="event" value={props.query.event ?? ""}>
+                  <option value="">Any event</option>
                   {props.filters.events.map((event) => (
-                    <option value={event} selected={props.query.event === event}>
-                      {event}
-                    </option>
+                    <option value={event}>{event}</option>
                   ))}
                 </FilterSelect>
-                <FilterSelect label="Component" name="component" compact={undefined}>
-                  <option value="" selected={props.query.component === undefined}>
-                    Any component
-                  </option>
+                <FilterSelect
+                  label="Component"
+                  name="component"
+                  value={props.query.component ?? ""}
+                >
+                  <option value="">Any component</option>
                   {props.filters.components.map((component) => (
-                    <option value={component} selected={props.query.component === component}>
-                      {component}
-                    </option>
+                    <option value={component}>{component}</option>
                   ))}
                 </FilterSelect>
-                <FilterSelect label="Tool" name="toolName" compact={undefined}>
-                  <option value="" selected={props.query.toolName === undefined}>
-                    Any tool
-                  </option>
+                <FilterSelect label="Tool" name="toolName" value={props.query.toolName ?? ""}>
+                  <option value="">Any tool</option>
                   {props.filters.toolNames.map((toolName) => (
-                    <option value={toolName} selected={props.query.toolName === toolName}>
-                      {toolName}
-                    </option>
+                    <option value={toolName}>{toolName}</option>
                   ))}
                 </FilterSelect>
                 <label class="filter-field">
@@ -408,7 +305,7 @@ function ActiveFilters(props: { query: TBehaviorLogSearchQuery }) {
 }
 
 function FilterSelect(
-  props: PropsWithChildren<{ label: string; name: string; compact: TOption<boolean> }>,
+  props: PropsWithChildren<{ label: string; name: string; value: string; compact?: boolean }>,
 ) {
   let labelClass = "filter-field";
   let textClass: TOption<string>;
@@ -421,16 +318,20 @@ function FilterSelect(
   return (
     <label class={labelClass}>
       <span class={textClass}>{props.label}</span>
-      <select name={props.name} aria-label={props.label}>
+      <select name={props.name} value={props.value} aria-label={props.label}>
         {props.children}
       </select>
     </label>
   );
 }
 
-function RecentTurns(props: { turns: TRecentTurn[]; query: TBehaviorLogSearchQuery }) {
+export function RecentTurns(props: {
+  turns: TRecentTurn[];
+  query: TBehaviorLogSearchQuery;
+  phone: boolean;
+}) {
   return (
-    <details class="turn-sidebar" data-mobile-collapse open>
+    <details class="turn-sidebar" open={!props.phone}>
       <summary class="sidebar-heading">
         <h2>Recent turns</h2>
         <span>{props.turns.length} turns</span>
@@ -455,10 +356,7 @@ function RecentTurns(props: { turns: TRecentTurn[]; query: TBehaviorLogSearchQue
             includeUntil: false,
             includeCursor: false,
             live: false,
-            overrides: {
-              range,
-              turnId,
-            },
+            overrides: { range, turnId },
           });
           const turnPresentation = describeTurn(turn.turnId);
           let statusClass = "turn-status healthy";
@@ -472,7 +370,7 @@ function RecentTurns(props: { turns: TRecentTurn[]; query: TBehaviorLogSearchQue
           }
 
           return (
-            <li class={listClass}>
+            <li class={listClass} key={turn.turnId}>
               <a class="turn-link" href={url} title={turn.turnId} aria-current={currentPage}>
                 <span class="turn-icon" aria-hidden="true">
                   {turnPresentation.icon}
@@ -489,15 +387,7 @@ function RecentTurns(props: { turns: TRecentTurn[]; query: TBehaviorLogSearchQue
                   <span class="sr-only">{statusTitle}</span>
                 </span>
               </a>
-              <button
-                class="copy-icon"
-                type="button"
-                data-copy={turn.turnId}
-                aria-label="Copy turn ID"
-                title="Copy turn ID"
-              >
-                Copy
-              </button>
+              <CopyButton class="copy-icon" label="Copy" title="Copy turn ID" value={turn.turnId} />
             </li>
           );
         })}
@@ -506,10 +396,20 @@ function RecentTurns(props: { turns: TRecentTurn[]; query: TBehaviorLogSearchQue
   );
 }
 
-function EventRows(props: {
+export function LiveStatus() {
+  return (
+    <div class="live-status">
+      <span class="live-dot"></span>
+      <span>Live · 5s</span>
+    </div>
+  );
+}
+
+export function EventRows(props: {
   events: TPersistedBehaviorLogEvent[];
   query: TBehaviorLogSearchQuery;
-  selectedEventId: TOption<number>;
+  selectedId: TOption<number>;
+  onSelect: (id: number) => void;
 }) {
   if (props.events.length === 0) {
     return (
@@ -523,7 +423,13 @@ function EventRows(props: {
   return (
     <div class="event-list timeline-list">
       {props.events.map((event) => (
-        <EventRow event={event} query={props.query} selected={props.selectedEventId === event.id} />
+        <EventRow
+          key={event.id}
+          event={event}
+          query={props.query}
+          selected={props.selectedId === event.id}
+          onSelect={props.onSelect}
+        />
       ))}
     </div>
   );
@@ -570,9 +476,9 @@ function EventRow(props: {
   event: TPersistedBehaviorLogEvent;
   query: TBehaviorLogSearchQuery;
   selected: boolean;
+  onSelect: (id: number) => void;
 }) {
   const event = props.event;
-  const slow = isSlowEvent(event);
   const status = eventStatus(event);
   let currentEvent: TOption<string>;
   let durationClass = "event-duration";
@@ -583,7 +489,7 @@ function EventRow(props: {
     currentEvent = "true";
   }
 
-  if (slow) {
+  if (isSlowEvent(event)) {
     durationClass += " slow";
     durationTitle = "Slow event";
   }
@@ -592,20 +498,33 @@ function EventRow(props: {
     durationLabel = formatDuration(event.durationMs);
   }
 
-  const turnUrl = buildLogUrl(props.query, {
-    includeUntil: false,
-    includeCursor: false,
-    live: props.query.live,
-    overrides: { range: "all", turnId: event.turnId },
-  });
+  const onClick = (click: MouseEvent) => {
+    if (
+      click.target instanceof Element &&
+      click.target.closest("a, button, input, select, summary, details") !== null
+    ) {
+      return;
+    }
+
+    props.onSelect(event.id);
+  };
+  const onKeyDown = (key: KeyboardEvent) => {
+    if (key.target !== key.currentTarget || (key.key !== "Enter" && key.key !== " ")) {
+      return;
+    }
+
+    key.preventDefault();
+    props.onSelect(event.id);
+  };
 
   return (
     <article
       class={eventClass(event, props.selected)}
       data-event-id={String(event.id)}
-      data-event-selectable="true"
       aria-current={currentEvent}
       tabindex={0}
+      onClick={onClick}
+      onKeyDown={onKeyDown}
     >
       <span class="timeline-dot" aria-hidden="true"></span>
       <div class="event-body">
@@ -617,7 +536,7 @@ function EventRow(props: {
                   {event.event}
                 </PivotLink>
               </strong>
-              {event.level !== EBehaviorLogLevel.Info && (
+              {event.level !== LOG_LEVELS.info && (
                 <span class={`badge level-${event.level}`}>{event.level}</span>
               )}
               {event.success === false && <span class="badge result-failure">Failure</span>}
@@ -626,7 +545,7 @@ function EventRow(props: {
             {event.summary !== null && <p class="event-summary">{event.summary}</p>}
             {event.error !== null && <p class="event-error">{event.error}</p>}
             <div class="event-turn">
-              <a href={turnUrl} title={`Filter to turn ${event.turnId}`}>
+              <a href={turnUrl(props.query, event)} title={`Filter to turn ${event.turnId}`}>
                 {shortenId(event.turnId)}
               </a>
             </div>
@@ -652,26 +571,42 @@ function EventRow(props: {
           </span>
         </div>
       </div>
-      <template class="event-inspector-template">
-        <EventInspectorContent event={event} query={props.query} />
-      </template>
     </article>
   );
 }
 
-function EventInspector(props: {
+export function EventInspector(props: {
   event: TOption<TPersistedBehaviorLogEvent>;
   query: TBehaviorLogSearchQuery;
+  open: boolean;
+  onClose: () => void;
 }) {
+  const contentRef = useRef<HTMLDivElement>(null);
+  let className = "event-inspector";
+
+  if (props.open) {
+    className += " open";
+  }
+
+  useEffect(() => {
+    if (contentRef.current !== null) {
+      contentRef.current.scrollTop = 0;
+    }
+  }, [props.event?.id]);
+
   return (
-    <aside class="event-inspector" aria-label="Event details">
+    <aside class={className} aria-label="Event details">
       <div class="inspector-heading">
         <h2>Event details</h2>
-        <button class="button secondary small inspector-close" type="button" data-inspector-close>
+        <button
+          class="button secondary small inspector-close"
+          type="button"
+          onClick={props.onClose}
+        >
           Close
         </button>
       </div>
-      <div id="event-inspector-content" aria-live="polite">
+      <div id="event-inspector-content" aria-live="polite" ref={contentRef}>
         {props.event === undefined && (
           <div class="inspector-empty">
             <strong>Select an event</strong>
@@ -704,15 +639,8 @@ function EventInspectorContent(props: {
     durationClass = "warning";
   }
 
-  const turnUrl = buildLogUrl(props.query, {
-    includeUntil: false,
-    includeCursor: false,
-    live: props.query.live,
-    overrides: { range: "all", turnId: event.turnId },
-  });
-
   return (
-    <div class="inspector-content" data-event-json={JSON.stringify(event)}>
+    <div class="inspector-content">
       <div class="inspector-event-title">
         <strong>{event.event}</strong>
         <span class={`status-label ${status.className}`}>
@@ -756,10 +684,8 @@ function EventInspectorContent(props: {
         <pre class="raw-event">{JSON.stringify(event, null, 2)}</pre>
       </InspectorSection>
       <div class="inspector-actions">
-        <button class="button secondary" type="button" data-copy-current-event>
-          Copy JSON
-        </button>
-        <a class="button secondary" href={turnUrl}>
+        <CopyButton class="button secondary" label="Copy JSON" value={JSON.stringify(event)} />
+        <a class="button secondary" href={turnUrl(props.query, event)}>
           Filter to this turn
         </a>
       </div>
@@ -845,68 +771,114 @@ function InspectorValue(props: {
   );
 }
 
-function LoadMore(props: {
-  query: TBehaviorLogSearchQuery;
-  events: TPersistedBehaviorLogEvent[];
-  hasMore: boolean;
-}) {
-  if (!props.hasMore) {
-    return (
-      <div id="load-more" class="result-end">
-        End of loaded results
-      </div>
-    );
-  }
+export function LoadMore(props: { hasMore: boolean; onLoad: () => Promise<void> }) {
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const onLoadRef = useRef(props.onLoad);
+  const loadingRef = useRef(false);
+  onLoadRef.current = props.onLoad;
 
-  const last = props.events[props.events.length - 1];
+  const load = async () => {
+    if (loadingRef.current || onLoadRef.current === null) {
+      return;
+    }
 
-  if (last === undefined) {
-    return <div id="load-more"></div>;
-  }
-
-  const nextQuery: TBehaviorLogSearchQuery = {
-    ...props.query,
-    beforeCreatedAt: last.createdAtMs,
-    beforeId: last.id,
+    loadingRef.current = true;
+    await onLoadRef.current();
+    loadingRef.current = false;
   };
-  const url = buildLogUrl(nextQuery, {
-    includeUntil: true,
-    includeCursor: true,
-    live: props.query.live,
-    path: "/fragments/events",
-  });
+
+  useEffect(() => {
+    if (!props.hasMore || buttonRef.current === null) {
+      return;
+    }
+
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) {
+        load();
+      }
+    });
+    observer.observe(buttonRef.current);
+    return () => observer.disconnect();
+  }, [props.hasMore]);
+
+  if (!props.hasMore) {
+    return <div class="result-end">End of loaded results</div>;
+  }
 
   return (
-    <div id="load-more" class="load-more">
-      <button
-        class="button secondary"
-        type="button"
-        hx-get={url}
-        hx-trigger="click, intersect once root:#events-list"
-        hx-target="#load-more"
-        hx-swap="outerHTML"
-      >
+    <div class="load-more">
+      <button class="button secondary" type="button" ref={buttonRef} onClick={load}>
         Load 100 older events
       </button>
     </div>
   );
 }
 
-function LocalTime(props: { ms: number }) {
-  const iso = new Date(props.ms).toISOString();
+function CopyButton(props: { class: string; label: string; value: string; title?: string }) {
+  const [label, setLabel] = useState(props.label);
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(props.value);
+      setLabel("Copied");
+    } catch (_error) {
+      setLabel("Copy failed");
+    }
+
+    setTimeout(() => setLabel(props.label), 1200);
+  };
+
   return (
-    <time class="local-time" datetime={iso} title={iso}>
-      {iso}
+    <button
+      class={props.class}
+      type="button"
+      aria-label={props.title}
+      title={props.title}
+      onClick={copy}
+    >
+      {label}
+    </button>
+  );
+}
+
+function LocalTime(props: { ms: number }) {
+  const date = new Date(props.ms);
+  return (
+    <time class="local-time" datetime={date.toISOString()} title={date.toLocaleString()}>
+      {formatTimestamp(date)}
     </time>
   );
 }
 
-function shortenId(value: string): string {
+export function shortenId(value: string): string {
   if (value.length <= 28) {
     return value;
   }
 
   return `${value.slice(0, 12)}…${value.slice(-10)}`;
+}
+
+function getActiveTheme(): string {
+  const selected = document.documentElement.dataset.theme;
+
+  if (selected !== undefined) {
+    return selected;
+  }
+
+  if (matchMedia("(prefers-color-scheme: light)").matches) {
+    return "light";
+  }
+
+  return "dark";
+}
+
+function turnUrl(query: TBehaviorLogSearchQuery, event: TPersistedBehaviorLogEvent): string {
+  return buildLogUrl(query, {
+    includeUntil: false,
+    includeCursor: false,
+    live: query.live,
+    overrides: { range: "all", turnId: event.turnId },
+  });
 }
 
 function eventClass(event: TPersistedBehaviorLogEvent, selected: boolean): string {
@@ -987,4 +959,36 @@ function formatDuration(value: number): string {
   }
 
   return `${(value / 60_000).toFixed(1)}m`;
+}
+
+function formatTimestamp(date: Date): string {
+  const seconds = Math.max(0, Math.round((Date.now() - date.getTime()) / 1000));
+
+  if (seconds < 10) {
+    return "just now";
+  }
+
+  if (seconds < 60) {
+    return `${seconds}s ago`;
+  }
+
+  const minutes = Math.round(seconds / 60);
+
+  if (minutes < 60) {
+    return `${minutes}m ago`;
+  }
+
+  const hours = Math.round(minutes / 60);
+
+  if (hours < 24) {
+    return `${hours}h ago`;
+  }
+
+  const days = Math.round(hours / 24);
+
+  if (days < 7) {
+    return `${days}d ago`;
+  }
+
+  return date.toLocaleString();
 }

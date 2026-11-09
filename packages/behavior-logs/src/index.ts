@@ -7,6 +7,7 @@ export type {
   TCacheHitRate,
   TChatMetricOptions,
   TLogFilterOptions,
+  TLogLiveUpdate,
   TLogPage,
   TLogReaderError,
   TLogReaderResult,
