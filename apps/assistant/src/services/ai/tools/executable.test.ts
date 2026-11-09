@@ -584,7 +584,7 @@ describe("production executable tools", () => {
       (candidate) => candidate.name === "update-settings",
     );
 
-    await tool?.execute("call", { aiProvider: EAiProvider.OpenaiCodex });
+    await tool?.execute("call", { aiProvider: EAiProvider.Openrouter });
 
     expect(verifySettings.mock.calls.map(([, purposes]) => purposes)).toEqual([
       [EModelPurpose.Utility],
@@ -629,7 +629,7 @@ describe("production executable tools", () => {
 
     const result = await tool?.execute("call", { aiProvider: EAiProvider.OpenaiCodex });
 
-    expect(verifySettings).toHaveBeenCalledTimes(5);
+    expect(verifySettings).toHaveBeenCalledTimes(4);
     expect(retries).toEqual([EModelPurpose.Main, EModelPurpose.Specialist]);
     expect(remainingPreferences).toEqual([[EModelPurpose.Specialist], []]);
     expect(result?.details).toMatchObject({

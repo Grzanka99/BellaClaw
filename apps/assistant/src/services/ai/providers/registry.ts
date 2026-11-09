@@ -37,11 +37,11 @@ const AI_PROVIDER_REGISTRY: Record<EAiProvider, TAiProviderRegistration> = {
   [EAiProvider.OpenaiCodex]: {
     createProvider: openaiCodexProvider,
     modelByPurpose: {
-      [EModelPurpose.Utility]: { model: "gpt-5.6-luna", effort: "medium" },
-      [EModelPurpose.Main]: { model: "gpt-5.6-sol", effort: "medium" },
-      [EModelPurpose.Specialist]: { model: "gpt-5.6-luna", effort: "max" },
-      [EModelPurpose.SpecialistAccurate]: { model: "gpt-5.6-luna", effort: "max" },
-      [EModelPurpose.ScheduledTask]: { model: "gpt-5.6-luna", effort: "max" },
+      [EModelPurpose.Utility]: { model: "gpt-6.1-terra", effort: "medium" },
+      [EModelPurpose.Main]: { model: "gpt-6.1-terra", effort: "medium" },
+      [EModelPurpose.Specialist]: { model: "gpt-6.1-terra", effort: "medium" },
+      [EModelPurpose.SpecialistAccurate]: { model: "gpt-6.1-terra", effort: "medium" },
+      [EModelPurpose.ScheduledTask]: { model: "gpt-6.1-terra", effort: "medium" },
     },
     getApiKey: () => undefined,
   },
