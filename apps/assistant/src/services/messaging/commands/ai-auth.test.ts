@@ -10,10 +10,13 @@ import { aiAuthCommand } from "./ai-auth";
 let previousProvider: Provider | undefined;
 let sent: { chatId: string; text: string }[];
 let approve: () => void;
+let delivered: Promise<void>;
 let authorizedChats: Mock<() => Promise<string[]>>;
 
 beforeEach(() => {
   sent = [];
+  const delivery = Promise.withResolvers<void>();
+  delivered = delivery.promise;
   authorizedChats = spyOn(AuthorizationService.instance, "listAuthorizedChatIds").mockResolvedValue(
     ["discord:1", "discord:2"],
   );
@@ -21,6 +24,7 @@ beforeEach(() => {
     listChatIds: async () => [],
     send: async (chatId, text) => {
       sent.push({ chatId, text });
+      delivery.resolve();
     },
   });
   previousProvider = aiModels.getProvider(EAiProvider.OpenaiCodex);
@@ -81,7 +85,7 @@ test("logs in with a device code and confirms in the chat", async () => {
   );
 
   approve();
-  await Bun.sleep(10);
+  await delivered;
 
   expect(sent).toEqual([
     { chatId: "discord:1", text: "Connected openai-codex. It is now this chat's AI provider." },
@@ -102,7 +106,7 @@ test("cancels a pending login when a new one starts", async () => {
   await aiAuthCommand.handler("discord:2", "login openai-codex");
 
   approve();
-  await Bun.sleep(10);
+  await delivered;
 
   expect(sent).toEqual([
     { chatId: "discord:2", text: "Connected openai-codex. It is now this chat's AI provider." },
