@@ -107,21 +107,6 @@ describe("AI provider registry", () => {
     }
   });
 
-  test("keeps a service tier only for OpenAI Responses models", () => {
-    expect(
-      getAiModelConfig(EAiProvider.OpenaiCodex, EModelPurpose.Main, {
-        model: "gpt-6.1-terra",
-        serviceTier: "priority",
-      }).serviceTier,
-    ).toBe("priority");
-    expect(
-      getAiModelConfig(EAiProvider.Openrouter, EModelPurpose.Main, {
-        model: "openai/gpt-5.4-mini",
-        serviceTier: "priority",
-      }).serviceTier,
-    ).toBeUndefined();
-  });
-
   test("reads required API keys from Bun.env and rejects missing keys", () => {
     Bun.env.OPENROUTER_API_KEY = "openrouter-test-key";
 

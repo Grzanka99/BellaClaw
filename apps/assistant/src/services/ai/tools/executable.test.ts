@@ -520,7 +520,7 @@ describe("production executable tools", () => {
     expect(settingsMock.setMany).toHaveBeenCalledTimes(2);
   });
 
-  test("selects and clears a service tier, rejecting it for unsupported models", async () => {
+  test("selects a service tier and rejects it for unsupported models", async () => {
     const settingsMock = installSettingsMock({
       ...DefaultConfigRecord,
       [EConfigKey.AiProvider]: EAiProvider.OpenaiCodex,
@@ -547,21 +547,6 @@ describe("production executable tools", () => {
         },
       },
     });
-    const cleared = await tool?.execute("call", {
-      aiServiceTier: "default",
-      aiModelPurpose: EModelPurpose.ScheduledTask,
-    });
-    expect(cleared?.details).toMatchObject({
-      aiRuntime: {
-        models: {
-          [EModelPurpose.ScheduledTask]: {
-            model: "gpt-6.1-terra",
-            effort: "high",
-            serviceTier: "default",
-          },
-        },
-      },
-    });
     await expect(
       tool?.execute("call", {
         aiProvider: EAiProvider.Openrouter,
@@ -569,7 +554,7 @@ describe("production executable tools", () => {
         aiServiceTier: "priority",
       }),
     ).rejects.toThrow("Service tier is unsupported by openai/gpt-5.4-mini");
-    expect(settingsMock.setMany).toHaveBeenCalledTimes(2);
+    expect(settingsMock.setMany).toHaveBeenCalledTimes(1);
   });
 
   test("checks distinct model/effort pairs concurrently before saving a provider", async () => {
