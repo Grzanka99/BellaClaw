@@ -1,13 +1,20 @@
 import { describe, expect, test } from "bun:test";
-import { Value } from "typebox/value";
+import { compile } from "@earendil-works/pi-schema";
+import { formats } from "@earendil-works/pi-schema/formats";
 import { SWebSearchArgs } from "./handler";
 
 describe("SWebSearchArgs", () => {
   test("accepts valid args and rejects invalid fields", () => {
-    expect(Value.Check(SWebSearchArgs, { query: "bun test", maxResults: 10 })).toBe(true);
-    expect(Value.Check(SWebSearchArgs, { query: "" })).toBe(false);
-    expect(Value.Check(SWebSearchArgs, { query: "bun", maxResults: 11 })).toBe(false);
-    expect(Value.Check(SWebSearchArgs, { query: "bun", topic: "images" })).toBe(false);
-    expect(Value.Check(SWebSearchArgs, { query: "bun", limit: 1 })).toBe(false);
+    expect(compile(SWebSearchArgs, { formats }).check({ query: "bun test", maxResults: 10 })).toBe(
+      true,
+    );
+    expect(compile(SWebSearchArgs, { formats }).check({ query: "" })).toBe(false);
+    expect(compile(SWebSearchArgs, { formats }).check({ query: "bun", maxResults: 11 })).toBe(
+      false,
+    );
+    expect(compile(SWebSearchArgs, { formats }).check({ query: "bun", topic: "images" })).toBe(
+      false,
+    );
+    expect(compile(SWebSearchArgs, { formats }).check({ query: "bun", limit: 1 })).toBe(false);
   });
 });

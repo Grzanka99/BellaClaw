@@ -13,10 +13,20 @@ import {
   type Message,
   type Model,
   type SimpleStreamOptions,
-  type Static,
   type ThinkingLevel,
-  Type,
 } from "@earendil-works/pi-ai";
+import {
+  arr,
+  bool,
+  map,
+  num,
+  obj,
+  oneOf,
+  opt,
+  type Static,
+  str,
+  union,
+} from "@earendil-works/pi-schema";
 import type {
   CreateMessageRequest,
   CreateMessageResult,
@@ -751,9 +761,12 @@ export class AgentHarness {
   }
 
   private createDelegationTools(args: TAgentRunArgs & { delegationCount: TOption<() => void> }) {
-    const schema = Type.Object({
-      task: Type.String({ minLength: 1, description: "Focused task for the specialist" }),
-    });
+    const schema = obj(
+      {
+        task: str({ minLength: 1, description: "Focused task for the specialist" }),
+      },
+      { open: true },
+    );
     const delegates: Array<{
       name: string;
       label: string;
@@ -858,29 +871,30 @@ export class AgentHarness {
     const profileSummary = profiles
       .map((profile) => `${profile.id}: ${profile.description}`)
       .join("\n");
-    const delegateSchema = Type.Object({
-      profileId: Type.String({
-        minLength: 1,
-        description: `One configured profile:\n${profileSummary}`,
-      }),
-      task: Type.String({ minLength: 1, description: "Focused task for the MCP specialist" }),
-      context: Type.String({
-        minLength: 1,
-        description: "Recent conversation context needed for this task, stated explicitly",
-      }),
-    });
-    const responseValue = Type.Union([
-      Type.String(),
-      Type.Number(),
-      Type.Boolean(),
-      Type.Array(Type.String()),
-    ]);
-    const resumeSchema = Type.Object({
-      runId: Type.String({ minLength: 1 }),
-      action: Type.Union([Type.Literal("accept"), Type.Literal("decline"), Type.Literal("cancel")]),
-      content: Type.Optional(Type.Record(Type.String(), responseValue)),
-    });
-    const cancelSchema = Type.Object({ runId: Type.String({ minLength: 1 }) });
+    const delegateSchema = obj(
+      {
+        profileId: str({
+          minLength: 1,
+          description: `One configured profile:\n${profileSummary}`,
+        }),
+        task: str({ minLength: 1, description: "Focused task for the MCP specialist" }),
+        context: str({
+          minLength: 1,
+          description: "Recent conversation context needed for this task, stated explicitly",
+        }),
+      },
+      { open: true },
+    );
+    const responseValue = union([str(), num(), bool(), arr(str())]);
+    const resumeSchema = obj(
+      {
+        runId: str({ minLength: 1 }),
+        action: oneOf(["accept", "decline", "cancel"]),
+        content: opt(map(responseValue)),
+      },
+      { open: true },
+    );
+    const cancelSchema = obj({ runId: str({ minLength: 1 }) }, { open: true });
     const tools: AgentTool[] = [
       {
         name: "delegate-mcp",

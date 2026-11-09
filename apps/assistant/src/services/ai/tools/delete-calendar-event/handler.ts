@@ -1,15 +1,8 @@
-import { type Static, Type } from "@earendil-works/pi-ai";
+import { obj, oneOf, type Static, str } from "@earendil-works/pi-schema";
 
-export const SDeleteCalendarEventArgs = Type.Object(
-  {
-    eventId: Type.String({ minLength: 1, description: "Resolved writable-calendar event ID" }),
-    scope: Type.Union([
-      Type.Literal("occurrence"),
-      Type.Literal("following"),
-      Type.Literal("series"),
-    ]),
-  },
-  { additionalProperties: false },
-);
+export const SDeleteCalendarEventArgs = obj({
+  eventId: str({ minLength: 1, description: "Resolved writable-calendar event ID" }),
+  scope: oneOf(["occurrence", "following", "series"]),
+});
 
 export type TDeleteCalendarEventArgs = Static<typeof SDeleteCalendarEventArgs>;

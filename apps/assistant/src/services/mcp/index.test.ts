@@ -4,10 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { TOption } from "@bellaclaw/shared";
 import { validateToolArguments } from "@earendil-works/pi-ai";
+import { compile } from "@earendil-works/pi-schema";
+import { formats } from "@earendil-works/pi-schema/formats";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
-import { Value } from "typebox/value";
 import { disconnectMcpAuth, getMcpAuthStatus, saveMcpAuthToken } from "./auth";
 import { loadMcpProfiles } from "./config";
 import { mcpResult } from "./content";
@@ -143,8 +144,10 @@ describe("MCP runtime", () => {
     const read = tool(session, "read.foo");
     expect(read.name).not.toBe(tool(session, "read_foo").name);
     expect(read.executionMode).toBe("parallel");
-    expect(Value.Check(read.parameters, { query: "hello", options: { limit: null } })).toBe(true);
-    expect(Value.Check(read.parameters, { query: 23 })).toBe(false);
+    expect(
+      compile(read.parameters, { formats }).check({ query: "hello", options: { limit: null } }),
+    ).toBe(true);
+    expect(compile(read.parameters, { formats }).check({ query: 23 })).toBe(false);
     expect(JSON.stringify(read.parameters)).not.toContain('"chatId"');
     expect(JSON.stringify(read.parameters)).not.toContain('"excludeTurnId"');
     const valid = validateToolArguments(read, {

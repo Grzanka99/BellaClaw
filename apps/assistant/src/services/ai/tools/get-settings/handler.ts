@@ -1,10 +1,11 @@
-import { getSupportedThinkingLevels, type Static, Type } from "@earendil-works/pi-ai";
+import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
+import { obj, type Static } from "@earendil-works/pi-schema";
 import { EConfigKey, type TConfigRecord } from "../../../settings/schema";
 import { decodeAiModelPreferences } from "../../model-preferences";
 import { aiModels, getAiModelConfigs } from "../../providers/registry";
 import { EAiProvider } from "../../types";
 
-export const SGetSettingsArgs = Type.Object({}, { additionalProperties: false });
+export const SGetSettingsArgs = obj({});
 
 export type TGetSettingsArgs = Static<typeof SGetSettingsArgs>;
 

@@ -1,4 +1,4 @@
-import { type Static, Type } from "@earendil-works/pi-ai";
+import { bool, obj, opt, type Static, str } from "@earendil-works/pi-schema";
 import type { TCronJob } from "../../../../lib/cron-engine";
 import {
   countCronContentModes,
@@ -8,40 +8,26 @@ import {
   validateCronFallbackPairing,
 } from "../cron-content";
 
-export const SScheduleOnceArgs = Type.Object(
-  {
-    name: Type.String({
-      description: "Unique one-time job name used to reference, update, or cancel it",
-    }),
-    fireAt: Type.String({
-      pattern: LOCAL_FIRE_AT_PATTERN,
-      description:
-        "Future local date-time in the owner's timezone, YYYY-MM-DDTHH:mm[:ss], no offset",
-    }),
-    group: Type.Optional(
-      Type.String({ description: "Optional group label stored with the cron job" }),
-    ),
-    reminderText: Type.Optional(
-      Type.String({ description: "Plain reminder text for a direct, non-generated reminder" }),
-    ),
-    reminderPromptData: Type.Optional(
-      Type.String({ description: "Structured reminder prompt data serialized as JSON" }),
-    ),
-    reminderFallbackText: Type.Optional(
-      Type.String({ description: "Fallback text required with reminderPromptData" }),
-    ),
-    taskPrompt: Type.Optional(
-      Type.String({ description: "Autonomous objective requiring tools at firing time" }),
-    ),
-    taskFallbackText: Type.Optional(
-      Type.String({ description: "Fallback text required with taskPrompt" }),
-    ),
-    overwrite: Type.Optional(
-      Type.Boolean({ description: "Replace an existing one-time job with the same name" }),
-    ),
-  },
-  { additionalProperties: false },
-);
+export const SScheduleOnceArgs = obj({
+  name: str({
+    description: "Unique one-time job name used to reference, update, or cancel it",
+  }),
+  fireAt: str({
+    pattern: LOCAL_FIRE_AT_PATTERN,
+    description: "Future local date-time in the owner's timezone, YYYY-MM-DDTHH:mm[:ss], no offset",
+  }),
+  group: opt(str({ description: "Optional group label stored with the cron job" })),
+  reminderText: opt(
+    str({ description: "Plain reminder text for a direct, non-generated reminder" }),
+  ),
+  reminderPromptData: opt(
+    str({ description: "Structured reminder prompt data serialized as JSON" }),
+  ),
+  reminderFallbackText: opt(str({ description: "Fallback text required with reminderPromptData" })),
+  taskPrompt: opt(str({ description: "Autonomous objective requiring tools at firing time" })),
+  taskFallbackText: opt(str({ description: "Fallback text required with taskPrompt" })),
+  overwrite: opt(bool({ description: "Replace an existing one-time job with the same name" })),
+});
 
 export type TScheduleOnceArgs = Static<typeof SScheduleOnceArgs>;
 export type TScheduleOnceResult = TCronJob;

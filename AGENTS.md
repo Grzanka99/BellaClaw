@@ -96,9 +96,10 @@ Always use `safeParse` and branch on `.success` — never use `.parse` (throws o
 
 ## AI Tool Schemas
 
-AI-facing tool schemas use TypeBox imported through `@earendil-works/pi-ai`. Keep `S*` schema
-names and derive argument types with `Static<typeof SArguments>`. Zod remains appropriate for
-non-AI persistence, settings, logging, memory, and configuration schemas.
+- AI tool and MCP schemas: `@earendil-works/pi-schema` builders.
+- Name schemas `S*`; type arguments with `Static<typeof SArguments>`.
+- Validate with `compile(schema, { formats })`. Without `formats`, `format` is only an annotation.
+- Zod: everything else (persistence, settings, logging, memory, config).
 
 ## Environment Variables
 
@@ -116,13 +117,13 @@ Each tool lives in its own directory under `apps/assistant/src/services/ai/tools
 
 ```
 apps/assistant/src/services/ai/tools/<tool-name>/
-  definition.ts    — exports TypeBox schema and Pi tool metadata
+  definition.ts    — exports pi-schema schema and Pi tool metadata
   handler.ts       — typed execution and domain validation
   instructions.xml — detailed instructions for the AI on when/how to use the tool
 ```
 
-- `definition.ts`: Use `createToolDefinition()` with an `S*` TypeBox schema.
-- `handler.ts`: Treat tool arguments as structured data. TypeBox/Pi validates shape; keep cross-field domain validation in handlers and throw descriptive errors. Never apply `JSON.parse` to tool arguments.
+- `definition.ts`: Use `createToolDefinition()` with an `S*` pi-schema schema.
+- `handler.ts`: Treat tool arguments as structured data. Pi validates shape; keep cross-field domain validation in handlers and throw descriptive errors. Never apply `JSON.parse` to tool arguments.
 - `instructions.xml`: XML format with `<purpose>`, `<tool>`, `<usage_rules>`, and `<examples>` sections.
 
 ## Scope Rules

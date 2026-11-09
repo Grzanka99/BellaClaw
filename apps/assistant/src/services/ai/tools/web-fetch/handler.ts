@@ -1,22 +1,17 @@
-import { type Static, Type } from "@earendil-works/pi-ai";
+import { int, obj, oneOf, opt, type Static, str } from "@earendil-works/pi-schema";
 import type { TFetchWebResult } from "../../../../lib/web";
 
-export const SWebFetchArgs = Type.Object(
-  {
-    url: Type.String({ format: "uri", description: "Public http or https URL to fetch" }),
-    format: Type.Optional(
-      Type.Union([Type.Literal("markdown"), Type.Literal("text"), Type.Literal("html")]),
-    ),
-    timeout: Type.Optional(
-      Type.Integer({
-        minimum: 1,
-        maximum: 45,
-        description: "Timeout in seconds; defaults to 15 and cannot exceed 45",
-      }),
-    ),
-  },
-  { additionalProperties: false },
-);
+export const SWebFetchArgs = obj({
+  url: str({ format: "uri", description: "Public http or https URL to fetch" }),
+  format: opt(oneOf(["markdown", "text", "html"])),
+  timeout: opt(
+    int({
+      minimum: 1,
+      maximum: 45,
+      description: "Timeout in seconds; defaults to 15 and cannot exceed 45",
+    }),
+  ),
+});
 
 export type TWebFetchArgs = Static<typeof SWebFetchArgs>;
 

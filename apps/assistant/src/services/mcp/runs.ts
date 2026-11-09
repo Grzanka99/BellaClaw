@@ -1,6 +1,7 @@
 import type { TOption } from "@bellaclaw/shared";
+import { compile } from "@earendil-works/pi-schema";
+import { formats } from "@earendil-works/pi-schema/formats";
 import type { ElicitRequest, ElicitResult } from "@modelcontextprotocol/sdk/types.js";
-import { Value } from "typebox/value";
 
 type TPendingElicitation = {
   params: ElicitRequest["params"];
@@ -131,7 +132,9 @@ export class McpRunRegistry {
     if (result.action === "accept" && pending.params.mode !== "url") {
       if (
         result.content === undefined ||
-        !Value.Check(pending.params.requestedSchema, result.content)
+        !compile(pending.params.requestedSchema, { formats, unresolvedRefs: "reject" }).check(
+          result.content,
+        )
       ) {
         throw new Error("Elicitation response does not match the requested schema");
       }

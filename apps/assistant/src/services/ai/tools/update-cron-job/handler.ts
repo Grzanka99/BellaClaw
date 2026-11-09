@@ -1,4 +1,4 @@
-import { type Static, Type } from "@earendil-works/pi-ai";
+import { obj, opt, type Static, str } from "@earendil-works/pi-schema";
 import type { TCronJob } from "../../../../lib/cron-engine";
 import { ECronJobType } from "../../../../lib/cron-engine";
 import { CronSingleton } from "../../../cron";
@@ -10,38 +10,27 @@ import {
   validateCronFallbackPairing,
 } from "../cron-content";
 
-export const SUpdateCronJobArgs = Type.Object(
-  {
-    name: Type.String({ description: "Unique name of the existing cron job to update" }),
-    pattern: Type.Optional(
-      Type.String({
-        description:
-          "New 5-field cron expression for a recurring job; omit to keep the current schedule",
-      }),
-    ),
-    fireAt: Type.Optional(
-      Type.String({
-        description:
-          "New future local date-time for a one-time job in the owner's timezone, YYYY-MM-DDTHH:mm[:ss]; omit for recurring jobs and to keep the current time",
-      }),
-    ),
-    group: Type.Optional(
-      Type.String({ description: "New group label; omit to preserve the current group" }),
-    ),
-    reminderText: Type.Optional(Type.String({ description: "New plain reminder text" })),
-    reminderPromptData: Type.Optional(
-      Type.String({ description: "New structured reminder prompt data" }),
-    ),
-    reminderFallbackText: Type.Optional(
-      Type.String({ description: "Fallback text required with reminderPromptData" }),
-    ),
-    taskPrompt: Type.Optional(Type.String({ description: "New autonomous web task objective" })),
-    taskFallbackText: Type.Optional(
-      Type.String({ description: "Fallback text required with taskPrompt" }),
-    ),
-  },
-  { additionalProperties: false },
-);
+export const SUpdateCronJobArgs = obj({
+  name: str({ description: "Unique name of the existing cron job to update" }),
+  pattern: opt(
+    str({
+      description:
+        "New 5-field cron expression for a recurring job; omit to keep the current schedule",
+    }),
+  ),
+  fireAt: opt(
+    str({
+      description:
+        "New future local date-time for a one-time job in the owner's timezone, YYYY-MM-DDTHH:mm[:ss]; omit for recurring jobs and to keep the current time",
+    }),
+  ),
+  group: opt(str({ description: "New group label; omit to preserve the current group" })),
+  reminderText: opt(str({ description: "New plain reminder text" })),
+  reminderPromptData: opt(str({ description: "New structured reminder prompt data" })),
+  reminderFallbackText: opt(str({ description: "Fallback text required with reminderPromptData" })),
+  taskPrompt: opt(str({ description: "New autonomous web task objective" })),
+  taskFallbackText: opt(str({ description: "Fallback text required with taskPrompt" })),
+});
 
 export type TUpdateCronJobArgs = Static<typeof SUpdateCronJobArgs>;
 export type TUpdateCronJobResult = TCronJob;

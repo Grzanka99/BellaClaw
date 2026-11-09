@@ -1,5 +1,5 @@
-import { type Static, Type } from "@earendil-works/pi-ai";
+import { obj, type Static } from "@earendil-works/pi-schema";
 
-export const SListCalendarsArgs = Type.Object({}, { additionalProperties: false });
+export const SListCalendarsArgs = obj({});
 
 export type TListCalendarsArgs = Static<typeof SListCalendarsArgs>;

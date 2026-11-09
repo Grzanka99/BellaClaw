@@ -1,16 +1,13 @@
-import { type Static, Type } from "@earendil-works/pi-ai";
+import { arr, int, obj, type Static } from "@earendil-works/pi-schema";
 import { createToolDefinition } from "../definition";
 
-export const SForgetMemoryArgs = Type.Object(
-  {
-    factIds: Type.Array(Type.Integer({ minimum: 1 }), {
-      minItems: 1,
-      uniqueItems: true,
-      description: "Unique IDs of the resolved live facts to forget",
-    }),
-  },
-  { additionalProperties: false },
-);
+export const SForgetMemoryArgs = obj({
+  factIds: arr(int({ minimum: 1 }), {
+    minItems: 1,
+    uniqueItems: true,
+    description: "Unique IDs of the resolved live facts to forget",
+  }),
+});
 
 export type TForgetMemoryArgs = Static<typeof SForgetMemoryArgs>;
 

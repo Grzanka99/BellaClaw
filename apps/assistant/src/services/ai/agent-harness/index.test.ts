@@ -14,9 +14,9 @@ import {
   getCurrentTools,
   type Model,
   type TranscriptContext,
-  Type,
 } from "@earendil-works/pi-ai";
 import { convertResponsesMessages } from "@earendil-works/pi-ai/api/openai-responses-shared";
+import { obj } from "@earendil-works/pi-schema";
 import type {
   CreateMessageRequest,
   CreateMessageResult,
@@ -274,7 +274,7 @@ describe("AgentHarness", () => {
   });
 
   test("uses refreshed MCP tools on the next specialist turn", async () => {
-    const schema = Type.Object({});
+    const schema = obj({}, { open: true });
     const tools: AgentTool[] = [];
     const replacement: AgentTool = {
       name: "replacement-tool",

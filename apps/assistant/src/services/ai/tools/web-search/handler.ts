@@ -1,30 +1,18 @@
-import { type Static, Type } from "@earendil-works/pi-ai";
+import { int, obj, oneOf, opt, type Static, str } from "@earendil-works/pi-schema";
 import type { TWebSearchResult } from "../../../../lib/web";
 
-export const SWebSearchArgs = Type.Object(
-  {
-    query: Type.String({ minLength: 1, description: "Search query to submit to Tavily" }),
-    maxResults: Type.Optional(
-      Type.Integer({
-        minimum: 1,
-        maximum: 10,
-        description: "Maximum number of results; defaults to 5",
-      }),
-    ),
-    topic: Type.Optional(
-      Type.Union([Type.Literal("general"), Type.Literal("news"), Type.Literal("finance")]),
-    ),
-    timeRange: Type.Optional(
-      Type.Union([
-        Type.Literal("day"),
-        Type.Literal("week"),
-        Type.Literal("month"),
-        Type.Literal("year"),
-      ]),
-    ),
-  },
-  { additionalProperties: false },
-);
+export const SWebSearchArgs = obj({
+  query: str({ minLength: 1, description: "Search query to submit to Tavily" }),
+  maxResults: opt(
+    int({
+      minimum: 1,
+      maximum: 10,
+      description: "Maximum number of results; defaults to 5",
+    }),
+  ),
+  topic: opt(oneOf(["general", "news", "finance"])),
+  timeRange: opt(oneOf(["day", "week", "month", "year"])),
+});
 
 export type TWebSearchArgs = Static<typeof SWebSearchArgs>;
 
