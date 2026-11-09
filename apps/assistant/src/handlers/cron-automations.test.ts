@@ -224,6 +224,7 @@ describe("automation outputs", () => {
     expect(block).toContain('"name": "bus"');
     expect(block).toContain('"text": "Bus at 7:05"');
     expect(block).not.toContain("instructions");
+    expect(block).toContain("untrusted data");
   });
 
   test("creates one fixed notice per automation paused by this run", () => {
