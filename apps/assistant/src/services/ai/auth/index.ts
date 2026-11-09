@@ -106,12 +106,10 @@ export async function describeAiAuthProblem(provider: string): Promise<TOption<s
   const state = await getAiAuthState(providerId);
 
   if (state === EAiAuthState.LoginExpired) {
-    alertedProviders.add(providerId);
     return `The ${providerId} login has expired. ${loginHint(providerId)}.`;
   }
 
   if (state === EAiAuthState.NotConnected) {
-    alertedProviders.add(providerId);
     return `${providerId} is not connected. ${loginHint(providerId)}.`;
   }
 
