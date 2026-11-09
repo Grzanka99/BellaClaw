@@ -105,6 +105,22 @@ describe("runScript", () => {
     expect(expectError(await run("export const x = 1;"))).toContain("default export");
   });
 
+  test("reports deep recursion as a stack overflow without crashing the worker", async () => {
+    const result = await run(
+      "export default async function run() { const f = (n) => f(n + 1) + 1; return { kind: 'text', text: String(f(0)) }; }",
+    );
+
+    expect(expectError(result)).toContain("stack overflow");
+  });
+
+  test("rejects a return value whose serialization is not JSON", async () => {
+    const result = await run(
+      "export default async function run() { JSON.stringify = () => '{'; return { kind: 'silent' }; }",
+    );
+
+    expect(expectError(result)).toContain("invalid return value");
+  });
+
   test("rejects invalid return shape", async () => {
     expect(
       expectError(await run("export default async () => ({ kind: 'text', text: 42 })")),

@@ -705,6 +705,28 @@ describe("MessagingAdapter", () => {
       expect(save).not.toHaveBeenCalled();
     });
 
+    test("falls back to taskFallbackText when running the automations throws", async () => {
+      const { sendText, internals } = setupAutomationDelivery();
+      const getByIds = spyOn(AutomationService.instance, "getByIds").mockRejectedValue(
+        new Error("database unavailable"),
+      );
+
+      try {
+        await internals.handleCronFire(
+          cron({
+            reminderText: undefined,
+            taskPrompt: "Prepare briefing.",
+            taskFallbackText: "Briefing unavailable.",
+            automationIds: [1],
+          }),
+        );
+      } finally {
+        getByIds.mockRestore();
+      }
+
+      expect(sendText).toHaveBeenCalledWith("+100", "Briefing unavailable.");
+    });
+
     test("passes automation outputs to the scheduled task agent", async () => {
       const metrics = await saveAutomation(
         "metrics",

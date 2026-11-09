@@ -271,7 +271,7 @@ export async function runScript(args: TRunScriptArgs): Promise<TScriptRunResult>
       }
     });
     worker.addEventListener("error", (event) => {
-      finish({ ok: false, error: `sandbox worker crashed: ${event.message}` });
+      finish({ ok: false, error: `sandbox worker crashed: ${event.message.slice(0, 300)}` });
     });
 
     const runMessage: TRunMessage = {
@@ -293,7 +293,15 @@ export async function runScript(args: TRunScriptArgs): Promise<TScriptRunResult>
     return fail(`invalid return value: script returned nothing; expected ${EXPECTED_RETURN}`);
   }
 
-  const returned = SScriptReturn.safeParse(JSON.parse(outcome.json));
+  let returnedJson: unknown;
+
+  try {
+    returnedJson = JSON.parse(outcome.json);
+  } catch (error) {
+    return fail(`invalid return value: ${errorMessage(error)}`);
+  }
+
+  const returned = SScriptReturn.safeParse(returnedJson);
 
   if (!returned.success) {
     const issue = returned.error.issues[0];

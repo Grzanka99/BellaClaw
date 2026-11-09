@@ -10,6 +10,7 @@ import { createLogger, type TLogger } from "@bellaclaw/shared";
 import {
   createAutomationPausedNotices,
   runCronJobAutomations,
+  type TCronAutomationsResult,
 } from "../../handlers/cron-automations";
 import {
   generateReminderText,
@@ -30,7 +31,11 @@ import {
   EAuthorizationDecision,
   type TAuthorizationResult,
 } from "../authorization";
-import { EAutomationRunMode, runSavedAutomation } from "../automation/runner";
+import {
+  EAutomationRunMode,
+  runSavedAutomation,
+  type TAutomationRunReport,
+} from "../automation/runner";
 import { CronSingleton } from "../cron";
 import { EMemoryImportance } from "../memory/types";
 import { MessageHandler } from "../message-handler";
@@ -352,21 +357,37 @@ export class MessagingAdapter {
     let memoryPrefix = "CRON REMINDER";
 
     if (ctx.automationIds.length > 0) {
-      const result = await runCronJobAutomations(
-        ctx,
-        canonicalChatId,
-        this.ai,
-        (automation, options) => runSavedAutomation(automation, EAutomationRunMode.Cron, options),
-        trace,
-      );
-      text = result.text;
       memoryPrefix = "CRON TASK";
+      let result: TOption<TCronAutomationsResult>;
 
-      if (result.taskResult !== undefined) {
-        logCronTaskCompleted(trace, result.taskResult);
+      try {
+        result = await runCronJobAutomations(
+          ctx,
+          canonicalChatId,
+          this.ai,
+          (automation, options) => runSavedAutomation(automation, EAutomationRunMode.Cron, options),
+          trace,
+        );
+      } catch (error) {
+        this.logger.error(
+          `handleCronFire: automations of job "${ctx.name}" failed: ${String(error)}`,
+        );
       }
 
-      for (const notice of createAutomationPausedNotices(result.reports)) {
+      let reports: TAutomationRunReport[] = [];
+
+      if (result === undefined) {
+        text = ctx.taskFallbackText;
+      } else {
+        text = result.text;
+        reports = result.reports;
+
+        if (result.taskResult !== undefined) {
+          logCronTaskCompleted(trace, result.taskResult);
+        }
+      }
+
+      for (const notice of createAutomationPausedNotices(reports)) {
         await this.deliverCronText(
           ctx,
           canonicalChatId,
@@ -387,6 +408,20 @@ export class MessagingAdapter {
     }
 
     if (text === undefined) {
+      if (ctx.automationIds.length > 0) {
+        this.logger.info(`handleCronFire: job "${ctx.name}" has nothing to send`);
+        logHandlerCompleted(
+          trace,
+          "cron-fire",
+          handlerStart,
+          true,
+          0,
+          "nothing to send",
+          undefined,
+        );
+        return;
+      }
+
       this.logger.info(`handleCronFire: job "${ctx.name}" has no reminder text, skipping delivery`);
       logHandlerCompleted(
         trace,

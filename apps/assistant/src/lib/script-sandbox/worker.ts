@@ -15,7 +15,9 @@ import {
 
 const MAX_LOG_LINE_CHARS = 500;
 const MAX_ERROR_CHARS = 500;
-const STACK_SIZE_BYTES = 1024 * 1024;
+// Must stay below the Bun Worker's native stack, or deep recursion crashes the worker
+// before QuickJS can raise its own stack overflow error.
+const STACK_SIZE_BYTES = 256 * 1024;
 
 // Evaluated inside QuickJS. Builds the `host` object from raw host functions
 // without exposing them as globals, runs the script's default export and
