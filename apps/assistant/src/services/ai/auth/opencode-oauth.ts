@@ -1,3 +1,4 @@
+import type { TOption } from "@bellaclaw/shared";
 import type { OAuthAuth, OAuthCredential } from "@earendil-works/pi-ai";
 import { raceWithAbortSignal } from "@earendil-works/pi-ai/utils/abort";
 import { z } from "zod";
@@ -18,9 +19,11 @@ const SToken = z.object({
   access_token: z.string().min(1),
   refresh_token: z.string().min(1).optional(),
   expires_in: z.number().positive().optional(),
+  org_id: z.string().min(1).optional(),
 });
 
 const STokenError = z.object({ error: z.string().min(1) });
+const SOrgs = z.array(z.object({ id: z.string().min(1) }));
 
 async function postToken(body: Record<string, string>, signal: AbortSignal) {
   const response = await fetch(`${SERVER}/auth/device/token`, {
@@ -31,6 +34,29 @@ async function postToken(body: Record<string, string>, signal: AbortSignal) {
   });
   const json: unknown = await response.json().catch(() => undefined);
   return { status: response.status, ok: response.ok, json };
+}
+
+// Inference rejects tokens without a workspace, so a login must resolve one.
+async function resolveOrgId(
+  accessToken: string,
+  grantedOrgId: TOption<string>,
+  signal: AbortSignal,
+) {
+  if (grantedOrgId !== undefined) {
+    return grantedOrgId;
+  }
+
+  const response = await fetch(`${SERVER}/api/orgs`, {
+    headers: { Accept: "application/json", Authorization: `Bearer ${accessToken}` },
+    signal,
+  });
+  const orgs = SOrgs.safeParse(await response.json().catch(() => undefined));
+
+  if (!response.ok || !orgs.success || orgs.data.length !== 1) {
+    throw new Error("OpenCode login did not select a workspace");
+  }
+
+  return orgs.data[0]?.id;
 }
 
 function expiresAt(expiresIn: number | undefined): number {
@@ -45,7 +71,7 @@ export const opencodeOAuth: OAuthAuth = {
     const response = await fetch(`${SERVER}/auth/device/code`, {
       method: "POST",
       headers: { Accept: "application/json", "Content-Type": "application/json" },
-      body: JSON.stringify({ client_id: CLIENT_ID }),
+      body: JSON.stringify({ client_id: CLIENT_ID, supports_org_scope: true }),
       signal: interaction.signal,
     });
 
@@ -105,6 +131,7 @@ export const opencodeOAuth: OAuthAuth = {
         access: token.data.access_token,
         refresh: token.data.refresh_token,
         expires: expiresAt(token.data.expires_in),
+        orgId: await resolveOrgId(token.data.access_token, token.data.org_id, interaction.signal),
       };
     }
 
@@ -133,9 +160,14 @@ export const opencodeOAuth: OAuthAuth = {
       access: token.data.access_token,
       refresh: token.data.refresh_token ?? credential.refresh,
       expires: expiresAt(token.data.expires_in),
+      orgId: token.data.org_id ?? credential.orgId,
     };
   },
   async toAuth(credential) {
+    if (typeof credential.orgId === "string") {
+      return { apiKey: credential.access, headers: { "x-opencode-org-id": credential.orgId } };
+    }
+
     return { apiKey: credential.access };
   },
 };
