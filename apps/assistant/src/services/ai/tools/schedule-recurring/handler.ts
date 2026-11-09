@@ -1,4 +1,4 @@
-import { type Static, Type } from "@earendil-works/pi-ai";
+import { bool, obj, opt, type Static, str } from "@earendil-works/pi-schema";
 import type { TCronJob } from "../../../../lib/cron-engine";
 import {
   countCronContentModes,
@@ -6,36 +6,23 @@ import {
   validateCronFallbackPairing,
 } from "../cron-content";
 
-export const SScheduleRecurringArgs = Type.Object(
-  {
-    name: Type.String({
-      description: "Unique recurring job name used to reference, update, or cancel it",
-    }),
-    pattern: Type.String({ description: "Standard 5-field cron expression" }),
-    group: Type.Optional(
-      Type.String({ description: "Optional group label stored with the cron job" }),
-    ),
-    reminderText: Type.Optional(
-      Type.String({ description: "Plain reminder text for a direct, non-generated reminder" }),
-    ),
-    reminderPromptData: Type.Optional(
-      Type.String({ description: "Structured reminder prompt data serialized as JSON" }),
-    ),
-    reminderFallbackText: Type.Optional(
-      Type.String({ description: "Fallback text required with reminderPromptData" }),
-    ),
-    taskPrompt: Type.Optional(
-      Type.String({ description: "Autonomous objective requiring tools at firing time" }),
-    ),
-    taskFallbackText: Type.Optional(
-      Type.String({ description: "Fallback text required with taskPrompt" }),
-    ),
-    overwrite: Type.Optional(
-      Type.Boolean({ description: "Replace an existing recurring job with the same name" }),
-    ),
-  },
-  { additionalProperties: false },
-);
+export const SScheduleRecurringArgs = obj({
+  name: str({
+    description: "Unique recurring job name used to reference, update, or cancel it",
+  }),
+  pattern: str({ description: "Standard 5-field cron expression" }),
+  group: opt(str({ description: "Optional group label stored with the cron job" })),
+  reminderText: opt(
+    str({ description: "Plain reminder text for a direct, non-generated reminder" }),
+  ),
+  reminderPromptData: opt(
+    str({ description: "Structured reminder prompt data serialized as JSON" }),
+  ),
+  reminderFallbackText: opt(str({ description: "Fallback text required with reminderPromptData" })),
+  taskPrompt: opt(str({ description: "Autonomous objective requiring tools at firing time" })),
+  taskFallbackText: opt(str({ description: "Fallback text required with taskPrompt" })),
+  overwrite: opt(bool({ description: "Replace an existing recurring job with the same name" })),
+});
 
 export type TScheduleRecurringArgs = Static<typeof SScheduleRecurringArgs>;
 export type TScheduleRecurringResult = TCronJob;

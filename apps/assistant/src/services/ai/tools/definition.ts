@@ -1,7 +1,7 @@
-import type { TSchema } from "@earendil-works/pi-ai";
-import { Value } from "typebox/value";
+import { compile, type Schema } from "@earendil-works/pi-schema";
+import { formats } from "@earendil-works/pi-schema/formats";
 
-export function createToolDefinition(name: string, description: string, parameters: TSchema) {
+export function createToolDefinition(name: string, description: string, parameters: Schema) {
   return {
     name,
     description,
@@ -10,13 +10,15 @@ export function createToolDefinition(name: string, description: string, paramete
   };
 }
 
-export function validateToolArguments<T extends TSchema>(schema: T, args: unknown) {
-  if (Value.Check(schema, args)) {
+export function validateToolArguments<T extends Schema>(schema: T, args: unknown) {
+  const validator = compile(schema, { formats });
+
+  if (validator.check(args)) {
     return args;
   }
 
-  const [failure] = Value.Errors(schema, args);
-  let location = failure?.instancePath ?? "";
+  const [failure] = validator.errors(args);
+  let location = failure?.path ?? "";
 
   if (location === "") {
     location = "(root)";

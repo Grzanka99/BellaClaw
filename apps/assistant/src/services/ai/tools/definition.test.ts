@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import type { TSchema } from "@earendil-works/pi-ai";
-import { Value } from "typebox/value";
+import { compile, type Schema } from "@earendil-works/pi-schema";
+import { formats } from "@earendil-works/pi-schema/formats";
 import {
   SCreateCalendarEventArgs,
   validateCreateCalendarEventArgs,
@@ -23,31 +23,39 @@ import { SUpdateCronJobArgs, validateUpdateCronJobArgs } from "./update-cron-job
 
 describe("AI tool arguments", () => {
   test("enforce structural constraints", () => {
-    expect(Value.Check(SScheduleOnceArgs, { name: "x", fireAt: "invalid" })).toBe(false);
-    expect(Value.Check(SScheduleRecurringArgs, { name: "x", pattern: "0 8 * * *" })).toBe(true);
-    expect(Value.Check(SSearchMemoryArgs, { query: "facts", limit: 0 })).toBe(false);
+    expect(compile(SScheduleOnceArgs, { formats }).check({ name: "x", fireAt: "invalid" })).toBe(
+      false,
+    );
     expect(
-      Value.Check(SRememberMemoryArgs, {
+      compile(SScheduleRecurringArgs, { formats }).check({ name: "x", pattern: "0 8 * * *" }),
+    ).toBe(true);
+    expect(compile(SSearchMemoryArgs, { formats }).check({ query: "facts", limit: 0 })).toBe(false);
+    expect(
+      compile(SRememberMemoryArgs, { formats }).check({
         fact: "The user likes tea.",
         sourceMessage: "I like tea.",
         supersedesFactIds: [],
       }),
     ).toBe(true);
-    expect(Value.Check(SForgetMemoryArgs, { factIds: [1, 2] })).toBe(true);
+    expect(compile(SForgetMemoryArgs, { formats }).check({ factIds: [1, 2] })).toBe(true);
     for (const factIds of [[], [1, 1], [0], [1.5]]) {
-      expect(Value.Check(SForgetMemoryArgs, { factIds })).toBe(false);
+      expect(compile(SForgetMemoryArgs, { formats }).check({ factIds })).toBe(false);
     }
-    expect(Value.Check(SUpdateCronJobArgs, { name: "x", unknown: true })).toBe(false);
+    expect(compile(SUpdateCronJobArgs, { formats }).check({ name: "x", unknown: true })).toBe(
+      false,
+    );
   });
 
   test("uses the semantic memory search schema", () => {
-    expect(Value.Check(SSearchMemoryArgs, { query: "facts" })).toBe(true);
-    expect(Value.Check(SSearchMemoryArgs, { query: "" })).toBe(false);
-    expect(Value.Check(SSearchMemoryArgs, { query: "   " })).toBe(false);
-    expect(Value.Check(SSearchMemoryArgs, { query: "a".repeat(120) })).toBe(true);
-    expect(Value.Check(SSearchMemoryArgs, { query: "a".repeat(121) })).toBe(false);
-    expect(Value.Check(SSearchMemoryArgs, { query: "facts", limit: 25 })).toBe(true);
-    expect(Value.Check(SSearchMemoryArgs, { query: "facts", limit: 26 })).toBe(false);
+    expect(compile(SSearchMemoryArgs, { formats }).check({ query: "facts" })).toBe(true);
+    expect(compile(SSearchMemoryArgs, { formats }).check({ query: "" })).toBe(false);
+    expect(compile(SSearchMemoryArgs, { formats }).check({ query: "   " })).toBe(false);
+    expect(compile(SSearchMemoryArgs, { formats }).check({ query: "a".repeat(120) })).toBe(true);
+    expect(compile(SSearchMemoryArgs, { formats }).check({ query: "a".repeat(121) })).toBe(false);
+    expect(compile(SSearchMemoryArgs, { formats }).check({ query: "facts", limit: 25 })).toBe(true);
+    expect(compile(SSearchMemoryArgs, { formats }).check({ query: "facts", limit: 26 })).toBe(
+      false,
+    );
   });
 
   test("resolves local schedule dates with the offset valid at fire time", () => {
@@ -73,9 +81,9 @@ describe("AI tool arguments", () => {
   });
 
   test("rejects schedule dates with an offset", () => {
-    expect(Value.Check(SScheduleOnceArgs, { name: "x", fireAt: "2026-07-13T12:00:00Z" })).toBe(
-      false,
-    );
+    expect(
+      compile(SScheduleOnceArgs, { formats }).check({ name: "x", fireAt: "2026-07-13T12:00:00Z" }),
+    ).toBe(false);
   });
 
   test("does not count blank schedule content as a second content mode", () => {
@@ -166,10 +174,10 @@ describe("AI tool arguments", () => {
         args: { eventId: "event", scope: "occurrence", summary: "Event" },
       },
     ]) {
-      expect(Value.Check(schema, args)).toBe(true);
+      expect(compile(schema, { formats }).check(args)).toBe(true);
     }
     expect(
-      Value.Check(SCreateCalendarEventArgs, {
+      compile(SCreateCalendarEventArgs, { formats }).check({
         summary: "Event",
         start: "2026-08-01T10:00:00+02:00",
         durationMinutes: 30,
@@ -231,12 +239,12 @@ describe("AI tool arguments", () => {
 
 describe("validateToolArguments", () => {
   test("names the offending path instead of throwing a bare Decode error", () => {
-    const cases: Array<{ schema: TSchema; args: unknown; path: string; reason: string }> = [
+    const cases: Array<{ schema: Schema; args: unknown; path: string; reason: string }> = [
       {
         schema: SScheduleOnceArgs,
         args: { name: "x", fireAt: "tomorrow at 5pm", reminderText: "Reminder" },
         path: "/fireAt",
-        reason: "must match pattern",
+        reason: "expected to match",
       },
       {
         schema: SScheduleOnceArgs,
@@ -247,19 +255,19 @@ describe("validateToolArguments", () => {
           group: null,
         },
         path: "/group",
-        reason: "must be string",
+        reason: "expected string, got null",
       },
       {
         schema: SSearchMemoryArgs,
         args: { query: "facts", limit: 99 },
         path: "/limit",
-        reason: "must be <= 25",
+        reason: "expected <= 25",
       },
       {
         schema: SSearchMemoryArgs,
         args: {},
-        path: "(root)",
-        reason: "must have required properties query",
+        path: "/query",
+        reason: "missing",
       },
     ];
 

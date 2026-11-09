@@ -1,19 +1,16 @@
-import { type Static, Type } from "@earendil-works/pi-ai";
+import { obj, opt, type Static, str } from "@earendil-works/pi-schema";
 
-export const SListCalendarEventsArgs = Type.Object(
-  {
-    timeMin: Type.String({
-      format: "date-time",
-      description: "Inclusive range start as RFC 3339 with an explicit timezone",
-    }),
-    timeMax: Type.String({
-      format: "date-time",
-      description: "Exclusive range end as RFC 3339 with an explicit timezone",
-    }),
-    query: Type.Optional(Type.String({ minLength: 1, description: "Optional event text query" })),
-  },
-  { additionalProperties: false },
-);
+export const SListCalendarEventsArgs = obj({
+  timeMin: str({
+    format: "date-time",
+    description: "Inclusive range start as RFC 3339 with an explicit timezone",
+  }),
+  timeMax: str({
+    format: "date-time",
+    description: "Exclusive range end as RFC 3339 with an explicit timezone",
+  }),
+  query: opt(str({ minLength: 1, description: "Optional event text query" })),
+});
 
 export type TListCalendarEventsArgs = Static<typeof SListCalendarEventsArgs>;
 

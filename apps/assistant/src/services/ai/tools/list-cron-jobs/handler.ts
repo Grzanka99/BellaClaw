@@ -1,13 +1,7 @@
-import { type Static, Type } from "@earendil-works/pi-ai";
+import { obj, type Static } from "@earendil-works/pi-schema";
 import type { TCronJob } from "../../../../lib/cron-engine";
 
-export const SListCronJobsArgs = Type.Object(
-  {},
-  {
-    additionalProperties: false,
-    description: "No arguments are required",
-  },
-);
+export const SListCronJobsArgs = obj({}, { description: "No arguments are required" });
 
 export type TListCronJobsArgs = Static<typeof SListCronJobsArgs>;
 

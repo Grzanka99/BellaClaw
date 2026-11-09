@@ -1,31 +1,22 @@
-import { type Static, Type } from "@earendil-works/pi-ai";
+import { obj, oneOf, opt, type Static, str } from "@earendil-works/pi-schema";
 import type { TUpdateEventPatch } from "../../../calendar/types";
 import {
-  SCreateCalendarEventArgs,
+  SCalendarEventFields,
   validateCreateCalendarEventArgs,
 } from "../create-calendar-event/handler";
 
-const SScope = Type.Union([
-  Type.Literal("occurrence"),
-  Type.Literal("following"),
-  Type.Literal("series"),
-]);
-
-export const SUpdateCalendarEventArgs = Type.Object(
-  {
-    eventId: Type.String({ minLength: 1, description: "Resolved writable-calendar event ID" }),
-    scope: SScope,
-    summary: Type.Optional(SCreateCalendarEventArgs.properties.summary),
-    description: Type.Optional(SCreateCalendarEventArgs.properties.description),
-    location: Type.Optional(SCreateCalendarEventArgs.properties.location),
-    start: Type.Optional(SCreateCalendarEventArgs.properties.start),
-    end: Type.Optional(SCreateCalendarEventArgs.properties.end),
-    timezone: Type.Optional(SCreateCalendarEventArgs.properties.timezone),
-    transparency: Type.Optional(SCreateCalendarEventArgs.properties.transparency),
-    recurrence: Type.Optional(SCreateCalendarEventArgs.properties.recurrence),
-  },
-  { additionalProperties: false },
-);
+export const SUpdateCalendarEventArgs = obj({
+  eventId: str({ minLength: 1, description: "Resolved writable-calendar event ID" }),
+  scope: oneOf(["occurrence", "following", "series"]),
+  summary: opt(SCalendarEventFields.summary),
+  description: opt(SCalendarEventFields.description),
+  location: opt(SCalendarEventFields.location),
+  start: opt(SCalendarEventFields.start),
+  end: opt(SCalendarEventFields.end),
+  timezone: opt(SCalendarEventFields.timezone),
+  transparency: opt(SCalendarEventFields.transparency),
+  recurrence: opt(SCalendarEventFields.recurrence),
+});
 
 export type TUpdateCalendarEventArgs = Static<typeof SUpdateCalendarEventArgs>;
 

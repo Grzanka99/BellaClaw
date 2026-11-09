@@ -1,36 +1,36 @@
-import { type Static, Type } from "@earendil-works/pi-ai";
+import { arr, obj, oneOf, opt, type Static, str } from "@earendil-works/pi-schema";
 
-const STransparency = Type.Union([Type.Literal("opaque"), Type.Literal("transparent")]);
+export const SCalendarEventFields = {
+  summary: str({ minLength: 1, description: "Event title" }),
+  description: str({ description: "Event description" }),
+  location: str({ description: "Event location" }),
+  start: str({
+    minLength: 1,
+    description: "YYYY-MM-DD for all-day, otherwise RFC 3339 with an explicit timezone",
+  }),
+  end: str({
+    minLength: 1,
+    description:
+      "Exclusive all-day date or timed RFC 3339 end with an explicit timezone. Omit for a one-hour timed event or a single-day all-day event",
+  }),
+  timezone: str({ minLength: 1, description: "IANA timezone; defaults to owner timezone" }),
+  transparency: oneOf(["opaque", "transparent"]),
+  recurrence: arr(str({ minLength: 1 }), {
+    minItems: 1,
+    description: "Google-native RRULE, RDATE, or EXDATE lines",
+  }),
+};
 
-export const SCreateCalendarEventArgs = Type.Object(
-  {
-    summary: Type.String({ minLength: 1, description: "Event title" }),
-    description: Type.Optional(Type.String({ description: "Event description" })),
-    location: Type.Optional(Type.String({ description: "Event location" })),
-    start: Type.String({
-      minLength: 1,
-      description: "YYYY-MM-DD for all-day, otherwise RFC 3339 with an explicit timezone",
-    }),
-    end: Type.Optional(
-      Type.String({
-        minLength: 1,
-        description:
-          "Exclusive all-day date or timed RFC 3339 end with an explicit timezone. Omit for a one-hour timed event or a single-day all-day event",
-      }),
-    ),
-    timezone: Type.Optional(
-      Type.String({ minLength: 1, description: "IANA timezone; defaults to owner timezone" }),
-    ),
-    transparency: Type.Optional(STransparency),
-    recurrence: Type.Optional(
-      Type.Array(Type.String({ minLength: 1 }), {
-        minItems: 1,
-        description: "Google-native RRULE, RDATE, or EXDATE lines",
-      }),
-    ),
-  },
-  { additionalProperties: false },
-);
+export const SCreateCalendarEventArgs = obj({
+  summary: SCalendarEventFields.summary,
+  description: opt(SCalendarEventFields.description),
+  location: opt(SCalendarEventFields.location),
+  start: SCalendarEventFields.start,
+  end: opt(SCalendarEventFields.end),
+  timezone: opt(SCalendarEventFields.timezone),
+  transparency: opt(SCalendarEventFields.transparency),
+  recurrence: opt(SCalendarEventFields.recurrence),
+});
 
 export type TCreateCalendarEventArgs = Static<typeof SCreateCalendarEventArgs>;
 

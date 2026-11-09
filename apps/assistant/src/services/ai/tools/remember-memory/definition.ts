@@ -1,25 +1,22 @@
-import { type Static, Type } from "@earendil-works/pi-ai";
+import { arr, int, obj, type Static, str } from "@earendil-works/pi-schema";
 import { createToolDefinition } from "../definition";
 
-export const SRememberMemoryArgs = Type.Object(
-  {
-    fact: Type.String({
-      minLength: 1,
-      pattern: "\\S",
-      description: "One durable fact to remember",
-    }),
-    sourceMessage: Type.String({
-      minLength: 1,
-      pattern: "\\S",
-      description: "Exact user transcript message that stated the fact",
-    }),
-    supersedesFactIds: Type.Array(Type.Integer({ minimum: 1 }), {
-      uniqueItems: true,
-      description: "Live fact IDs this fact replaces; empty when it replaces none",
-    }),
-  },
-  { additionalProperties: false },
-);
+export const SRememberMemoryArgs = obj({
+  fact: str({
+    minLength: 1,
+    pattern: "\\S",
+    description: "One durable fact to remember",
+  }),
+  sourceMessage: str({
+    minLength: 1,
+    pattern: "\\S",
+    description: "Exact user transcript message that stated the fact",
+  }),
+  supersedesFactIds: arr(int({ minimum: 1 }), {
+    uniqueItems: true,
+    description: "Live fact IDs this fact replaces; empty when it replaces none",
+  }),
+});
 
 export type TRememberMemoryArgs = Static<typeof SRememberMemoryArgs>;
 

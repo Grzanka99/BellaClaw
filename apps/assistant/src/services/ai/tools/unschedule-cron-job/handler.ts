@@ -1,14 +1,11 @@
-import { type Static, Type } from "@earendil-works/pi-ai";
+import { obj, type Static, str } from "@earendil-works/pi-schema";
 import type { TCronJob } from "../../../../lib/cron-engine";
 
-export const SUnscheduleCronJobArgs = Type.Object(
-  {
-    name: Type.String({
-      description: "Unique name of the one-time or recurring cron job to cancel",
-    }),
-  },
-  { additionalProperties: false },
-);
+export const SUnscheduleCronJobArgs = obj({
+  name: str({
+    description: "Unique name of the one-time or recurring cron job to cancel",
+  }),
+});
 
 export type TUnscheduleCronJobArgs = Static<typeof SUnscheduleCronJobArgs>;
 

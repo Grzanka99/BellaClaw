@@ -1,6 +1,16 @@
 import type { TOption } from "@bellaclaw/shared";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
-import { type Static, type TSchema, Type } from "@earendil-works/pi-ai";
+import {
+  compile,
+  map,
+  obj,
+  oneOf,
+  opt,
+  type Schema,
+  type Static,
+  str,
+} from "@earendil-works/pi-schema";
+import { formats } from "@earendil-works/pi-schema/formats";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import type { RequestOptions } from "@modelcontextprotocol/sdk/shared/protocol.js";
 import {
@@ -11,26 +21,31 @@ import {
   type Tool,
   UrlElicitationRequiredError,
 } from "@modelcontextprotocol/sdk/types.js";
-import { Value } from "typebox/value";
 import { z } from "zod";
 import type { TMcpProfile } from "./config";
 import { mcpJsonResult, mcpResult } from "./content";
 import type { TMcpOpenArgs } from "./types";
 
 const SObjectArguments = z.record(z.string(), z.unknown());
-const SEmpty = Type.Object({});
-const SResource = Type.Object({ uri: Type.String({ minLength: 1 }) });
-const SPrompt = Type.Object({
-  name: Type.String({ minLength: 1 }),
-  arguments: Type.Optional(Type.Record(Type.String(), Type.String())),
-});
-const SCompletion = Type.Object({
-  kind: Type.Union([Type.Literal("prompt"), Type.Literal("resource")]),
-  name: Type.String(),
-  argument: Type.String(),
-  value: Type.String(),
-  arguments: Type.Optional(Type.Record(Type.String(), Type.String())),
-});
+const SEmpty = obj({}, { open: true });
+const SResource = obj({ uri: str({ minLength: 1 }) }, { open: true });
+const SPrompt = obj(
+  {
+    name: str({ minLength: 1 }),
+    arguments: opt(map(str())),
+  },
+  { open: true },
+);
+const SCompletion = obj(
+  {
+    kind: oneOf(["prompt", "resource"]),
+    name: str(),
+    argument: str(),
+    value: str(),
+    arguments: opt(map(str())),
+  },
+  { open: true },
+);
 
 export type TMcpToolContext = {
   client: Client;
@@ -139,7 +154,11 @@ function remoteTool(context: TMcpToolContext, tool: Tool): AgentTool {
         delete argumentsWithContext[name];
       }
       Object.assign(argumentsWithContext, injected);
-      if (!Value.Check(tool.inputSchema, argumentsWithContext)) {
+      if (
+        !compile(tool.inputSchema, { formats, unresolvedRefs: "reject" }).check(
+          argumentsWithContext,
+        )
+      ) {
         throw new Error(`Invalid arguments for MCP tool ${tool.name}`);
       }
       for (let attempt = 0; attempt < 12; attempt += 1) {
@@ -303,7 +322,7 @@ function capabilityTools(context: TMcpToolContext): AgentTool[] {
   return tools;
 }
 
-function metaTool<T extends TSchema>(
+function metaTool<T extends Schema>(
   name: string,
   description: string,
   schema: T,
@@ -316,7 +335,7 @@ function metaTool<T extends TSchema>(
     parameters: schema,
     executionMode: "parallel",
     execute: async (_id, args, signal) => {
-      if (!Value.Check(schema, args)) {
+      if (!compile(schema, { formats }).check(args)) {
         throw new Error(`Invalid arguments for ${name}`);
       }
       return mcpJsonResult(await run(args, signal));

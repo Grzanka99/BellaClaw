@@ -1,5 +1,6 @@
 import type { TOption } from "@bellaclaw/shared";
-import { getSupportedThinkingLevels, type Static, Type } from "@earendil-works/pi-ai";
+import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
+import { bool, obj, oneOf, opt, type Static, str } from "@earendil-works/pi-schema";
 import { SettingsService, type TConfigUpdate } from "../../../settings";
 import { ConfigValidators, EConfigKey } from "../../../settings/schema";
 import {
@@ -14,68 +15,56 @@ import { EAiProvider, EModelPurpose } from "../../types";
 import type { TToolExecutionContext } from "../executable";
 import { createAiRuntime, resolveAiProvider } from "../get-settings/handler";
 
-export const SUpdateSettingsArgs = Type.Object(
-  {
-    timezone: Type.Optional(
-      Type.String({
+export const SUpdateSettingsArgs = {
+  ...obj({
+    timezone: opt(
+      str({
         minLength: 1,
         description: "Valid IANA timezone, such as Europe/Warsaw, America/New_York, or UTC",
       }),
     ),
-    language: Type.Optional(
-      Type.String({
+    language: opt(
+      str({
         minLength: 1,
         description: "Conversation language for assistant replies, such as Polish or English",
       }),
     ),
-    assistantName: Type.Optional(
-      Type.String({ minLength: 1, description: "The assistant's display name" }),
+    assistantName: opt(str({ minLength: 1, description: "The assistant's display name" })),
+    addressStyle: opt(
+      str({ minLength: 1, description: "How the assistant should address the user" }),
     ),
-    addressStyle: Type.Optional(
-      Type.String({ minLength: 1, description: "How the assistant should address the user" }),
-    ),
-    preferredReplyLength: Type.Optional(
-      Type.String({
+    preferredReplyLength: opt(
+      str({
         minLength: 1,
         description: "Preferred reply length, such as 1-3 sentences, short, or detailed",
       }),
     ),
-    aiProvider: Type.Optional(
-      Type.Enum(EAiProvider, {
+    aiProvider: opt(
+      oneOf(Object.values(EAiProvider), {
         description: "Active AI provider: openai-codex, openrouter, ollama, or opencode-go",
       }),
     ),
-    aiModel: Type.Optional(
-      Type.String({
+    aiModel: opt(
+      str({
         minLength: 1,
         description: "Exact Pi model ID from the active or simultaneously requested provider",
       }),
     ),
-    aiModelPurpose: Type.Optional(
-      Type.Enum(EModelPurpose, {
+    aiModelPurpose: opt(
+      oneOf(Object.values(EModelPurpose), {
         description: "Model purpose to change. Defaults to Main when omitted",
       }),
     ),
-    aiReasoningEffort: Type.Optional(
-      Type.Union([
-        Type.Literal("off"),
-        Type.Literal("minimal"),
-        Type.Literal("low"),
-        Type.Literal("medium"),
-        Type.Literal("high"),
-        Type.Literal("xhigh"),
-        Type.Literal("max"),
-      ]),
+    aiReasoningEffort: opt(oneOf(["off", "minimal", "low", "medium", "high", "xhigh", "max"])),
+    resetAiModel: opt(
+      bool({ description: "Reset the selected purpose to the provider registry default" }),
     ),
-    resetAiModel: Type.Optional(
-      Type.Boolean({ description: "Reset the selected purpose to the provider registry default" }),
+    resetAiReasoningEffort: opt(
+      bool({ description: "Reset reasoning effort while keeping the selected model" }),
     ),
-    resetAiReasoningEffort: Type.Optional(
-      Type.Boolean({ description: "Reset reasoning effort while keeping the selected model" }),
-    ),
-  },
-  { additionalProperties: false, minProperties: 1 },
-);
+  }),
+  minProperties: 1,
+};
 
 export type TUpdateSettingsArgs = Static<typeof SUpdateSettingsArgs>;
 
