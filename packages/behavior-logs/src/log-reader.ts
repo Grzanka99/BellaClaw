@@ -8,6 +8,7 @@ import type {
   TCacheHitRate,
   TChatMetricOptions,
   TLogFilterOptions,
+  TLogLiveUpdate,
   TLogPage,
   TLogReaderError,
   TLogReaderResult,
@@ -93,8 +94,8 @@ export class LogReader {
     query: TBehaviorLogSearchQuery,
     afterCreatedAt: number,
     afterId: number,
-  ): Promise<TLogReaderResult<TPersistedBehaviorLogEvent[]>> {
-    return this.queue.enqueue(async () => {
+  ): Promise<TLogReaderResult<TLogLiveUpdate>> {
+    return this.queue.enqueue(async (): Promise<TLogReaderResult<TLogLiveUpdate>> => {
       try {
         const db = this.getDatabase();
         const where = this.buildWhere(query, false);
@@ -114,7 +115,13 @@ export class LogReader {
           .all(...where.bindings);
 
         // Advance through the oldest unseen batch so bursts cannot skip events.
-        return { success: true, data: this.parseEvents(rows).reverse() };
+        return {
+          success: true,
+          data: {
+            events: this.parseEvents(rows).reverse(),
+            recentTurns: this.selectRecentTurns(db),
+          },
+        };
       } catch (error) {
         return { success: false, error: this.describeError(error) };
       }

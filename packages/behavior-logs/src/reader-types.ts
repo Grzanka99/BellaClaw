@@ -49,6 +49,11 @@ export type TLogPage = {
   filters: TLogFilterOptions;
 };
 
+export type TLogLiveUpdate = {
+  events: TPersistedBehaviorLogEvent[];
+  recentTurns: TRecentTurn[];
+};
+
 export type TRecentFailuresOptions = {
   sinceMs: number;
   limit: number;

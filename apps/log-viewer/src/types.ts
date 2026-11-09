@@ -1,16 +1,11 @@
-import { EBehaviorLogLevel } from "@bellaclaw/behavior-logs";
+import {
+  EBehaviorLogLevel,
+  type TBehaviorLogSearchQuery,
+  type TLogPage,
+} from "@bellaclaw/behavior-logs";
 import { z } from "zod";
 
 export const SLogTimeRange = z.enum(["15m", "1h", "24h", "7d", "all"]);
-
-export const SModelRequestUsage = z.object({
-  input: z.number().nonnegative(),
-  output: z.number().nonnegative(),
-  cacheRead: z.number().nonnegative(),
-  cacheWrite: z.number().nonnegative(),
-  inputTokens: z.number().nonnegative(),
-  cacheHitPercent: z.number().min(0).max(100).nullable(),
-});
 
 export const SLogSearchQuery = z.object({
   q: z.string().optional().catch(undefined),
@@ -32,3 +27,9 @@ export const SLogSearchQuery = z.object({
   beforeId: z.coerce.number().int().positive().optional().catch(undefined),
   live: z.literal("1").optional().catch(undefined),
 });
+
+export type TLogViewerPage = {
+  dbPath: string;
+  query: TBehaviorLogSearchQuery;
+  page: TLogPage;
+};
