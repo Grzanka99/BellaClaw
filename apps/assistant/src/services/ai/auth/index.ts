@@ -98,24 +98,37 @@ export async function getAiAuthState(
 }
 
 // Returns the reply for a failed chat turn when the provider needs a new login.
-export async function describeAiAuthProblem(provider: string): Promise<TOption<string>> {
+// Switches the chat to another connected OAuth provider when one exists.
+export async function describeAiAuthProblem(
+  chatId: string,
+  provider: string,
+  models: Models = aiModels,
+): Promise<TOption<string>> {
   const providerId = findAiOAuthProvider(provider);
 
   if (providerId === undefined) {
     return undefined;
   }
 
-  const state = await getAiAuthState(providerId);
+  const state = await getAiAuthState(providerId, models);
+  let problem: string;
 
   if (state === EAiAuthState.LoginExpired) {
-    return `The ${providerId} login has expired. ${loginHint(providerId)}.`;
+    problem = `The ${providerId} login has expired.`;
+  } else if (state === EAiAuthState.NotConnected) {
+    problem = `${providerId} is not connected.`;
+  } else {
+    return undefined;
   }
 
-  if (state === EAiAuthState.NotConnected) {
-    return `${providerId} is not connected. ${loginHint(providerId)}.`;
+  for (const other of AI_OAUTH_PROVIDERS) {
+    if (other !== providerId && (await getAiAuthState(other, models)) === EAiAuthState.Connected) {
+      await SettingsService.instance.set(chatId, EConfigKey.AiProvider, other);
+      return `${problem} Switched this chat to ${other}. Send your message again.`;
+    }
   }
 
-  return undefined;
+  return `${problem} ${loginHint(providerId)}.`;
 }
 
 // Refreshes every OAuth credential and sends one alert to all chats when logins break.

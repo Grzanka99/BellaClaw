@@ -7,7 +7,14 @@ import { openAICodexResponsesApi } from "@earendil-works/pi-ai/api/openai-codex-
 import { SettingsService } from "../../settings";
 import { EConfigKey } from "../../settings/schema";
 import { EAiProvider } from "../types";
-import { beginAiLogin, checkAiOAuth, EAiAuthState, getAiAuthState, registerAiAuthChannel } from ".";
+import {
+  beginAiLogin,
+  checkAiOAuth,
+  describeAiAuthProblem,
+  EAiAuthState,
+  getAiAuthState,
+  registerAiAuthChannel,
+} from ".";
 import { FileCredentialStore } from "./file-credential-store";
 
 let directory: string;
@@ -205,5 +212,34 @@ test.each([
       EConfigKey.AiProvider,
       EAiProvider.OpenaiCodex,
     );
+  }
+});
+
+test.each([
+  [
+    true,
+    "opencode-go is not connected. Switched this chat to openai-codex. Send your message again.",
+  ],
+  [false, "opencode-go is not connected. Run !ai-auth login opencode-go."],
+])("switches a failed chat to a connected provider (codex connected: %p)", async (codexConnected, reply) => {
+  const { models, store } = await createTestModels(async (credential) => ({
+    ...credential,
+    expires: Date.now() + 60 * 60 * 1000,
+  }));
+  if (!codexConnected) {
+    await store.delete(EAiProvider.OpenaiCodex);
+  }
+  const set = mock(async () => ({}));
+  (SettingsService as unknown as { _instance: unknown })._instance = { set };
+
+  expect(await describeAiAuthProblem("discord:switch", EAiProvider.OpencodeGo, models)).toBe(reply);
+  if (codexConnected) {
+    expect(set).toHaveBeenCalledWith(
+      "discord:switch",
+      EConfigKey.AiProvider,
+      EAiProvider.OpenaiCodex,
+    );
+  } else {
+    expect(set).not.toHaveBeenCalled();
   }
 });
