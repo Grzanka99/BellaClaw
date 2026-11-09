@@ -229,11 +229,15 @@ function logAutomationRun(
       automation: name,
       mode,
       outcome,
-      fetches: result.fetches.map((fetch) => ({
-        url: fetch.url,
-        status: fetch.status ?? 0,
-        bytes: fetch.bytes,
-      })),
+      fetches: result.fetches.map((fetch) => {
+        let host = "invalid-url";
+
+        if (URL.canParse(fetch.url)) {
+          host = new URL(fetch.url).host;
+        }
+
+        return { host, status: fetch.status ?? 0, bytes: fetch.bytes };
+      }),
     },
     error: sanitizeErrorMessage(error),
   });
