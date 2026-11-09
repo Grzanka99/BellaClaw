@@ -2,7 +2,7 @@ import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { obj, type Static } from "@earendil-works/pi-schema";
 import { EConfigKey, type TConfigRecord } from "../../../settings/schema";
 import { decodeAiModelPreferences } from "../../model-preferences";
-import { aiModels, getAiModelConfigs } from "../../providers/registry";
+import { aiModels, getAiModelConfigs, supportsAiServiceTier } from "../../providers/registry";
 import { EAiProvider } from "../../types";
 
 export const SGetSettingsArgs = obj({});
@@ -38,6 +38,7 @@ export function createAiRuntime(settings: TConfigRecord, includeAvailableModels:
         name: model.name,
         id: model.id,
         supportedEfforts: getSupportedThinkingLevels(model),
+        supportsServiceTier: supportsAiServiceTier(model),
       })),
     };
   }

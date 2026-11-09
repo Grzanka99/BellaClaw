@@ -520,6 +520,58 @@ describe("production executable tools", () => {
     expect(settingsMock.setMany).toHaveBeenCalledTimes(2);
   });
 
+  test("selects and clears a service tier, rejecting it for unsupported models", async () => {
+    const settingsMock = installSettingsMock({
+      ...DefaultConfigRecord,
+      [EConfigKey.AiProvider]: EAiProvider.OpenaiCodex,
+    });
+    const verifySettings = mock(async () => undefined);
+    const tool = createSettingsTools({ ...context, verifySettings }).find(
+      (candidate) => candidate.name === "update-settings",
+    );
+
+    const fast = await tool?.execute("call", {
+      aiModel: "gpt-6.1-terra",
+      aiReasoningEffort: "high",
+      aiServiceTier: "priority",
+      aiModelPurpose: EModelPurpose.ScheduledTask,
+    });
+    expect(fast?.details).toMatchObject({
+      aiRuntime: {
+        models: {
+          [EModelPurpose.ScheduledTask]: {
+            model: "gpt-6.1-terra",
+            effort: "high",
+            serviceTier: "priority",
+          },
+        },
+      },
+    });
+    const cleared = await tool?.execute("call", {
+      aiServiceTier: "default",
+      aiModelPurpose: EModelPurpose.ScheduledTask,
+    });
+    expect(cleared?.details).toMatchObject({
+      aiRuntime: {
+        models: {
+          [EModelPurpose.ScheduledTask]: {
+            model: "gpt-6.1-terra",
+            effort: "high",
+            serviceTier: "default",
+          },
+        },
+      },
+    });
+    await expect(
+      tool?.execute("call", {
+        aiProvider: EAiProvider.Openrouter,
+        aiModel: "openai/gpt-5.4-mini",
+        aiServiceTier: "priority",
+      }),
+    ).rejects.toThrow("Service tier is unsupported by openai/gpt-5.4-mini");
+    expect(settingsMock.setMany).toHaveBeenCalledTimes(2);
+  });
+
   test("checks distinct model/effort pairs concurrently before saving a provider", async () => {
     const settingsMock = installSettingsMock(DefaultConfigRecord);
     const verifySettings = mock(async (_settings: TConfigRecord, _purposes: EModelPurpose[]) => {

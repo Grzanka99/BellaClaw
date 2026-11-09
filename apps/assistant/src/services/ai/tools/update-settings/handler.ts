@@ -10,7 +10,12 @@ import {
   setAiModelPreference,
   type TAiModelPreferences,
 } from "../../model-preferences";
-import { aiModels, getAiModelConfig, refreshAiModels } from "../../providers/registry";
+import {
+  aiModels,
+  getAiModelConfig,
+  refreshAiModels,
+  supportsAiServiceTier,
+} from "../../providers/registry";
 import { EAiProvider, EModelPurpose } from "../../types";
 import type { TToolExecutionContext } from "../executable";
 import { createAiRuntime, resolveAiProvider } from "../get-settings/handler";
@@ -56,6 +61,12 @@ export const SUpdateSettingsArgs = {
       }),
     ),
     aiReasoningEffort: opt(oneOf(["off", "minimal", "low", "medium", "high", "xhigh", "max"])),
+    aiServiceTier: opt(
+      oneOf(["default", "flex", "priority"], {
+        description:
+          "OpenAI processing tier: priority is fast mode, flex is cheaper and slower, default clears it",
+      }),
+    ),
     resetAiModel: opt(
       bool({ description: "Reset the selected purpose to the provider registry default" }),
     ),
@@ -72,6 +83,7 @@ export function validateUpdateSettingsArgs(args: TUpdateSettingsArgs): void {
   const hasModelOperation =
     args.aiModel !== undefined ||
     args.aiReasoningEffort !== undefined ||
+    args.aiServiceTier !== undefined ||
     args.resetAiModel === true ||
     args.resetAiReasoningEffort === true;
 
@@ -83,6 +95,7 @@ export function validateUpdateSettingsArgs(args: TUpdateSettingsArgs): void {
     args.resetAiModel === true &&
     (args.aiModel !== undefined ||
       args.aiReasoningEffort !== undefined ||
+      args.aiServiceTier !== undefined ||
       args.resetAiReasoningEffort === true)
   ) {
     throw new Error("resetAiModel cannot be combined with another model change");
@@ -135,6 +148,7 @@ export async function handleUpdateSettings(
   const hasModelOperation =
     parsedArgs.aiModel !== undefined ||
     parsedArgs.aiReasoningEffort !== undefined ||
+    parsedArgs.aiServiceTier !== undefined ||
     parsedArgs.resetAiModel === true ||
     parsedArgs.resetAiReasoningEffort === true;
   if (hasModelOperation || parsedArgs.aiProvider !== undefined) {
@@ -190,12 +204,40 @@ export async function handleUpdateSettings(
         effort = getAiModelConfig(provider, purpose, { model: modelId }).effort;
       }
 
+      let serviceTier = currentConfig.serviceTier;
+
+      if (parsedArgs.aiServiceTier === "default") {
+        serviceTier = undefined;
+      } else if (parsedArgs.aiServiceTier !== undefined) {
+        if (!supportsAiServiceTier(model)) {
+          throw new Error(`Service tier is unsupported by ${modelId}`);
+        }
+
+        serviceTier = parsedArgs.aiServiceTier;
+      }
+
+      if (serviceTier !== undefined && !supportsAiServiceTier(model)) {
+        fallbacks.push({
+          purpose,
+          reason: `Service tier ${serviceTier} is unsupported by ${modelId}; using the default tier`,
+        });
+        serviceTier = undefined;
+      }
+
       const defaultConfig = getAiModelConfig(provider, purpose);
 
-      if (modelId === defaultConfig.model.id && effort === defaultConfig.effort) {
+      if (
+        modelId === defaultConfig.model.id &&
+        effort === defaultConfig.effort &&
+        serviceTier === undefined
+      ) {
         setAiModelPreference(preferences, provider, purpose, undefined);
       } else {
-        setAiModelPreference(preferences, provider, purpose, { model: modelId, effort });
+        setAiModelPreference(preferences, provider, purpose, {
+          model: modelId,
+          effort,
+          serviceTier,
+        });
       }
     }
   }
@@ -226,12 +268,12 @@ export async function handleUpdateSettings(
   const verifications = new Map<string, Promise<TOption<string>>>();
   const results = await Promise.all(
     purposes.map(async (verificationPurpose) => {
-      const { model, effort } = getAiModelConfig(
+      const { model, effort, serviceTier } = getAiModelConfig(
         provider,
         verificationPurpose,
         getAiModelPreference(preferences, provider, verificationPurpose),
       );
-      const key = JSON.stringify([model.id, effort]);
+      const key = JSON.stringify([model.id, effort, serviceTier]);
       let verification = verifications.get(key);
 
       if (verification === undefined) {
@@ -318,7 +360,10 @@ function normalizeProviderPreferences(provider: EAiProvider, preferences: TAiMod
       preference.effort !== undefined &&
       !getSupportedThinkingLevels(model).includes(preference.effort)
     ) {
-      setAiModelPreference(preferences, provider, purpose, { model: preference.model });
+      setAiModelPreference(preferences, provider, purpose, {
+        model: preference.model,
+        serviceTier: preference.serviceTier,
+      });
       fallbacks.push({
         purpose,
         reason: `Remembered effort ${preference.effort} is unsupported by ${preference.model}`,

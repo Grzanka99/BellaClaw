@@ -12,7 +12,7 @@
     <description>
       Updates one or more of: timezone, language, assistantName, addressStyle,
       preferredReplyLength, aiProvider, aiModel, aiModelPurpose, aiReasoningEffort,
-      resetAiModel, or resetAiReasoningEffort. At least one field must be provided. Only the listed fields are accepted.
+      aiServiceTier, resetAiModel, or resetAiReasoningEffort. At least one field must be provided. Only the listed fields are accepted.
     </description>
   </tool>
 
@@ -26,7 +26,8 @@
     - aiModel — exact Pi model ID from the active provider, or from aiProvider when both are supplied.
     - aiModelPurpose — Utility, Main, Specialist, SpecialistAccurate, or ScheduledTask. Defaults to Main for model/effort operations.
     - aiReasoningEffort — off, minimal, low, medium, high, xhigh, or max.
-    - resetAiModel — true resets the selected purpose's model and effort to the provider registry default.
+    - aiServiceTier — priority (fast mode), flex (cheaper, slower), or default (clears the tier). Only models with supportsServiceTier accept it.
+    - resetAiModel — true resets the selected purpose's model, effort, and service tier to the provider registry default.
     - resetAiReasoningEffort — true keeps the selected model and resets its reasoning effort.
   </field_mapping>
 
@@ -35,8 +36,10 @@
     <rule>Only the provided fields are written. Omitted fields are left untouched.</rule>
     <rule>Never invent or guess values. If the user did not specify a value for a field, omit it.</rule>
     <rule>Only the listed fields are accepted.</rule>
-    <rule>Change provider, model, or effort only after an explicit user request. Never switch autonomously.</rule>
-    <rule>Model operations apply to Main unless the user explicitly names another existing purpose.</rule>
+    <rule>When the user says "fast" after a model name (e.g. "gpt 6.1 terra fast"), select the base model ID and set aiServiceTier to priority. Do not look for a separate "-fast" model ID.</rule>
+    <rule>One call changes one purpose. When the user names several purposes, call update-settings once per purpose with the same model, effort, and tier.</rule>
+    <rule>Change provider, model, effort, or service tier only after an explicit user request. Never switch autonomously.</rule>
+    <rule>Model, effort, and service tier operations apply to Main unless the user explicitly names another existing purpose.</rule>
     <rule>A model must belong to the active provider. A combined explicit provider/model request is allowed and applied atomically.</rule>
     <rule>Call get-settings first when the user asks which models are available or does not provide an exact model ID.</rule>
     <rule>Utility controls memory distillation. Specialist controls Memory and Settings. SpecialistAccurate controls Calendar and Scheduling. ScheduledTask controls autonomous scheduled work. Reminder-text generation continues to use Main.</rule>
@@ -45,7 +48,7 @@
       apply only the settings change with this tool and then ask the user to resend the normal
       task separately. Never attempt to execute the normal task from the settings loop.
     </rule>
-    <rule>After a successful update, confirm the effective provider, affected purpose, model, and effort from aiRuntime. State that AI runtime changes take effect from the next message.</rule>
+    <rule>After a successful update, confirm the effective provider, affected purpose, model, effort, and service tier from aiRuntime. State that AI runtime changes take effect from the next message.</rule>
     <rule>Report every entry in change.fallbacks. On provider switches, otherwise mention the restored Main selection without enumerating unchanged internal purposes.</rule>
     <rule>If the tool returns an error, tell the user which field/value was rejected and do not retry blindly.</rule>
   </usage_rules>
@@ -75,6 +78,12 @@
       <message>"switch to gpt-5.6-terra"</message>
       <fields>{ "aiModel": "gpt-5.6-terra" }</fields>
       <response>Confirm the returned Main model and effort and say the change applies from the next message.</response>
+    </example>
+
+    <example>
+      <message>"use gpt 6.1 terra fast at high for scheduled tasks"</message>
+      <fields>{ "aiModel": "gpt-6.1-terra", "aiReasoningEffort": "high", "aiServiceTier": "priority", "aiModelPurpose": "ScheduledTask" }</fields>
+      <response>Confirm the returned ScheduledTask model, effort, and fast (priority) tier and say the change applies from the next message.</response>
     </example>
 
     <example>

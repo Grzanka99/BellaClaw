@@ -1,14 +1,16 @@
 import { logger, type TOption } from "@bellaclaw/shared";
 import {
+  type Api,
   createModels,
   getSupportedThinkingLevels,
+  type Model,
   type ModelThinkingLevel,
   type Provider,
 } from "@earendil-works/pi-ai";
 import { openaiCodexProvider } from "@earendil-works/pi-ai/providers/openai-codex";
 import { openrouterProvider } from "@earendil-works/pi-ai/providers/openrouter";
 import { FileCredentialStore } from "../auth/file-credential-store";
-import type { TAiModelPreference, TAiModelPreferences } from "../model-preferences";
+import type { TAiModelPreference, TAiModelPreferences, TAiServiceTier } from "../model-preferences";
 import { getAiModelPreference } from "../model-preferences";
 import { EAiProvider, EModelPurpose } from "../types";
 import { ollamaProvider } from "./ollama";
@@ -17,6 +19,12 @@ import { opencodeGoProvider } from "./opencode-go";
 type TAiModelPurposeRegistration = {
   model: string;
   effort?: ModelThinkingLevel;
+};
+
+type TAiModelRuntimeConfig = {
+  model: string;
+  effort: ModelThinkingLevel | "default";
+  serviceTier: TAiServiceTier | "default";
 };
 
 type TAiProviderRegistration = {
@@ -171,6 +179,10 @@ for (const providerId of Object.values(EAiProvider)) {
   }
 }
 
+export function supportsAiServiceTier(model: Model<Api>): boolean {
+  return model.api === "openai-responses" || model.api === "openai-codex-responses";
+}
+
 export function getAiModelConfig(
   provider: EAiProvider,
   purpose: EModelPurpose,
@@ -179,12 +191,17 @@ export function getAiModelConfig(
   const registration = AI_PROVIDER_REGISTRY[provider].modelByPurpose[purpose];
   let modelId = registration.model;
   let effort = registration.effort;
+  let serviceTier: TOption<TAiServiceTier>;
 
   if (preference !== undefined) {
     const selectedModel = aiModels.getModel(provider, preference.model);
 
     if (selectedModel !== undefined) {
       modelId = preference.model;
+
+      if (supportsAiServiceTier(selectedModel)) {
+        serviceTier = preference.serviceTier;
+      }
 
       if (preference.effort !== undefined) {
         effort = preference.effort;
@@ -206,26 +223,30 @@ export function getAiModelConfig(
     );
   }
 
-  return { model, effort };
+  return { model, effort, serviceTier };
 }
 
 function getAiModelRuntimeConfig(
   provider: EAiProvider,
   purpose: EModelPurpose,
   preferences: TAiModelPreferences,
-): { model: string; effort: ModelThinkingLevel | "default" } {
+): TAiModelRuntimeConfig {
   const config = getAiModelConfig(
     provider,
     purpose,
     getAiModelPreference(preferences, provider, purpose),
   );
-  return { model: config.model.id, effort: config.effort ?? "default" };
+  return {
+    model: config.model.id,
+    effort: config.effort ?? "default",
+    serviceTier: config.serviceTier ?? "default",
+  };
 }
 
 export function getAiModelConfigs(
   provider: EAiProvider,
   preferences: TAiModelPreferences,
-): Readonly<Record<EModelPurpose, { model: string; effort: ModelThinkingLevel | "default" }>> {
+): Readonly<Record<EModelPurpose, TAiModelRuntimeConfig>> {
   return {
     [EModelPurpose.Utility]: getAiModelRuntimeConfig(provider, EModelPurpose.Utility, preferences),
     [EModelPurpose.Main]: getAiModelRuntimeConfig(provider, EModelPurpose.Main, preferences),

@@ -3,11 +3,13 @@ import { z } from "zod";
 import { EAiProvider, EModelPurpose } from "./types";
 
 const SThinkingLevel = z.enum(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
+const SAiServiceTier = z.enum(["flex", "priority"]);
 
 const SAiModelPreference = z
   .object({
     model: z.string().trim().min(1),
     effort: SThinkingLevel.optional(),
+    serviceTier: SAiServiceTier.optional(),
   })
   .strict();
 
@@ -16,6 +18,7 @@ const SAiModelPreferences = z.partialRecord(
   z.partialRecord(z.enum(EModelPurpose), SAiModelPreference),
 );
 
+export type TAiServiceTier = z.infer<typeof SAiServiceTier>;
 export type TAiModelPreference = z.infer<typeof SAiModelPreference>;
 export type TAiModelPreferences = z.infer<typeof SAiModelPreferences>;
 
