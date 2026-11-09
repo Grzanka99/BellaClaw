@@ -19,7 +19,7 @@ You need:
 
 - [Bun](https://bun.sh)
 - A Discord bot token
-- An OpenCode API key
+- An OpenCode Go subscription
 - A libSQL database, such as Turso
 
 Set up the project:
@@ -33,7 +33,6 @@ Open `.env` and fill in:
 
 ```dotenv
 DISCORD_TOKEN=
-OPENCODE_API_KEY=
 TURSO_CONNECTION_URL=
 TURSO_AUTH_TOKEN=
 ```
@@ -46,7 +45,13 @@ Start BellaClaw:
 bun run start
 ```
 
-This starts both the assistant and the behavior-log viewer. Then send the bot a Discord DM or open
+This starts both the assistant and the behavior-log viewer. Then send the bot a Discord DM:
+
+```text
+!ai-auth login opencode-go
+```
+
+Open the returned link, approve the code, and wait for the confirmation. Open
 `http://127.0.0.1:8989` to inspect behavior logs.
 
 ## Repository Layout
@@ -63,7 +68,7 @@ Bun workspaces own dependencies and Turborepo coordinates tasks from the reposit
 
 - [Configuration](docs/configuration.md) — environment variables and AI providers
 - [Development](docs/development.md) — local commands, tests, and code checks
-- [Deployment](docs/deployment.md) — Podman deployment and OpenAI Codex auth
+- [Deployment](docs/deployment.md) — Podman deployment
 - [Messaging](docs/messaging.md) — Discord and Signal setup
 - [Google Calendar](docs/google-calendar.md) — calendar access and setup
 - [MCP](docs/mcp.md) — integration profiles, specialist behavior, OAuth and logs

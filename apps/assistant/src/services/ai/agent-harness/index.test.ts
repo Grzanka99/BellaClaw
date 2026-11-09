@@ -45,7 +45,6 @@ const logDirectories: string[] = [];
 describe("AgentHarness", () => {
   const previousApiKey = Bun.env.OPENROUTER_API_KEY;
   const previousMcpConfig = Bun.env.BELLACLAW_MCP_CONFIG;
-  const previousOpenCodeApiKey = Bun.env.OPENCODE_API_KEY;
   const previousOpencodeGoProvider = aiModels.getProvider(EAiProvider.OpencodeGo);
   const faux = fauxProvider({
     provider: EAiProvider.Openrouter,
@@ -65,12 +64,6 @@ describe("AgentHarness", () => {
       delete Bun.env.OPENROUTER_API_KEY;
     } else {
       Bun.env.OPENROUTER_API_KEY = previousApiKey;
-    }
-
-    if (previousOpenCodeApiKey === undefined) {
-      delete Bun.env.OPENCODE_API_KEY;
-    } else {
-      Bun.env.OPENCODE_API_KEY = previousOpenCodeApiKey;
     }
 
     if (previousOpencodeGoProvider !== undefined) {
@@ -596,13 +589,12 @@ describe("AgentHarness", () => {
   });
 
   test("sends the conversation's OpenCode session header when sampling MCP", async () => {
-    Bun.env.OPENCODE_API_KEY = "opencode-test-key";
     const opencode = fauxProvider({
       provider: EAiProvider.OpencodeGo,
       models: [{ id: "grok-4.7", reasoning: true }],
     });
     aiModels.setProvider(opencode.provider);
-    const expectedSessionId = new Bun.CryptoHasher("sha256", "opencode-test-key")
+    const expectedSessionId = new Bun.CryptoHasher("sha256")
       .update("discord:discord:1")
       .digest("hex");
     opencode.setResponses([
@@ -714,7 +706,6 @@ describe("AgentHarness", () => {
   });
 
   test("sends a stable OpenCode session header for each conversation", async () => {
-    Bun.env.OPENCODE_API_KEY = "opencode-test-key";
     const sessionIds: Array<string | undefined> = [];
     const sessionHeaders: Array<string | null | undefined> = [];
     const opencode = fauxProvider({
@@ -799,7 +790,7 @@ describe("AgentHarness", () => {
     expect(sameConversation.text).toBe("same conversation final");
     expect(otherConversation.text).toBe("other conversation final");
     expect(direct).toBe("direct final");
-    const expectedConversationId = new Bun.CryptoHasher("sha256", "opencode-test-key")
+    const expectedConversationId = new Bun.CryptoHasher("sha256")
       .update("discord:discord:1")
       .digest("hex");
 
@@ -814,13 +805,12 @@ describe("AgentHarness", () => {
   });
 
   test("sends the conversation's OpenCode session header when compacting", async () => {
-    Bun.env.OPENCODE_API_KEY = "opencode-test-key";
     const opencode = fauxProvider({
       provider: EAiProvider.OpencodeGo,
       models: [{ id: "grok-4.7", reasoning: true }],
     });
     aiModels.setProvider(opencode.provider);
-    const expectedSessionId = new Bun.CryptoHasher("sha256", "opencode-test-key")
+    const expectedSessionId = new Bun.CryptoHasher("sha256")
       .update("discord:discord:1")
       .digest("hex");
     opencode.setResponses([
@@ -849,33 +839,6 @@ describe("AgentHarness", () => {
     );
 
     expect(result?.state.summary).toBe("Earlier context summarized.");
-  });
-
-  test("rejects an OpenCode conversation before streaming when its API key is missing", async () => {
-    delete Bun.env.OPENCODE_API_KEY;
-    const opencode = fauxProvider({
-      provider: EAiProvider.OpencodeGo,
-      models: [{ id: "grok-4.7", reasoning: true }],
-    });
-    opencode.setResponses([fauxAssistantMessage("must not stream")]);
-    aiModels.setProvider(opencode.provider);
-
-    await expect(
-      AgentHarness.instance.runMain({
-        prompt: "hello",
-        history: [],
-        chatId: "discord:1",
-        settings: {
-          ...DefaultConfigRecord,
-          [EConfigKey.AiProvider]: EAiProvider.OpencodeGo,
-        },
-        currentTimeContext: undefined,
-        platform: EMessagePlatform.Discord,
-        trace: undefined,
-        signal: undefined,
-      }),
-    ).rejects.toThrow("Missing required environment variable OPENCODE_API_KEY");
-    expect(opencode.state.callCount).toBe(0);
   });
 
   test.each([

@@ -1,5 +1,6 @@
 import { AppLogger, EBehaviorLogLevel } from "@bellaclaw/behavior-logs";
-import { startOpenaiCodexOAuthKeepAlive } from "./services/ai/auth/oauth-keep-alive";
+import { registerAiAuthChannel } from "./services/ai/auth";
+import { startAiOAuthKeepAlive } from "./services/ai/auth/oauth-keep-alive";
 import { AuthorizationService } from "./services/authorization";
 import { CalendarService } from "./services/calendar";
 import { DiscordSingleton } from "./services/discord";
@@ -40,6 +41,10 @@ async function init(): Promise<void> {
     registerMcpAuthConnectedListener((chatId, profileId) =>
       MessagingAdapter.instance.sendMcpConnectedMessage(chatId, profileId),
     );
+    registerAiAuthChannel({
+      listChatIds: () => AuthorizationService.instance.listAuthorizedChatIds(),
+      send: (chatId, text) => MessagingAdapter.instance.sendNotice(chatId, text),
+    });
     if (Bun.env.BELLACLAW_MCP_PUBLIC_URL?.trim()) {
       startMcpAuthServer();
     }
@@ -51,7 +56,7 @@ async function init(): Promise<void> {
     ]);
     await MessagingAdapter.instance.setup();
     await MessageHandler.scheduleFactDrainForAllChats(turnId);
-    startOpenaiCodexOAuthKeepAlive();
+    startAiOAuthKeepAlive();
 
     AppLogger.instance.record({
       trace: {

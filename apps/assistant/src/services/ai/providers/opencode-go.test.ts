@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, type Mock, spyOn, test } from 
 import {
   createModels,
   getSupportedThinkingLevels,
+  InMemoryCredentialStore,
   InMemoryModelsStore,
 } from "@earendil-works/pi-ai";
 import { opencodeGoProvider as bundledOpencodeGoProvider } from "@earendil-works/pi-ai/providers/opencode-go";
@@ -22,17 +23,14 @@ const metadata = {
     tiers: [{ input: 2, output: 10, tier: { type: "context", size: 200000 } }],
   },
 };
-const originalApiKey = Bun.env.OPENCODE_API_KEY;
 let fetchMock: Mock<(input: Parameters<typeof fetch>[0], init?: RequestInit) => Promise<Response>>;
 
 beforeEach(() => {
   fetchMock = spyOn(globalThis, "fetch");
-  Bun.env.OPENCODE_API_KEY = "catalog-test-key";
 });
 
 afterEach(() => {
   fetchMock.mockRestore();
-  Bun.env.OPENCODE_API_KEY = originalApiKey;
 });
 
 function serveCatalog(ids: string[], models: Record<string, unknown>) {
@@ -44,8 +42,15 @@ function serveCatalog(ids: string[], models: Record<string, unknown>) {
   });
 }
 
-function collection(modelsStore = new InMemoryModelsStore()) {
-  const models = createModels({ modelsStore });
+async function collection(modelsStore = new InMemoryModelsStore()) {
+  const credentials = new InMemoryCredentialStore();
+  await credentials.modify("opencode-go", async () => ({
+    type: "oauth",
+    access: "catalog-test-access",
+    refresh: "catalog-test-refresh",
+    expires: Date.now() + 24 * 60 * 60 * 1000,
+  }));
+  const models = createModels({ modelsStore, credentials });
   models.setProvider(opencodeGoProvider([]));
   return models;
 }
@@ -72,7 +77,7 @@ describe("OpenCode Go discovery", () => {
         "google-current": { ...metadata, provider: { npm: "@ai-sdk/google" } },
       },
     );
-    const models = collection();
+    const models = await collection();
     expect((await models.refresh()).errors.size).toBe(0);
     expect(models.getModels().map((model) => model.id)).toEqual([
       "qwen3.8-flash",
@@ -125,7 +130,7 @@ describe("OpenCode Go discovery", () => {
 
   test("uses the hourly cache and forced refresh publishes the current live catalog", async () => {
     serveCatalog(["completions-current"], { "completions-current": metadata });
-    const models = collection();
+    const models = await collection();
     await models.refresh();
     await models.refresh();
     expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -151,7 +156,7 @@ describe("OpenCode Go discovery", () => {
     ["empty list", () => Response.json({ data: [] })],
   ])("keeps the last successful catalog after %s", async (_name, response) => {
     serveCatalog(["completions-current"], { "completions-current": metadata });
-    const models = collection();
+    const models = await collection();
     await models.refresh();
     fetchMock.mockImplementation(async () => response());
     expect((await models.refresh({ force: true })).errors.has("opencode-go")).toBe(true);
@@ -160,7 +165,7 @@ describe("OpenCode Go discovery", () => {
 
   test("waits out a cooldown after a failed refresh unless the refresh is forced", async () => {
     fetchMock.mockRejectedValue(new Error("Offline"));
-    const models = collection();
+    const models = await collection();
     await models.refresh();
     await models.refresh();
     expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -177,7 +182,7 @@ describe("OpenCode Go discovery", () => {
 
   test("keeps required bundled models that the live list omits", async () => {
     serveCatalog(["completions-current"], { "completions-current": metadata });
-    const models = createModels();
+    const models = await collection();
     models.setProvider(opencodeGoProvider(["grok-4.7"]));
     await models.refresh();
     expect(models.getModels().map((model) => model.id)).toEqual([
@@ -195,7 +200,7 @@ describe("OpenCode Go discovery", () => {
   test("adds required bundled models to a restored catalog that lacks them", async () => {
     serveCatalog(["completions-current"], { "completions-current": metadata });
     const store = new InMemoryModelsStore();
-    await collection(store).refresh();
+    await (await collection(store)).refresh();
     const restored = createModels({ modelsStore: store });
     restored.setProvider(opencodeGoProvider(["grok-4.7"]));
     await restored.refresh({ allowNetwork: false });
@@ -207,7 +212,7 @@ describe("OpenCode Go discovery", () => {
 
   test("keeps the bundled catalog when its first fetch fails", async () => {
     fetchMock.mockRejectedValue(new Error("Offline"));
-    const models = collection();
+    const models = await collection();
     expect((await models.refresh()).errors.has("opencode-go")).toBe(true);
     expect(models.getModels().map((model) => model.id)).toEqual(
       bundledOpencodeGoProvider()
@@ -219,8 +224,8 @@ describe("OpenCode Go discovery", () => {
   test("restores the stored catalog without network access", async () => {
     serveCatalog(["completions-current"], { "completions-current": metadata });
     const store = new InMemoryModelsStore();
-    await collection(store).refresh();
-    const restored = collection(store);
+    await (await collection(store)).refresh();
+    const restored = await collection(store);
     await restored.refresh({ allowNetwork: false });
     expect(restored.getModels().map((model) => model.id)).toEqual(["completions-current"]);
     expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -228,7 +233,7 @@ describe("OpenCode Go discovery", () => {
 
   test("streams a discovered model through native Go transport with conversation routing", async () => {
     serveCatalog(["completions-current"], { "completions-current": metadata });
-    const models = collection();
+    const models = await collection();
     await models.refresh();
     const model = models.getModel("opencode-go", "completions-current");
     if (model === undefined) {
@@ -255,6 +260,6 @@ describe("OpenCode Go discovery", () => {
     expect(reply.stopReason).toBe("stop");
     expect(request?.url).toBe("https://opencode.ai/inference/go/v1/chat/completions");
     expect(request?.headers.get("x-opencode-session")).toBe("conversation-session");
-    expect(request?.headers.get("authorization")).toBe("Bearer catalog-test-key");
+    expect(request?.headers.get("authorization")).toBe("Bearer catalog-test-access");
   });
 });

@@ -2,6 +2,7 @@ import { AppLogger, EBehaviorLogLevel, type TBehaviorTraceContext } from "@bella
 import type { TOption } from "@bellaclaw/shared";
 import { AsyncQueue, createLogger, logger, type TLogger } from "@bellaclaw/shared";
 import { AgentHarness } from "../ai/agent-harness";
+import { describeAiAuthProblem } from "../ai/auth";
 import { ERole, type THistoryItem } from "../ai/types";
 import {
   logHandlerCompleted,
@@ -128,16 +129,23 @@ export class MessageHandler {
 
       if (aiRes.text === undefined) {
         this.logger.warning("handleMessage: AI returned no final response");
+        let reply = "Something went wrong.";
+        const authProblem = await describeAiAuthProblem(settings[EConfigKey.AiProvider]);
+
+        if (authProblem !== undefined) {
+          reply = authProblem;
+        }
+
         logHandlerCompleted(
           trace,
           "message-handler",
           handleMessageStart,
           false,
-          "Something went wrong.".length,
+          reply.length,
           "missing final response",
           undefined,
         );
-        return "Something went wrong.";
+        return reply;
       }
 
       const saveStartedAt = performance.now();

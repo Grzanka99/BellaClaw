@@ -11,11 +11,9 @@ import {
 } from "./registry";
 
 const ORIGINAL_OPENROUTER_API_KEY = Bun.env.OPENROUTER_API_KEY;
-const ORIGINAL_OPENCODE_API_KEY = Bun.env.OPENCODE_API_KEY;
 
 afterEach(() => {
   Bun.env.OPENROUTER_API_KEY = ORIGINAL_OPENROUTER_API_KEY;
-  Bun.env.OPENCODE_API_KEY = ORIGINAL_OPENCODE_API_KEY;
 });
 
 describe("AI provider registry", () => {
@@ -117,18 +115,15 @@ describe("AI provider registry", () => {
 
   test("reads required API keys from Bun.env and rejects missing keys", () => {
     Bun.env.OPENROUTER_API_KEY = "openrouter-test-key";
-    Bun.env.OPENCODE_API_KEY = "opencode-test-key";
 
     expect(getAiApiKey(EAiProvider.Openrouter)).toBe("openrouter-test-key");
-    expect(getAiApiKey(EAiProvider.OpencodeGo)).toBe("opencode-test-key");
+    expect(getAiApiKey(EAiProvider.OpencodeGo)).toBeUndefined();
     expect(getAiApiKey(EAiProvider.OpenaiCodex)).toBeUndefined();
     expect(getAiApiKey(EAiProvider.Ollama)).toBeUndefined();
 
     Bun.env.OPENROUTER_API_KEY = undefined;
-    Bun.env.OPENCODE_API_KEY = "";
 
     expect(() => getAiApiKey(EAiProvider.Openrouter)).toThrow("OPENROUTER_API_KEY");
-    expect(() => getAiApiKey(EAiProvider.OpencodeGo)).toThrow("OPENCODE_API_KEY");
   });
 
   test("stores static Ollama metadata and keyless compatibility auth", async () => {
@@ -199,10 +194,17 @@ describe("OpenCode Go catalog refresh", () => {
   }
 
   beforeEach(async () => {
-    Bun.env.OPENCODE_API_KEY = "catalog-test-key";
     previousProvider = aiModels.getProvider(EAiProvider.OpencodeGo);
     await dropStoredCatalog();
-    aiModels.setProvider(opencodeGoProvider(["grok-4.7", "deepseek-v4-pro"]));
+    aiModels.setProvider({
+      ...opencodeGoProvider(["grok-4.7", "deepseek-v4-pro"]),
+      auth: {
+        apiKey: {
+          name: "Test key",
+          resolve: async () => ({ auth: { apiKey: "catalog-test-key" } }),
+        },
+      },
+    });
     fetchMock = spyOn(globalThis, "fetch");
     fetchMock.mockImplementation(async (input) => catalogResponse(input));
   });

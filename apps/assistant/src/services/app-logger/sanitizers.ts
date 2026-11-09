@@ -659,9 +659,15 @@ function sanitizeContentPreview(value: TOption<string>): string {
   return `${sanitized.slice(0, CONTENT_PREVIEW_MAX_CHARS)}...`;
 }
 
+const registeredSecrets = new Set<string>();
+
+export function registerRedactedSecret(secret: string) {
+  registeredSecrets.add(secret);
+}
+
 function redactSecrets(value: string): string {
   let redacted = value;
-  const secrets = [Bun.env.OPENROUTER_API_KEY, Bun.env.OPENCODE_API_KEY];
+  const secrets = [Bun.env.OPENROUTER_API_KEY, ...registeredSecrets];
 
   for (const secret of secrets) {
     if (secret !== undefined && secret.length > 0) {

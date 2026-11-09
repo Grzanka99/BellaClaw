@@ -40,43 +40,21 @@ The package scripts include the Signal profile:
 
 | Command | Action |
 | --- | --- |
-| `bun run server:init` | Seed optional Codex auth, build, rebuild embeddings, and start all services. |
-| `bun run server:update` | Preserve auth, rebuild without cache, and recreate all services. |
+| `bun run server:init` | Build, rebuild embeddings, and start all services. |
+| `bun run server:update` | Rebuild without cache and recreate all services. |
 | `bun run server:rebuild-embeddings` | Stop the assistant, pull the embedding model, re-embed all facts, and start the assistant on the current image. |
 | `bun run server:down` | Stop all services, including the Signal profile. |
-| `bun run server:reset-auth` | Replace Pi credentials from `.secrets/auth.json`. |
 
-## OpenAI Codex Subscription
+## AI Provider Login
 
-Create the secrets directory:
-
-```bash
-mkdir -p .secrets
-```
-
-Copy an authenticated Codex `auth.json` to:
+After the first start, log in from any activated chat:
 
 ```text
-.secrets/auth.json
+!ai-auth login opencode-go
 ```
 
-Seed it and start the services:
-
-```bash
-bun run server:init
-```
-
-The seed script creates `.secrets/pi-auth.json` when it does not exist. Later starts preserve that
-file so Pi can refresh and store OAuth tokens.
-
-To intentionally replace it:
-
-```bash
-bun run server:reset-auth
-```
-
-Seeding credentials does not change the active provider. After startup, ask BellaClaw to switch to
-`openai-codex`.
+Credentials are stored in `.secrets/pi-auth.json` and survive restarts. See
+[Configuration](configuration.md#ai-and-web) for the other providers and commands.
 
 ## Data and Ports
 
