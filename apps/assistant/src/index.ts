@@ -1,4 +1,5 @@
 import { AppLogger, EBehaviorLogLevel } from "@bellaclaw/behavior-logs";
+import { startOpenaiCodexOAuthKeepAlive } from "./services/ai/auth/oauth-keep-alive";
 import { AuthorizationService } from "./services/authorization";
 import { CalendarService } from "./services/calendar";
 import { DiscordSingleton } from "./services/discord";
@@ -50,6 +51,7 @@ async function init(): Promise<void> {
     ]);
     await MessagingAdapter.instance.setup();
     await MessageHandler.scheduleFactDrainForAllChats(turnId);
+    startOpenaiCodexOAuthKeepAlive();
 
     AppLogger.instance.record({
       trace: {
