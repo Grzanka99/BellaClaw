@@ -1,11 +1,16 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AppLogger, EBehaviorLogLevel } from "@bellaclaw/behavior-logs";
+import {
+  AppLogger,
+  EBehaviorLogLevel,
+  type TLogLiveUpdate,
+  type TLogReaderResult,
+} from "@bellaclaw/behavior-logs";
 import type { TOption } from "@bellaclaw/shared";
 import { createLogViewerApp, type TLogViewerApplication } from "./app";
+import type { TLogViewerPage } from "./types";
 
 let application: TOption<TLogViewerApplication>;
 let tempDir: TOption<string>;
@@ -21,38 +26,45 @@ afterEach(async () => {
   tempDir = undefined;
 });
 
+function createLogger(): { dbPath: string; logger: AppLogger } {
+  tempDir = mkdtempSync(join(tmpdir(), "bellaclaw-log-viewer-"));
+  const dbPath = join(tempDir, "logs.db");
+  return { dbPath, logger: new AppLogger({ dbPath, stdout() {} }) };
+}
+
 describe("log viewer", () => {
-  test("serves htmx from the viewer workspace dependency", async () => {
-    const application = createLogViewerApp({ dbPath: ":memory:" });
+  test("serves the shell and a browser bundle without server-only modules", async () => {
+    application = createLogViewerApp({ dbPath: ":memory:" });
 
-    try {
-      const response = await application.app.request("/assets/htmx.min.js");
+    const shell = await application.app.request("/");
+    const bundle = await application.app.request("/assets/client.js");
+    const script = await bundle.text();
 
-      expect(response.status).toBe(200);
-      expect(await response.text()).toContain("htmx");
-    } finally {
-      await application.close();
-    }
+    expect(await shell.text()).toContain('<div id="root"></div>');
+    expect(bundle.status).toBe(200);
+    expect(bundle.headers.get("Content-Type")).toContain("javascript");
+    expect(script).not.toContain("bun:sqlite");
+    expect(script).not.toContain("zod/v4/locales");
   });
 
-  test("shows a missing database without creating it", async () => {
+  test("reports a missing database without creating it", async () => {
     tempDir = mkdtempSync(join(tmpdir(), "bellaclaw-log-viewer-"));
     const dbPath = join(tempDir, "missing.db");
     application = createLogViewerApp({ dbPath });
 
-    const page = await application.app.request("/");
+    const page = await application.app.request("/api/logs");
+    const body: TLogReaderResult<TLogViewerPage> = await page.json();
     const health = await application.app.request("/health");
 
-    expect(page.status).toBe(200);
-    expect(await page.text()).toContain("Behavior log database not found");
+    expect(page.status).toBe(503);
+    expect(body.success).toBe(false);
+    expect(JSON.stringify(body)).toContain("Behavior log database not found");
     expect(health.status).toBe(503);
     expect(await Bun.file(dbPath).exists()).toBe(false);
   });
 
-  test("searches events and renders the log workspace", async () => {
-    tempDir = mkdtempSync(join(tmpdir(), "bellaclaw-log-viewer-"));
-    const dbPath = join(tempDir, "logs.db");
-    const logger = new AppLogger({ dbPath, stdout() {} });
+  test("searches events and pages through older results", async () => {
+    const { dbPath, logger } = createLogger();
 
     for (let index = 0; index < 101; index += 1) {
       logger.record({
@@ -66,124 +78,105 @@ describe("log viewer", () => {
       });
     }
 
-    await logger.flush();
     await logger.close();
     application = createLogViewerApp({ dbPath });
 
-    const home = await application.app.request("/?q=distinctive&success=success");
-    const homeHtml = await home.text();
+    const first = await application.app.request("/api/logs?q=distinctive&success=success");
+    const firstBody: TLogReaderResult<TLogViewerPage> = await first.json();
 
-    expect(homeHtml).toContain("distinctive lookup 100");
-    expect(homeHtml).not.toContain("<h3>Prompt cache</h3>");
-    expect(homeHtml).toContain(
-      "q=distinctive&amp;range=all&amp;success=success&amp;turnId=turn-searchable",
+    expect(firstBody.success).toBe(true);
+
+    if (!firstBody.success) {
+      return;
+    }
+
+    const page = firstBody.data.page;
+    const last = page.events[page.events.length - 1];
+    expect(firstBody.data.query.q).toBe("distinctive");
+    expect(page.events[0]?.summary).toBe("distinctive lookup 100");
+    expect(page.events).toHaveLength(100);
+    expect(page.hasMore).toBe(true);
+
+    const older = await application.app.request(
+      `/api/logs?q=distinctive&success=success&until=${firstBody.data.query.until}&beforeCreatedAt=${last?.createdAtMs}&beforeId=${last?.id}`,
     );
+    const olderBody: TLogReaderResult<TLogViewerPage> = await older.json();
+
+    expect(olderBody.success && olderBody.data.page.events.map((event) => event.summary)).toEqual([
+      "distinctive lookup 0",
+    ]);
+    expect(olderBody.success && olderBody.data.page.hasMore).toBe(false);
   });
 
-  test("shows cache hits, cold requests, and unreported usage in the inspector", async () => {
-    tempDir = mkdtempSync(join(tmpdir(), "bellaclaw-log-viewer-"));
-    const dbPath = join(tempDir, "logs.db");
-    const logger = new AppLogger({ dbPath, stdout() {} });
-    const cases = [
-      { turnId: "cache-hit", input: 100, cacheRead: 800, cacheWrite: 100, expected: "80.0%" },
-      { turnId: "cache-cold", input: 1000, cacheRead: 0, cacheWrite: 0, expected: "0.0%" },
-      { turnId: "cache-unknown", input: 0, cacheRead: 0, cacheWrite: 0, expected: "Not reported" },
-    ];
-    for (const item of cases) {
-      const inputTokens = item.input + item.cacheRead + item.cacheWrite;
-      let cacheHitPercent: number | null = null;
-      if (inputTokens > 0) {
-        cacheHitPercent = (item.cacheRead / inputTokens) * 100;
-      }
-      logger.record({
-        trace: { turnId: item.turnId, chatId: undefined, platform: "discord" },
-        event: "model.request.completed",
-        component: "agent-harness",
-        success: true,
-        metadata: {
-          input: item.input,
-          output: 20,
-          cacheRead: item.cacheRead,
-          cacheWrite: item.cacheWrite,
-          inputTokens,
-          cacheHitPercent,
-        },
-      });
-    }
-    await logger.close();
-    application = createLogViewerApp({ dbPath });
+  test("live endpoint delivers every new matching event across batches", async () => {
+    const { dbPath, logger } = createLogger();
 
-    for (const item of cases) {
-      for (const path of ["/", "/fragments/events"]) {
-        const response = await application.app.request(`${path}?range=all&turnId=${item.turnId}`);
-        const html = await response.text();
-        expect(response.status).toBe(200);
-        expect(html).toContain("<h3>Prompt cache</h3>");
-        expect(html).toContain(`>${item.expected}</strong>`);
-        expect(html).toContain("Cached tokens read");
-        expect(html).toContain("Cache tokens written");
-        expect(html).toContain("Uncached input tokens");
-        expect(html).toContain("Output tokens");
-      }
-    }
-  });
-});
-
-test("live fragments deliver every new matching event across batches and advance the cursor", async () => {
-  tempDir = mkdtempSync(join(tmpdir(), "bellaclaw-log-viewer-"));
-  const dbPath = join(tempDir, "logs.db");
-  const logger = new AppLogger({ dbPath, stdout() {} });
-  try {
-    logger.record({
-      trace: { turnId: "live", chatId: undefined, platform: "discord" },
-      event: "tool.finished",
-      component: "ai",
-    });
-    await logger.flush();
-    application = createLogViewerApp({ dbPath });
-    const home = await application.app.request("/?live=1&range=all&event=tool.finished");
-    const html = await home.text();
-    let pollUrl = html
-      .match(/hx-get="([^"]*\/fragments\/live[^"]*)"/)?.[1]
-      ?.replaceAll("&amp;", "&");
-    expect(pollUrl).toBeDefined();
-
-    for (let index = 0; index < 205; index += 1) {
+    try {
       logger.record({
         trace: { turnId: "live", chatId: undefined, platform: "discord" },
         event: "tool.finished",
         component: "ai",
       });
-    }
-    logger.record({
-      trace: { turnId: "live", chatId: undefined, platform: "discord" },
-      event: "model.request.completed",
-      component: "ai",
-    });
-    await logger.flush();
+      await logger.flush();
+      application = createLogViewerApp({ dbPath });
+      const home = await application.app.request("/api/logs?live=1&range=all&event=tool.finished");
+      const homeBody: TLogReaderResult<TLogViewerPage> = await home.json();
+      expect(homeBody.success).toBe(true);
 
-    const ids: number[] = [];
-    for (const expectedCount of [100, 100, 5, 0]) {
-      assert(pollUrl);
-      const response = await application.app.request(pollUrl);
-      expect(response.status).toBe(200);
-      const fragment = await response.text();
-      const batch = [...fragment.matchAll(/data-event-id="(\d+)"/g)].map((match) =>
-        Number(match[1]),
-      );
-      expect(batch.length).toBe(expectedCount);
-      expect(batch).toEqual([...batch].sort((a, b) => b - a));
-      ids.push(...batch);
-      const nextPollUrl = fragment.match(/hx-get="([^"]+)"/)?.[1]?.replaceAll("&amp;", "&");
-      expect(nextPollUrl).toBeDefined();
-      if (expectedCount === 0) {
-        expect(nextPollUrl).toBe(pollUrl);
-        expect(fragment).not.toContain("data-live-events");
+      if (!homeBody.success) {
+        return;
       }
-      pollUrl = nextPollUrl;
+
+      let cursor = homeBody.data.page.events[0];
+
+      for (let index = 0; index < 205; index += 1) {
+        logger.record({
+          trace: { turnId: "live", chatId: undefined, platform: "discord" },
+          event: "tool.finished",
+          component: "ai",
+        });
+      }
+      logger.record({
+        trace: { turnId: "live", chatId: undefined, platform: "discord" },
+        event: "model.request.completed",
+        component: "ai",
+      });
+      await logger.flush();
+
+      const ids: number[] = [];
+
+      for (const expectedCount of [100, 100, 5, 0]) {
+        const response = await application.app.request(
+          `/api/logs/new?live=1&range=all&event=tool.finished&afterCreatedAt=${cursor?.createdAtMs}&afterId=${cursor?.id}`,
+        );
+        const body: TLogReaderResult<TLogLiveUpdate> = await response.json();
+        expect(body.success).toBe(true);
+
+        if (!body.success) {
+          return;
+        }
+
+        const batch = body.data.events.map((event) => event.id);
+        expect(batch).toHaveLength(expectedCount);
+        expect(batch).toEqual([...batch].sort((a, b) => b - a));
+        ids.push(...batch);
+        expect(body.data.recentTurns[0]?.turnId).toBe("live");
+        cursor = body.data.events[0] ?? cursor;
+      }
+
+      expect(ids.sort((a, b) => a - b)).toEqual(
+        Array.from({ length: 205 }, (_, index) => index + 2),
+      );
+    } finally {
+      await logger.close();
     }
-    expect(ids.sort((a, b) => a - b)).toEqual(Array.from({ length: 205 }, (_, index) => index + 2));
-  } finally {
-    await logger.close();
-  }
+  });
+
+  test("live endpoint rejects a missing cursor", async () => {
+    application = createLogViewerApp({ dbPath: ":memory:" });
+
+    const response = await application.app.request("/api/logs/new?live=1");
+
+    expect(response.status).toBe(400);
+  });
 });

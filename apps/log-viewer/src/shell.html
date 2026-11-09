@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark light" />
+    <title>BellaClaw Logs</title>
+    <link rel="icon" href="data:," />
+    <script>
+      {
+        const savedTheme = localStorage.getItem("bellaclaw-log-viewer-theme");
+
+        if (savedTheme === "light" || savedTheme === "dark") {
+          document.documentElement.dataset.theme = savedTheme;
+        }
+      }
+    </script>
+    <link rel="stylesheet" href="/assets/styles.css" />
+    <script type="module" src="/assets/client.js"></script>
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>

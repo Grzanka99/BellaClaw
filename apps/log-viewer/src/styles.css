@@ -281,14 +281,6 @@ pre,
   background: color-mix(in srgb, var(--success) 12%, var(--surface));
 }
 
-.theme-toggle-icon::before {
-  content: "☼";
-}
-
-:root[data-current-theme="light"] .theme-toggle-icon::before {
-  content: "◐";
-}
-
 .search-panel {
   padding: 0 28px 12px;
   border-bottom: 1px solid var(--border);
@@ -1550,7 +1542,7 @@ pre {
     transition: transform 0.18s ease;
   }
 
-  :root[data-inspector-open="1"] .event-inspector {
+  .event-inspector.open {
     transform: none;
   }
 
