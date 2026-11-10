@@ -8,7 +8,7 @@ import {
   parseLocalFireAt,
   validateCronFallbackPairing,
 } from "./cron-content";
-import { defineTool, requireChatId } from "./define-tool";
+import { defineTool, requireChatId, ToolError } from "./define-tool";
 import instructions from "./schedule-once.xml" with { type: "text" };
 
 export const SScheduleOnceArgs = obj({
@@ -40,11 +40,17 @@ export function validateScheduleOnceArgs(
   const contentModeCount = countCronContentModes(args);
 
   if (contentModeCount === 0) {
-    throw new Error("Provide reminderText, reminderPromptData, or taskPrompt");
+    throw new ToolError(
+      "missing-content",
+      "Provide reminderText, reminderPromptData, or taskPrompt",
+    );
   }
 
   if (contentModeCount > 1) {
-    throw new Error("Provide only one of reminderText, reminderPromptData, or taskPrompt");
+    throw new ToolError(
+      "conflicting-content-modes",
+      "Provide only one of reminderText, reminderPromptData, or taskPrompt",
+    );
   }
 
   validateCronFallbackPairing(args);
@@ -63,6 +69,16 @@ export const scheduleOnce = defineTool({
   schema: SScheduleOnceArgs,
   instructions,
   mode: "sequential",
+  logSafe: [
+    "fireAt",
+    "overwrite",
+    "type",
+    ["pattern", "cronPattern"],
+    "nextRunAt",
+    "timezone",
+    "status",
+  ],
+  privateErrors: true,
   execute: async (context, args) => {
     const ownerTimezone = context.settings[EConfigKey.AiInstructionsTimezone];
     const validatedArgs = validateScheduleOnceArgs(args, ownerTimezone);
@@ -73,7 +89,10 @@ export const scheduleOnce = defineTool({
     });
 
     if ("error" in result) {
-      throw new Error(`${result.operation} failed: ${String(result.error)}`);
+      throw new ToolError(
+        `${result.operation}-failed`,
+        `${result.operation} failed: ${String(result.error)}`,
+      );
     }
 
     return result;

@@ -28,6 +28,7 @@ export const rememberMemory = defineTool({
   schema: SRememberMemoryArgs,
   instructions,
   mode: "sequential",
+  logSafe: [],
   execute: async (context, args) => {
     const chatId = requireChatId(context.chatId);
     const fact = args.fact.trim();

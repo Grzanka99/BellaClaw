@@ -11,6 +11,8 @@ export const listCronJobs = defineTool({
   schema: obj({}, { description: "No arguments are required" }),
   instructions,
   mode: "parallel",
+  logSafe: [],
+  privateErrors: true,
   execute: async (context) => {
     return CronSingleton.instance.list(requireChatId(context.chatId));
   },

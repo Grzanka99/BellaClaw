@@ -32,6 +32,7 @@ export const searchMemory = defineTool({
   schema: SSearchMemoryArgs,
   instructions,
   mode: "parallel",
+  logSafe: ["limit"],
   execute: async (context, args) => {
     const chatId = requireChatId(context.chatId);
     await FactDistiller.instance.ensureFactsCurrent(chatId, context.trace);

@@ -1,4 +1,5 @@
 import type { TOption } from "@bellaclaw/shared";
+import { ToolError } from "./define-tool";
 
 type TCronContentFields = {
   group?: string;
@@ -41,7 +42,10 @@ export function countCronContentModes(args: TCronContentFields): number {
 
 export function validateCronFallbackPairing(args: TCronContentFields): void {
   if (args.reminderPromptData !== undefined && args.reminderFallbackText === undefined) {
-    throw new Error("reminderFallbackText is required when reminderPromptData is set");
+    throw new ToolError(
+      "invalid-fallback-pairing",
+      "reminderFallbackText is required when reminderPromptData is set",
+    );
   }
 
   if (
@@ -49,15 +53,21 @@ export function validateCronFallbackPairing(args: TCronContentFields): void {
     args.reminderText === undefined &&
     args.reminderPromptData === undefined
   ) {
-    throw new Error("reminderFallbackText requires reminderText or reminderPromptData");
+    throw new ToolError(
+      "invalid-fallback-pairing",
+      "reminderFallbackText requires reminderText or reminderPromptData",
+    );
   }
 
   if (args.taskPrompt !== undefined && args.taskFallbackText === undefined) {
-    throw new Error("taskFallbackText is required when taskPrompt is set");
+    throw new ToolError(
+      "invalid-fallback-pairing",
+      "taskFallbackText is required when taskPrompt is set",
+    );
   }
 
   if (args.taskFallbackText !== undefined && args.taskPrompt === undefined) {
-    throw new Error("taskFallbackText requires taskPrompt");
+    throw new ToolError("invalid-fallback-pairing", "taskFallbackText requires taskPrompt");
   }
 }
 
@@ -89,13 +99,16 @@ function getTimezoneOffsetMs(timestamp: number, timezone: string): number {
  */
 export function parseLocalFireAt(fireAt: string, timezone: string): Date {
   if (!new RegExp(LOCAL_FIRE_AT_PATTERN).test(fireAt)) {
-    throw new Error("fireAt must be local time, YYYY-MM-DDTHH:mm[:ss], with no Z or offset");
+    throw new ToolError(
+      "invalid-fire-at",
+      "fireAt must be local time, YYYY-MM-DDTHH:mm[:ss], with no Z or offset",
+    );
   }
 
   const wallTime = Date.parse(`${fireAt}Z`);
 
   if (Number.isNaN(wallTime)) {
-    throw new Error(`Invalid fireAt: ${fireAt}`);
+    throw new ToolError("invalid-fire-at", `Invalid fireAt: ${fireAt}`);
   }
 
   const firstOffset = getTimezoneOffsetMs(wallTime, timezone);
@@ -104,7 +117,7 @@ export function parseLocalFireAt(fireAt: string, timezone: string): Date {
 
   // Rejects normalized calendar dates (April 31) and times skipped by a DST change.
   if (!formatLocalDateTime(resolved, timezone).startsWith(fireAt)) {
-    throw new Error(`fireAt ${fireAt} does not exist in ${timezone}`);
+    throw new ToolError("nonexistent-fire-at", `fireAt ${fireAt} does not exist in ${timezone}`);
   }
 
   return new Date(resolved);

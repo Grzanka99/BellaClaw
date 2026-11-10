@@ -155,7 +155,11 @@ describe("update-cron-job", () => {
           taskFallbackText: "",
           ...generatedContent,
         }),
-      ).rejects.toThrow("omit fireAt for this recurring reminder");
+      ).resolves.toMatchObject({
+        isError: true,
+        details: { errorCode: "fire-at-on-recurring-job" },
+        content: [{ text: expect.stringContaining("omit fireAt for this recurring reminder") }],
+      });
       expect(createRecurring).not.toHaveBeenCalled();
     });
 
@@ -205,7 +209,11 @@ describe("update-cron-job", () => {
 
       await expect(
         tool.execute("call", { name: "water-plants", fireAt: "2026-12-25T03:30:00+01:00" }),
-      ).rejects.toThrow("no Z or offset");
+      ).resolves.toMatchObject({
+        isError: true,
+        details: { errorCode: "invalid-fire-at" },
+        content: [{ text: expect.stringContaining("no Z or offset") }],
+      });
       expect(createOnce).not.toHaveBeenCalled();
     });
 
@@ -214,7 +222,11 @@ describe("update-cron-job", () => {
 
       await expect(
         tool.execute("call", { name: "water-plants", pattern: "0 8 * * *" }),
-      ).rejects.toThrow("omit pattern for this one-time reminder");
+      ).resolves.toMatchObject({
+        isError: true,
+        details: { errorCode: "pattern-on-one-time-job" },
+        content: [{ text: expect.stringContaining("omit pattern for this one-time reminder") }],
+      });
       expect(createOnce).not.toHaveBeenCalled();
     });
   });

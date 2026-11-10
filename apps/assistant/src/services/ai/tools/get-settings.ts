@@ -54,6 +54,7 @@ export const getSettings = defineTool({
   schema: obj({}),
   instructions,
   mode: "parallel",
+  logSafe: [["settings", "settingKeys"]],
   execute: async (context) => {
     const settings = await SettingsService.instance.getAll(requireChatId(context.chatId));
     await refreshAiModels(resolveAiProvider(settings), true);

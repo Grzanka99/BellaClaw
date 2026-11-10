@@ -46,7 +46,11 @@ import { createPlatformInstructions } from "../instructions/platform";
 import { readXmlAndInjectConfig } from "../instructions/read-xml-and-inject-config";
 import { emptyUsage, LlmClient } from "../llm";
 import { aiModels } from "../providers/registry";
-import { type TToolExecutionContext, validateToolArguments } from "../tools/define-tool";
+import {
+  type TToolExecutionContext,
+  type TToolLogPolicy,
+  validateToolArguments,
+} from "../tools/define-tool";
 import { EModelPurpose, ERole, type THistoryItem } from "../types";
 import type { TAgentRunArgs, TAgentRunResult, TMainAgentRunResult } from "./types";
 
@@ -167,6 +171,16 @@ export class AgentHarness {
     );
 
     const toolSpans = new Map<string, TBehaviorSpan>();
+    const toolLogPolicies = new Map<string, TToolLogPolicy>(
+      agentDefinition.tools.map((tool) => [tool.name, tool]),
+    );
+    for (const target of agentDefinition.delegates) {
+      toolLogPolicies.set(`delegate-${target}`, {
+        logSafe: [],
+        privateErrors: false,
+        previews: ["task", "text"],
+      });
+    }
 
     let messages = this.createHistory(
       args.history,
@@ -284,11 +298,11 @@ export class AgentHarness {
             toolName: event.toolName,
           }),
         );
-        const details = sanitizeToolCallArguments({
-          id: "",
-          name: event.toolName,
-          arguments: event.args,
-        });
+        const details = sanitizeToolCallArguments(
+          event.toolName,
+          event.args,
+          toolLogPolicies.get(event.toolName),
+        );
         AppLogger.instance.record({
           trace: args.trace,
           event: "tool.call.started",
@@ -323,7 +337,8 @@ export class AgentHarness {
           data: resultDetails,
           error: resultError,
         };
-        const details = sanitizeToolResult(result);
+        const logPolicy = toolLogPolicies.get(event.toolName);
+        const details = sanitizeToolResult(result, logPolicy);
 
         // NOTE: tool errors use the tool-specific sanitizer, so they bypass the span's own one.
         toolSpans.get(event.toolCallId)?.end(
@@ -336,7 +351,7 @@ export class AgentHarness {
               toolCallId: event.toolCallId,
               parentToolCallId: args.parentToolCallId ?? null,
             },
-            error: sanitizeToolResultError(result),
+            error: sanitizeToolResultError(result, logPolicy),
           },
           undefined,
         );

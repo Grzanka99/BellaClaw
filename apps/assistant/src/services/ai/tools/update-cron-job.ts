@@ -9,7 +9,7 @@ import {
   parseLocalFireAt,
   validateCronFallbackPairing,
 } from "./cron-content";
-import { defineTool, requireChatId } from "./define-tool";
+import { defineTool, requireChatId, ToolError } from "./define-tool";
 import instructions from "./update-cron-job.xml" with { type: "text" };
 
 export const SUpdateCronJobArgs = obj({
@@ -45,11 +45,17 @@ export function validateUpdateCronJobArgs(
   };
 
   if (args.pattern !== undefined && args.fireAt !== undefined) {
-    throw new Error("Provide either pattern or fireAt, not both");
+    throw new ToolError(
+      "conflicting-schedule-fields",
+      "Provide either pattern or fireAt, not both",
+    );
   }
 
   if (countCronContentModes(args) > 1) {
-    throw new Error("Provide only one of reminderText, reminderPromptData, or taskPrompt");
+    throw new ToolError(
+      "conflicting-content-modes",
+      "Provide only one of reminderText, reminderPromptData, or taskPrompt",
+    );
   }
 
   validateCronFallbackPairing(args);
@@ -65,13 +71,15 @@ export const updateCronJob = defineTool({
   schema: SUpdateCronJobArgs,
   instructions,
   mode: "sequential",
+  logSafe: ["fireAt", "type", ["pattern", "cronPattern"], "nextRunAt", "timezone", "status"],
+  privateErrors: true,
   execute: async (context, parsedArgs) => {
     const chatId = requireChatId(context.chatId);
     const validatedArgs = validateUpdateCronJobArgs(parsedArgs);
     const existing = await CronSingleton.instance.get(validatedArgs.name, chatId);
 
     if (existing === undefined) {
-      throw new Error(`No job found with name: ${validatedArgs.name}`);
+      throw new ToolError("job-not-found", `No job found with name: ${validatedArgs.name}`);
     }
 
     let reminderText = existing.reminderText;
@@ -102,7 +110,8 @@ export const updateCronJob = defineTool({
 
     if (existing.type === ECronJobType.Recurring) {
       if (validatedArgs.fireAt !== undefined) {
-        throw new Error(
+        throw new ToolError(
+          "fire-at-on-recurring-job",
           "fireAt can only update one-time reminders; omit fireAt for this recurring reminder and use pattern only to change its schedule",
         );
       }
@@ -128,14 +137,18 @@ export const updateCronJob = defineTool({
       });
 
       if ("error" in result) {
-        throw new Error(`${result.operation} failed: ${String(result.error)}`);
+        throw new ToolError(
+          `${result.operation}-failed`,
+          `${result.operation} failed: ${String(result.error)}`,
+        );
       }
 
       return result;
     }
 
     if (validatedArgs.pattern !== undefined) {
-      throw new Error(
+      throw new ToolError(
+        "pattern-on-one-time-job",
         "pattern can only update recurring reminders; omit pattern for this one-time reminder and use fireAt only to change its time",
       );
     }
@@ -164,7 +177,10 @@ export const updateCronJob = defineTool({
     });
 
     if ("error" in result) {
-      throw new Error(`${result.operation} failed: ${String(result.error)}`);
+      throw new ToolError(
+        `${result.operation}-failed`,
+        `${result.operation} failed: ${String(result.error)}`,
+      );
     }
 
     return result;

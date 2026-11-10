@@ -15,6 +15,7 @@ export const removeReadonlyCalendar = defineTool({
   }),
   instructions,
   mode: "sequential",
+  logSafe: [],
   execute: async (context, args) => {
     await CalendarService.instance.removeReadonlyCalendar(
       requireChatId(context.chatId),

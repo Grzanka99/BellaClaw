@@ -35,6 +35,7 @@ export const webFetch = defineTool({
   schema: SWebFetchArgs,
   instructions,
   mode: "parallel",
+  logSafe: ["format", "timeout", "contentType", "truncated"],
   execute: async (_context, args, signal) => {
     return fetchWeb(validateWebFetchArgs(args), signal);
   },

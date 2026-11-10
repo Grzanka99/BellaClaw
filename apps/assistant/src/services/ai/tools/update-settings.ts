@@ -115,6 +115,7 @@ export const updateSettings = defineTool({
   schema: SUpdateSettingsArgs,
   instructions,
   mode: "sequential",
+  logSafe: [["settings", "settingKeys"]],
   execute: async (context, parsedArgs) => {
     const chatId = requireChatId(context.chatId);
     validateUpdateSettingsArgs(parsedArgs);

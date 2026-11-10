@@ -38,6 +38,7 @@ export const listCalendarEvents = defineTool({
   schema: SListCalendarEventsArgs,
   instructions,
   mode: "parallel",
+  logSafe: [],
   execute: async (context, args, signal) => {
     const userId = requireChatId(context.chatId);
     validateListCalendarEventsArgs(args);

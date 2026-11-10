@@ -16,6 +16,7 @@ export const deleteCalendarEvent = defineTool({
   schema: SDeleteCalendarEventArgs,
   instructions,
   mode: "sequential",
+  logSafe: [],
   execute: async (context, args, signal) => {
     const userId = requireChatId(context.chatId);
     await CalendarService.instance.deleteEvent({ ...args, userId, signal });

@@ -18,6 +18,7 @@ export const forgetMemory = defineTool({
   schema: SForgetMemoryArgs,
   instructions,
   mode: "sequential",
+  logSafe: [],
   execute: async (context, args) => {
     const chatId = requireChatId(context.chatId);
     try {

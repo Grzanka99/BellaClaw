@@ -96,6 +96,7 @@ export const createCalendarEvent = defineTool({
   schema: SCreateCalendarEventArgs,
   instructions,
   mode: "sequential",
+  logSafe: [],
   execute: async (context, args, signal) => {
     const userId = requireChatId(context.chatId);
     const validatedArgs = validateCreateCalendarEventArgs(args);

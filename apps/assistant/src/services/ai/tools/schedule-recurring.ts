@@ -6,7 +6,7 @@ import {
   normalizeCronContentFields,
   validateCronFallbackPairing,
 } from "./cron-content";
-import { defineTool, requireChatId } from "./define-tool";
+import { defineTool, requireChatId, ToolError } from "./define-tool";
 import instructions from "./schedule-recurring.xml" with { type: "text" };
 
 export const SScheduleRecurringArgs = obj({
@@ -34,11 +34,17 @@ export function validateScheduleRecurringArgs(
   const contentModeCount = countCronContentModes(args);
 
   if (contentModeCount === 0) {
-    throw new Error("Provide reminderText, reminderPromptData, or taskPrompt");
+    throw new ToolError(
+      "missing-content",
+      "Provide reminderText, reminderPromptData, or taskPrompt",
+    );
   }
 
   if (contentModeCount > 1) {
-    throw new Error("Provide only one of reminderText, reminderPromptData, or taskPrompt");
+    throw new ToolError(
+      "conflicting-content-modes",
+      "Provide only one of reminderText, reminderPromptData, or taskPrompt",
+    );
   }
 
   validateCronFallbackPairing(args);
@@ -54,6 +60,8 @@ export const scheduleRecurring = defineTool({
   schema: SScheduleRecurringArgs,
   instructions,
   mode: "sequential",
+  logSafe: ["overwrite", "type", ["pattern", "cronPattern"], "nextRunAt", "timezone", "status"],
+  privateErrors: true,
   execute: async (context, args) => {
     const validatedArgs = validateScheduleRecurringArgs(args);
     const result = await CronSingleton.instance.createRecurring({
@@ -63,7 +71,10 @@ export const scheduleRecurring = defineTool({
     });
 
     if ("error" in result) {
-      throw new Error(`${result.operation} failed: ${String(result.error)}`);
+      throw new ToolError(
+        `${result.operation}-failed`,
+        `${result.operation} failed: ${String(result.error)}`,
+      );
     }
 
     return result;

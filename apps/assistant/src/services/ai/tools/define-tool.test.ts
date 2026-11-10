@@ -1,6 +1,7 @@
-import { describe, expect, test } from "bun:test";
-import type { Schema } from "@earendil-works/pi-schema";
-import { validateToolArguments } from "./define-tool";
+import { describe, expect, mock, test } from "bun:test";
+import { obj, type Schema } from "@earendil-works/pi-schema";
+import { DefaultConfigRecord } from "../../settings/schema";
+import { defineTool, ToolError, validateToolArguments } from "./define-tool";
 import { SScheduleOnceArgs } from "./schedule-once";
 import { SSearchMemoryArgs } from "./search-memory";
 
@@ -50,5 +51,43 @@ describe("validateToolArguments", () => {
       query: "tea",
       limit: 3,
     });
+  });
+});
+
+describe("defineTool", () => {
+  const context = {
+    chatId: "discord:1",
+    settings: DefaultConfigRecord,
+    trace: { turnId: "test", chatId: undefined, platform: undefined },
+    verifySettings: mock(async () => undefined),
+  };
+
+  function failingTool(error: Error) {
+    return defineTool({
+      name: "failing",
+      label: "Failing",
+      description: "Fails",
+      schema: obj({}),
+      instructions: "",
+      mode: "sequential",
+      logSafe: [],
+      execute: async () => {
+        throw error;
+      },
+    }).createAgentTool(context);
+  }
+
+  test("returns a ToolError as an error result that carries its code", async () => {
+    await expect(
+      failingTool(new ToolError("job-not-found", "No job found with name: x")).execute("call", {}),
+    ).resolves.toEqual({
+      content: [{ type: "text", text: "No job found with name: x" }],
+      details: { errorCode: "job-not-found" },
+      isError: true,
+    });
+  });
+
+  test("rethrows other errors", async () => {
+    await expect(failingTool(new Error("boom")).execute("call", {})).rejects.toThrow("boom");
   });
 });

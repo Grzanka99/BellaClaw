@@ -1782,7 +1782,7 @@ describe("AgentHarness", () => {
           durationMs: expect.any(Number),
           metadata: expect.objectContaining({
             toolCallId: "delegate-1",
-            responsePreview: "Project alpha used TypeBox.",
+            textChars: "Project alpha used TypeBox.".length,
           }),
         }),
         expect.objectContaining({

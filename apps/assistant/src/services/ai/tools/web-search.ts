@@ -24,6 +24,7 @@ export const webSearch = defineTool({
   schema: SWebSearchArgs,
   instructions,
   mode: "parallel",
+  logSafe: ["maxResults", "topic", "timeRange"],
   execute: async (_context, args, signal) => {
     return { query: args.query, results: await searchWeb(args, signal) };
   },

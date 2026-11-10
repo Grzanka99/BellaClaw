@@ -86,7 +86,15 @@ describe("schedule-once", () => {
         name: "missing-content",
         fireAt: "2026-08-01T10:00:00",
       }),
-    ).rejects.toThrow("Provide reminderText, reminderPromptData, or taskPrompt");
+    ).resolves.toMatchObject({
+      isError: true,
+      details: { errorCode: "missing-content" },
+      content: [
+        {
+          text: expect.stringContaining("Provide reminderText, reminderPromptData, or taskPrompt"),
+        },
+      ],
+    });
 
     await tool.execute("call", {
       name: "direct",
