@@ -1,6 +1,7 @@
 import { AsyncQueue, type TOption } from "@bellaclaw/shared";
 import { type AssistantMessage, contentText, type Message } from "@earendil-works/pi-ai";
 import { and, asc, desc, eq, gt, isNotNull, ne } from "drizzle-orm";
+import { emptyUsage } from "../ai/llm";
 import { ERole } from "../ai/types";
 import { DatabaseConnector } from "../database";
 import { memoriesTable } from "../database/schema";
@@ -135,14 +136,7 @@ export class ConversationStore {
       api: "bellaclaw",
       provider: "bellaclaw",
       model: "scheduled-delivery",
-      usage: {
-        input: 0,
-        output: 0,
-        cacheRead: 0,
-        cacheWrite: 0,
-        totalTokens: 0,
-        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-      },
+      usage: emptyUsage(),
       stopReason: "stop",
       timestamp: deliveredAt,
     };

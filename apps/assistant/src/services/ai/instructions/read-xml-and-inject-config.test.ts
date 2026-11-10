@@ -2,6 +2,7 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { formatCommandList } from "../../messaging/commands";
 import { DefaultConfigRecord, EConfigKey } from "../../settings/schema";
 import { readXmlAndInjectConfig } from "./read-xml-and-inject-config";
 
@@ -22,7 +23,7 @@ describe("readXmlAndInjectConfig", () => {
       [EConfigKey.AiInstructionsPersona]: "You are {{config.ai.instructions.assistantName}}.",
     };
 
-    expect(await readXmlAndInjectConfig(path, settings)).toBe(
+    expect(await readXmlAndInjectConfig(path, settings, "")).toBe(
       "You are Nyx. TZ: America/New_York {user.id}",
     );
   });
@@ -31,7 +32,7 @@ describe("readXmlAndInjectConfig", () => {
     const path = join(directory, "unknown.xml");
     await Bun.write(path, "{{config.ai.instructions.nonexistent}}");
 
-    await expect(readXmlAndInjectConfig(path, DefaultConfigRecord)).rejects.toThrow(
+    await expect(readXmlAndInjectConfig(path, DefaultConfigRecord, "")).rejects.toThrow(
       "unknown config key",
     );
   });
@@ -40,6 +41,7 @@ describe("readXmlAndInjectConfig", () => {
     const result = await readXmlAndInjectConfig(
       "./src/services/ai/instructions/base-system.xml",
       DefaultConfigRecord,
+      formatCommandList(),
     );
 
     expect(result).toContain(DefaultConfigRecord[EConfigKey.AiInstructionsAssistantName]);

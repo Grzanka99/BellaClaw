@@ -3,24 +3,20 @@ import { obj, type Static } from "@earendil-works/pi-schema";
 import { EConfigKey, type TConfigRecord } from "../../../settings/schema";
 import { decodeAiModelPreferences } from "../../model-preferences";
 import { aiModels, getAiModelConfigs, supportsAiServiceTier } from "../../providers/registry";
-import { EAiProvider } from "../../types";
+import { type EAiProvider, SAiProvider } from "../../types";
 
 export const SGetSettingsArgs = obj({});
 
 export type TGetSettingsArgs = Static<typeof SGetSettingsArgs>;
 
 export function resolveAiProvider(settings: TConfigRecord): EAiProvider {
-  const provider = settings[EConfigKey.AiProvider];
+  const provider = SAiProvider.safeParse(settings[EConfigKey.AiProvider]);
 
-  switch (provider) {
-    case EAiProvider.OpenaiCodex:
-    case EAiProvider.Openrouter:
-    case EAiProvider.Ollama:
-    case EAiProvider.OpencodeGo:
-      return provider;
-    default:
-      throw new Error("Configured AI provider is invalid");
+  if (!provider.success) {
+    throw new Error("Configured AI provider is invalid");
   }
+
+  return provider.data;
 }
 
 export function createAiRuntime(settings: TConfigRecord, includeAvailableModels: boolean) {

@@ -10,7 +10,7 @@ import {
   startMcpAuthServer,
   stopMcpAuthServer,
 } from "./services/mcp/auth";
-import { MessageHandler } from "./services/message-handler";
+import { FactDistiller } from "./services/memory/distill";
 import { MessagingAdapter } from "./services/messaging";
 import { SignalSingleton } from "./services/signal";
 
@@ -55,7 +55,7 @@ async function init(): Promise<void> {
       SignalSingleton.instance.setup(),
     ]);
     await MessagingAdapter.instance.setup();
-    await MessageHandler.scheduleFactDrainForAllChats(turnId);
+    await FactDistiller.instance.scheduleFactDrainForAllChats(turnId);
     startAiOAuthKeepAlive();
 
     AppLogger.instance.record({

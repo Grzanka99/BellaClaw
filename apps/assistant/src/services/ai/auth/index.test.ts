@@ -6,6 +6,7 @@ import { createModels, createProvider, type OAuthCredential } from "@earendil-wo
 import { openAICodexResponsesApi } from "@earendil-works/pi-ai/api/openai-codex-responses.lazy";
 import { SettingsService } from "../../settings";
 import { EConfigKey } from "../../settings/schema";
+import { FileCredentialStore } from "../providers/file-credential-store";
 import { EAiProvider } from "../types";
 import {
   checkAiOAuth,
@@ -14,7 +15,6 @@ import {
   getAiAuthState,
   registerAiAuthChannel,
 } from ".";
-import { FileCredentialStore } from "./file-credential-store";
 
 let directory: string;
 let sent: { chatId: string; text: string }[];

@@ -1,6 +1,6 @@
 import { AppLogger, EBehaviorLogLevel, type TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
 import type { TOption } from "@bellaclaw/shared";
-import { AsyncQueue, createLogger, logger, type TLogger } from "@bellaclaw/shared";
+import { AsyncQueue, createLogger, type TLogger } from "@bellaclaw/shared";
 import { AgentHarness } from "../ai/agent-harness";
 import { describeAiAuthProblem } from "../ai/auth";
 import { ERole, type THistoryItem } from "../ai/types";
@@ -28,9 +28,6 @@ export class MessageHandler {
   private queue = new AsyncQueue();
   private turnQueue = new AsyncQueue();
   private conversations = ConversationStore.instance;
-  // NOTE: fact drains get their own queue so a slow distillation run never delays the
-  // transcript saves that the reply path awaits on this.queue
-  private factQueue = new AsyncQueue();
   private memory = Memory.instance;
   private factDistiller = FactDistiller.instance;
 
@@ -55,9 +52,10 @@ export class MessageHandler {
 
   public async handleMessage(
     message: TIncommingMessage,
+    commands: string,
     platform?: EMessagePlatform,
   ): Promise<string> {
-    return this.turnQueue.enqueue(() => this.handleTurn(message, platform));
+    return this.turnQueue.enqueue(() => this.handleTurn(message, commands, platform));
   }
 
   public saveDeliveredMessage(
@@ -75,6 +73,7 @@ export class MessageHandler {
 
   private async handleTurn(
     message: TIncommingMessage,
+    commands: string,
     platform: TOption<EMessagePlatform>,
   ): Promise<string> {
     const trace = getMessageTrace(message);
@@ -87,7 +86,7 @@ export class MessageHandler {
       await this.queue.enqueue(async () => undefined);
       let conversation = await this.conversations.load(message.chatId, platform ?? "unknown");
       if (conversation !== undefined) {
-        conversation = await this.compact(conversation, settings, platform, trace);
+        conversation = await this.compact(conversation, settings, commands, platform, trace);
       }
       let last30: TMemory[] = [];
       if (conversation === undefined) {
@@ -119,6 +118,7 @@ export class MessageHandler {
         currentTimeContext: createCurrentTimeContext(settings, savedMessage.createdAt),
         chatId: message.chatId,
         settings,
+        commands,
         platform,
         trace,
         signal: undefined,
@@ -182,12 +182,12 @@ export class MessageHandler {
 
       const finalResponse = aiRes.text;
 
-      void this.factQueue
-        .enqueue(() => this.drainLiveFactWindows(message.chatId, settings, trace))
+      void this.factDistiller
+        .enqueueFactDrain(message.chatId, settings, trace)
         .catch((error) => this.logger.error(`handleMessage: fact drain failed: ${String(error)}`));
       void this.queue
         .enqueue(async () => {
-          await this.compact(persisted, settings, platform, trace);
+          await this.compact(persisted, settings, commands, platform, trace);
         })
         .catch((error) => this.logger.error(`handleMessage: compaction failed: ${String(error)}`));
 
@@ -221,6 +221,7 @@ export class MessageHandler {
   private async compact(
     state: TConversation,
     settings: TConfigRecord,
+    commands: string,
     platform: TOption<EMessagePlatform>,
     trace: TOption<TBehaviorTraceContext>,
   ): Promise<TConversation> {
@@ -231,6 +232,7 @@ export class MessageHandler {
         settings,
         this.chatId,
         platform,
+        commands,
         trace,
       );
       if (result === undefined) {
@@ -268,66 +270,6 @@ export class MessageHandler {
         });
       }
       return state;
-    }
-  }
-
-  // NOTE: without this, facts stay empty until the first inbound message of the process, so the
-  // very first recall after a deploy answers from an unpopulated store. Catching up is best-effort
-  // and must never fail boot — messaging works fine against a partially distilled store.
-  public static async scheduleFactDrainForAllChats(turnId: string): Promise<void> {
-    try {
-      const chatIds = await Memory.instance.findChatIds();
-
-      for (const chatId of chatIds) {
-        MessageHandler.getInstance(chatId).scheduleFactDrain({
-          turnId,
-          chatId,
-          platform: undefined,
-        });
-      }
-    } catch (error) {
-      logger.error(`scheduleFactDrainForAllChats: boot fact drain failed: ${String(error)}`);
-    }
-  }
-
-  public scheduleFactDrain(trace: TOption<TBehaviorTraceContext>): void {
-    void this.factQueue
-      .enqueue(async () => {
-        const settings = await SettingsService.instance.getAll(this.chatId);
-        await this.drainLiveFactWindows(this.chatId, settings, trace);
-      })
-      .catch((error) => {
-        this.logger.error(`scheduleFactDrain: fact drain failed: ${String(error)}`);
-      });
-  }
-
-  public async ensureFactsCurrent(): Promise<void> {
-    const settings = await SettingsService.instance.getAll(this.chatId);
-    const success = await this.factQueue.enqueue(() =>
-      this.drainLiveFactWindows(this.chatId, settings, undefined),
-    );
-    if (!success) {
-      throw new Error("Pending fact distillation failed");
-    }
-  }
-
-  private async drainLiveFactWindows(
-    chatId: string,
-    settings: TConfigRecord,
-    trace: TOption<TBehaviorTraceContext>,
-  ): Promise<boolean> {
-    while (true) {
-      const window = await this.memory.loadLiveFactWindow(chatId);
-      if (window.messages.length === 0) {
-        return true;
-      }
-
-      const result = await this.factDistiller.processWindow({ window, settings, trace });
-
-      if (!result.success) {
-        this.logger.error(`drainLiveFactWindows: stopped after ${result.reason} failure`);
-        return false;
-      }
     }
   }
 

@@ -4,17 +4,9 @@ import type { AgentMessage, AgentTool } from "@earendil-works/pi-agent-core";
 import { Agent } from "@earendil-works/pi-agent-core";
 import {
   type Api,
-  type AssistantMessage,
-  type Context,
   contentText,
   createAssistantMessageEventStream,
-  hasApi,
-  type JsonValue,
-  type Message,
   type Model,
-  type ModelThinkingLevel,
-  type SimpleStreamOptions,
-  type ThinkingLevel,
 } from "@earendil-works/pi-ai";
 import {
   arr,
@@ -34,11 +26,7 @@ import type {
   CreateMessageResultWithTools,
   ElicitRequest,
   ElicitResult,
-  ContentBlock as McpContentBlock,
-  SamplingMessageContentBlock,
-  ToolUseContent,
 } from "@modelcontextprotocol/sdk/types.js";
-import { z } from "zod";
 import {
   sanitizeErrorMessage,
   sanitizeToolCallArguments,
@@ -50,21 +38,12 @@ import { conversationMessages, type TConversation } from "../../conversation/typ
 import { McpService } from "../../mcp";
 import { loadMcpProfiles } from "../../mcp/config";
 import { McpRunRegistry, type TMcpRunStatus } from "../../mcp/runs";
-import { EConfigKey, type TConfigRecord } from "../../settings/schema";
+import { createMcpSamplingRequest, createMcpSamplingResult } from "../../mcp/sampling";
+import type { TConfigRecord } from "../../settings/schema";
 import { createPlatformInstructions } from "../instructions/platform";
 import { readXmlAndInjectConfig } from "../instructions/read-xml-and-inject-config";
-import {
-  decodeAiModelPreferences,
-  getAiModelPreference,
-  type TAiServiceTier,
-} from "../model-preferences";
-import {
-  aiModels,
-  getAiApiKey,
-  getAiModelConfig,
-  refreshAiModels,
-  supportsAiServiceTier,
-} from "../providers/registry";
+import { emptyUsage, LlmClient } from "../llm";
+import { aiModels } from "../providers/registry";
 import { validateToolArguments } from "../tools/definition";
 import {
   createCalendarTools,
@@ -74,7 +53,7 @@ import {
   createWebTools,
   type TToolExecutionContext,
 } from "../tools/executable";
-import { EAiProvider, EModelPurpose, ERole, type THistoryItem } from "../types";
+import { EModelPurpose, ERole, type THistoryItem } from "../types";
 import {
   EAgentName,
   type TAgentRunArgs,
@@ -95,57 +74,10 @@ const AGENT_INSTRUCTIONS: Record<EAgentName, string> = {
   [EAgentName.ScheduledTask]: "./src/services/ai/agents/scheduled-task/instructions.xml",
 };
 
-function sessionHeaders(provider: string, sessionId: string): Record<string, string> {
-  const headers: Record<string, string> = {};
-  if (provider === EAiProvider.OpencodeGo) {
-    headers["x-opencode-session"] = sessionId;
-  }
-  if (provider === EAiProvider.Openrouter) {
-    headers["x-session-id"] = sessionId;
-  }
-
-  return headers;
-}
-
-function withSession(
-  options: SimpleStreamOptions,
-  provider: string,
-  sessionId: string,
-): SimpleStreamOptions {
-  return {
-    ...options,
-    sessionId,
-    headers: { ...options.headers, ...sessionHeaders(provider, sessionId) },
-  };
-}
-
-// Simple requests cannot carry a service tier or Codex effort "none"; these need full stream options.
-function createAiStreamOptions(
-  model: Model<Api>,
-  options: SimpleStreamOptions,
-  effort: TOption<ModelThinkingLevel>,
-  serviceTier: TOption<TAiServiceTier>,
-) {
-  const isCodexEffortOff = effort === "off" && hasApi(model, "openai-codex-responses");
-
-  if (!isCodexEffortOff && (serviceTier === undefined || !supportsAiServiceTier(model))) {
-    return undefined;
-  }
-
-  let reasoningEffort: TOption<ThinkingLevel | "none">;
-
-  if (isCodexEffortOff) {
-    reasoningEffort = "none";
-  } else if (effort !== "off") {
-    reasoningEffort = effort;
-  }
-
-  return { ...options, reasoningEffort, serviceTier };
-}
-
 export class AgentHarness {
   private static _instance: TOption<AgentHarness>;
   private logger = createLogger("AGENT_HARNESS");
+  private llm = LlmClient.instance;
 
   public static get instance(): AgentHarness {
     if (AgentHarness._instance === undefined) {
@@ -189,147 +121,20 @@ export class AgentHarness {
     });
   }
 
-  public async completeText(args: {
-    prompt: string;
-    instructions: string;
-    settings: TConfigRecord;
-    purpose: EModelPurpose;
-    trace: TOption<TBehaviorTraceContext>;
-    signal?: AbortSignal;
-  }): Promise<TOption<string>> {
-    const startedAt = performance.now();
-    const modelConfig = await this.resolveModel(args.settings, args.purpose, args.signal);
-    const sessionId = this.createSessionId(
-      modelConfig.model.provider,
-      args.trace?.chatId,
-      args.trace?.platform,
-    );
-    this.logDirectCompletionStarted(
-      args.trace,
-      modelConfig.model.provider,
-      modelConfig.model.id,
-      args.purpose,
-    );
-    let result: Awaited<ReturnType<typeof aiModels.completeSimple>>;
-    let reasoning: TOption<ThinkingLevel>;
-
-    if (modelConfig.effort !== "off") {
-      reasoning = modelConfig.effort;
-    }
-
-    try {
-      const context: Context = {
-        systemPrompt: args.instructions,
-        messages: [{ role: "user", content: args.prompt, timestamp: Date.now() }],
-        tools: [],
-      };
-      const options = withSession(
-        {
-          apiKey: this.resolveApiKey(modelConfig.model.provider),
-          signal: args.signal,
-        },
-        modelConfig.model.provider,
-        sessionId,
-      );
-      const streamOptions = createAiStreamOptions(
-        modelConfig.model,
-        options,
-        modelConfig.effort,
-        modelConfig.serviceTier,
-      );
-
-      if (streamOptions !== undefined) {
-        result = await aiModels.complete(modelConfig.model, context, streamOptions);
-      } else {
-        result = await aiModels.completeSimple(modelConfig.model, context, {
-          ...options,
-          reasoning,
-        });
-      }
-    } catch (error) {
-      this.logDirectCompletionCompleted(
-        args.trace,
-        modelConfig.model.provider,
-        modelConfig.model.id,
-        args.purpose,
-        startedAt,
-        false,
-        "error",
-        0,
-        String(error),
-      );
-      throw error;
-    }
-
-    this.logModelRequestCompleted({
-      trace: args.trace,
-      purpose: args.purpose,
-      agentName: undefined,
-      parentToolCallId: undefined,
-      iteration: 1,
-      startedAt,
-      message: result,
-    });
-
-    let text: TOption<string>;
-    let stopReason: string = result.stopReason;
-    if (result.stopReason !== "error" && result.stopReason !== "aborted") {
-      const response = contentText(result.content).trim();
-      if (response.length > 0) {
-        text = response;
-      } else {
-        stopReason = "blank";
-      }
-    }
-
-    this.logDirectCompletionCompleted(
-      args.trace,
-      modelConfig.model.provider,
-      modelConfig.model.id,
-      args.purpose,
-      startedAt,
-      text !== undefined,
-      stopReason,
-      text?.length ?? 0,
-      result.errorMessage,
-    );
-    return text;
-  }
-
-  public async verifySettings(
-    settings: TConfigRecord,
-    purposes: EModelPurpose[],
-  ): Promise<TOption<string>> {
-    for (const purpose of purposes) {
-      const response = await this.completeText({
-        prompt: "Reply with ok.",
-        instructions: "Reply with ok.",
-        settings,
-        purpose,
-        trace: undefined,
-        signal: AbortSignal.timeout(60_000),
-      });
-
-      if (response === undefined) {
-        return `Provider returned no response for ${purpose}`;
-      }
-    }
-
-    return undefined;
-  }
-
   public async compactConversation(
     state: TConversation,
     settings: TConfigRecord,
     chatId: string,
     platform: TAgentRunArgs["platform"],
+    commands: string,
     trace?: TBehaviorTraceContext,
   ) {
-    const config = await this.resolveModel(settings, EModelPurpose.Main);
+    const config = await this.llm.resolveModel(settings, EModelPurpose.Main);
     const args = {
       name: EAgentName.Main,
       purpose: EModelPurpose.Main,
       settings,
+      commands,
       chatId,
       platform,
       prompt: "",
@@ -350,12 +155,12 @@ export class AgentHarness {
         ).length) /
         4,
     );
-    const sessionId = this.createSessionId(config.model.provider, chatId, platform);
+    const sessionId = this.llm.createSessionId(config.model.provider, chatId, platform);
     const model = {
       ...config.model,
       headers: {
         ...config.model.headers,
-        ...sessionHeaders(config.model.provider, sessionId),
+        ...this.llm.sessionHeaders(config.model.provider, sessionId),
       },
     };
     return compactConversation(state, aiModels, model, fixedTokens, trace);
@@ -364,7 +169,7 @@ export class AgentHarness {
   private async run(
     args: TAgentRunArgs & { delegationCount: TOption<() => void> },
   ): Promise<TMainAgentRunResult> {
-    const modelConfig = await this.resolveModel(args.settings, args.purpose, args.signal);
+    const modelConfig = await this.llm.resolveModel(args.settings, args.purpose, args.signal);
     const tools = await this.createTools(args);
     const systemPrompt = await this.createSystemPrompt(args, tools);
     let iterations = 0;
@@ -376,7 +181,11 @@ export class AgentHarness {
     let forcedFinalAttempt = false;
     const startedAt = performance.now();
     let requestStartedAt: TOption<number>;
-    const sessionId = this.createSessionId(modelConfig.model.provider, args.chatId, args.platform);
+    const sessionId = this.llm.createSessionId(
+      modelConfig.model.provider,
+      args.chatId,
+      args.platform,
+    );
 
     const toolStartedAt = new Map<string, number>();
 
@@ -404,21 +213,9 @@ export class AgentHarness {
 
         iterations += 1;
         requestStartedAt = performance.now();
-        const requestOptions = withSession(options ?? {}, model.provider, sessionId);
-        const streamOptions = createAiStreamOptions(
-          model,
-          requestOptions,
-          modelConfig.effort,
-          modelConfig.serviceTier,
-        );
-
-        if (streamOptions !== undefined) {
-          return aiModels.stream(model, context, streamOptions);
-        }
-
-        return aiModels.streamSimple(model, context, requestOptions);
+        return this.llm.stream(model, modelConfig, context, options ?? {}, sessionId);
       },
-      getApiKey: (provider) => this.resolveApiKey(provider),
+      getApiKey: (provider) => this.llm.resolveApiKey(provider),
       toolExecution: "parallel",
       prepareNextTurnWithContext: (context) => {
         let nextTools = context.context.tools;
@@ -470,7 +267,7 @@ export class AgentHarness {
         event.message.role === "assistant" &&
         requestStartedAt !== undefined
       ) {
-        this.logModelRequestCompleted({
+        this.llm.logModelRequestCompleted({
           trace: args.trace,
           purpose: args.purpose,
           agentName: args.name,
@@ -622,59 +419,6 @@ export class AgentHarness {
     return { text: finalText, iterations, toolCallCount, stopReason, messages: transcript };
   }
 
-  private async resolveModel(
-    settings: TConfigRecord,
-    purpose: EModelPurpose,
-    signal?: AbortSignal,
-  ) {
-    const provider = settings[EConfigKey.AiProvider];
-    const preferences = decodeAiModelPreferences(settings[EConfigKey.AiModelPreferences]);
-
-    switch (provider) {
-      case EAiProvider.OpenaiCodex:
-      case EAiProvider.Openrouter:
-      case EAiProvider.Ollama:
-      case EAiProvider.OpencodeGo:
-        await refreshAiModels(provider, false, signal);
-        return getAiModelConfig(
-          provider,
-          purpose,
-          getAiModelPreference(preferences, provider, purpose),
-        );
-      default:
-        throw new Error(`Unknown AI provider: ${provider}`);
-    }
-  }
-
-  private resolveApiKey(provider: string): TOption<string> {
-    switch (provider) {
-      case EAiProvider.OpenaiCodex:
-        return getAiApiKey(EAiProvider.OpenaiCodex);
-      case EAiProvider.Openrouter:
-        return getAiApiKey(EAiProvider.Openrouter);
-      case EAiProvider.Ollama:
-        return getAiApiKey(EAiProvider.Ollama);
-      case EAiProvider.OpencodeGo:
-        return getAiApiKey(EAiProvider.OpencodeGo);
-      default:
-        return undefined;
-    }
-  }
-
-  private createSessionId(
-    provider: string,
-    chatId: TOption<string>,
-    platform: TOption<string>,
-  ): string {
-    if (chatId === undefined) {
-      return crypto.randomUUID();
-    }
-
-    return new Bun.CryptoHasher("sha256", this.resolveApiKey(provider))
-      .update(`${platform ?? "unknown"}:${chatId}`)
-      .digest("hex");
-  }
-
   private createHistory(
     history: TOption<THistoryItem[]>,
     api: Api,
@@ -704,7 +448,7 @@ export class AgentHarness {
         api,
         provider,
         model,
-        usage: this.emptyUsage(),
+        usage: emptyUsage(),
         stopReason: "stop",
         timestamp,
       });
@@ -724,9 +468,9 @@ export class AgentHarness {
       return [tool.instructionsPath];
     });
     const [base, agentInstructions, ...toolInstructions] = await Promise.all([
-      readXmlAndInjectConfig(BASE_INSTRUCTIONS_PATH, args.settings),
-      readXmlAndInjectConfig(AGENT_INSTRUCTIONS[args.name], args.settings),
-      ...toolPaths.map((path) => readXmlAndInjectConfig(path, args.settings)),
+      readXmlAndInjectConfig(BASE_INSTRUCTIONS_PATH, args.settings, args.commands),
+      readXmlAndInjectConfig(AGENT_INSTRUCTIONS[args.name], args.settings, args.commands),
+      ...toolPaths.map((path) => readXmlAndInjectConfig(path, args.settings, args.commands)),
     ]);
     const parts = [base, agentInstructions, ...toolInstructions];
 
@@ -764,7 +508,7 @@ export class AgentHarness {
     const context: TToolExecutionContext = {
       chatId: args.chatId,
       settings: args.settings,
-      verifySettings: this.verifySettings.bind(this),
+      verifySettings: this.llm.verifySettings.bind(this.llm),
     };
     switch (args.name) {
       case EAgentName.Calendar:
@@ -1101,58 +845,26 @@ export class AgentHarness {
     if (params.toolChoice?.mode === "required") {
       throw new Error("MCP sampling toolChoice mode 'required' is not supported");
     }
-    const modelConfig = await this.resolveModel(settings, EModelPurpose.SpecialistAccurate, signal);
-    const tools = params.tools?.map((tool) => {
-      return {
-        name: tool.name,
-        description: tool.description ?? `MCP sampling tool ${tool.name}`,
-        parameters: tool.inputSchema,
-      };
-    });
-    const context: Context = {
-      systemPrompt: params.systemPrompt,
-      messages: this.createMcpSamplingMessages(params, modelConfig.model),
-      tools,
-    };
-    let reasoning: TOption<ThinkingLevel>;
-    if (modelConfig.effort !== "off") {
-      reasoning = modelConfig.effort;
-    }
-    let toolChoice: SimpleStreamOptions["toolChoice"];
-    if (params.toolChoice?.mode === "none") {
-      toolChoice = "none";
-    } else if (tools !== undefined && tools.length > 0) {
-      toolChoice = "auto";
-    }
+    const modelConfig = await this.llm.resolveModel(
+      settings,
+      EModelPurpose.SpecialistAccurate,
+      signal,
+    );
+    const request = createMcpSamplingRequest(params, modelConfig.model);
     const startedAt = performance.now();
-    const sessionId = this.createSessionId(modelConfig.model.provider, chatId, platform);
-    const options = withSession(
+    const sessionId = this.llm.createSessionId(modelConfig.model.provider, chatId, platform);
+    const result = await this.llm.complete(
+      modelConfig,
+      request.context,
       {
-        apiKey: this.resolveApiKey(modelConfig.model.provider),
         signal,
         maxTokens: Math.min(params.maxTokens, modelConfig.model.maxTokens),
         temperature: params.temperature,
-        toolChoice,
+        toolChoice: request.toolChoice,
       },
-      modelConfig.model.provider,
       sessionId,
     );
-    let result: Awaited<ReturnType<typeof aiModels.completeSimple>>;
-    const streamOptions = createAiStreamOptions(
-      modelConfig.model,
-      options,
-      modelConfig.effort,
-      modelConfig.serviceTier,
-    );
-    if (streamOptions !== undefined) {
-      result = await aiModels.complete(modelConfig.model, context, streamOptions);
-    } else {
-      result = await aiModels.completeSimple(modelConfig.model, context, {
-        ...options,
-        reasoning,
-      });
-    }
-    this.logModelRequestCompleted({
+    this.llm.logModelRequestCompleted({
       trace,
       purpose: EModelPurpose.SpecialistAccurate,
       agentName: EAgentName.Mcp,
@@ -1164,169 +876,7 @@ export class AgentHarness {
     if (result.stopReason === "error" || result.stopReason === "aborted") {
       throw new Error(result.errorMessage ?? `MCP sampling ${result.stopReason}`);
     }
-    const toolUses: ToolUseContent[] = [];
-    const textParts: string[] = [];
-    for (const block of result.content) {
-      if (block.type === "text") {
-        textParts.push(block.text);
-      } else if (block.type === "toolCall") {
-        toolUses.push({
-          type: "tool_use",
-          id: block.id,
-          name: block.name,
-          input: block.arguments,
-        });
-      }
-    }
-    let stopReason: string = "endTurn";
-    if (result.stopReason === "toolUse") {
-      stopReason = "toolUse";
-    } else if (result.stopReason === "length") {
-      stopReason = "maxTokens";
-    }
-    const responseModel = result.responseModel ?? modelConfig.model.id;
-    if (toolUses.length > 0) {
-      const response: CreateMessageResultWithTools = {
-        role: "assistant",
-        content: toolUses,
-        model: responseModel,
-        stopReason,
-      };
-      return response;
-    }
-    return {
-      role: "assistant",
-      content: { type: "text", text: textParts.join("\n") },
-      model: responseModel,
-      stopReason,
-    };
-  }
-
-  private createMcpSamplingMessages(
-    params: CreateMessageRequest["params"],
-    model: Model<string>,
-  ): Message[] {
-    const messages: Message[] = [];
-    const timestamp = Date.now();
-    for (const message of params.messages) {
-      let blocks: SamplingMessageContentBlock[];
-      if (Array.isArray(message.content)) {
-        blocks = message.content;
-      } else {
-        blocks = [message.content];
-      }
-      if (message.role === "assistant") {
-        const content: AssistantMessage["content"] = [];
-        for (const block of blocks) {
-          if (block.type === "text") {
-            content.push({ type: "text", text: block.text });
-          } else if (block.type === "tool_use") {
-            const input = z.record(z.string(), z.json()).safeParse(block.input);
-            if (!input.success) {
-              throw new Error("MCP sampling tool input must contain JSON values");
-            }
-            content.push({
-              type: "toolCall",
-              id: block.id,
-              name: block.name,
-              arguments: input.data,
-            });
-          } else {
-            content.push({ type: "text", text: this.describeMcpBlock(block) });
-          }
-        }
-        let stopReason: AssistantMessage["stopReason"] = "stop";
-        if (content.some((block) => block.type === "toolCall")) {
-          stopReason = "toolUse";
-        }
-        messages.push({
-          role: "assistant",
-          content,
-          api: model.api,
-          provider: model.provider,
-          model: model.id,
-          usage: this.emptyUsage(),
-          stopReason,
-          timestamp,
-        });
-        continue;
-      }
-      const userContent: Array<
-        { type: "text"; text: string } | { type: "image"; data: string; mimeType: string }
-      > = [];
-      for (const block of blocks) {
-        if (block.type === "tool_result") {
-          if (userContent.length > 0) {
-            messages.push({ role: "user", content: userContent.splice(0), timestamp });
-          }
-          const resultContent: Array<
-            { type: "text"; text: string } | { type: "image"; data: string; mimeType: string }
-          > = [];
-          for (const item of block.content) {
-            if (item.type === "text" || item.type === "image") {
-              resultContent.push(item);
-            } else {
-              resultContent.push({ type: "text", text: this.describeMcpBlock(item) });
-            }
-          }
-          let details: TOption<JsonValue>;
-          if (block.structuredContent !== undefined) {
-            const parsed = z.json().safeParse(block.structuredContent);
-            if (!parsed.success) {
-              throw new Error("MCP sampling structured content must contain JSON values");
-            }
-            details = parsed.data;
-          }
-          messages.push({
-            role: "toolResult",
-            toolCallId: block.toolUseId,
-            toolName: "mcp-sampling-tool",
-            content: resultContent,
-            details,
-            isError: block.isError ?? false,
-            timestamp,
-          });
-        } else if (block.type === "text" || block.type === "image") {
-          userContent.push(block);
-        } else {
-          userContent.push({ type: "text", text: this.describeMcpBlock(block) });
-        }
-      }
-      if (userContent.length > 0) {
-        messages.push({ role: "user", content: userContent, timestamp });
-      }
-    }
-    return messages;
-  }
-
-  private describeMcpBlock(block: SamplingMessageContentBlock | McpContentBlock): string {
-    if (block.type === "audio") {
-      return `[Audio content: ${block.mimeType}]`;
-    }
-    if (block.type === "image") {
-      return `[Image content: ${block.mimeType}]`;
-    }
-    if (block.type === "tool_result") {
-      return JSON.stringify(block.structuredContent ?? block.content);
-    }
-    if (block.type === "tool_use") {
-      return JSON.stringify({ tool: block.name, arguments: block.input });
-    }
-    if (block.type === "text") {
-      return block.text;
-    }
-    return JSON.stringify(block);
-  }
-
-  private emptyUsage(): AssistantMessage["usage"] {
-    return {
-      input: 0,
-      output: 0,
-      cacheRead: 0,
-      cacheWrite: 0,
-      totalTokens: 0,
-      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-    };
+    return createMcpSamplingResult(result, modelConfig.model.id);
   }
 
   private logStarted(args: TAgentRunArgs, provider: string, model: string) {
@@ -1505,117 +1055,6 @@ export class AgentHarness {
       error: sanitizeErrorMessage(error),
     });
   }
-
-  private logModelRequestCompleted(args: {
-    trace: TOption<TBehaviorTraceContext>;
-    purpose: EModelPurpose;
-    agentName: TOption<EAgentName>;
-    parentToolCallId: TOption<string>;
-    iteration: number;
-    startedAt: number;
-    message: AssistantMessage;
-  }) {
-    if (args.trace === undefined) {
-      return;
-    }
-
-    const { usage, stopReason } = args.message;
-    const inputTokens = usage.input + usage.cacheRead + usage.cacheWrite;
-    let cacheHitPercent: number | null = null;
-    if (inputTokens > 0) {
-      cacheHitPercent = (usage.cacheRead / inputTokens) * 100;
-    }
-
-    const success = stopReason !== "error" && stopReason !== "aborted";
-    let level = EBehaviorLogLevel.Info;
-    if (!success) {
-      level = EBehaviorLogLevel.Warning;
-    }
-
-    AppLogger.instance.record({
-      trace: args.trace,
-      event: "model.request.completed",
-      component: "agent-harness",
-      provider: args.message.provider,
-      model: args.message.model,
-      purpose: args.purpose,
-      level,
-      success,
-      durationMs: performance.now() - args.startedAt,
-      summary: `model request completed cacheRead=${usage.cacheRead} inputTokens=${inputTokens}`,
-      error: sanitizeErrorMessage(args.message.errorMessage),
-      metadata: {
-        agentName: args.agentName ?? null,
-        parentToolCallId: args.parentToolCallId ?? null,
-        iteration: args.iteration,
-        stopReason,
-        input: usage.input,
-        output: usage.output,
-        cacheRead: usage.cacheRead,
-        cacheWrite: usage.cacheWrite,
-        inputTokens,
-        cacheHitPercent,
-      },
-    });
-  }
-
-  private logDirectCompletionStarted(
-    trace: TOption<TBehaviorTraceContext>,
-    provider: string,
-    model: string,
-    purpose: EModelPurpose,
-  ) {
-    if (trace === undefined) {
-      return;
-    }
-
-    AppLogger.instance.record({
-      trace,
-      event: "direct-completion.started",
-      component: "agent-harness",
-      provider,
-      model,
-      purpose,
-      summary: "direct completion started",
-    });
-  }
-
-  private logDirectCompletionCompleted(
-    trace: TOption<TBehaviorTraceContext>,
-    provider: string,
-    model: string,
-    purpose: EModelPurpose,
-    startedAt: number,
-    success: boolean,
-    stopReason: string,
-    responseChars: number,
-    error: TOption<string>,
-  ) {
-    if (trace === undefined) {
-      return;
-    }
-
-    let level = EBehaviorLogLevel.Warning;
-
-    if (success) {
-      level = EBehaviorLogLevel.Info;
-    }
-
-    AppLogger.instance.record({
-      trace,
-      event: "direct-completion.completed",
-      component: "agent-harness",
-      level,
-      provider,
-      model,
-      purpose,
-      success,
-      durationMs: performance.now() - startedAt,
-      summary: "direct completion completed",
-      metadata: { stopReason, responseChars },
-      error: sanitizeErrorMessage(error),
-    });
-  }
 }
 
 function canonicalize(value: unknown): unknown {
@@ -1692,14 +1131,7 @@ function createHardLimitStream(model: Model<Api>) {
     api: model.api,
     provider: model.provider,
     model: model.id,
-    usage: {
-      input: 0,
-      output: 0,
-      cacheRead: 0,
-      cacheWrite: 0,
-      totalTokens: 0,
-      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-    },
+    usage: emptyUsage(),
     stopReason: "error" as const,
     errorMessage: "Agent iteration limit reached",
     timestamp: Date.now(),

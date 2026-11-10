@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { EModelPurpose, ERole } from "../ai/types";
+import { SettingsService } from "../settings";
 import { DefaultConfigRecord } from "../settings/schema";
 import { Memory } from ".";
 import { FactDistiller } from "./distill";
@@ -16,7 +17,10 @@ type TDistillerInternals = {
   memory: {
     findLiveFactCandidates: ReturnType<typeof mock>;
     commitLiveFactWindow: ReturnType<typeof mock>;
+    loadLiveFactWindow: ReturnType<typeof mock>;
+    findChatIds: ReturnType<typeof mock>;
   };
+  processWindow: ReturnType<typeof mock>;
 };
 
 function makeMemory(id: number, author: ERole, message: string): TMemory {
@@ -65,6 +69,7 @@ function resetDistiller() {
     _instance: unknown;
   };
   DistillerWithInternals._instance = undefined;
+  (SettingsService as unknown as { _instance: unknown })._instance = undefined;
 }
 
 function setupDistiller() {
@@ -79,6 +84,8 @@ function setupDistiller() {
   internals.memory = {
     findLiveFactCandidates: mock(async () => []),
     commitLiveFactWindow: mock(async () => ({ committed: true, facts: [] })),
+    loadLiveFactWindow: mock(async () => ({ ...makeWindow(), messages: [] })),
+    findChatIds: mock(async () => []),
   };
   return { distiller, internals };
 }
@@ -599,5 +606,37 @@ describe("FactDistiller", () => {
 
     expect(result).toEqual({ success: false, reason: "candidate-search" });
     expect(commit).not.toHaveBeenCalled();
+  });
+
+  test("scheduleFactDrain catches up chats without an inbound message", async () => {
+    const { distiller, internals } = setupDistiller();
+    (SettingsService as unknown as { _instance: unknown })._instance = {
+      getAll: mock(async () => DefaultConfigRecord),
+    };
+    const windows = [makeWindow(), { ...makeWindow(), messages: [] }];
+    internals.memory.loadLiveFactWindow = mock(async () => windows.shift());
+    internals.processWindow = mock(async () => ({ success: true }));
+
+    distiller.scheduleFactDrain("chat-comet", undefined);
+    for (
+      let attempt = 0;
+      attempt < 20 && internals.processWindow.mock.calls.length < 1;
+      attempt++
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    expect(internals.processWindow.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({ window: makeWindow() }),
+    );
+  });
+
+  test("a boot fact drain sweep never rejects when chat discovery fails", async () => {
+    const { distiller, internals } = setupDistiller();
+    internals.memory.findChatIds = mock(async () => {
+      throw new Error("turso unreachable");
+    });
+
+    await expect(distiller.scheduleFactDrainForAllChats("boot:1")).resolves.toBeUndefined();
   });
 });

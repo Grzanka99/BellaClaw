@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
 import { ECronJobType, type TCronJobContext } from "../lib/cron-engine";
 import type { AgentHarness } from "../services/ai/agent-harness";
+import type { LlmClient } from "../services/ai/llm";
 import { EModelPurpose } from "../services/ai/types";
 import { EMessagePlatform } from "../services/messaging/types";
 import { SettingsService } from "../services/settings";
@@ -40,9 +41,14 @@ afterEach(() => {
 describe("generateReminderText", () => {
   test("returns direct reminder text without invoking AI", async () => {
     const ai = { completeText: mock(async () => "unused") };
-    expect(await generateReminderText(context({ reminderText: "  Call Mum.  " }), ai)).toBe(
-      "Call Mum.",
-    );
+    expect(
+      await generateReminderText(
+        context({ reminderText: "  Call Mum.  " }),
+        EMessagePlatform.Signal,
+        "",
+        ai,
+      ),
+    ).toBe("Call Mum.");
     expect(ai.completeText).not.toHaveBeenCalled();
   });
 
@@ -54,13 +60,15 @@ describe("generateReminderText", () => {
       [EConfigKey.AiInstructionsAddressStyle]: "Address the owner as Captain",
     };
     settings(ownerSettings);
-    const captured: Array<Parameters<AgentHarness["completeText"]>[0]> = [];
-    const completeText = mock(async (args: Parameters<AgentHarness["completeText"]>[0]) => {
+    const captured: Array<Parameters<LlmClient["completeText"]>[0]> = [];
+    const completeText = mock(async (args: Parameters<LlmClient["completeText"]>[0]) => {
       captured.push(args);
       return "Generated reminder.";
     });
 
-    const result = await generateReminderText(context(), { completeText });
+    const result = await generateReminderText(context(), EMessagePlatform.Signal, "", {
+      completeText,
+    });
     const args = captured[0];
 
     expect(result).toBe("Generated reminder.");
@@ -78,11 +86,13 @@ describe("generateReminderText", () => {
 
   test("uses fallback for blank output and failures", async () => {
     settings();
-    expect(await generateReminderText(context(), { completeText: mock(async () => "   ") })).toBe(
-      "Reminder unavailable.",
-    );
     expect(
-      await generateReminderText(context(), {
+      await generateReminderText(context(), EMessagePlatform.Signal, "", {
+        completeText: mock(async () => "   "),
+      }),
+    ).toBe("Reminder unavailable.");
+    expect(
+      await generateReminderText(context(), EMessagePlatform.Signal, "", {
         completeText: mock(async () => {
           throw new Error("provider failed");
         }),
@@ -113,6 +123,8 @@ describe("generateScheduledTaskText", () => {
         taskPrompt: "Prepare a briefing.",
         taskFallbackText: "Briefing unavailable.",
       }),
+      EMessagePlatform.Signal,
+      "",
       { runScheduledTask },
     );
     const args = captured[0];
@@ -143,7 +155,7 @@ describe("generateScheduledTaskText", () => {
 
     expect(
       (
-        await generateScheduledTaskText(task, {
+        await generateScheduledTaskText(task, EMessagePlatform.Signal, "", {
           runScheduledTask: mock(async () => ({
             text: " ",
             stopReason: "iteration-limit",
@@ -155,7 +167,7 @@ describe("generateScheduledTaskText", () => {
     ).toBe("Briefing unavailable.");
     expect(
       (
-        await generateScheduledTaskText(task, {
+        await generateScheduledTaskText(task, EMessagePlatform.Signal, "", {
           runScheduledTask: mock(async () => {
             throw new Error("provider failed");
           }),

@@ -1,9 +1,13 @@
+import { z } from "zod";
+
 export enum EAiProvider {
   OpenaiCodex = "openai-codex",
   Openrouter = "openrouter",
   Ollama = "ollama",
   OpencodeGo = "opencode-go",
 }
+
+export const SAiProvider = z.enum(EAiProvider);
 
 export enum ERole {
   System = "system",

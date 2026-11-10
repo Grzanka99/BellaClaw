@@ -40,8 +40,10 @@ type TAdapterInternals = {
     authorize: ReturnType<typeof mock>;
   };
   ai: {
-    completeText: ReturnType<typeof mock>;
     runScheduledTask: ReturnType<typeof mock>;
+  };
+  llm: {
+    completeText: ReturnType<typeof mock>;
   };
   transports: Map<EMessagePlatform, TMessageTransport>;
   runningCronTaskKeys: Set<string>;
@@ -109,7 +111,7 @@ function setupConversationHandler(chatId: string) {
   const compactConversation = mock(async (_state: TConversation): Promise<unknown> => undefined);
   Object.assign(handler, {
     ai: { runMain, compactConversation },
-    factQueue: { enqueue: async () => undefined },
+    factDistiller: { enqueueFactDrain: async () => true },
   });
   const message: TIncommingMessage = {
     chatId,
@@ -180,13 +182,13 @@ describe("MessagingAdapter", () => {
   ])("replays a delivered %s in the next Main request", async (kind) => {
     const chatId = `signal:replay-${kind}`;
     const { handler, runMain, message } = setupConversationHandler(chatId);
-    await handler.handleMessage(message, EMessagePlatform.Signal);
+    await handler.handleMessage(message, "", EMessagePlatform.Signal);
     const adapter = MessagingAdapter.instance;
     const sendText = mock(async () => undefined);
     adapter.registerTransport({ platform: EMessagePlatform.Signal, sendText });
     const internals = adapter as unknown as TAdapterInternals;
+    internals.llm = { completeText: mock(async () => undefined) };
     internals.ai = {
-      completeText: mock(async () => undefined),
       runScheduledTask: mock(async () => ({
         text: "Your briefing is ready.",
         stopReason: "completed",
@@ -202,7 +204,7 @@ describe("MessagingAdapter", () => {
     }
 
     await internals.handleCronFire(context);
-    await handler.handleMessage(message, EMessagePlatform.Signal);
+    await handler.handleMessage(message, "", EMessagePlatform.Signal);
 
     const conversation = runMain.mock.calls[1]?.[0].conversation;
     expect(JSON.stringify(conversation)).toContain(transcript);
@@ -274,7 +276,7 @@ describe("MessagingAdapter", () => {
     const internals = adapter as unknown as TAdapterInternals;
 
     try {
-      const turn = handler.handleMessage(message, EMessagePlatform.Signal);
+      const turn = handler.handleMessage(message, "", EMessagePlatform.Signal);
       await started.promise;
       const delivery = internals.handleCronFire(cron({ scope: chatId }));
       await waitForCall(sendText);
@@ -282,7 +284,7 @@ describe("MessagingAdapter", () => {
       finish.resolve();
       await turn;
       await delivery;
-      await handler.handleMessage(message, EMessagePlatform.Signal);
+      await handler.handleMessage(message, "", EMessagePlatform.Signal);
 
       const conversation = runMain.mock.calls[1]?.[0].conversation;
       expect(conversation?.summary).toBe("The normal turn was summarized.");
@@ -397,11 +399,13 @@ describe("MessagingAdapter", () => {
     const directory = await mkdtemp(join(tmpdir(), "bellaclaw-messaging-mcp-"));
     let receivedMessage: TIncommingMessage | undefined;
     let receivedPlatform: EMessagePlatform | undefined;
-    const handleMessage = mock(async (message: TIncommingMessage, platform: EMessagePlatform) => {
-      receivedMessage = message;
-      receivedPlatform = platform;
-      return "Prompt completed.";
-    });
+    const handleMessage = mock(
+      async (message: TIncommingMessage, _commands: string, platform: EMessagePlatform) => {
+        receivedMessage = message;
+        receivedPlatform = platform;
+        return "Prompt completed.";
+      },
+    );
     MessageHandler.getInstance = mock(() => ({
       handleMessage,
     })) as unknown as typeof MessageHandler.getInstance;
@@ -568,8 +572,8 @@ describe("MessagingAdapter", () => {
     const adapter = MessagingAdapter.instance;
     adapter.registerTransport({ platform: EMessagePlatform.Signal, sendText });
     const internals = adapter as unknown as TAdapterInternals;
+    internals.llm = { completeText: mock(async () => undefined) };
     internals.ai = {
-      completeText: mock(async () => undefined),
       runScheduledTask: mock(async () => {
         await waiting;
         return {

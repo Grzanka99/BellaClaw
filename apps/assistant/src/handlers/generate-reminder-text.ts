@@ -5,13 +5,13 @@ import type { TCronJobContext } from "../lib/cron-engine";
 import type { AgentHarness } from "../services/ai/agent-harness";
 import { createPlatformInstructions } from "../services/ai/instructions/platform";
 import { readXmlAndInjectConfig } from "../services/ai/instructions/read-xml-and-inject-config";
+import type { LlmClient } from "../services/ai/llm";
 import { EModelPurpose } from "../services/ai/types";
-import { parseCanonicalChatKey } from "../services/messaging/chat-key";
 import type { EMessagePlatform } from "../services/messaging/types";
 import { SettingsService } from "../services/settings";
 import { DefaultConfigRecord, EConfigKey, type TConfigRecord } from "../services/settings/schema";
 
-type TReminderAi = Pick<AgentHarness, "completeText">;
+type TReminderAi = Pick<LlmClient, "completeText">;
 type TScheduledTaskAi = Pick<AgentHarness, "runScheduledTask">;
 
 export type TScheduledTaskResult = {
@@ -27,14 +27,8 @@ const logger = createLogger("REMINDER");
 async function resolveCronScopeContext(ctx: TCronJobContext, logPrefix: string) {
   let timezone: TOption<string> = ctx.timezone;
   let settings: TConfigRecord = DefaultConfigRecord;
-  let platform: TOption<EMessagePlatform>;
 
   if (ctx.scope !== undefined) {
-    const parsedScope = parseCanonicalChatKey(ctx.scope);
-    if (parsedScope !== undefined) {
-      platform = parsedScope.platform;
-    }
-
     try {
       const loaded = await SettingsService.instance.getAll(ctx.scope);
       settings = loaded;
@@ -53,11 +47,13 @@ async function resolveCronScopeContext(ctx: TCronJobContext, logPrefix: string) 
     timezone = DefaultConfigRecord[EConfigKey.AiInstructionsTimezone];
   }
 
-  return { settings, timezone, platform };
+  return { settings, timezone };
 }
 
 export async function generateReminderText(
   ctx: TCronJobContext,
+  platform: TOption<EMessagePlatform>,
+  commands: string,
   ai: TReminderAi,
   trace?: TBehaviorTraceContext,
 ): Promise<TOption<string>> {
@@ -78,14 +74,15 @@ export async function generateReminderText(
     return ctx.reminderFallbackText;
   }
 
-  const { settings, timezone, platform } = await resolveCronScopeContext(
-    ctx,
-    "generateReminderText",
-  );
+  const { settings, timezone } = await resolveCronScopeContext(ctx, "generateReminderText");
 
   try {
     const instructions = [
-      await readXmlAndInjectConfig("./src/services/ai/instructions/base-system.xml", settings),
+      await readXmlAndInjectConfig(
+        "./src/services/ai/instructions/base-system.xml",
+        settings,
+        commands,
+      ),
       "Generate one reminder message from the provided reminder payload and firing context. Use the firing context for any date, time, or weekday-relative wording. Return only the final reminder text with no quotes or explanation.",
     ];
     const platformInstructions = createPlatformInstructions(platform);
@@ -122,6 +119,8 @@ export async function generateReminderText(
 
 export async function generateScheduledTaskText(
   ctx: TCronJobContext,
+  platform: TOption<EMessagePlatform>,
+  commands: string,
   ai: TScheduledTaskAi,
   trace?: TBehaviorTraceContext,
 ): Promise<TScheduledTaskResult> {
@@ -137,10 +136,7 @@ export async function generateScheduledTaskText(
     };
   }
 
-  const { settings, timezone, platform } = await resolveCronScopeContext(
-    ctx,
-    "generateScheduledTaskText",
-  );
+  const { settings, timezone } = await resolveCronScopeContext(ctx, "generateScheduledTaskText");
 
   try {
     const result = await ai.runScheduledTask({
@@ -149,6 +145,7 @@ export async function generateScheduledTaskText(
       currentTimeContext: `Scheduled firing context JSON:\n${JSON.stringify(createFiringContext(ctx.nextRunAt, timezone))}`,
       chatId: ctx.scope,
       settings,
+      commands,
       platform,
       trace,
       signal: undefined,

@@ -2,7 +2,7 @@ import type { TOption } from "@bellaclaw/shared";
 import { fetchWeb, searchWeb } from "../../../lib/web";
 import { CalendarService } from "../../calendar";
 import { CronSingleton } from "../../cron";
-import { MessageHandler } from "../../message-handler";
+import { FactDistiller } from "../../memory/distill";
 import { SettingsService } from "../../settings";
 import { EConfigKey, type TConfigRecord } from "../../settings/schema";
 import { refreshAiModels } from "../providers/registry";
@@ -92,7 +92,7 @@ export function createMemoryTools(context: TToolExecutionContext) {
       execute: async (_toolCallId: string, args: unknown) => {
         const parsedArgs = validateToolArguments(SSearchMemoryArgs, args);
         const chatId = requireChatId(context.chatId);
-        await MessageHandler.getInstance(chatId).ensureFactsCurrent();
+        await FactDistiller.instance.ensureFactsCurrent(chatId);
         const result = await handleSearchMemory(chatId, parsedArgs);
         return textResult(result);
       },

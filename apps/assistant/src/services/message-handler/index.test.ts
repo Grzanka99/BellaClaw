@@ -14,6 +14,7 @@ import { aiCredentials, aiModels } from "../ai/providers/registry";
 import { EAiProvider, ERole } from "../ai/types";
 import type { TConversation } from "../conversation/types";
 import { Memory } from "../memory";
+import { FactDistiller } from "../memory/distill";
 import { EMemoryImportance, type TMemory } from "../memory/types";
 import { EMessagePlatform } from "../messaging/types";
 import { SettingsService } from "../settings";
@@ -41,6 +42,17 @@ type THandlerInternals = {
 function reset() {
   (MessageHandler as unknown as { _instances: Map<string, MessageHandler> })._instances.clear();
   (SettingsService as unknown as { _instance: unknown })._instance = undefined;
+  (FactDistiller as unknown as { _instance: unknown })._instance = undefined;
+}
+
+// Fact drains run in the FactDistiller singleton; point it at the handler's memory stub.
+function wireFactDistiller(memory: THandlerInternals["memory"]) {
+  const distiller = FactDistiller.instance as unknown as THandlerInternals["factDistiller"] & {
+    memory: THandlerInternals["memory"];
+  };
+  distiller.memory = memory;
+  distiller.processWindow = mock(async () => ({ success: true }));
+  return distiller;
 }
 
 function emptyWindow(chatId: string, lastProcessedMessageId = 0) {
@@ -125,9 +137,7 @@ function setupHandler(chatId: string, response = "Final answer") {
     loadLiveFactWindow: mock(async () => emptyWindow(chatId)),
     commitLiveFactWindow: mock(async () => ({ committed: true, facts: [] })),
   };
-  internals.factDistiller = {
-    processWindow: mock(async () => ({ success: true })),
-  };
+  internals.factDistiller = wireFactDistiller(internals.memory);
   internals.ai = {
     compactConversation: mock(async () => undefined),
     runMain: mock(async () => ({
@@ -186,19 +196,25 @@ describe("MessageHandler", () => {
 
     setSystemTime(firstArrival);
     try {
-      const first = handler.handleMessage({
-        chatId,
-        receivedAt: firstArrival,
-        message: { content: "What is on my calendar tomorrow?" },
-        author: { type: ERole.User },
-      });
+      const first = handler.handleMessage(
+        {
+          chatId,
+          receivedAt: firstArrival,
+          message: { content: "What is on my calendar tomorrow?" },
+          author: { type: ERole.User },
+        },
+        "",
+      );
       await waitForCall(internals.ai.compactConversation, 1);
-      const second = handler.handleMessage({
-        chatId,
-        receivedAt: secondArrival,
-        message: { content: "And tomorrow evening?" },
-        author: { type: ERole.User },
-      });
+      const second = handler.handleMessage(
+        {
+          chatId,
+          receivedAt: secondArrival,
+          message: { content: "And tomorrow evening?" },
+          author: { type: ERole.User },
+        },
+        "",
+      );
       setSystemTime(processingTime);
       release();
       await Promise.all([first, second]);
@@ -279,6 +295,7 @@ describe("MessageHandler", () => {
           message: { content: "What day is tomorrow?" },
           author: { type: ERole.User },
         },
+        "",
         EMessagePlatform.Discord,
       );
       await flushAsyncWork();
@@ -290,6 +307,7 @@ describe("MessageHandler", () => {
           message: { content: "And today?" },
           author: { type: ERole.User },
         },
+        "",
         EMessagePlatform.Discord,
       );
       await flushAsyncWork();
@@ -345,6 +363,7 @@ describe("MessageHandler", () => {
         message: { content: "new question" },
         author: { type: ERole.User },
       },
+      "",
       EMessagePlatform.Discord,
     );
     await flushAsyncWork();
@@ -401,12 +420,15 @@ describe("MessageHandler", () => {
       message: { content: "first" },
       author: { type: ERole.User },
     };
-    expect(await handler.handleMessage(message)).toBe("Final answer");
+    expect(await handler.handleMessage(message, "")).toBe("Final answer");
     await waitForCall(internals.ai.compactConversation, 1);
-    const second = handler.handleMessage({
-      ...message,
-      message: { content: "second" },
-    });
+    const second = handler.handleMessage(
+      {
+        ...message,
+        message: { content: "second" },
+      },
+      "",
+    );
     await flushAsyncWork();
     expect(internals.ai.runMain).toHaveBeenCalledTimes(1);
     release();
@@ -430,10 +452,10 @@ describe("MessageHandler", () => {
       message: { content: "first" },
       author: { type: ERole.User },
     };
-    await handler.handleMessage(message);
+    await handler.handleMessage(message, "");
     await waitForCall(internals.conversations.saveSummary, 1);
     expect((await internals.conversations.load())?.summary).toBe("");
-    await handler.handleMessage(message);
+    await handler.handleMessage(message, "");
     expect(internals.ai.runMain.mock.calls[1]?.[0].conversation.summary).toBe("compact summary");
     await flushAsyncWork();
   });
@@ -457,9 +479,7 @@ describe("MessageHandler", () => {
       loadLiveFactWindow: mock(async () => emptyWindow("signal:1")),
       commitLiveFactWindow: mock(async () => ({ committed: true, facts: [] })),
     };
-    internals.factDistiller = {
-      processWindow: mock(async () => ({ success: true })),
-    };
+    internals.factDistiller = wireFactDistiller(internals.memory);
     let capturedSettings: typeof DefaultConfigRecord | undefined;
     internals.ai = {
       compactConversation: mock(async () => undefined),
@@ -475,12 +495,15 @@ describe("MessageHandler", () => {
       }),
     };
 
-    await handler.handleMessage({
-      chatId: "signal:1",
-      receivedAt: new Date(),
-      message: { content: "change my settings" },
-      author: { type: ERole.User },
-    });
+    await handler.handleMessage(
+      {
+        chatId: "signal:1",
+        receivedAt: new Date(),
+        message: { content: "change my settings" },
+        author: { type: ERole.User },
+      },
+      "",
+    );
     sharedSettings[EConfigKey.AiInstructionsTimezone] = "Asia/Tokyo";
     await flushAsyncWork();
 
@@ -498,12 +521,15 @@ describe("MessageHandler", () => {
     });
 
     await expect(
-      handler.handleMessage({
-        chatId: "discord:user-save-failure",
-        receivedAt: new Date(),
-        message: { content: "remember this" },
-        author: { type: ERole.User },
-      }),
+      handler.handleMessage(
+        {
+          chatId: "discord:user-save-failure",
+          receivedAt: new Date(),
+          message: { content: "remember this" },
+          author: { type: ERole.User },
+        },
+        "",
+      ),
     ).rejects.toThrow("database unavailable");
 
     expect(internals.ai.runMain).not.toHaveBeenCalled();
@@ -517,12 +543,15 @@ describe("MessageHandler", () => {
       throw new Error("database unavailable");
     });
     await expect(
-      handler.handleMessage({
-        chatId: "discord:assistant-save-failure",
-        receivedAt: new Date(),
-        message: { content: "hello" },
-        author: { type: ERole.User },
-      }),
+      handler.handleMessage(
+        {
+          chatId: "discord:assistant-save-failure",
+          receivedAt: new Date(),
+          message: { content: "hello" },
+          author: { type: ERole.User },
+        },
+        "",
+      ),
     ).rejects.toThrow("database unavailable");
     expect(internals.memory.loadLiveFactWindow).not.toHaveBeenCalled();
   });
@@ -545,12 +574,15 @@ describe("MessageHandler", () => {
       events.push("drain");
       return emptyWindow("discord:ordering");
     });
-    const reply = handler.handleMessage({
-      chatId: "discord:ordering",
-      receivedAt: new Date(),
-      message: { content: "remember this" },
-      author: { type: ERole.User },
-    });
+    const reply = handler.handleMessage(
+      {
+        chatId: "discord:ordering",
+        receivedAt: new Date(),
+        message: { content: "remember this" },
+        author: { type: ERole.User },
+      },
+      "",
+    );
     await waitForCall(internals.conversations.saveTurn, 1);
     expect(events).toEqual(["save-start"]);
     release();
@@ -559,52 +591,30 @@ describe("MessageHandler", () => {
     expect(events).toEqual(["save-start", "save-end", "drain"]);
   });
 
-  test("scheduleFactDrain catches up chats without an inbound message", async () => {
-    const { handler, internals } = setupHandler("discord:boot");
-    const windows = [populatedWindow("discord:boot", 1), emptyWindow("discord:boot", 1)];
-    internals.memory.loadLiveFactWindow = mock(async () => windows.shift());
-
-    handler.scheduleFactDrain(undefined);
-    await waitForCall(internals.factDistiller.processWindow, 1);
-
-    expect(internals.factDistiller.processWindow.mock.calls[0]?.[0]).toEqual(
-      expect.objectContaining({ window: populatedWindow("discord:boot", 1) }),
-    );
-    expect(internals.memory.save).not.toHaveBeenCalled();
-  });
-
-  test("a boot fact drain sweep never rejects when chat discovery fails", async () => {
-    const memoryStatics = Memory as unknown as { _instance: unknown };
-    const originalMemory = memoryStatics._instance;
-    memoryStatics._instance = {
-      findChatIds: mock(async () => {
-        throw new Error("turso unreachable");
-      }),
-    };
-
-    await expect(MessageHandler.scheduleFactDrainForAllChats("boot:1")).resolves.toBeUndefined();
-
-    memoryStatics._instance = originalMemory;
-  });
-
   test("a stalled fact drain does not delay the next reply", async () => {
     const { handler, internals } = setupHandler("discord:stalled");
     internals.memory.loadLiveFactWindow = mock(() => new Promise(() => undefined));
 
-    await handler.handleMessage({
-      chatId: "discord:stalled",
-      receivedAt: new Date(),
-      message: { content: "first" },
-      author: { type: ERole.User },
-    });
+    await handler.handleMessage(
+      {
+        chatId: "discord:stalled",
+        receivedAt: new Date(),
+        message: { content: "first" },
+        author: { type: ERole.User },
+      },
+      "",
+    );
     await waitForCall(internals.memory.loadLiveFactWindow, 1);
 
-    const secondReply = await handler.handleMessage({
-      chatId: "discord:stalled",
-      receivedAt: new Date(),
-      message: { content: "second" },
-      author: { type: ERole.User },
-    });
+    const secondReply = await handler.handleMessage(
+      {
+        chatId: "discord:stalled",
+        receivedAt: new Date(),
+        message: { content: "second" },
+        author: { type: ERole.User },
+      },
+      "",
+    );
 
     expect(secondReply).toBe("Final answer");
   });
@@ -625,12 +635,15 @@ describe("MessageHandler", () => {
       return window;
     });
 
-    await handler.handleMessage({
-      chatId: "discord:drain",
-      receivedAt: new Date(),
-      message: { content: "two facts" },
-      author: { type: ERole.User },
-    });
+    await handler.handleMessage(
+      {
+        chatId: "discord:drain",
+        receivedAt: new Date(),
+        message: { content: "two facts" },
+        author: { type: ERole.User },
+      },
+      "",
+    );
     await waitForCall(internals.memory.loadLiveFactWindow, 3);
 
     expect(internals.factDistiller.processWindow).toHaveBeenCalledTimes(2);
@@ -668,23 +681,29 @@ describe("MessageHandler", () => {
       return { success: true as const };
     });
 
-    await handler.handleMessage({
-      chatId: "discord:retry",
-      receivedAt: new Date(),
-      message: { content: "first turn" },
-      author: { type: ERole.User },
-    });
+    await handler.handleMessage(
+      {
+        chatId: "discord:retry",
+        receivedAt: new Date(),
+        message: { content: "first turn" },
+        author: { type: ERole.User },
+      },
+      "",
+    );
     await waitForCall(internals.factDistiller.processWindow, 1);
     await flushAsyncWork();
 
     expect(internals.memory.loadLiveFactWindow).toHaveBeenCalledTimes(1);
 
-    await handler.handleMessage({
-      chatId: "discord:retry",
-      receivedAt: new Date(),
-      message: { content: "second turn" },
-      author: { type: ERole.User },
-    });
+    await handler.handleMessage(
+      {
+        chatId: "discord:retry",
+        receivedAt: new Date(),
+        message: { content: "second turn" },
+        author: { type: ERole.User },
+      },
+      "",
+    );
     await waitForCall(internals.memory.loadLiveFactWindow, 3);
 
     expect(internals.factDistiller.processWindow).toHaveBeenCalledTimes(2);
@@ -714,12 +733,15 @@ describe("MessageHandler", () => {
     }));
 
     expect(
-      await handler.handleMessage({
-        chatId: "discord:2",
-        receivedAt: new Date(),
-        message: { content: "hello" },
-        author: { type: ERole.User },
-      }),
+      await handler.handleMessage(
+        {
+          chatId: "discord:2",
+          receivedAt: new Date(),
+          message: { content: "hello" },
+          author: { type: ERole.User },
+        },
+        "",
+      ),
     ).toBe("Something went wrong.");
     await flushAsyncWork();
 
@@ -727,12 +749,15 @@ describe("MessageHandler", () => {
     expect(internals.conversations.saveTurn).not.toHaveBeenCalled();
     expect(await internals.conversations.load()).toBeUndefined();
     expect(internals.memory.loadLiveFactWindow).not.toHaveBeenCalled();
-    await handler.handleMessage({
-      chatId: "discord:2",
-      receivedAt: new Date(),
-      message: { content: "try again" },
-      author: { type: ERole.User },
-    });
+    await handler.handleMessage(
+      {
+        chatId: "discord:2",
+        receivedAt: new Date(),
+        message: { content: "try again" },
+        author: { type: ERole.User },
+      },
+      "",
+    );
     expect(internals.ai.runMain.mock.calls[1]?.[0].conversation).toBeUndefined();
     expect(JSON.stringify(internals.ai.runMain.mock.calls[1]?.[0].history)).not.toContain(
       "rejected transcript",
@@ -751,12 +776,15 @@ describe("MessageHandler", () => {
     }));
 
     expect(
-      await handler.handleMessage({
-        chatId: "discord:3",
-        receivedAt: new Date(),
-        message: { content: "hello" },
-        author: { type: ERole.User },
-      }),
+      await handler.handleMessage(
+        {
+          chatId: "discord:3",
+          receivedAt: new Date(),
+          message: { content: "hello" },
+          author: { type: ERole.User },
+        },
+        "",
+      ),
     ).toBe("opencode-go is not connected. Run !ai-auth login opencode-go.");
   });
 });

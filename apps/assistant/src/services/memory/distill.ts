@@ -1,10 +1,11 @@
 import type { TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
 import type { TOption } from "@bellaclaw/shared";
-import { createLogger } from "@bellaclaw/shared";
+import { AsyncQueue, createLogger } from "@bellaclaw/shared";
 import { z } from "zod";
-import { AgentHarness } from "../ai/agent-harness";
+import { LlmClient } from "../ai/llm";
 import { EModelPurpose, ERole } from "../ai/types";
 import { EmbeddingClient } from "../embedding";
+import { SettingsService } from "../settings";
 import type { TConfigRecord } from "../settings/schema";
 import { Memory } from ".";
 import type { TFactSearchResult, TLiveFactWindow, TMemory, TPreparedFact } from "./types";
@@ -77,9 +78,12 @@ type TFactPreparationResult =
 export class FactDistiller {
   private static _instance: TOption<FactDistiller>;
   private logger = createLogger("FACT_DISTILLER");
-  private ai = AgentHarness.instance;
+  private ai = LlmClient.instance;
   private embedding = EmbeddingClient.instance;
   private memory = Memory.instance;
+  // NOTE: fact drains get their own per-chat queue so a slow distillation run never delays the
+  // transcript saves that the reply path awaits on the message handler queue
+  private factQueues = new Map<string, AsyncQueue>();
 
   private constructor() {}
 
@@ -89,6 +93,52 @@ export class FactDistiller {
     }
 
     return FactDistiller._instance;
+  }
+
+  // NOTE: without this, facts stay empty until the first inbound message of the process, so the
+  // very first recall after a deploy answers from an unpopulated store. Catching up is best-effort
+  // and must never fail boot — messaging works fine against a partially distilled store.
+  public async scheduleFactDrainForAllChats(turnId: string): Promise<void> {
+    try {
+      const chatIds = await this.memory.findChatIds();
+
+      for (const chatId of chatIds) {
+        this.scheduleFactDrain(chatId, {
+          turnId,
+          chatId,
+          platform: undefined,
+        });
+      }
+    } catch (error) {
+      this.logger.error(`scheduleFactDrainForAllChats: boot fact drain failed: ${String(error)}`);
+    }
+  }
+
+  public scheduleFactDrain(chatId: string, trace: TOption<TBehaviorTraceContext>): void {
+    void this.factQueue(chatId)
+      .enqueue(async () => {
+        const settings = await SettingsService.instance.getAll(chatId);
+        await this.drainLiveFactWindows(chatId, settings, trace);
+      })
+      .catch((error) => {
+        this.logger.error(`scheduleFactDrain: fact drain failed: ${String(error)}`);
+      });
+  }
+
+  public enqueueFactDrain(
+    chatId: string,
+    settings: TConfigRecord,
+    trace: TOption<TBehaviorTraceContext>,
+  ): Promise<boolean> {
+    return this.factQueue(chatId).enqueue(() => this.drainLiveFactWindows(chatId, settings, trace));
+  }
+
+  public async ensureFactsCurrent(chatId: string): Promise<void> {
+    const settings = await SettingsService.instance.getAll(chatId);
+    const success = await this.enqueueFactDrain(chatId, settings, undefined);
+    if (!success) {
+      throw new Error("Pending fact distillation failed");
+    }
   }
 
   public async distill(
@@ -378,6 +428,37 @@ export class FactDistiller {
     }
 
     return lines.join("\n");
+  }
+
+  private factQueue(chatId: string): AsyncQueue {
+    let queue = this.factQueues.get(chatId);
+
+    if (queue === undefined) {
+      queue = new AsyncQueue();
+      this.factQueues.set(chatId, queue);
+    }
+
+    return queue;
+  }
+
+  private async drainLiveFactWindows(
+    chatId: string,
+    settings: TConfigRecord,
+    trace: TOption<TBehaviorTraceContext>,
+  ): Promise<boolean> {
+    while (true) {
+      const window = await this.memory.loadLiveFactWindow(chatId);
+      if (window.messages.length === 0) {
+        return true;
+      }
+
+      const result = await this.processWindow({ window, settings, trace });
+
+      if (!result.success) {
+        this.logger.error(`drainLiveFactWindows: stopped after ${result.reason} failure`);
+        return false;
+      }
+    }
   }
 
   private async selectSupersededFactIds(

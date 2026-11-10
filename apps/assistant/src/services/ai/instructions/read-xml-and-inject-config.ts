@@ -1,14 +1,17 @@
-import { formatCommandList } from "../../messaging/commands";
 import { isConfigKey, type TConfigRecord } from "../../settings/schema";
 
 const PLACEHOLDER_PATTERN = /\{\{config\.([a-zA-Z0-9._]+)\}\}/g;
 const COMMANDS_PLACEHOLDER = "{{commands}}";
 const MAX_RESOLUTION_PASSES = 10;
 
-export async function readXmlAndInjectConfig(path: string, config: TConfigRecord): Promise<string> {
+export async function readXmlAndInjectConfig(
+  path: string,
+  config: TConfigRecord,
+  commands: string,
+): Promise<string> {
   const xml = await Bun.file(path).text();
 
-  let result = xml.replaceAll(COMMANDS_PLACEHOLDER, formatCommandList());
+  let result = xml.replaceAll(COMMANDS_PLACEHOLDER, commands);
 
   for (let pass = 0; pass < MAX_RESOLUTION_PASSES; pass++) {
     const nextResult = result.replace(PLACEHOLDER_PATTERN, (_match, pathStr: string) => {

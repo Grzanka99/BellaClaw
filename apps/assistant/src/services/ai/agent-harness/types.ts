@@ -24,6 +24,7 @@ export type TAgentRunArgs = {
   prompt: string;
   chatId: TOption<string>;
   settings: TConfigRecord;
+  commands: string;
   currentTimeContext: TOption<string>;
   platform: TOption<EMessagePlatform>;
   trace: TOption<TBehaviorTraceContext>;

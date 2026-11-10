@@ -14,6 +14,7 @@ import {
 } from "../../handlers/generate-reminder-text";
 import type { TCronJobContext } from "../../lib/cron-engine";
 import { AgentHarness } from "../ai/agent-harness";
+import { LlmClient } from "../ai/llm";
 import { ERole } from "../ai/types";
 import {
   logHandlerCompleted,
@@ -32,7 +33,7 @@ import { MessageHandler } from "../message-handler";
 import { attachMessageTrace } from "../message-handler/trace";
 import type { TIncommingMessage } from "../message-handler/types";
 import { createCanonicalChatKey, parseCanonicalChatKey } from "./chat-key";
-import { runCommand } from "./commands";
+import { formatCommandList, runCommand } from "./commands";
 import type { EMessagePlatform, TMessageTransport, TPlatformMessage } from "./types";
 
 export class MessagingAdapter {
@@ -40,6 +41,7 @@ export class MessagingAdapter {
   private logger: TLogger = createLogger("MESSAGING");
   private transports = new Map<EMessagePlatform, TMessageTransport>();
   private ai = AgentHarness.instance;
+  private llm = LlmClient.instance;
   private authorization = AuthorizationService.instance;
   private cronListenerRegistered = false;
   private runningCronTaskKeys = new Set<string>();
@@ -160,7 +162,11 @@ export class MessagingAdapter {
       attachMessageTrace(incomingMessage, trace);
 
       const handler = MessageHandler.getInstance(canonicalChatId);
-      const reply = await handler.handleMessage(incomingMessage, message.platform);
+      const reply = await handler.handleMessage(
+        incomingMessage,
+        formatCommandList(),
+        message.platform,
+      );
 
       if (reply.trim().length === 0) {
         logHandlerCompleted(trace, "messaging", handlerStart, true, 0, "empty reply", undefined);
@@ -347,12 +353,24 @@ export class MessagingAdapter {
     let memoryPrefix = "CRON REMINDER";
 
     if (ctx.taskPrompt !== undefined) {
-      const taskResult = await generateScheduledTaskText(ctx, this.ai, trace);
+      const taskResult = await generateScheduledTaskText(
+        ctx,
+        parsedScope.platform,
+        formatCommandList(),
+        this.ai,
+        trace,
+      );
       text = taskResult.text;
       memoryPrefix = "CRON TASK";
       logCronTaskCompleted(trace, taskResult);
     } else {
-      text = await generateReminderText(ctx, this.ai, trace);
+      text = await generateReminderText(
+        ctx,
+        parsedScope.platform,
+        formatCommandList(),
+        this.llm,
+        trace,
+      );
     }
 
     if (text === undefined) {

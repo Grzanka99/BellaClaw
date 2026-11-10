@@ -27,6 +27,7 @@ import type { TConversation } from "../../conversation/types";
 import { McpRunRegistry } from "../../mcp/runs";
 import { EMessagePlatform } from "../../messaging/types";
 import { DefaultConfigRecord, EConfigKey } from "../../settings/schema";
+import { LlmClient } from "../llm";
 import { aiModels, getAiModelConfig, getAiModelConfigs } from "../providers/registry";
 import { EAiProvider, EModelPurpose, ERole, type THistoryItem } from "../types";
 import { AgentHarness, EAgentName, isSerializedToolCall } from ".";
@@ -99,6 +100,7 @@ describe("AgentHarness", () => {
       history: [],
       chatId: "discord:1",
       settings: { ...DefaultConfigRecord, [EConfigKey.AiProvider]: EAiProvider.Openrouter },
+      commands: "",
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
       trace: undefined,
@@ -159,6 +161,7 @@ describe("AgentHarness", () => {
       history: [{ role: ERole.User, content: "stored history" }],
       chatId: "discord:1",
       settings,
+      commands: "",
       currentTimeContext: "time one",
       platform: EMessagePlatform.Discord,
       trace: undefined,
@@ -175,6 +178,7 @@ describe("AgentHarness", () => {
       history: [],
       chatId: "discord:1",
       settings,
+      commands: "",
       currentTimeContext: "time two",
       platform: EMessagePlatform.Discord,
       trace: undefined,
@@ -253,6 +257,7 @@ describe("AgentHarness", () => {
         history: [],
         chatId,
         settings: { ...DefaultConfigRecord, [EConfigKey.AiProvider]: EAiProvider.Openrouter },
+        commands: "",
         currentTimeContext: undefined,
         platform: EMessagePlatform.Discord,
         trace: undefined,
@@ -316,6 +321,7 @@ describe("AgentHarness", () => {
       prompt: "Use the MCP tools",
       chatId: "discord:1",
       settings: { ...DefaultConfigRecord, [EConfigKey.AiProvider]: EAiProvider.Openrouter },
+      commands: "",
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
       trace: undefined,
@@ -715,6 +721,7 @@ describe("AgentHarness", () => {
       chatId: "replay-tools",
       settings: { ...DefaultConfigRecord, [EConfigKey.AiProvider]: EAiProvider.Openrouter },
       platform: EMessagePlatform.Discord,
+      commands: "",
       currentTimeContext: "Message received at: 2026-09-10",
       trace: undefined,
       signal: undefined,
@@ -739,6 +746,7 @@ describe("AgentHarness", () => {
       ...args,
       conversation: replay,
       prompt: "What is available today?",
+      commands: "",
       currentTimeContext: "Message received at: 2026-09-13",
     });
     expect(captured[1]?.messages.slice(0, captured[0]?.messages.length)).toEqual(
@@ -809,6 +817,7 @@ describe("AgentHarness", () => {
       history: [],
       chatId: "discord:1",
       settings,
+      commands: "",
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
       trace: undefined,
@@ -819,6 +828,7 @@ describe("AgentHarness", () => {
       history: [],
       chatId: "discord:1",
       settings,
+      commands: "",
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
       trace: undefined,
@@ -829,12 +839,13 @@ describe("AgentHarness", () => {
       history: [],
       chatId: "discord:2",
       settings,
+      commands: "",
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
       trace: undefined,
       signal: undefined,
     });
-    const direct = await AgentHarness.instance.completeText({
+    const direct = await LlmClient.instance.completeText({
       prompt: "hello",
       instructions: "Reply directly",
       settings,
@@ -892,6 +903,7 @@ describe("AgentHarness", () => {
       { ...DefaultConfigRecord, [EConfigKey.AiProvider]: EAiProvider.OpencodeGo },
       "discord:1",
       EMessagePlatform.Discord,
+      "",
     );
 
     expect(result?.state.summary).toBe("Earlier context summarized.");
@@ -933,6 +945,7 @@ describe("AgentHarness", () => {
       history: [],
       chatId: "chat-1",
       settings,
+      commands: "",
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
       trace: undefined,
@@ -943,14 +956,14 @@ describe("AgentHarness", () => {
       await AgentHarness.instance.runMain(args);
       await AgentHarness.instance.runMain({ ...args, chatId: "chat-2" });
       await AgentHarness.instance.runMain({ ...args, platform: EMessagePlatform.Signal });
-      await AgentHarness.instance.completeText({
+      await LlmClient.instance.completeText({
         prompt: "Utility work",
         instructions: "Reply directly",
         settings,
         purpose: EModelPurpose.Utility,
         trace: { turnId: "routing-utility", chatId: "chat-1", platform: EMessagePlatform.Discord },
       });
-      await AgentHarness.instance.completeText({
+      await LlmClient.instance.completeText({
         prompt: "Verify provider",
         instructions: "Reply directly",
         settings,
@@ -1022,6 +1035,7 @@ describe("AgentHarness", () => {
         history: [],
         chatId: "discord:1",
         settings: { ...DefaultConfigRecord, [EConfigKey.AiProvider]: EAiProvider.Openrouter },
+        commands: "",
         currentTimeContext: undefined,
         platform: EMessagePlatform.Discord,
         trace: undefined,
@@ -1069,6 +1083,7 @@ describe("AgentHarness", () => {
         history: [],
         chatId: "discord:1",
         settings: { ...DefaultConfigRecord, [EConfigKey.AiProvider]: EAiProvider.Openrouter },
+        commands: "",
         currentTimeContext: undefined,
         platform: EMessagePlatform.Discord,
         trace: undefined,
@@ -1103,6 +1118,7 @@ describe("AgentHarness", () => {
       history: [],
       chatId: "discord:1",
       settings: { ...DefaultConfigRecord, [EConfigKey.AiProvider]: EAiProvider.Openrouter },
+      commands: "",
       currentTimeContext: "Message received at:\nUTC: 2026-09-10T10:00:00.000Z",
       platform: EMessagePlatform.Discord,
       trace: undefined,
@@ -1112,6 +1128,7 @@ describe("AgentHarness", () => {
     await AgentHarness.instance.runScheduledTask({
       ...args,
       prompt: "Run the scheduled task",
+      commands: "",
       currentTimeContext:
         'Scheduled firing context JSON:\n{"fireTimestamp":"2026-09-11T10:00:00Z"}',
     });
@@ -1156,6 +1173,7 @@ describe("AgentHarness", () => {
         ...DefaultConfigRecord,
         [EConfigKey.AiProvider]: EAiProvider.Openrouter,
       },
+      commands: "",
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
       trace: undefined,
@@ -1184,6 +1202,7 @@ describe("AgentHarness", () => {
         ...DefaultConfigRecord,
         [EConfigKey.AiProvider]: EAiProvider.Openrouter,
       },
+      commands: "",
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
       trace: undefined,
@@ -1209,6 +1228,7 @@ describe("AgentHarness", () => {
         ...DefaultConfigRecord,
         [EConfigKey.AiProvider]: EAiProvider.Openrouter,
       },
+      commands: "",
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
       trace: undefined,
@@ -1230,6 +1250,7 @@ describe("AgentHarness", () => {
         prompt: string;
         chatId: string;
         settings: typeof DefaultConfigRecord;
+        commands: string;
         currentTimeContext: undefined;
         platform: EMessagePlatform;
         trace: undefined;
@@ -1249,6 +1270,7 @@ describe("AgentHarness", () => {
         ...DefaultConfigRecord,
         [EConfigKey.AiProvider]: EAiProvider.Openrouter,
       },
+      commands: "",
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
       trace: undefined,
@@ -1278,6 +1300,7 @@ describe("AgentHarness", () => {
         ...DefaultConfigRecord,
         [EConfigKey.AiProvider]: EAiProvider.Openrouter,
       },
+      commands: "",
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
       trace: undefined,
@@ -1307,6 +1330,7 @@ describe("AgentHarness", () => {
         ...DefaultConfigRecord,
         [EConfigKey.AiProvider]: EAiProvider.Openrouter,
       },
+      commands: "",
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
       trace: undefined,
@@ -1341,6 +1365,7 @@ describe("AgentHarness", () => {
         ...DefaultConfigRecord,
         [EConfigKey.AiProvider]: EAiProvider.Openrouter,
       },
+      commands: "",
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
       trace: undefined,
@@ -1375,6 +1400,7 @@ describe("AgentHarness", () => {
         ...DefaultConfigRecord,
         [EConfigKey.AiProvider]: EAiProvider.Openrouter,
       },
+      commands: "",
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
       trace: undefined,
@@ -1412,6 +1438,7 @@ describe("AgentHarness", () => {
         ...DefaultConfigRecord,
         [EConfigKey.AiProvider]: EAiProvider.Openrouter,
       },
+      commands: "",
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
       trace: undefined,
@@ -1459,6 +1486,7 @@ describe("AgentHarness", () => {
         ...DefaultConfigRecord,
         [EConfigKey.AiProvider]: EAiProvider.Openrouter,
       },
+      commands: "",
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
       trace: undefined,
@@ -1499,6 +1527,7 @@ describe("AgentHarness", () => {
         ...DefaultConfigRecord,
         [EConfigKey.AiProvider]: EAiProvider.Openrouter,
       },
+      commands: "",
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
       trace: undefined,
@@ -1532,6 +1561,7 @@ describe("AgentHarness", () => {
       prompt: "original",
       chatId: "discord:1",
       settings: DefaultConfigRecord,
+      commands: "",
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
       trace: { turnId: "turn", chatId: "discord:1", platform: EMessagePlatform.Discord },
@@ -1645,12 +1675,13 @@ describe("AgentHarness", () => {
         history: [{ role: ERole.Assistant, content: "Old response must not be counted" }],
         chatId: "discord:1",
         settings,
+        commands: "",
         currentTimeContext: undefined,
         platform: EMessagePlatform.Discord,
         trace,
         signal: undefined,
       });
-      await AgentHarness.instance.completeText({
+      await LlmClient.instance.completeText({
         prompt: "Abort",
         instructions: "Reply directly",
         settings,
@@ -1746,12 +1777,13 @@ describe("AgentHarness", () => {
       history: [],
       chatId: "discord:1",
       settings,
+      commands: "",
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
       trace,
       signal: undefined,
     });
-    await AgentHarness.instance.completeText({
+    await LlmClient.instance.completeText({
       prompt: "Reply directly",
       instructions: "Reply directly",
       settings,
@@ -1830,12 +1862,13 @@ describe("AgentHarness", () => {
       history: [],
       chatId: "discord:1",
       settings,
+      commands: "",
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
       trace,
       signal: undefined,
     });
-    const direct = await AgentHarness.instance.completeText({
+    const direct = await LlmClient.instance.completeText({
       prompt: "Fail directly",
       instructions: "Fail directly",
       settings,
