@@ -1,3 +1,4 @@
+import type { TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
 import type { TOption } from "@bellaclaw/shared";
 import { fetchWeb, searchWeb } from "../../../lib/web";
 import { CalendarService } from "../../calendar";
@@ -66,6 +67,7 @@ const SEQUENTIAL: "sequential" = "sequential";
 export type TToolExecutionContext = {
   chatId: TOption<string>;
   settings: TConfigRecord;
+  trace: TBehaviorTraceContext;
   verifySettings: (settings: TConfigRecord, purposes: EModelPurpose[]) => Promise<TOption<string>>;
 };
 
@@ -92,7 +94,7 @@ export function createMemoryTools(context: TToolExecutionContext) {
       execute: async (_toolCallId: string, args: unknown) => {
         const parsedArgs = validateToolArguments(SSearchMemoryArgs, args);
         const chatId = requireChatId(context.chatId);
-        await FactDistiller.instance.ensureFactsCurrent(chatId);
+        await FactDistiller.instance.ensureFactsCurrent(chatId, context.trace);
         const result = await handleSearchMemory(chatId, parsedArgs);
         return textResult(result);
       },

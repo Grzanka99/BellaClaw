@@ -1,14 +1,9 @@
-import { AppLogger, EBehaviorLogLevel, type TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
-import type { TOption } from "@bellaclaw/shared";
+import { AppLogger, type TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
 import type { ERole } from "../ai/types";
 import type { EMemoryImportance } from "../memory/types";
-import { sanitizeErrorMessage } from "./sanitizers";
+import { startSpan } from "./span";
 
-export function logHandlerStarted(trace: TOption<TBehaviorTraceContext>, handler: string) {
-  if (trace === undefined) {
-    return;
-  }
-
+export function logHandlerStarted(trace: TBehaviorTraceContext, handler: string) {
   AppLogger.instance.record({
     trace,
     event: "handler.started",
@@ -20,73 +15,33 @@ export function logHandlerStarted(trace: TOption<TBehaviorTraceContext>, handler
   });
 }
 
-export function logHandlerCompleted(
-  trace: TOption<TBehaviorTraceContext>,
-  handler: string,
-  start: number,
-  success: boolean,
-  replyChars: number,
-  summary: string,
-  error: TOption<string>,
-) {
-  if (trace === undefined) {
-    return;
-  }
+export type THandlerSpan = ReturnType<typeof startHandlerSpan>;
 
-  let level = EBehaviorLogLevel.Info;
+export function startHandlerSpan(trace: TBehaviorTraceContext, handler: string) {
+  const span = startSpan(trace, "handler.completed", handler);
 
-  if (!success) {
-    level = EBehaviorLogLevel.Warning;
-  }
-
-  AppLogger.instance.record({
-    trace,
-    event: "handler.completed",
-    component: handler,
-    level,
-    success,
-    durationMs: performance.now() - start,
-    summary: `${handler} ${summary}`,
-    metadata: {
-      handler,
-      replyChars,
+  return {
+    ok: (summary: string, replyChars: number) => {
+      span.ok({ summary: `${handler} ${summary}`, metadata: { handler, replyChars } });
     },
-    error: sanitizeErrorMessage(error),
-  });
+    fail: (summary: string, replyChars: number, error?: string) => {
+      span.fail(error, { summary: `${handler} ${summary}`, metadata: { handler, replyChars } });
+    },
+  };
 }
 
-export function logMemorySaveCompleted(
-  trace: TOption<TBehaviorTraceContext>,
-  start: number,
+export function startMemorySaveSpan(
+  trace: TBehaviorTraceContext,
   author: ERole,
   importance: EMemoryImportance,
   messageChars: number,
-  error?: string,
 ) {
-  if (trace === undefined) {
-    return;
-  }
-
-  const success = error === undefined;
-  let level = EBehaviorLogLevel.Info;
-
-  if (!success) {
-    level = EBehaviorLogLevel.Warning;
-  }
-
-  AppLogger.instance.record({
-    trace,
-    event: "memory.save.completed",
-    component: "memory",
-    level,
-    success,
-    durationMs: performance.now() - start,
+  return startSpan(trace, "memory.save.completed", "memory", {
     summary: `memory save completed author=${author} importance=${importance}`,
     metadata: {
       author,
       importance,
       messageChars,
     },
-    error: sanitizeErrorMessage(error),
   });
 }

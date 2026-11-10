@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import type { TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
 import { LlmClient, LlmResponseError } from "../ai/llm";
 import { EModelPurpose, ERole } from "../ai/types";
 import { SettingsService } from "../settings";
@@ -7,6 +8,12 @@ import { Memory } from ".";
 import { FactDistiller } from "./distill";
 import type { TFactSearchResult, TLiveFactWindow, TMemory } from "./types";
 import { EMemoryImportance } from "./types";
+
+const TEST_TRACE: TBehaviorTraceContext = {
+  turnId: "test",
+  chatId: undefined,
+  platform: undefined,
+};
 
 type TDistillerInternals = {
   ai: {
@@ -106,7 +113,7 @@ describe("FactDistiller", () => {
         '{"facts":[{"text":"The user attends ceramics on Tuesdays.","sourceMessageId":11}]}',
     );
 
-    const result = await distiller.distill(window, DefaultConfigRecord, undefined);
+    const result = await distiller.distill(window, DefaultConfigRecord, TEST_TRACE);
 
     expect(result).toEqual([
       {
@@ -118,7 +125,7 @@ describe("FactDistiller", () => {
       expect.objectContaining({
         purpose: EModelPurpose.Utility,
         settings: DefaultConfigRecord,
-        trace: undefined,
+        trace: TEST_TRACE,
       }),
     );
     const prompt = internals.ai.completeText.mock.calls[0]?.[0].prompt;
@@ -132,7 +139,7 @@ describe("FactDistiller", () => {
     internals.ai.completeText = mock(async () => "not-json");
 
     const error = await distiller
-      .distill(makeWindow(), DefaultConfigRecord, undefined)
+      .distill(makeWindow(), DefaultConfigRecord, TEST_TRACE)
       .catch((thrown: unknown) => thrown);
 
     expect(error).toBeInstanceOf(LlmResponseError);
@@ -144,7 +151,7 @@ describe("FactDistiller", () => {
     internals.ai.completeText = mock(async () => '{"facts":[{"text":"Missing provenance"}]}');
 
     const error = await distiller
-      .distill(makeWindow(), DefaultConfigRecord, undefined)
+      .distill(makeWindow(), DefaultConfigRecord, TEST_TRACE)
       .catch((thrown: unknown) => thrown);
 
     expect(error).toBeInstanceOf(LlmResponseError);
@@ -163,7 +170,7 @@ describe("FactDistiller", () => {
       }),
     );
 
-    await expect(distiller.distill(makeWindow(), DefaultConfigRecord, undefined)).resolves.toEqual(
+    await expect(distiller.distill(makeWindow(), DefaultConfigRecord, TEST_TRACE)).resolves.toEqual(
       [],
     );
   });
@@ -184,7 +191,7 @@ describe("FactDistiller", () => {
       distiller.processWindow({
         window,
         settings: DefaultConfigRecord,
-        trace: undefined,
+        trace: TEST_TRACE,
       }),
     ).resolves.toBeUndefined();
     expect(internals.memory.commitLiveFactWindow).toHaveBeenCalledWith({
@@ -212,7 +219,7 @@ describe("FactDistiller", () => {
     window.messages = [makeMemory(11, ERole.User, message)];
     internals.ai.completeText = mock(async () => '{"facts":[]}');
 
-    const result = await distiller.distill(window, DefaultConfigRecord, undefined);
+    const result = await distiller.distill(window, DefaultConfigRecord, TEST_TRACE);
 
     expect(result).toEqual([]);
     expect(internals.ai.completeText).toHaveBeenCalledWith(
@@ -239,7 +246,7 @@ describe("FactDistiller", () => {
       distiller.processWindow({
         window: makeWindow(),
         settings: DefaultConfigRecord,
-        trace: undefined,
+        trace: TEST_TRACE,
       }),
     ).resolves.toBeUndefined();
     expect(internals.embedding.embedMany).not.toHaveBeenCalled();
@@ -271,7 +278,7 @@ describe("FactDistiller", () => {
       distiller.processWindow({
         window: makeWindow(),
         settings: DefaultConfigRecord,
-        trace: undefined,
+        trace: TEST_TRACE,
       }),
     ).resolves.toBeUndefined();
     expect(calls).toBe(2);
@@ -292,7 +299,7 @@ describe("FactDistiller", () => {
       distiller.processWindow({
         window: makeWindow(),
         settings: DefaultConfigRecord,
-        trace: undefined,
+        trace: TEST_TRACE,
       }),
     ).resolves.toBeUndefined();
     expect(commit).toHaveBeenCalledWith({
@@ -313,7 +320,7 @@ describe("FactDistiller", () => {
       distiller.processWindow({
         window: makeWindow(),
         settings: DefaultConfigRecord,
-        trace: undefined,
+        trace: TEST_TRACE,
       }),
     ).rejects.toThrow(new LlmResponseError("model returned no response", true));
     expect(commit).not.toHaveBeenCalled();
@@ -332,7 +339,7 @@ describe("FactDistiller", () => {
       distiller.processWindow({
         window: makeWindow(),
         settings: DefaultConfigRecord,
-        trace: undefined,
+        trace: TEST_TRACE,
       }),
     ).rejects.toThrow("embedding failed");
     expect(internals.memory.findLiveFactCandidates).not.toHaveBeenCalled();
@@ -354,7 +361,7 @@ describe("FactDistiller", () => {
       distiller.processWindow({
         window: makeWindow(),
         settings: DefaultConfigRecord,
-        trace: undefined,
+        trace: TEST_TRACE,
       }),
     ).resolves.toBeUndefined();
     expect(internals.embedding.embedMany).toHaveBeenCalledWith(["The bicycle is named Comet."]);
@@ -426,7 +433,7 @@ describe("FactDistiller", () => {
       distiller.processWindow({
         window: await memory.loadLiveFactWindow(chatId),
         settings: DefaultConfigRecord,
-        trace: undefined,
+        trace: TEST_TRACE,
       }),
     ).resolves.toBeUndefined();
     const expectedSources = scenario.sourceIndexes.map((index) => {
@@ -469,7 +476,7 @@ describe("FactDistiller", () => {
       distiller.processWindow({
         window: makeWindow(),
         settings: DefaultConfigRecord,
-        trace: undefined,
+        trace: TEST_TRACE,
       }),
     ).resolves.toBeUndefined();
     expect(internals.ai.completeText).toHaveBeenCalledTimes(2);
@@ -510,7 +517,7 @@ describe("FactDistiller", () => {
       distiller.processWindow({
         window: makeWindow(),
         settings: DefaultConfigRecord,
-        trace: undefined,
+        trace: TEST_TRACE,
       }),
     ).resolves.toBeUndefined();
     expect(commit).toHaveBeenCalledWith(
@@ -541,7 +548,7 @@ describe("FactDistiller", () => {
       distiller.processWindow({
         window: makeWindow(),
         settings: DefaultConfigRecord,
-        trace: undefined,
+        trace: TEST_TRACE,
       }),
     ).rejects.toThrow("response selected an unoffered fact ID");
     expect(commit).not.toHaveBeenCalled();
@@ -576,7 +583,7 @@ describe("FactDistiller", () => {
       distiller.processWindow({
         window: makeWindow(),
         settings: DefaultConfigRecord,
-        trace: undefined,
+        trace: TEST_TRACE,
       }),
     ).resolves.toBeUndefined();
     expect(internals.ai.completeText).toHaveBeenCalledTimes(2);
@@ -606,7 +613,7 @@ describe("FactDistiller", () => {
       distiller.processWindow({
         window: makeWindow(),
         settings: DefaultConfigRecord,
-        trace: undefined,
+        trace: TEST_TRACE,
       }),
     ).rejects.toThrow("candidate database unavailable");
     expect(commit).not.toHaveBeenCalled();
@@ -621,7 +628,7 @@ describe("FactDistiller", () => {
     internals.memory.loadLiveFactWindow = mock(async () => windows.shift());
     internals.processWindow = mock(async () => undefined);
 
-    distiller.scheduleFactDrain("chat-comet", undefined);
+    distiller.scheduleFactDrain("chat-comet", TEST_TRACE);
     for (
       let attempt = 0;
       attempt < 20 && internals.processWindow.mock.calls.length < 1;

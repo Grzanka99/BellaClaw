@@ -1,4 +1,4 @@
-import { AppLogger, EBehaviorLogLevel, type TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
+import { AppLogger, type TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
 import type { TOption } from "@bellaclaw/shared";
 import {
   type Api,
@@ -13,7 +13,7 @@ import {
   type Usage,
 } from "@earendil-works/pi-ai";
 import type { z } from "zod";
-import { sanitizeErrorMessage } from "../../app-logger/sanitizers";
+import { startSpan, type TBehaviorSpan } from "../../app-logger/span";
 import { EConfigKey, type TConfigRecord } from "../../settings/schema";
 import {
   decodeAiModelPreferences,
@@ -204,22 +204,29 @@ export class LlmClient {
     instructions: string;
     settings: TConfigRecord;
     purpose: EModelPurpose;
-    trace: TOption<TBehaviorTraceContext>;
+    trace: TBehaviorTraceContext;
     signal?: AbortSignal;
   }): Promise<TOption<string>> {
-    const startedAt = performance.now();
+    const requestSpan = startSpan(args.trace, "model.request.completed", "agent-harness");
+    const completionSpan = startSpan(args.trace, "direct-completion.completed", "agent-harness");
     const modelConfig = await this.resolveModel(args.settings, args.purpose, args.signal);
     const sessionId = this.createSessionId(
       modelConfig.model.provider,
-      args.trace?.chatId,
-      args.trace?.platform,
+      args.trace.chatId,
+      args.trace.platform,
     );
-    this.logDirectCompletionStarted(
-      args.trace,
-      modelConfig.model.provider,
-      modelConfig.model.id,
-      args.purpose,
-    );
+    const completionFields = {
+      provider: modelConfig.model.provider,
+      model: modelConfig.model.id,
+      purpose: args.purpose,
+    };
+    AppLogger.instance.record({
+      trace: args.trace,
+      event: "direct-completion.started",
+      component: "agent-harness",
+      ...completionFields,
+      summary: "direct completion started",
+    });
     let result: AssistantMessage;
 
     try {
@@ -234,27 +241,20 @@ export class LlmClient {
         sessionId,
       );
     } catch (error) {
-      this.logDirectCompletionCompleted(
-        args.trace,
-        modelConfig.model.provider,
-        modelConfig.model.id,
-        args.purpose,
-        startedAt,
-        false,
-        "error",
-        0,
-        String(error),
-      );
+      completionSpan.fail(String(error), {
+        ...completionFields,
+        summary: "direct completion completed",
+        metadata: { stopReason: "error", responseChars: 0 },
+      });
       throw error;
     }
 
     this.logModelRequestCompleted({
-      trace: args.trace,
+      span: requestSpan,
       purpose: args.purpose,
       agentName: undefined,
       parentToolCallId: undefined,
       iteration: 1,
-      startedAt,
       message: result,
     });
 
@@ -269,15 +269,13 @@ export class LlmClient {
       }
     }
 
-    this.logDirectCompletionCompleted(
-      args.trace,
-      modelConfig.model.provider,
-      modelConfig.model.id,
-      args.purpose,
-      startedAt,
+    completionSpan.end(
       text !== undefined,
-      stopReason,
-      text?.length ?? 0,
+      {
+        ...completionFields,
+        summary: "direct completion completed",
+        metadata: { stopReason, responseChars: text?.length ?? 0 },
+      },
       result.errorMessage,
     );
     return text;
@@ -311,6 +309,7 @@ export class LlmClient {
   public async verifySettings(
     settings: TConfigRecord,
     purposes: EModelPurpose[],
+    trace: TBehaviorTraceContext,
   ): Promise<TOption<string>> {
     for (const purpose of purposes) {
       const response = await this.completeText({
@@ -318,7 +317,7 @@ export class LlmClient {
         instructions: "Reply with ok.",
         settings,
         purpose,
-        trace: undefined,
+        trace,
         signal: AbortSignal.timeout(60_000),
       });
 
@@ -331,18 +330,13 @@ export class LlmClient {
   }
 
   public logModelRequestCompleted(args: {
-    trace: TOption<TBehaviorTraceContext>;
+    span: TBehaviorSpan;
     purpose: EModelPurpose;
     agentName: TOption<string>;
     parentToolCallId: TOption<string>;
     iteration: number;
-    startedAt: number;
     message: AssistantMessage;
   }) {
-    if (args.trace === undefined) {
-      return;
-    }
-
     const { usage, stopReason } = args.message;
     const inputTokens = usage.input + usage.cacheRead + usage.cacheWrite;
     let cacheHitPercent: number | null = null;
@@ -350,37 +344,28 @@ export class LlmClient {
       cacheHitPercent = (usage.cacheRead / inputTokens) * 100;
     }
 
-    const success = stopReason !== "error" && stopReason !== "aborted";
-    let level = EBehaviorLogLevel.Info;
-    if (!success) {
-      level = EBehaviorLogLevel.Warning;
-    }
-
-    AppLogger.instance.record({
-      trace: args.trace,
-      event: "model.request.completed",
-      component: "agent-harness",
-      provider: args.message.provider,
-      model: args.message.model,
-      purpose: args.purpose,
-      level,
-      success,
-      durationMs: performance.now() - args.startedAt,
-      summary: `model request completed cacheRead=${usage.cacheRead} inputTokens=${inputTokens}`,
-      error: sanitizeErrorMessage(args.message.errorMessage),
-      metadata: {
-        agentName: args.agentName ?? null,
-        parentToolCallId: args.parentToolCallId ?? null,
-        iteration: args.iteration,
-        stopReason,
-        input: usage.input,
-        output: usage.output,
-        cacheRead: usage.cacheRead,
-        cacheWrite: usage.cacheWrite,
-        inputTokens,
-        cacheHitPercent,
+    args.span.end(
+      stopReason !== "error" && stopReason !== "aborted",
+      {
+        provider: args.message.provider,
+        model: args.message.model,
+        purpose: args.purpose,
+        summary: `model request completed cacheRead=${usage.cacheRead} inputTokens=${inputTokens}`,
+        metadata: {
+          agentName: args.agentName ?? null,
+          parentToolCallId: args.parentToolCallId ?? null,
+          iteration: args.iteration,
+          stopReason,
+          input: usage.input,
+          output: usage.output,
+          cacheRead: usage.cacheRead,
+          cacheWrite: usage.cacheWrite,
+          inputTokens,
+          cacheHitPercent,
+        },
       },
-    });
+      args.message.errorMessage,
+    );
   }
 
   private withSession(
@@ -393,63 +378,5 @@ export class LlmClient {
       sessionId,
       headers: { ...options.headers, ...this.sessionHeaders(provider, sessionId) },
     };
-  }
-
-  private logDirectCompletionStarted(
-    trace: TOption<TBehaviorTraceContext>,
-    provider: string,
-    model: string,
-    purpose: EModelPurpose,
-  ) {
-    if (trace === undefined) {
-      return;
-    }
-
-    AppLogger.instance.record({
-      trace,
-      event: "direct-completion.started",
-      component: "agent-harness",
-      provider,
-      model,
-      purpose,
-      summary: "direct completion started",
-    });
-  }
-
-  private logDirectCompletionCompleted(
-    trace: TOption<TBehaviorTraceContext>,
-    provider: string,
-    model: string,
-    purpose: EModelPurpose,
-    startedAt: number,
-    success: boolean,
-    stopReason: string,
-    responseChars: number,
-    error: TOption<string>,
-  ) {
-    if (trace === undefined) {
-      return;
-    }
-
-    let level = EBehaviorLogLevel.Warning;
-
-    if (success) {
-      level = EBehaviorLogLevel.Info;
-    }
-
-    AppLogger.instance.record({
-      trace,
-      event: "direct-completion.completed",
-      component: "agent-harness",
-      level,
-      provider,
-      model,
-      purpose,
-      success,
-      durationMs: performance.now() - startedAt,
-      summary: "direct completion completed",
-      metadata: { stopReason, responseChars },
-      error: sanitizeErrorMessage(error),
-    });
   }
 }

@@ -32,7 +32,7 @@ export type TDistilledFact = z.infer<typeof SDistilledFact>;
 export type TProcessFactWindowArgs = {
   window: TLiveFactWindow;
   settings: TConfigRecord;
-  trace: TOption<TBehaviorTraceContext>;
+  trace: TBehaviorTraceContext;
 };
 
 export class FactDistiller {
@@ -74,7 +74,7 @@ export class FactDistiller {
     }
   }
 
-  public scheduleFactDrain(chatId: string, trace: TOption<TBehaviorTraceContext>): void {
+  public scheduleFactDrain(chatId: string, trace: TBehaviorTraceContext): void {
     void this.factQueue(chatId)
       .enqueue(async () => {
         const settings = await SettingsService.instance.getAll(chatId);
@@ -88,14 +88,14 @@ export class FactDistiller {
   public enqueueFactDrain(
     chatId: string,
     settings: TConfigRecord,
-    trace: TOption<TBehaviorTraceContext>,
+    trace: TBehaviorTraceContext,
   ): Promise<boolean> {
     return this.factQueue(chatId).enqueue(() => this.drainLiveFactWindows(chatId, settings, trace));
   }
 
-  public async ensureFactsCurrent(chatId: string): Promise<void> {
+  public async ensureFactsCurrent(chatId: string, trace: TBehaviorTraceContext): Promise<void> {
     const settings = await SettingsService.instance.getAll(chatId);
-    const success = await this.enqueueFactDrain(chatId, settings, undefined);
+    const success = await this.enqueueFactDrain(chatId, settings, trace);
     if (!success) {
       throw new Error("Pending fact distillation failed");
     }
@@ -104,7 +104,7 @@ export class FactDistiller {
   public async distill(
     window: TLiveFactWindow,
     settings: TConfigRecord,
-    trace: TOption<TBehaviorTraceContext>,
+    trace: TBehaviorTraceContext,
   ): Promise<TDistilledFact[]> {
     const response = await this.ai.completeJson(SDistillationResponse, {
       prompt: this.createDistillationPrompt(window),
@@ -314,7 +314,7 @@ export class FactDistiller {
   private async drainLiveFactWindows(
     chatId: string,
     settings: TConfigRecord,
-    trace: TOption<TBehaviorTraceContext>,
+    trace: TBehaviorTraceContext,
   ): Promise<boolean> {
     while (true) {
       const window = await this.memory.loadLiveFactWindow(chatId);
@@ -335,7 +335,7 @@ export class FactDistiller {
     fact: TDistilledFact,
     candidates: TFactSearchResult[],
     settings: TConfigRecord,
-    trace: TOption<TBehaviorTraceContext>,
+    trace: TBehaviorTraceContext,
   ): Promise<number[]> {
     const offeredIds = new Set(candidates.map((candidate) => candidate.id));
     const candidateLines = candidates.map((candidate) => `[id=${candidate.id}] ${candidate.text}`);

@@ -6,9 +6,10 @@ import { AgentHarness } from "../ai/agent-harness";
 import { LlmClient } from "../ai/llm";
 import { ERole } from "../ai/types";
 import {
-  logHandlerCompleted,
   logHandlerStarted,
-  logMemorySaveCompleted,
+  startHandlerSpan,
+  startMemorySaveSpan,
+  type THandlerSpan,
 } from "../app-logger/operations";
 import { CronSingleton } from "../cron";
 import { EMemoryImportance } from "../memory/types";
@@ -52,13 +53,13 @@ export class ScheduledDelivery {
       chatId: ctx.scope,
       platform: undefined,
     };
-    const handlerStart = performance.now();
     logHandlerStarted(trace, "cron-fire");
+    const span = startHandlerSpan(trace, "cron-fire");
 
     const canonicalChatId = ctx.scope;
     if (canonicalChatId === undefined) {
       this.logger.warning(`handleCronFire: job "${ctx.name}" has no scope, skipping delivery`);
-      logHandlerCompleted(trace, "cron-fire", handlerStart, false, 0, "missing scope", undefined);
+      span.fail("missing scope", 0);
       return;
     }
 
@@ -67,7 +68,7 @@ export class ScheduledDelivery {
       this.logger.warning(
         `handleCronFire: job "${ctx.name}" has invalid scope "${canonicalChatId}", skipping delivery`,
       );
-      logHandlerCompleted(trace, "cron-fire", handlerStart, false, 0, "invalid scope", undefined);
+      span.fail("invalid scope", 0);
       return;
     }
 
@@ -78,15 +79,7 @@ export class ScheduledDelivery {
       this.logger.warning(
         `handleCronFire: no ${parsedScope.platform} transport for reminder "${ctx.name}", skipping delivery`,
       );
-      logHandlerCompleted(
-        trace,
-        "cron-fire",
-        handlerStart,
-        false,
-        0,
-        "missing transport",
-        undefined,
-      );
+      span.fail("missing transport", 0);
       return;
     }
 
@@ -95,29 +88,14 @@ export class ScheduledDelivery {
 
       if (this.runningCronTaskKeys.has(taskKey)) {
         this.logger.warning(`handleCronFire: task "${ctx.name}" is already running, skipping`);
-        logHandlerCompleted(
-          trace,
-          "cron-fire",
-          handlerStart,
-          true,
-          0,
-          "task overlap skipped",
-          undefined,
-        );
+        span.ok("task overlap skipped", 0);
         return;
       }
 
       this.runningCronTaskKeys.add(taskKey);
 
       try {
-        await this.handleCronDelivery(
-          ctx,
-          canonicalChatId,
-          parsedScope,
-          transport,
-          trace,
-          handlerStart,
-        );
+        await this.handleCronDelivery(ctx, canonicalChatId, parsedScope, transport, trace, span);
       } finally {
         this.runningCronTaskKeys.delete(taskKey);
       }
@@ -125,14 +103,7 @@ export class ScheduledDelivery {
       return;
     }
 
-    await this.handleCronDelivery(
-      ctx,
-      canonicalChatId,
-      parsedScope,
-      transport,
-      trace,
-      handlerStart,
-    );
+    await this.handleCronDelivery(ctx, canonicalChatId, parsedScope, transport, trace, span);
   }
 
   private async handleCronDelivery(
@@ -141,7 +112,7 @@ export class ScheduledDelivery {
     parsedScope: { platform: EMessagePlatform; chatId: string },
     transport: TMessageTransport,
     trace: TBehaviorTraceContext,
-    handlerStart: number,
+    span: THandlerSpan,
   ) {
     let text: TOption<string>;
     let memoryPrefix = "CRON REMINDER";
@@ -169,15 +140,7 @@ export class ScheduledDelivery {
 
     if (text === undefined) {
       this.logger.info(`handleCronFire: job "${ctx.name}" has no reminder text, skipping delivery`);
-      logHandlerCompleted(
-        trace,
-        "cron-fire",
-        handlerStart,
-        false,
-        0,
-        "missing reminder text",
-        undefined,
-      );
+      span.fail("missing reminder text", 0);
       return;
     }
 
@@ -185,34 +148,23 @@ export class ScheduledDelivery {
       this.logger.info(
         `handleCronFire: job "${ctx.name}" has blank reminder text, skipping delivery`,
       );
-      logHandlerCompleted(
-        trace,
-        "cron-fire",
-        handlerStart,
-        false,
-        0,
-        "blank reminder text",
-        undefined,
-      );
+      span.fail("blank reminder text", 0);
       return;
     }
 
     const sendError = await this.messaging.sendText(transport, parsedScope.chatId, text, trace);
     if (sendError !== undefined) {
-      logHandlerCompleted(
-        trace,
-        "cron-fire",
-        handlerStart,
-        false,
-        text.length,
-        "send failed",
-        sendError,
-      );
+      span.fail("send failed", text.length, sendError);
       return;
     }
 
     const deliveredAt = Date.now();
-    const saveStart = performance.now();
+    const saveSpan = startMemorySaveSpan(
+      trace,
+      ERole.Assistant,
+      EMemoryImportance.Low,
+      text.length,
+    );
 
     try {
       await MessageHandler.getInstance(canonicalChatId).saveDeliveredMessage(
@@ -220,37 +172,15 @@ export class ScheduledDelivery {
         parsedScope.platform,
         deliveredAt,
       );
-      logMemorySaveCompleted(
-        trace,
-        saveStart,
-        ERole.Assistant,
-        EMemoryImportance.Low,
-        text.length,
-        undefined,
-      );
+      saveSpan.ok();
     } catch (error) {
       this.logger.error(
         `handleCronFire: failed to save reminder "${ctx.name}" to memory for chat ${canonicalChatId}: ${String(error)}`,
       );
-      logMemorySaveCompleted(
-        trace,
-        saveStart,
-        ERole.Assistant,
-        EMemoryImportance.Low,
-        text.length,
-        String(error),
-      );
+      saveSpan.fail(String(error));
     }
 
-    logHandlerCompleted(
-      trace,
-      "cron-fire",
-      handlerStart,
-      true,
-      text.length,
-      "completed",
-      undefined,
-    );
+    span.ok("completed", text.length);
   }
 }
 

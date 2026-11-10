@@ -55,7 +55,7 @@ export async function generateReminderText(
   platform: TOption<EMessagePlatform>,
   commands: string,
   ai: TReminderAi,
-  trace?: TBehaviorTraceContext,
+  trace: TBehaviorTraceContext,
 ): Promise<TOption<string>> {
   if (ctx.reminderText !== undefined) {
     const reminderText = ctx.reminderText.trim();
@@ -122,7 +122,7 @@ export async function generateScheduledTaskText(
   platform: TOption<EMessagePlatform>,
   commands: string,
   ai: TScheduledTaskAi,
-  trace?: TBehaviorTraceContext,
+  trace: TBehaviorTraceContext,
 ): Promise<TScheduledTaskResult> {
   const startedAt = performance.now();
 

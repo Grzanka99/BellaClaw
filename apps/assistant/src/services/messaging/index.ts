@@ -7,15 +7,14 @@ import {
 import type { TOption } from "@bellaclaw/shared";
 import { createLogger, type TLogger } from "@bellaclaw/shared";
 import { ERole } from "../ai/types";
-import { logHandlerCompleted } from "../app-logger/operations";
-import { sanitizeErrorMessage } from "../app-logger/sanitizers";
+import { startHandlerSpan } from "../app-logger/operations";
+import { startSpan } from "../app-logger/span";
 import {
   AuthorizationService,
   EAuthorizationDecision,
   type TAuthorizationResult,
 } from "../authorization";
 import { MessageHandler } from "../message-handler";
-import { attachMessageTrace } from "../message-handler/trace";
 import type { TIncommingMessage } from "../message-handler/types";
 import { createCanonicalChatKey, parseCanonicalChatKey } from "./chat-key";
 import { formatCommandList, runCommand } from "./commands";
@@ -62,26 +61,18 @@ export class MessagingAdapter {
   public async handleInboundMessage(message: TPlatformMessage) {
     const receivedAt = new Date();
     const canonicalChatId = createCanonicalChatKey(message.platform, message.chatId);
-    const handlerStart = performance.now();
     const trace: TBehaviorTraceContext = {
       turnId: createMessageTurnId(),
       chatId: canonicalChatId,
       platform: message.platform,
     };
+    const span = startHandlerSpan(trace, "messaging");
 
     try {
       const transport = this.transports.get(message.platform);
       if (transport === undefined) {
         this.logger.error(`handleInboundMessage: no transport for platform ${message.platform}`);
-        logHandlerCompleted(
-          trace,
-          "messaging",
-          handlerStart,
-          false,
-          0,
-          "missing transport",
-          undefined,
-        );
+        span.fail("missing transport", 0);
         return;
       }
 
@@ -134,45 +125,29 @@ export class MessagingAdapter {
       if (commandReply !== undefined) {
         incomingMessage.message.content = commandReply.prompt;
       }
-      attachMessageTrace(incomingMessage, trace);
 
       const handler = MessageHandler.getInstance(canonicalChatId);
       const reply = await handler.handleMessage(
         incomingMessage,
+        trace,
         formatCommandList(),
         message.platform,
       );
 
       if (reply.trim().length === 0) {
-        logHandlerCompleted(trace, "messaging", handlerStart, true, 0, "empty reply", undefined);
+        span.ok("empty reply", 0);
         return;
       }
 
       const sendError = await this.sendText(transport, message.chatId, reply, trace);
       if (sendError !== undefined) {
-        logHandlerCompleted(
-          trace,
-          "messaging",
-          handlerStart,
-          false,
-          reply.length,
-          "send failed",
-          sendError,
-        );
+        span.fail("send failed", reply.length, sendError);
         return;
       }
 
-      logHandlerCompleted(
-        trace,
-        "messaging",
-        handlerStart,
-        true,
-        reply.length,
-        "completed",
-        undefined,
-      );
+      span.ok("completed", reply.length);
     } catch (error) {
-      logHandlerCompleted(trace, "messaging", handlerStart, false, 0, "failed", String(error));
+      span.fail("failed", 0, String(error));
       throw error;
     }
   }
@@ -183,25 +158,25 @@ export class MessagingAdapter {
     text: string,
     trace: TBehaviorTraceContext,
   ): Promise<TOption<string>> {
-    const start = performance.now();
-    let failure: TOption<string>;
+    const span = startSpan(trace, "transport.send.completed", "messaging", {
+      summary: `transport send completed platform=${transport.platform}`,
+      metadata: {
+        platform: transport.platform,
+        replyChars: text.length,
+      },
+    });
     try {
       await transport.sendText(chatId, text);
     } catch (error) {
-      failure = String(error);
+      const failure = String(error);
       this.logger.error(
         `sendText: failed to send to ${transport.platform} chat ${chatId}: ${failure}`,
       );
+      span.fail(failure, { level: EBehaviorLogLevel.Error });
+      return failure;
     }
-    logTransportSendCompleted(
-      trace,
-      start,
-      transport.platform,
-      failure === undefined,
-      text.length,
-      failure,
-    );
-    return failure;
+    span.ok();
+    return undefined;
   }
 
   public async waitForTransport(platform: EMessagePlatform): Promise<TOption<TMessageTransport>> {
@@ -255,35 +230,5 @@ function logMessageReceived(trace: TBehaviorTraceContext, message: TPlatformMess
       platform: message.platform,
       messageChars: message.message.content.length,
     },
-  });
-}
-
-function logTransportSendCompleted(
-  trace: TBehaviorTraceContext,
-  start: number,
-  platform: string,
-  success: boolean,
-  replyChars: number,
-  error: TOption<string>,
-) {
-  let level = EBehaviorLogLevel.Info;
-
-  if (!success) {
-    level = EBehaviorLogLevel.Error;
-  }
-
-  AppLogger.instance.record({
-    trace,
-    event: "transport.send.completed",
-    component: "messaging",
-    level,
-    success,
-    durationMs: performance.now() - start,
-    summary: `transport send completed platform=${platform}`,
-    metadata: {
-      platform,
-      replyChars,
-    },
-    error: sanitizeErrorMessage(error),
   });
 }

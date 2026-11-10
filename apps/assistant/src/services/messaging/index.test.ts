@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, mock, setSystemTime, test } fr
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
 import { ERole } from "../ai/types";
 import {
   AuthorizationService,
@@ -10,7 +11,6 @@ import {
 } from "../authorization";
 import { Memory } from "../memory";
 import { MessageHandler } from "../message-handler";
-import { getMessageTrace } from "../message-handler/trace";
 import type { TIncommingMessage } from "../message-handler/types";
 import { SettingsService } from "../settings";
 import { MessagingAdapter } from ".";
@@ -176,10 +176,17 @@ describe("MessagingAdapter", () => {
     const originalMcpConfig = Bun.env.BELLACLAW_MCP_CONFIG;
     const directory = await mkdtemp(join(tmpdir(), "bellaclaw-messaging-mcp-"));
     let receivedMessage: TIncommingMessage | undefined;
+    let receivedTrace: TBehaviorTraceContext | undefined;
     let receivedPlatform: EMessagePlatform | undefined;
     const handleMessage = mock(
-      async (message: TIncommingMessage, _commands: string, platform: EMessagePlatform) => {
+      async (
+        message: TIncommingMessage,
+        trace: TBehaviorTraceContext,
+        _commands: string,
+        platform: EMessagePlatform,
+      ) => {
         receivedMessage = message;
+        receivedTrace = trace;
         receivedPlatform = platform;
         return "Prompt completed.";
       },
@@ -230,7 +237,7 @@ describe("MessagingAdapter", () => {
             'Use MCP profile documents to run the explicitly requested prompt template summarize with arguments {"style":"brief"}.',
         },
       });
-      expect(getMessageTrace(receivedMessage as TIncommingMessage)).toEqual({
+      expect(receivedTrace).toEqual({
         turnId: expect.any(String),
         chatId: "discord:channel-1",
         platform: EMessagePlatform.Discord,

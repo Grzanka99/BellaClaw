@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
+import type { TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
 import { ECronJobType, type TCronJobContext } from "../../lib/cron-engine";
 import type { AgentHarness } from "../ai/agent-harness";
 import type { LlmClient } from "../ai/llm";
@@ -7,6 +8,12 @@ import { EMessagePlatform } from "../messaging/types";
 import { SettingsService } from "../settings";
 import { DefaultConfigRecord, EConfigKey } from "../settings/schema";
 import { generateReminderText, generateScheduledTaskText } from "./generate-reminder-text";
+
+const TEST_TRACE: TBehaviorTraceContext = {
+  turnId: "test",
+  chatId: undefined,
+  platform: undefined,
+};
 
 function context(overrides: Partial<TCronJobContext> = {}): TCronJobContext {
   return {
@@ -47,6 +54,7 @@ describe("generateReminderText", () => {
         EMessagePlatform.Signal,
         "",
         ai,
+        TEST_TRACE,
       ),
     ).toBe("Call Mum.");
     expect(ai.completeText).not.toHaveBeenCalled();
@@ -66,9 +74,13 @@ describe("generateReminderText", () => {
       return "Generated reminder.";
     });
 
-    const result = await generateReminderText(context(), EMessagePlatform.Signal, "", {
-      completeText,
-    });
+    const result = await generateReminderText(
+      context(),
+      EMessagePlatform.Signal,
+      "",
+      { completeText },
+      TEST_TRACE,
+    );
     const args = captured[0];
 
     expect(result).toBe("Generated reminder.");
@@ -87,16 +99,28 @@ describe("generateReminderText", () => {
   test("uses fallback for blank output and failures", async () => {
     settings();
     expect(
-      await generateReminderText(context(), EMessagePlatform.Signal, "", {
-        completeText: mock(async () => "   "),
-      }),
+      await generateReminderText(
+        context(),
+        EMessagePlatform.Signal,
+        "",
+        {
+          completeText: mock(async () => "   "),
+        },
+        TEST_TRACE,
+      ),
     ).toBe("Reminder unavailable.");
     expect(
-      await generateReminderText(context(), EMessagePlatform.Signal, "", {
-        completeText: mock(async () => {
-          throw new Error("provider failed");
-        }),
-      }),
+      await generateReminderText(
+        context(),
+        EMessagePlatform.Signal,
+        "",
+        {
+          completeText: mock(async () => {
+            throw new Error("provider failed");
+          }),
+        },
+        TEST_TRACE,
+      ),
     ).toBe("Reminder unavailable.");
   });
 });
@@ -126,6 +150,7 @@ describe("generateScheduledTaskText", () => {
       EMessagePlatform.Signal,
       "",
       { runScheduledTask },
+      TEST_TRACE,
     );
     const args = captured[0];
 
@@ -155,23 +180,35 @@ describe("generateScheduledTaskText", () => {
 
     expect(
       (
-        await generateScheduledTaskText(task, EMessagePlatform.Signal, "", {
-          runScheduledTask: mock(async () => ({
-            text: " ",
-            stopReason: "iteration-limit",
-            iterations: 30,
-            toolCallCount: 29,
-          })),
-        })
+        await generateScheduledTaskText(
+          task,
+          EMessagePlatform.Signal,
+          "",
+          {
+            runScheduledTask: mock(async () => ({
+              text: " ",
+              stopReason: "iteration-limit",
+              iterations: 30,
+              toolCallCount: 29,
+            })),
+          },
+          TEST_TRACE,
+        )
       ).text,
     ).toBe("Briefing unavailable.");
     expect(
       (
-        await generateScheduledTaskText(task, EMessagePlatform.Signal, "", {
-          runScheduledTask: mock(async () => {
-            throw new Error("provider failed");
-          }),
-        })
+        await generateScheduledTaskText(
+          task,
+          EMessagePlatform.Signal,
+          "",
+          {
+            runScheduledTask: mock(async () => {
+              throw new Error("provider failed");
+            }),
+          },
+          TEST_TRACE,
+        )
       ).text,
     ).toBe("Briefing unavailable.");
   });

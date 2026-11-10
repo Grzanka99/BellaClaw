@@ -17,7 +17,7 @@ export async function compactConversation(
   models: Models,
   model: Model<Api>,
   fixedTokens: number,
-  trace?: TBehaviorTraceContext,
+  trace: TBehaviorTraceContext,
 ) {
   const messages = conversationMessages(state);
   const estimates = messages.map((message) => estimateMessageTokens(message));
@@ -35,25 +35,23 @@ export async function compactConversation(
   if (tokensBefore < trigger) {
     return undefined;
   }
-  if (trace !== undefined) {
-    if (tokensBefore >= CONTEXT_SOFT_LIMIT) {
-      AppLogger.instance.record({
-        trace,
-        event: "conversation.soft-limit",
-        component: "agent-harness",
-        level: EBehaviorLogLevel.Warning,
-        summary: "Context exceeded soft guardrail; turn completed without interruption",
-        metadata: { contextTokens: tokensBefore },
-      });
-    }
+  if (tokensBefore >= CONTEXT_SOFT_LIMIT) {
     AppLogger.instance.record({
       trace,
-      event: "conversation.compaction.started",
+      event: "conversation.soft-limit",
       component: "agent-harness",
-      summary: "Compacting completed conversation",
-      metadata: { tokensBefore, model: model.id },
+      level: EBehaviorLogLevel.Warning,
+      summary: "Context exceeded soft guardrail; turn completed without interruption",
+      metadata: { contextTokens: tokensBefore },
     });
   }
+  AppLogger.instance.record({
+    trace,
+    event: "conversation.compaction.started",
+    component: "agent-harness",
+    summary: "Compacting completed conversation",
+    metadata: { tokensBefore, model: model.id },
+  });
 
   const keepTokens = Math.max(
     0,

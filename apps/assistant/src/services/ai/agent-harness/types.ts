@@ -27,7 +27,7 @@ export type TAgentRunArgs = {
   commands: string;
   currentTimeContext: TOption<string>;
   platform: TOption<EMessagePlatform>;
-  trace: TOption<TBehaviorTraceContext>;
+  trace: TBehaviorTraceContext;
   history: TOption<THistoryItem[]>;
   conversation?: TConversation;
   maxIterations: number;

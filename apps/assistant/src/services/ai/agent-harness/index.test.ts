@@ -42,6 +42,11 @@ const OPENROUTER_MODELS = [
 ].map((id) => ({ id, reasoning: true }));
 
 const logDirectories: string[] = [];
+const TEST_TRACE: TBehaviorTraceContext = {
+  turnId: "test",
+  chatId: undefined,
+  platform: undefined,
+};
 
 describe("AgentHarness", () => {
   const previousApiKey = Bun.env.OPENROUTER_API_KEY;
@@ -103,7 +108,7 @@ describe("AgentHarness", () => {
       commands: "",
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
-      trace: undefined,
+      trace: TEST_TRACE,
       signal: undefined,
     };
 
@@ -164,7 +169,7 @@ describe("AgentHarness", () => {
       commands: "",
       currentTimeContext: "time one",
       platform: EMessagePlatform.Discord,
-      trace: undefined,
+      trace: TEST_TRACE,
       signal: undefined,
     });
     settings[EConfigKey.AiInstructionsTimezone] = "Asia/Tokyo";
@@ -181,7 +186,7 @@ describe("AgentHarness", () => {
       commands: "",
       currentTimeContext: "time two",
       platform: EMessagePlatform.Discord,
-      trace: undefined,
+      trace: TEST_TRACE,
       signal: undefined,
     });
 
@@ -260,7 +265,7 @@ describe("AgentHarness", () => {
         commands: "",
         currentTimeContext: undefined,
         platform: EMessagePlatform.Discord,
-        trace: undefined,
+        trace: TEST_TRACE,
         signal: undefined,
       });
 
@@ -324,7 +329,7 @@ describe("AgentHarness", () => {
       commands: "",
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
-      trace: undefined,
+      trace: TEST_TRACE,
       history: [],
       maxIterations: 6,
       parentToolCallId: "delegate-call",
@@ -367,7 +372,7 @@ describe("AgentHarness", () => {
         settings: typeof DefaultConfigRecord,
         chatId: TOption<string>,
         platform: TOption<EMessagePlatform>,
-        trace: TOption<TBehaviorTraceContext>,
+        trace: TBehaviorTraceContext,
         parentToolCallId: string,
         iteration: number,
         signal: AbortSignal,
@@ -385,7 +390,7 @@ describe("AgentHarness", () => {
         { ...DefaultConfigRecord, [EConfigKey.AiProvider]: EAiProvider.Openrouter },
         "discord:1",
         EMessagePlatform.Discord,
-        undefined,
+        TEST_TRACE,
         "delegate-call",
         1,
         new AbortController().signal,
@@ -462,7 +467,7 @@ describe("AgentHarness", () => {
         settings: typeof DefaultConfigRecord,
         chatId: TOption<string>,
         platform: TOption<EMessagePlatform>,
-        trace: TOption<TBehaviorTraceContext>,
+        trace: TBehaviorTraceContext,
         parentToolCallId: string,
         iteration: number,
         signal: AbortSignal,
@@ -474,7 +479,7 @@ describe("AgentHarness", () => {
       { ...DefaultConfigRecord, [EConfigKey.AiProvider]: EAiProvider.Openrouter },
       "discord:1",
       EMessagePlatform.Discord,
-      undefined,
+      TEST_TRACE,
       "delegate-call",
       2,
       new AbortController().signal,
@@ -535,7 +540,7 @@ describe("AgentHarness", () => {
         settings: typeof DefaultConfigRecord,
         chatId: TOption<string>,
         platform: TOption<EMessagePlatform>,
-        trace: TOption<TBehaviorTraceContext>,
+        trace: TBehaviorTraceContext,
         parentToolCallId: string,
         iteration: number,
         signal: AbortSignal,
@@ -560,7 +565,7 @@ describe("AgentHarness", () => {
         },
         "discord:1",
         EMessagePlatform.Discord,
-        undefined,
+        TEST_TRACE,
         "delegate-call",
         1,
         signal,
@@ -605,7 +610,7 @@ describe("AgentHarness", () => {
         settings: typeof DefaultConfigRecord,
         chatId: TOption<string>,
         platform: TOption<EMessagePlatform>,
-        trace: TOption<TBehaviorTraceContext>,
+        trace: TBehaviorTraceContext,
         parentToolCallId: string,
         iteration: number,
         signal: AbortSignal,
@@ -633,7 +638,7 @@ describe("AgentHarness", () => {
         },
         "discord:1",
         EMessagePlatform.Discord,
-        undefined,
+        TEST_TRACE,
         "delegate-call",
         1,
         new AbortController().signal,
@@ -672,7 +677,7 @@ describe("AgentHarness", () => {
         settings: typeof DefaultConfigRecord,
         chatId: TOption<string>,
         platform: TOption<EMessagePlatform>,
-        trace: TOption<TBehaviorTraceContext>,
+        trace: TBehaviorTraceContext,
         parentToolCallId: string,
         iteration: number,
         signal: AbortSignal,
@@ -687,7 +692,7 @@ describe("AgentHarness", () => {
       { ...DefaultConfigRecord, [EConfigKey.AiProvider]: EAiProvider.OpencodeGo },
       "discord:1",
       EMessagePlatform.Discord,
-      undefined,
+      TEST_TRACE,
       "delegate-call",
       1,
       new AbortController().signal,
@@ -723,7 +728,7 @@ describe("AgentHarness", () => {
       platform: EMessagePlatform.Discord,
       commands: "",
       currentTimeContext: "Message received at: 2026-09-10",
-      trace: undefined,
+      trace: TEST_TRACE,
       signal: undefined,
     };
     const first = await AgentHarness.instance.runMain(args);
@@ -820,7 +825,7 @@ describe("AgentHarness", () => {
       commands: "",
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
-      trace: undefined,
+      trace: TEST_TRACE,
       signal: undefined,
     });
     const sameConversation = await AgentHarness.instance.runMain({
@@ -831,7 +836,7 @@ describe("AgentHarness", () => {
       commands: "",
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
-      trace: undefined,
+      trace: TEST_TRACE,
       signal: undefined,
     });
     const otherConversation = await AgentHarness.instance.runMain({
@@ -842,7 +847,7 @@ describe("AgentHarness", () => {
       commands: "",
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
-      trace: undefined,
+      trace: TEST_TRACE,
       signal: undefined,
     });
     const direct = await LlmClient.instance.completeText({
@@ -850,7 +855,7 @@ describe("AgentHarness", () => {
       instructions: "Reply directly",
       settings,
       purpose: EModelPurpose.Utility,
-      trace: undefined,
+      trace: TEST_TRACE,
     });
 
     expect(conversation.text).toBe("conversation final");
@@ -904,6 +909,7 @@ describe("AgentHarness", () => {
       "discord:1",
       EMessagePlatform.Discord,
       "",
+      TEST_TRACE,
     );
 
     expect(result?.state.summary).toBe("Earlier context summarized.");
@@ -948,7 +954,7 @@ describe("AgentHarness", () => {
       commands: "",
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
-      trace: undefined,
+      trace: TEST_TRACE,
       signal: undefined,
     };
     try {
@@ -968,7 +974,7 @@ describe("AgentHarness", () => {
         instructions: "Reply directly",
         settings,
         purpose: EModelPurpose.Utility,
-        trace: undefined,
+        trace: TEST_TRACE,
       });
 
       expect(sessions).toHaveLength(7);
@@ -1038,7 +1044,7 @@ describe("AgentHarness", () => {
         commands: "",
         currentTimeContext: undefined,
         platform: EMessagePlatform.Discord,
-        trace: undefined,
+        trace: TEST_TRACE,
         signal: undefined,
       });
       expect(toolResult).toContain("Specialist answer");
@@ -1086,7 +1092,7 @@ describe("AgentHarness", () => {
         commands: "",
         currentTimeContext: undefined,
         platform: EMessagePlatform.Discord,
-        trace: undefined,
+        trace: TEST_TRACE,
         signal: undefined,
       });
       expect(schedulingPrompt).toContain(
@@ -1121,7 +1127,7 @@ describe("AgentHarness", () => {
       commands: "",
       currentTimeContext: "Message received at:\nUTC: 2026-09-10T10:00:00.000Z",
       platform: EMessagePlatform.Discord,
-      trace: undefined,
+      trace: TEST_TRACE,
       signal: undefined,
     };
     await AgentHarness.instance.runMain(args);
@@ -1176,7 +1182,7 @@ describe("AgentHarness", () => {
       commands: "",
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
-      trace: undefined,
+      trace: TEST_TRACE,
       signal: undefined,
     };
 
@@ -1205,7 +1211,7 @@ describe("AgentHarness", () => {
       commands: "",
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
-      trace: undefined,
+      trace: TEST_TRACE,
       signal: controller.signal,
     });
 
@@ -1231,7 +1237,7 @@ describe("AgentHarness", () => {
       commands: "",
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
-      trace: undefined,
+      trace: TEST_TRACE,
       signal: undefined,
     });
 
@@ -1253,7 +1259,7 @@ describe("AgentHarness", () => {
         commands: string;
         currentTimeContext: undefined;
         platform: EMessagePlatform;
-        trace: undefined;
+        trace: TBehaviorTraceContext;
         history: THistoryItem[];
         maxIterations: number;
         parentToolCallId: undefined;
@@ -1273,7 +1279,7 @@ describe("AgentHarness", () => {
       commands: "",
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
-      trace: undefined,
+      trace: TEST_TRACE,
       history: [],
       maxIterations: 12,
       parentToolCallId: undefined,
@@ -1303,7 +1309,7 @@ describe("AgentHarness", () => {
       commands: "",
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
-      trace: undefined,
+      trace: TEST_TRACE,
       signal: undefined,
     });
 
@@ -1333,7 +1339,7 @@ describe("AgentHarness", () => {
       commands: "",
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
-      trace: undefined,
+      trace: TEST_TRACE,
       signal: undefined,
     });
 
@@ -1368,7 +1374,7 @@ describe("AgentHarness", () => {
       commands: "",
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
-      trace: undefined,
+      trace: TEST_TRACE,
       signal: controller.signal,
     });
     await providerStarted;
@@ -1403,7 +1409,7 @@ describe("AgentHarness", () => {
       commands: "",
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
-      trace: undefined,
+      trace: TEST_TRACE,
       signal: undefined,
     });
 
@@ -1441,7 +1447,7 @@ describe("AgentHarness", () => {
       commands: "",
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
-      trace: undefined,
+      trace: TEST_TRACE,
       signal: undefined,
     });
 
@@ -1489,7 +1495,7 @@ describe("AgentHarness", () => {
       commands: "",
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
-      trace: undefined,
+      trace: TEST_TRACE,
       signal: undefined,
     });
 
@@ -1530,7 +1536,7 @@ describe("AgentHarness", () => {
       commands: "",
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
-      trace: undefined,
+      trace: TEST_TRACE,
       signal: undefined,
     });
 

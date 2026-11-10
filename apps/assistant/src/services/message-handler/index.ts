@@ -1,15 +1,11 @@
-import { AppLogger, EBehaviorLogLevel, type TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
+import type { TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
 import type { TOption } from "@bellaclaw/shared";
 import { AsyncQueue, createLogger, type TLogger } from "@bellaclaw/shared";
 import { AgentHarness } from "../ai/agent-harness";
 import { describeAiAuthProblem } from "../ai/auth";
 import { ERole, type THistoryItem } from "../ai/types";
-import {
-  logHandlerCompleted,
-  logHandlerStarted,
-  logMemorySaveCompleted,
-} from "../app-logger/operations";
-import { sanitizeErrorMessage } from "../app-logger/sanitizers";
+import { logHandlerStarted, startHandlerSpan, startMemorySaveSpan } from "../app-logger/operations";
+import { startSpan } from "../app-logger/span";
 import { ConversationStore } from "../conversation";
 import type { TConversation } from "../conversation/types";
 import { Memory } from "../memory";
@@ -18,7 +14,6 @@ import { EMemoryImportance, type TMemory } from "../memory/types";
 import type { EMessagePlatform } from "../messaging/types";
 import { SettingsService } from "../settings";
 import { EConfigKey, type TConfigRecord } from "../settings/schema";
-import { getMessageTrace } from "./trace";
 import type { TIncommingMessage } from "./types";
 
 export class MessageHandler {
@@ -52,10 +47,11 @@ export class MessageHandler {
 
   public async handleMessage(
     message: TIncommingMessage,
+    trace: TBehaviorTraceContext,
     commands: string,
     platform?: EMessagePlatform,
   ): Promise<string> {
-    return this.turnQueue.enqueue(() => this.handleTurn(message, commands, platform));
+    return this.turnQueue.enqueue(() => this.handleTurn(message, trace, commands, platform));
   }
 
   public saveDeliveredMessage(
@@ -73,13 +69,14 @@ export class MessageHandler {
 
   private async handleTurn(
     message: TIncommingMessage,
+    trace: TBehaviorTraceContext,
     commands: string,
     platform: TOption<EMessagePlatform>,
   ): Promise<string> {
-    const trace = getMessageTrace(message);
     const handleMessageStart = performance.now();
     this.logger.info("handleMessage: start");
     logHandlerStarted(trace, "message-handler");
+    const span = startHandlerSpan(trace, "message-handler");
 
     try {
       const settings = await SettingsService.instance.getAll(message.chatId);
@@ -139,19 +136,16 @@ export class MessageHandler {
           reply = authProblem;
         }
 
-        logHandlerCompleted(
-          trace,
-          "message-handler",
-          handleMessageStart,
-          false,
-          reply.length,
-          "missing final response",
-          undefined,
-        );
+        span.fail("missing final response", reply.length);
         return reply;
       }
 
-      const saveStartedAt = performance.now();
+      const saveSpan = startMemorySaveSpan(
+        trace,
+        ERole.Assistant,
+        EMemoryImportance.Medium,
+        aiRes.text.length,
+      );
       let persisted: TConversation;
       let saveError: TOption<string>;
       try {
@@ -170,14 +164,7 @@ export class MessageHandler {
         saveError = String(error);
         throw error;
       } finally {
-        logMemorySaveCompleted(
-          trace,
-          saveStartedAt,
-          ERole.Assistant,
-          EMemoryImportance.Medium,
-          aiRes.text.length,
-          saveError,
-        );
+        saveSpan.end(saveError === undefined, {}, saveError);
       }
 
       const finalResponse = aiRes.text;
@@ -194,26 +181,10 @@ export class MessageHandler {
       this.logger.info(
         `handleMessage: done (${(performance.now() - handleMessageStart).toFixed(0)}ms)`,
       );
-      logHandlerCompleted(
-        trace,
-        "message-handler",
-        handleMessageStart,
-        true,
-        finalResponse.length,
-        "completed",
-        undefined,
-      );
+      span.ok("completed", finalResponse.length);
       return finalResponse;
     } catch (error) {
-      logHandlerCompleted(
-        trace,
-        "message-handler",
-        handleMessageStart,
-        false,
-        0,
-        "failed",
-        String(error),
-      );
+      span.fail("failed", 0, String(error));
       throw error;
     }
   }
@@ -223,9 +194,9 @@ export class MessageHandler {
     settings: TConfigRecord,
     commands: string,
     platform: TOption<EMessagePlatform>,
-    trace: TOption<TBehaviorTraceContext>,
+    trace: TBehaviorTraceContext,
   ): Promise<TConversation> {
-    const startedAt = performance.now();
+    const span = startSpan(trace, "conversation.compaction.completed", "message-handler");
     try {
       const result = await this.ai.compactConversation(
         state,
@@ -239,46 +210,36 @@ export class MessageHandler {
         return state;
       }
       await this.conversations.saveSummary(this.chatId, platform ?? "unknown", result.state);
-      if (trace !== undefined) {
-        AppLogger.instance.record({
-          trace,
-          event: "conversation.compaction.completed",
-          component: "message-handler",
-          success: true,
-          durationMs: performance.now() - startedAt,
-          summary: "Conversation compacted",
-          metadata: {
-            tokensBefore: result.tokensBefore,
-            tokensAfter: result.tokensAfter,
-            ...result.usage,
-          },
-        });
-      }
+      span.ok({
+        summary: "Conversation compacted",
+        metadata: {
+          tokensBefore: result.tokensBefore,
+          tokensAfter: result.tokensAfter,
+          ...result.usage,
+        },
+      });
       return result.state;
     } catch (error) {
       this.logger.error(`Conversation compaction failed: ${String(error)}`);
-      if (trace !== undefined) {
-        AppLogger.instance.record({
-          trace,
-          event: "conversation.compaction.failed",
-          component: "message-handler",
-          level: EBehaviorLogLevel.Warning,
-          success: false,
-          durationMs: performance.now() - startedAt,
-          summary: "Kept original conversation; retry next turn",
-          error: sanitizeErrorMessage(String(error)),
-        });
-      }
+      span.fail(String(error), {
+        event: "conversation.compaction.failed",
+        summary: "Kept original conversation; retry next turn",
+      });
       return state;
     }
   }
 
   private async saveMessageToDatabase(
     message: TIncommingMessage,
-    trace: TOption<TBehaviorTraceContext>,
+    trace: TBehaviorTraceContext,
     platform: TOption<EMessagePlatform>,
   ): Promise<TMemory> {
-    const start = performance.now();
+    const span = startMemorySaveSpan(
+      trace,
+      message.author.type,
+      EMemoryImportance.Medium,
+      message.message.content.length,
+    );
     let failure: TOption<string>;
     try {
       return await this.memory.save({
@@ -293,68 +254,33 @@ export class MessageHandler {
       failure = String(error);
       throw error;
     } finally {
-      logMemorySaveCompleted(
-        trace,
-        start,
-        message.author.type,
-        EMemoryImportance.Medium,
-        message.message.content.length,
-        failure,
-      );
+      span.end(failure === undefined, {}, failure);
     }
   }
 
   private async retrieveMemory(
     chatId: string,
-    trace: TOption<TBehaviorTraceContext>,
+    trace: TBehaviorTraceContext,
     platform: TOption<EMessagePlatform>,
   ): Promise<TMemory[]> {
-    const start = performance.now();
+    const span = startSpan(trace, "memory.recent.completed", "memory");
 
     try {
       const memories = await this.memory.findRecent(chatId, 30, platform);
-      logMemoryRecentCompleted(trace, start, true, memories.length, 30, undefined);
+      span.ok({
+        summary: `recent memory completed count=${memories.length} limit=30`,
+        metadata: { count: memories.length, limit: 30 },
+      });
       return memories;
     } catch (error) {
       this.logger.error(`retrieveMemory: failed to retrieve recent memory: ${String(error)}`);
-      logMemoryRecentCompleted(trace, start, false, 0, 30, String(error));
+      span.fail(String(error), {
+        summary: "recent memory completed count=0 limit=30",
+        metadata: { count: 0, limit: 30 },
+      });
       return [];
     }
   }
-}
-
-function logMemoryRecentCompleted(
-  trace: TOption<TBehaviorTraceContext>,
-  start: number,
-  success: boolean,
-  count: number,
-  limit: number,
-  error: TOption<string>,
-) {
-  if (trace === undefined) {
-    return;
-  }
-
-  let level = EBehaviorLogLevel.Info;
-
-  if (!success) {
-    level = EBehaviorLogLevel.Warning;
-  }
-
-  AppLogger.instance.record({
-    trace,
-    event: "memory.recent.completed",
-    component: "memory",
-    level,
-    success,
-    durationMs: performance.now() - start,
-    summary: `recent memory completed count=${count} limit=${limit}`,
-    metadata: {
-      count,
-      limit,
-    },
-    error: sanitizeErrorMessage(error),
-  });
 }
 
 function createCurrentTimeContext(settings: TConfigRecord, now: Date) {

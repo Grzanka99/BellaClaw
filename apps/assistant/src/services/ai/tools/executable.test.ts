@@ -21,6 +21,7 @@ import {
 const context = {
   chatId: "discord:1",
   settings: DefaultConfigRecord,
+  trace: { turnId: "test", chatId: undefined, platform: undefined },
   verifySettings: mock(async () => undefined),
 };
 

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, mock, setSystemTime, test } from "bun:test";
+import type { TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
 import type { Message } from "@earendil-works/pi-ai";
 import {
   fauxAssistantMessage,
@@ -21,6 +22,12 @@ import { SettingsService } from "../settings";
 import { DefaultConfigRecord, EConfigKey } from "../settings/schema";
 import { MessageHandler } from ".";
 import type { TIncommingMessage } from "./types";
+
+const TEST_TRACE: TBehaviorTraceContext = {
+  turnId: "test",
+  chatId: undefined,
+  platform: undefined,
+};
 
 type THandlerInternals = {
   ai: {
@@ -203,6 +210,7 @@ describe("MessageHandler", () => {
           message: { content: "What is on my calendar tomorrow?" },
           author: { type: ERole.User },
         },
+        TEST_TRACE,
         "",
       );
       await waitForCall(internals.ai.compactConversation, 1);
@@ -213,6 +221,7 @@ describe("MessageHandler", () => {
           message: { content: "And tomorrow evening?" },
           author: { type: ERole.User },
         },
+        TEST_TRACE,
         "",
       );
       setSystemTime(processingTime);
@@ -295,6 +304,7 @@ describe("MessageHandler", () => {
           message: { content: "What day is tomorrow?" },
           author: { type: ERole.User },
         },
+        TEST_TRACE,
         "",
         EMessagePlatform.Discord,
       );
@@ -307,6 +317,7 @@ describe("MessageHandler", () => {
           message: { content: "And today?" },
           author: { type: ERole.User },
         },
+        TEST_TRACE,
         "",
         EMessagePlatform.Discord,
       );
@@ -363,6 +374,7 @@ describe("MessageHandler", () => {
         message: { content: "new question" },
         author: { type: ERole.User },
       },
+      TEST_TRACE,
       "",
       EMessagePlatform.Discord,
     );
@@ -420,13 +432,14 @@ describe("MessageHandler", () => {
       message: { content: "first" },
       author: { type: ERole.User },
     };
-    expect(await handler.handleMessage(message, "")).toBe("Final answer");
+    expect(await handler.handleMessage(message, TEST_TRACE, "")).toBe("Final answer");
     await waitForCall(internals.ai.compactConversation, 1);
     const second = handler.handleMessage(
       {
         ...message,
         message: { content: "second" },
       },
+      TEST_TRACE,
       "",
     );
     await flushAsyncWork();
@@ -452,10 +465,10 @@ describe("MessageHandler", () => {
       message: { content: "first" },
       author: { type: ERole.User },
     };
-    await handler.handleMessage(message, "");
+    await handler.handleMessage(message, TEST_TRACE, "");
     await waitForCall(internals.conversations.saveSummary, 1);
     expect((await internals.conversations.load())?.summary).toBe("");
-    await handler.handleMessage(message, "");
+    await handler.handleMessage(message, TEST_TRACE, "");
     expect(internals.ai.runMain.mock.calls[1]?.[0].conversation.summary).toBe("compact summary");
     await flushAsyncWork();
   });
@@ -502,6 +515,7 @@ describe("MessageHandler", () => {
         message: { content: "change my settings" },
         author: { type: ERole.User },
       },
+      TEST_TRACE,
       "",
     );
     sharedSettings[EConfigKey.AiInstructionsTimezone] = "Asia/Tokyo";
@@ -528,6 +542,7 @@ describe("MessageHandler", () => {
           message: { content: "remember this" },
           author: { type: ERole.User },
         },
+        TEST_TRACE,
         "",
       ),
     ).rejects.toThrow("database unavailable");
@@ -550,6 +565,7 @@ describe("MessageHandler", () => {
           message: { content: "hello" },
           author: { type: ERole.User },
         },
+        TEST_TRACE,
         "",
       ),
     ).rejects.toThrow("database unavailable");
@@ -581,6 +597,7 @@ describe("MessageHandler", () => {
         message: { content: "remember this" },
         author: { type: ERole.User },
       },
+      TEST_TRACE,
       "",
     );
     await waitForCall(internals.conversations.saveTurn, 1);
@@ -602,6 +619,7 @@ describe("MessageHandler", () => {
         message: { content: "first" },
         author: { type: ERole.User },
       },
+      TEST_TRACE,
       "",
     );
     await waitForCall(internals.memory.loadLiveFactWindow, 1);
@@ -613,6 +631,7 @@ describe("MessageHandler", () => {
         message: { content: "second" },
         author: { type: ERole.User },
       },
+      TEST_TRACE,
       "",
     );
 
@@ -642,6 +661,7 @@ describe("MessageHandler", () => {
         message: { content: "two facts" },
         author: { type: ERole.User },
       },
+      TEST_TRACE,
       "",
     );
     await waitForCall(internals.memory.loadLiveFactWindow, 3);
@@ -686,6 +706,7 @@ describe("MessageHandler", () => {
         message: { content: "first turn" },
         author: { type: ERole.User },
       },
+      TEST_TRACE,
       "",
     );
     await waitForCall(internals.factDistiller.processWindow, 1);
@@ -700,6 +721,7 @@ describe("MessageHandler", () => {
         message: { content: "second turn" },
         author: { type: ERole.User },
       },
+      TEST_TRACE,
       "",
     );
     await waitForCall(internals.memory.loadLiveFactWindow, 3);
@@ -738,6 +760,7 @@ describe("MessageHandler", () => {
           message: { content: "hello" },
           author: { type: ERole.User },
         },
+        TEST_TRACE,
         "",
       ),
     ).toBe("Something went wrong.");
@@ -754,6 +777,7 @@ describe("MessageHandler", () => {
         message: { content: "try again" },
         author: { type: ERole.User },
       },
+      TEST_TRACE,
       "",
     );
     expect(internals.ai.runMain.mock.calls[1]?.[0].conversation).toBeUndefined();
@@ -781,6 +805,7 @@ describe("MessageHandler", () => {
           message: { content: "hello" },
           author: { type: ERole.User },
         },
+        TEST_TRACE,
         "",
       ),
     ).toBe("opencode-go is not connected. Run !ai-auth login opencode-go.");

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
+import type { TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
 import { fauxAssistantMessage, type Message, normalizeContext } from "@earendil-works/pi-ai";
 import { convertResponsesMessages } from "@earendil-works/pi-ai/api/openai-responses-shared";
 import { transformMessages } from "@earendil-works/pi-ai/api/transform-messages";
@@ -17,6 +18,12 @@ import { EMessagePlatform, type TMessageTransport } from "../messaging/types";
 import { SettingsService } from "../settings";
 import { DefaultConfigRecord } from "../settings/schema";
 import { ScheduledDelivery } from "./delivery";
+
+const TEST_TRACE: TBehaviorTraceContext = {
+  turnId: "test",
+  chatId: undefined,
+  platform: undefined,
+};
 
 type TDeliveryInternals = {
   ai: {
@@ -121,7 +128,7 @@ describe("ScheduledDelivery", () => {
   ])("replays a delivered %s in the next Main request", async (kind) => {
     const chatId = `signal:replay-${kind}`;
     const { handler, runMain, message } = setupConversationHandler(chatId);
-    await handler.handleMessage(message, "", EMessagePlatform.Signal);
+    await handler.handleMessage(message, TEST_TRACE, "", EMessagePlatform.Signal);
     const adapter = MessagingAdapter.instance;
     const sendText = mock(async () => undefined);
     adapter.registerTransport({ platform: EMessagePlatform.Signal, sendText });
@@ -143,7 +150,7 @@ describe("ScheduledDelivery", () => {
     }
 
     await internals.handleCronFire(context);
-    await handler.handleMessage(message, "", EMessagePlatform.Signal);
+    await handler.handleMessage(message, TEST_TRACE, "", EMessagePlatform.Signal);
 
     const conversation = runMain.mock.calls[1]?.[0].conversation;
     expect(JSON.stringify(conversation)).toContain(transcript);
@@ -215,7 +222,7 @@ describe("ScheduledDelivery", () => {
     const internals = ScheduledDelivery.instance as unknown as TDeliveryInternals;
 
     try {
-      const turn = handler.handleMessage(message, "", EMessagePlatform.Signal);
+      const turn = handler.handleMessage(message, TEST_TRACE, "", EMessagePlatform.Signal);
       await started.promise;
       const delivery = internals.handleCronFire(cron({ scope: chatId }));
       await waitForCall(sendText);
@@ -223,7 +230,7 @@ describe("ScheduledDelivery", () => {
       finish.resolve();
       await turn;
       await delivery;
-      await handler.handleMessage(message, "", EMessagePlatform.Signal);
+      await handler.handleMessage(message, TEST_TRACE, "", EMessagePlatform.Signal);
 
       const conversation = runMain.mock.calls[1]?.[0].conversation;
       expect(conversation?.summary).toBe("The normal turn was summarized.");
