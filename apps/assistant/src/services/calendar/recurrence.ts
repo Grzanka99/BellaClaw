@@ -7,8 +7,10 @@ export type TRecurrenceSplit = {
   successor: string[];
 };
 
+export const ALL_DAY_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
 function wallClockDate(value: string, timezone: TEventDateTime["timeZone"]): Date {
-  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+  if (ALL_DAY_DATE.test(value)) {
     return new Date(`${value}T00:00:00Z`);
   }
   const instant = new Date(value);
