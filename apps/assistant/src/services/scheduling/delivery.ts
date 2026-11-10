@@ -108,11 +108,13 @@ export class ScheduledDelivery {
   ) {
     let text: TOption<string>;
     let memoryPrefix = "CRON REMINDER";
+    let toolCallCount: TOption<number>;
 
     if (ctx.content.kind === "task") {
       const taskResult = await generateScheduledTaskText(ctx, parsedScope.platform, this.ai, trace);
       text = taskResult.text;
       memoryPrefix = "CRON TASK";
+      toolCallCount = taskResult.toolCallCount;
       logCronTaskCompleted(trace, taskResult);
     } else {
       text = await generateReminderText(ctx, parsedScope.platform, this.llm, trace);
@@ -139,11 +141,17 @@ export class ScheduledDelivery {
     }
 
     const deliveredAt = Date.now();
+    const firedAt = new Date(deliveredAt).toISOString();
+    let notice = `Scheduler notice, not from the user: reminder "${ctx.name}" fired at ${firedAt}. The next assistant message is its delivery.`;
+    if (toolCallCount !== undefined) {
+      notice = `Scheduler notice, not from the user: scheduled task "${ctx.name}" ran at ${firedAt} as a separate agent run that made ${toolCallCount} tool calls, such as web searches, to produce the next assistant message.`;
+    }
     const saveSpan = startMemorySaveSpan(trace, ERole.Assistant, text.length);
 
     try {
       await MessageHandler.getInstance(canonicalChatId).saveDeliveredMessage(
         `[${memoryPrefix} ${ctx.name}]: ${text}`,
+        notice,
         deliveredAt,
       );
       saveSpan.ok();

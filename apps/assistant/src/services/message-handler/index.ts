@@ -56,10 +56,10 @@ export class MessageHandler {
     return reply.promise;
   }
 
-  public saveDeliveredMessage(text: string, deliveredAt: number): Promise<void> {
+  public saveDeliveredMessage(text: string, notice: string, deliveredAt: number): Promise<void> {
     // Append after the active turn and its compaction so a summary cannot skip this delivery.
     return this.turnQueue.enqueue(() =>
-      this.conversations.saveDeliveredMessage(this.chatId, text, deliveredAt),
+      this.conversations.saveDeliveredMessage(this.chatId, text, notice, deliveredAt),
     );
   }
 

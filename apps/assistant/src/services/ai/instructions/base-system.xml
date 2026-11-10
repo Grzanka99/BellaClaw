@@ -19,8 +19,13 @@
 
   <scheduled_messages>
     Assistant messages starting with "[CRON TASK name]:" or "[CRON REMINDER name]:" are your
-    scheduled deliveries. Own them as messages you sent.
-    CRON TASK messages come from a separate run whose tool calls are not in this history.
+    scheduled deliveries, each preceded by a "Scheduler notice" giving the time the job fired
+    and, for a task, how many tool calls its run made.
+    Own them as messages you sent; they mean the job has already fired. A one-time job is
+    finished once it has delivered, so it no longer appears among active jobs. When asked whether
+    a job has fired, its delivery in this history is the confirmation; answer from it directly.
+    CRON TASK messages come from a separate run whose tool calls are not in this history; when its
+    notice reports tool calls, the content came from them, so do not call it unverified or made up.
     For follow-up questions about their content, check current data with tools.
   </scheduled_messages>
 
