@@ -1,3 +1,4 @@
+import { AsyncQueue } from "@bellaclaw/shared";
 import { drizzle, type LibSQLDatabase } from "drizzle-orm/libsql";
 
 const TURSO_URL = Bun.env.TURSO_CONNECTION_URL;
@@ -19,6 +20,7 @@ function isTestDatabaseMode() {
 export class DatabaseConnector {
   private static _instance: DatabaseConnector;
   private db: LibSQLDatabase;
+  private queue = new AsyncQueue();
 
   private constructor(isTest = false) {
     if (isTest) {
@@ -54,7 +56,15 @@ export class DatabaseConnector {
     return DatabaseConnector._instance;
   }
 
+  // NOTE: for tests and standalone scripts only; services go through run()
   public get database() {
     return this.db;
+  }
+
+  // Runs one unit of database work after every earlier one has finished. Not re-entrant: the
+  // callback must use the given handle and never call run() again, directly or through another
+  // service, or it deadlocks. Keep model, embedding, network and subprocess calls outside it.
+  public run<T>(callback: (db: LibSQLDatabase) => Promise<T>): Promise<T> {
+    return this.queue.enqueue(() => callback(this.db));
   }
 }

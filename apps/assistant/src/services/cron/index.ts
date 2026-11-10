@@ -1,8 +1,9 @@
 import { EventEmitter } from "node:events";
 import type { TOption } from "@bellaclaw/shared";
-import { AsyncQueue, createLogger } from "@bellaclaw/shared";
+import { createLogger } from "@bellaclaw/shared";
 import { Cron } from "croner";
 import { and, asc, eq } from "drizzle-orm";
+import type { LibSQLDatabase } from "drizzle-orm/libsql";
 import { DatabaseConnector } from "../database";
 import { cronEngineJobsTable } from "../database/schema";
 import { DefaultConfigRecord, EConfigKey } from "../settings/schema";
@@ -21,8 +22,7 @@ import {
 export class CronScheduler extends EventEmitter {
   private static _instance: TOption<CronScheduler>;
   private static readonly FIRE_EVENT = Symbol("cron-scheduler-fire");
-  private db = DatabaseConnector.instance.database;
-  private queue = new AsyncQueue();
+  private database = DatabaseConnector.instance;
   private logger = createLogger("CRON SCHEDULER");
   private timezone: TOption<string>;
   private timers = new Map<number, Cron>();
@@ -45,8 +45,8 @@ export class CronScheduler extends EventEmitter {
   }
 
   public async setup(): Promise<void> {
-    const jobs = await this.queue.enqueue(async () => {
-      const rows = await this.db
+    const jobs = await this.database.run(async (db) => {
+      const rows = await db
         .select()
         .from(cronEngineJobsTable)
         .where(eq(cronEngineJobsTable.status, ECronJobStatus.Active))
@@ -84,8 +84,8 @@ export class CronScheduler extends EventEmitter {
     }
 
     try {
-      const created = await this.queue.enqueue(async () => {
-        const existing = await this.getActiveJob(args.name, args.scope);
+      const created = await this.database.run(async (db) => {
+        const existing = await this.getActiveJob(db, args.name, args.scope);
 
         if (existing && existing.type !== type) {
           throw this.createCrossTypeCreateError(args.name, existing.type);
@@ -149,7 +149,7 @@ export class CronScheduler extends EventEmitter {
         };
 
         if (existing && args.overwrite === true) {
-          const row = await this.db.transaction(async (tx) => {
+          const row = await db.transaction(async (tx) => {
             const claimedRow = await tx
               .update(cronEngineJobsTable)
               .set({
@@ -186,10 +186,10 @@ export class CronScheduler extends EventEmitter {
         }
 
         try {
-          const row = await this.db.insert(cronEngineJobsTable).values(rowValues).returning().get();
+          const row = await db.insert(cronEngineJobsTable).values(rowValues).returning().get();
           return this.toJob(row);
         } catch (error) {
-          const currentJob = await this.getActiveJob(args.name, args.scope);
+          const currentJob = await this.getActiveJob(db, args.name, args.scope);
           if (currentJob) {
             if (currentJob.type !== type) {
               throw this.createCrossTypeCreateError(args.name, currentJob.type);
@@ -219,8 +219,8 @@ export class CronScheduler extends EventEmitter {
     let cancelled: TOption<TCronJob>;
 
     try {
-      cancelled = await this.queue.enqueue(async () => {
-        const row = await this.db
+      cancelled = await this.database.run(async (db) => {
+        const row = await db
           .update(cronEngineJobsTable)
           .set({
             status: ECronJobStatus.Cancelled,
@@ -257,8 +257,8 @@ export class CronScheduler extends EventEmitter {
   }
 
   public async list(scope: string): Promise<TCronJob[]> {
-    return this.queue.enqueue(async () => {
-      const rows = await this.db
+    return this.database.run(async (db) => {
+      const rows = await db
         .select()
         .from(cronEngineJobsTable)
         .where(
@@ -274,8 +274,8 @@ export class CronScheduler extends EventEmitter {
   }
 
   public async get(name: string, scope: string): Promise<TOption<TCronJob>> {
-    return this.queue.enqueue(async () => {
-      return this.getActiveJob(name, scope);
+    return this.database.run(async (db) => {
+      return this.getActiveJob(db, name, scope);
     });
   }
 
@@ -326,8 +326,8 @@ export class CronScheduler extends EventEmitter {
   }
 
   private async startTimerIfActive(job: TCronJob) {
-    const overdueJob = await this.queue.enqueue(async () => {
-      const row = await this.db
+    const overdueJob = await this.database.run(async (db) => {
+      const row = await db
         .select()
         .from(cronEngineJobsTable)
         .where(
@@ -392,8 +392,8 @@ export class CronScheduler extends EventEmitter {
       return;
     }
 
-    const updated = await this.queue.enqueue(async () => {
-      const row = await this.db
+    const updated = await this.database.run(async (db) => {
+      const row = await db
         .update(cronEngineJobsTable)
         .set({ nextRunAt })
         .where(
@@ -420,8 +420,8 @@ export class CronScheduler extends EventEmitter {
 
   private async fire(id: number) {
     try {
-      const firedJob = await this.queue.enqueue(async () => {
-        const current = await this.db
+      const firedJob = await this.database.run(async (db) => {
+        const current = await db
           .select()
           .from(cronEngineJobsTable)
           .where(
@@ -449,7 +449,7 @@ export class CronScheduler extends EventEmitter {
             return undefined;
           }
 
-          const row = await this.db
+          const row = await db
             .update(cronEngineJobsTable)
             .set({
               nextRunAt: nextRun,
@@ -473,7 +473,7 @@ export class CronScheduler extends EventEmitter {
         }
 
         if (job.type === ECronJobType.OneTime) {
-          const row = await this.db
+          const row = await db
             .update(cronEngineJobsTable)
             .set({
               status: ECronJobStatus.Completed,
@@ -581,8 +581,12 @@ export class CronScheduler extends EventEmitter {
     return { ...job, content: { kind: "text", text: contentBody } };
   }
 
-  private async getActiveJob(name: string, scope: string): Promise<TOption<TCronJob>> {
-    const row = await this.db
+  private async getActiveJob(
+    db: LibSQLDatabase,
+    name: string,
+    scope: string,
+  ): Promise<TOption<TCronJob>> {
+    const row = await db
       .select()
       .from(cronEngineJobsTable)
       .where(

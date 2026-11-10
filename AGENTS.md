@@ -86,9 +86,13 @@ concurrency and background processing under this human usage model.
 - Zod schemas: `S*` prefix (e.g. `SMemory`, `SSaveArgs`)
 - Singleton accessor: `public static get instance()` — always this name, no variants
 
-## AsyncQueue
+## Database Access
 
-All SQLite operations must go through `this.queue.enqueue()`. Never call `this.db.*` directly outside of an enqueued callback.
+All database work goes through `DatabaseConnector.instance.run((db) => ...)`, one queue for the whole connection. Services keep no queue of their own for the database and use only the `db` handle the callback receives.
+
+- `run` is not re-entrant: a callback or transaction body must never call `run` again, directly or through another service's method. Pass `db` to helpers instead.
+- Keep model, embedding, network and subprocess calls outside the callback.
+- `DatabaseConnector.instance.database` is for tests and standalone scripts only.
 
 ## Zod Usage
 

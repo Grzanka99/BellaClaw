@@ -19,7 +19,6 @@ export class MessageHandler {
   private static _instances = new Map<string, MessageHandler>();
   private logger: TLogger;
   private ai = AgentHarness.instance;
-  private queue = new AsyncQueue();
   private turnQueue = new AsyncQueue();
   private conversations = ConversationStore.instance;
   private factDistiller = FactDistiller.instance;
@@ -48,15 +47,19 @@ export class MessageHandler {
     trace: TBehaviorTraceContext,
     platform?: EMessagePlatform,
   ): Promise<string> {
-    return this.turnQueue.enqueue(() => this.handleTurn(message, trace, platform));
+    // The turn task settles the reply first, then runs post-turn work, so the caller never waits
+    // for compaction while the next turn of this chat still starts only after it.
+    const reply = Promise.withResolvers<string>();
+    void this.turnQueue
+      .enqueue(() => this.handleTurn(message, trace, platform, reply))
+      .catch((error) => reply.reject(error));
+    return reply.promise;
   }
 
   public saveDeliveredMessage(text: string, deliveredAt: number): Promise<void> {
     // Append after the active turn and its compaction so a summary cannot skip this delivery.
     return this.turnQueue.enqueue(() =>
-      this.queue.enqueue(() =>
-        this.conversations.saveDeliveredMessage(this.chatId, text, deliveredAt),
-      ),
+      this.conversations.saveDeliveredMessage(this.chatId, text, deliveredAt),
     );
   }
 
@@ -64,7 +67,8 @@ export class MessageHandler {
     message: TIncommingMessage,
     trace: TBehaviorTraceContext,
     platform: TOption<EMessagePlatform>,
-  ): Promise<string> {
+    reply: PromiseWithResolvers<string>,
+  ): Promise<void> {
     const handleMessageStart = performance.now();
     this.logger.info("handleMessage: start");
     logHandlerStarted(trace, "message-handler");
@@ -72,15 +76,12 @@ export class MessageHandler {
 
     try {
       const settings = await SettingsService.instance.getAll(message.chatId);
-      await this.queue.enqueue(async () => undefined);
       let conversation = await this.conversations.load(message.chatId);
       if (conversation !== undefined) {
         conversation = await this.compact(conversation, settings, platform, trace);
       }
 
-      const savedMessage = await this.queue.enqueue(() =>
-        this.saveMessageToDatabase(message, trace),
-      );
+      const savedMessage = await this.saveMessageToDatabase(message, trace);
 
       const chatStart = performance.now();
       const aiRes = await this.ai.runMain({
@@ -99,18 +100,19 @@ export class MessageHandler {
 
       if (aiRes.text === undefined) {
         this.logger.warning("handleMessage: AI returned no final response");
-        let reply = "Something went wrong.";
+        let fallback = "Something went wrong.";
         const authProblem = await describeAiAuthProblem(
           message.chatId,
           settings[EConfigKey.AiProvider],
         );
 
         if (authProblem !== undefined) {
-          reply = authProblem;
+          fallback = authProblem;
         }
 
-        span.fail("missing final response", reply.length);
-        return reply;
+        span.fail("missing final response", fallback.length);
+        reply.resolve(fallback);
+        return;
       }
 
       const saveSpan = startMemorySaveSpan(trace, ERole.Assistant, aiRes.text.length);
@@ -135,20 +137,18 @@ export class MessageHandler {
       void this.factDistiller
         .enqueueFactDrain(message.chatId, settings, trace)
         .catch((error) => this.logger.error(`handleMessage: fact drain failed: ${String(error)}`));
-      void this.queue
-        .enqueue(async () => {
-          await this.compact(persisted, settings, platform, trace);
-        })
-        .catch((error) => this.logger.error(`handleMessage: compaction failed: ${String(error)}`));
 
       this.logger.info(
         `handleMessage: done (${(performance.now() - handleMessageStart).toFixed(0)}ms)`,
       );
       span.ok("completed", finalResponse.length);
-      return finalResponse;
+      reply.resolve(finalResponse);
+
+      // Post-turn work runs after the reply is settled; compact() reports its own failures
+      await this.compact(persisted, settings, platform, trace);
     } catch (error) {
       span.fail("failed", 0, String(error));
-      throw error;
+      reply.reject(error);
     }
   }
 

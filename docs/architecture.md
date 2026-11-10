@@ -31,7 +31,8 @@ moving a file cannot silently change which directory it reads.
 5. A fresh Main agent receives the current message with the structured replay.
 6. Main answers directly or delegates focused work to a specialist.
 7. The completed model turn, including tool exchanges, is persisted for replay. Fact distillation
-   and conversation compaction run in the background.
+   runs in the background. Conversation compaction runs after the reply is handed back, and the
+   chat's next turn starts only after it finishes.
 8. The transport sends Main's final response.
 
 Discord and Signal use separate chat keys. Their histories and scheduled deliveries do not merge.

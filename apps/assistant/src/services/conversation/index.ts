@@ -1,4 +1,4 @@
-import { AsyncQueue, type TOption } from "@bellaclaw/shared";
+import type { TOption } from "@bellaclaw/shared";
 import { type AssistantMessage, contentText, type Message } from "@earendil-works/pi-ai";
 import { and, asc, eq, gt, isNotNull } from "drizzle-orm";
 import { emptyUsage } from "../ai/llm";
@@ -9,8 +9,7 @@ import { SConversationMessage, type TConversation } from "./types";
 
 export class ConversationStore {
   private static _instance: TOption<ConversationStore>;
-  private queue = new AsyncQueue();
-  private db = DatabaseConnector.instance.database;
+  private database = DatabaseConnector.instance;
 
   public static get instance(): ConversationStore {
     if (ConversationStore._instance === undefined) {
@@ -25,18 +24,14 @@ export class ConversationStore {
     message: string,
     createdAt: Date,
   ): Promise<TSelectMemory> {
-    return this.queue.enqueue(() =>
-      this.db
-        .insert(memoriesTable)
-        .values({ chatId, author, message, createdAt })
-        .returning()
-        .get(),
+    return this.database.run((db) =>
+      db.insert(memoriesTable).values({ chatId, author, message, createdAt }).returning().get(),
     );
   }
 
   public findChatIds(): Promise<string[]> {
-    return this.queue.enqueue(async () => {
-      const rows = await this.db
+    return this.database.run(async (db) => {
+      const rows = await db
         .selectDistinct({ chatId: memoriesTable.chatId })
         .from(memoriesTable)
         .orderBy(asc(memoriesTable.chatId));
@@ -45,13 +40,13 @@ export class ConversationStore {
   }
 
   public load(chatId: string): Promise<TOption<TConversation>> {
-    return this.queue.enqueue(async () => {
-      const summary = await this.db
+    return this.database.run(async (db) => {
+      const summary = await db
         .select()
         .from(conversationSummariesTable)
         .where(eq(conversationSummariesTable.chatId, chatId))
         .get();
-      const rows = await this.db
+      const rows = await db
         .select()
         .from(memoriesTable)
         .where(
@@ -88,8 +83,8 @@ export class ConversationStore {
     userMessageId: number,
     previous: TOption<TConversation>,
   ): Promise<TConversation> {
-    return this.queue.enqueue(() =>
-      this.db.transaction(async (tx) => {
+    return this.database.run((db) =>
+      db.transaction(async (tx) => {
         const entries = [...(previous?.entries ?? [])];
         const pending = messages.slice(entries.length);
         for (const [index, message] of pending.entries()) {
@@ -149,8 +144,8 @@ export class ConversationStore {
       stopReason: "stop",
       timestamp: deliveredAt,
     };
-    return this.queue.enqueue(async () => {
-      await this.db.insert(memoriesTable).values({
+    return this.database.run(async (db) => {
+      await db.insert(memoriesTable).values({
         chatId,
         kind: "message",
         author: ERole.Assistant,
@@ -162,13 +157,13 @@ export class ConversationStore {
   }
 
   public saveSummary(chatId: string, state: TConversation): Promise<void> {
-    return this.queue.enqueue(async () => {
+    return this.database.run(async (db) => {
       const values = {
         summary: state.summary,
         summarizedThroughId: state.summarizedThroughId,
         createdAt: new Date(state.summaryTimestamp),
       };
-      await this.db
+      await db
         .insert(conversationSummariesTable)
         .values({ chatId, ...values })
         .onConflictDoUpdate({ target: conversationSummariesTable.chatId, set: values });

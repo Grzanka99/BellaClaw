@@ -1,7 +1,6 @@
 import type { TOption } from "@bellaclaw/shared";
-import { AsyncQueue, createLogger, repositoryPath } from "@bellaclaw/shared";
+import { createLogger, repositoryPath } from "@bellaclaw/shared";
 import { and, eq, ne } from "drizzle-orm";
-import type { LibSQLDatabase } from "drizzle-orm/libsql";
 import { z } from "zod";
 import { DatabaseConnector } from "../database";
 import { calendarsTable } from "../database/schema";
@@ -357,11 +356,10 @@ function applyPatch(
 export class CalendarService {
   private static _instance: CalendarService;
   private logger = createLogger("CALENDAR");
-  private queue = new AsyncQueue();
   private status: TCalendarStatus = { ready: false, error: "Calendar setup has not run" };
 
   public constructor(
-    private db: LibSQLDatabase = DatabaseConnector.instance.database,
+    private database: DatabaseConnector = DatabaseConnector.instance,
     private client: GwsCalendarClient = new GwsCalendarClient(),
   ) {}
 
@@ -384,8 +382,8 @@ export class CalendarService {
 
   private async requireWriteCalendarId(userId: string): Promise<string> {
     this.requireReady();
-    const rows = await this.queue.enqueue(() =>
-      this.db
+    const rows = await this.database.run((db) =>
+      db
         .select()
         .from(calendarsTable)
         .where(and(eq(calendarsTable.userId, userId), eq(calendarsTable.access, "write"))),
@@ -421,8 +419,8 @@ export class CalendarService {
       );
     }
     const addedAt = Date.now();
-    await this.queue.enqueue(async () => {
-      await this.db.transaction(async (transaction) => {
+    await this.database.run(async (db) => {
+      await db.transaction(async (transaction) => {
         await transaction
           .delete(calendarsTable)
           .where(and(eq(calendarsTable.userId, userId), eq(calendarsTable.access, "write")));
@@ -446,8 +444,8 @@ export class CalendarService {
 
   public async listCalendars(userId: string, signal?: AbortSignal): Promise<TCalendar[]> {
     this.requireReady();
-    const rows = await this.queue.enqueue(() =>
-      this.db.select().from(calendarsTable).where(eq(calendarsTable.userId, userId)),
+    const rows = await this.database.run((db) =>
+      db.select().from(calendarsTable).where(eq(calendarsTable.userId, userId)),
     );
     return Promise.all(
       rows.map(async (row) => {
@@ -493,8 +491,8 @@ export class CalendarService {
       );
     }
     const addedAt = Date.now();
-    const inserted = await this.queue.enqueue(() =>
-      this.db
+    const inserted = await this.database.run((db) =>
+      db
         .insert(calendarsTable)
         .values({ userId, calendarId, access: "read", addedAt })
         .onConflictDoUpdate({
@@ -518,8 +516,8 @@ export class CalendarService {
 
   public async removeReadonlyCalendar(userId: string, calendarId: string): Promise<void> {
     this.requireReady();
-    const removed = await this.queue.enqueue(() =>
-      this.db
+    const removed = await this.database.run((db) =>
+      db
         .delete(calendarsTable)
         .where(
           and(
@@ -540,8 +538,8 @@ export class CalendarService {
     if (Date.parse(args.timeMin) >= Date.parse(args.timeMax)) {
       throw new Error("timeMax must be after timeMin");
     }
-    const rows = await this.queue.enqueue(() =>
-      this.db.select().from(calendarsTable).where(eq(calendarsTable.userId, args.userId)),
+    const rows = await this.database.run((db) =>
+      db.select().from(calendarsTable).where(eq(calendarsTable.userId, args.userId)),
     );
     const events: TCalendarEvent[] = [];
     const failures: Array<{ calendarId: string; error: string }> = [];

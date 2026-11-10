@@ -3,6 +3,7 @@ import { mkdir } from "node:fs/promises";
 import { repositoryPath } from "@bellaclaw/shared";
 import type { LibSQLDatabase } from "drizzle-orm/libsql";
 import { validateUpdateCalendarEventArgs } from "../ai/tools/update-calendar-event";
+import type { DatabaseConnector } from "../database";
 import { CalendarService } from ".";
 import type { GwsCalendarClient } from "./gws";
 
@@ -14,6 +15,12 @@ function googleEvent(id: string, extra: Record<string, unknown> = {}) {
     end: { dateTime: "2026-07-25T10:00:00Z" },
     ...extra,
   };
+}
+
+function connector(db: LibSQLDatabase): DatabaseConnector {
+  return {
+    run: <T>(callback: (handle: LibSQLDatabase) => Promise<T>) => callback(db),
+  } as unknown as DatabaseConnector;
 }
 
 function selectingDatabase(rows: Record<string, unknown>[]): LibSQLDatabase {
@@ -43,7 +50,7 @@ describe("CalendarService mutation boundary", () => {
       await mkdir(repositoryPath(".secrets"), { recursive: true });
       await Bun.write(credentialsPath, "{}");
     }
-    const service = new CalendarService(database, {} as unknown as GwsCalendarClient);
+    const service = new CalendarService(connector(database), {} as unknown as GwsCalendarClient);
 
     try {
       await service.setup();
@@ -59,7 +66,7 @@ describe("CalendarService mutation boundary", () => {
     const client = {
       probeCalendar: async () => ({ accessRole: "reader", summary: "Wrong role" }),
     } as unknown as GwsCalendarClient;
-    const service = new CalendarService(database, client);
+    const service = new CalendarService(connector(database), client);
     Object.assign(service, { status: { ready: true, error: undefined } });
 
     await expect(service.setWriteCalendar("user-1", "other-calendar")).rejects.toThrow(
@@ -75,7 +82,7 @@ describe("CalendarService mutation boundary", () => {
         return googleEvent("created");
       },
     } as unknown as GwsCalendarClient;
-    const service = new CalendarService(selectingDatabase([]), client);
+    const service = new CalendarService(connector(selectingDatabase([])), client);
     Object.assign(service, { status: { ready: true, error: undefined } });
 
     await expect(
@@ -99,7 +106,7 @@ describe("CalendarService mutation boundary", () => {
     const client = {
       probeCalendar: async () => ({ accessRole: "freeBusyReader", summary: "Wrong role" }),
     } as unknown as GwsCalendarClient;
-    const service = new CalendarService(selectingDatabase([]), client);
+    const service = new CalendarService(connector(selectingDatabase([])), client);
     Object.assign(service, { status: { ready: true, error: undefined } });
 
     await expect(service.addReadonlyCalendar("user-1", "other-calendar")).rejects.toThrow(
@@ -125,7 +132,7 @@ describe("CalendarService mutation boundary", () => {
         }),
       }),
     } as unknown as LibSQLDatabase;
-    const service = new CalendarService(database, client);
+    const service = new CalendarService(connector(database), client);
     Object.assign(service, { status: { ready: true, error: undefined } });
 
     const calendar = await service.addReadonlyCalendar("user-1", "housemate-calendar");
@@ -143,7 +150,7 @@ describe("CalendarService mutation boundary", () => {
         return googleEvent("created");
       },
     } as unknown as GwsCalendarClient;
-    const service = new CalendarService(database, client);
+    const service = new CalendarService(connector(database), client);
     Object.assign(service, { status: { ready: true, error: undefined } });
 
     await service.createEvent({
@@ -177,7 +184,7 @@ describe("CalendarService mutation boundary", () => {
         return googleEvent("timed", body);
       },
     } as unknown as GwsCalendarClient;
-    const service = new CalendarService(database, client);
+    const service = new CalendarService(connector(database), client);
     Object.assign(service, { status: { ready: true, error: undefined } });
 
     await service.updateEvent({
@@ -210,7 +217,7 @@ describe("CalendarService mutation boundary", () => {
         return googleEvent("all-day", body);
       },
     } as unknown as GwsCalendarClient;
-    const service = new CalendarService(database, client);
+    const service = new CalendarService(connector(database), client);
     Object.assign(service, { status: { ready: true, error: undefined } });
 
     await service.updateEvent({
@@ -234,7 +241,7 @@ describe("CalendarService mutation boundary", () => {
         ],
       }),
     } as unknown as GwsCalendarClient;
-    const service = new CalendarService(listDatabase, client);
+    const service = new CalendarService(connector(listDatabase), client);
     Object.assign(service, { status: { ready: true, error: undefined } });
 
     const result = await service.listEvents({
@@ -280,7 +287,7 @@ describe("CalendarService mutation boundary", () => {
         return googleEvent("successor", body);
       },
     } as unknown as GwsCalendarClient;
-    const service = new CalendarService(database, client);
+    const service = new CalendarService(connector(database), client);
     Object.assign(service, { status: { ready: true, error: undefined } });
     const patch = {
       summary: "Changed",
@@ -373,7 +380,7 @@ describe("CalendarService mutation boundary", () => {
           return googleEvent("successor", body);
         },
       } as unknown as GwsCalendarClient;
-      const service = new CalendarService(database, client);
+      const service = new CalendarService(connector(database), client);
       Object.assign(service, { status: { ready: true, error: undefined } });
       const patch = validateUpdateCalendarEventArgs({
         eventId: "instance",
@@ -408,7 +415,7 @@ describe("CalendarService mutation boundary", () => {
           workingLocationProperties: { type: "homeOffice" },
         }),
     } as unknown as GwsCalendarClient;
-    const service = new CalendarService(database, client);
+    const service = new CalendarService(connector(database), client);
     Object.assign(service, { status: { ready: true, error: undefined } });
 
     const result = await service.createEvent({
@@ -459,7 +466,7 @@ describe("CalendarService mutation boundary", () => {
         return googleEvent("master");
       },
     } as unknown as GwsCalendarClient;
-    const service = new CalendarService(database, client);
+    const service = new CalendarService(connector(database), client);
     Object.assign(service, { status: { ready: true, error: undefined } });
 
     expect(
@@ -506,7 +513,7 @@ describe("CalendarService mutation boundary", () => {
           return googleEvent("master");
         },
       } as unknown as GwsCalendarClient;
-      const service = new CalendarService(database, client);
+      const service = new CalendarService(connector(database), client);
       Object.assign(service, { status: { ready: true, error: undefined } });
 
       await expect(
@@ -551,7 +558,7 @@ describe("CalendarService mutation boundary", () => {
         return googleEvent("master");
       },
     } as unknown as GwsCalendarClient;
-    const service = new CalendarService(database, client);
+    const service = new CalendarService(connector(database), client);
     Object.assign(service, { status: { ready: true, error: undefined } });
 
     await expect(
@@ -574,7 +581,7 @@ describe("CalendarService mutation boundary", () => {
         return googleEvent("birthday");
       },
     } as unknown as GwsCalendarClient;
-    const service = new CalendarService(database, client);
+    const service = new CalendarService(connector(database), client);
     Object.assign(service, { status: { ready: true, error: undefined } });
 
     expect(

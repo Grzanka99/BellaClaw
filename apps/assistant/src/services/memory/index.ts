@@ -1,5 +1,6 @@
-import { AsyncQueue, createLogger, type TLogger } from "@bellaclaw/shared";
+import { createLogger, type TLogger } from "@bellaclaw/shared";
 import { and, asc, desc, eq, gt, inArray, isNull, lte, sql } from "drizzle-orm";
+import type { LibSQLDatabase } from "drizzle-orm/libsql";
 import { z } from "zod";
 import { ERole } from "../ai/types";
 import { DatabaseConnector } from "../database";
@@ -33,9 +34,7 @@ const MAX_SUPERSESSION_COSINE_DISTANCE = 0.24;
 const SUPERSESSION_CANDIDATE_LIMIT = 10;
 const SQueryEmbedding = z.array(z.number()).length(EMBEDDING_DIMENSIONS);
 
-type TFactTransaction = Parameters<
-  Parameters<typeof DatabaseConnector.instance.database.transaction>[0]
->[0];
+type TFactTransaction = Parameters<Parameters<LibSQLDatabase["transaction"]>[0]>[0];
 
 // Runs inside the caller's queued transaction: inserts one live fact and retires the facts it
 // supersedes, failing the whole transaction when any of them is no longer a same-chat live fact.
@@ -82,13 +81,10 @@ async function insertFact(
 
 export class Memory {
   private static _instance: Memory;
-  private db = DatabaseConnector.instance.database;
-  private queue: AsyncQueue;
+  private database = DatabaseConnector.instance;
   private logger: TLogger = createLogger("MEMORY");
 
-  private constructor() {
-    this.queue = new AsyncQueue();
-  }
+  private constructor() {}
 
   public static get instance() {
     if (!Memory._instance) {
@@ -98,12 +94,12 @@ export class Memory {
   }
 
   public async loadLiveFactWindow(chatId: string): Promise<TLiveFactWindow> {
-    return this.queue.enqueue(async () => {
-      const state = await this.readLiveState(chatId);
+    return this.database.run(async (db) => {
+      const state = await this.readLiveState(db, chatId);
 
       return {
         state,
-        ...(await this.readTranscriptWindow(chatId, state.lastProcessedMessageId)),
+        ...(await this.readTranscriptWindow(db, chatId, state.lastProcessedMessageId)),
       };
     });
   }
@@ -129,8 +125,8 @@ export class Memory {
   }
 
   public async forgetFacts(chatId: string, factIds: number[]): Promise<number[]> {
-    return this.queue.enqueue(async () =>
-      this.db.transaction(async (tx) => {
+    return this.database.run(async (db) =>
+      db.transaction(async (tx) => {
         const result = await tx
           .update(factsTable)
           .set({ forgottenAt: new Date() })
@@ -159,8 +155,8 @@ export class Memory {
     embedding: number[],
     supersedesFactIds: number[],
   ): Promise<TFact> {
-    return this.queue.enqueue(async () =>
-      this.db.transaction(async (tx) => {
+    return this.database.run(async (db) =>
+      db.transaction(async (tx) => {
         const existing = await tx
           .select()
           .from(factsTable)
@@ -209,10 +205,8 @@ export class Memory {
     );
   }
 
-  // readLiveState and readTranscriptWindow are queue-free by design: they run
-  // inside an existing queue.enqueue() callback, and enqueuing again from there would deadlock.
-  private async readLiveState(chatId: string): Promise<TFactDistillationState> {
-    const row = await this.db
+  private async readLiveState(db: LibSQLDatabase, chatId: string): Promise<TFactDistillationState> {
+    const row = await db
       .select()
       .from(factDistillationStateTable)
       .where(eq(factDistillationStateTable.chatId, chatId))
@@ -230,10 +224,11 @@ export class Memory {
   }
 
   private async readTranscriptWindow(
+    db: LibSQLDatabase,
     chatId: string,
     lastProcessedMessageId: number,
   ): Promise<TFactWindow> {
-    const contextRows = await this.db
+    const contextRows = await db
       .select()
       .from(memoriesTable)
       .where(
@@ -245,7 +240,7 @@ export class Memory {
       )
       .orderBy(desc(memoriesTable.id))
       .limit(FACT_CONTEXT_SIZE);
-    const messageRows = await this.db
+    const messageRows = await db
       .select()
       .from(memoriesTable)
       .where(
@@ -280,9 +275,9 @@ export class Memory {
 
     const queryEmbedding = new Float32Array(parsedEmbedding.data).buffer;
 
-    return this.queue.enqueue(async () => {
+    return this.database.run(async (db) => {
       const distance = sql<number>`vector_distance_cos(${factsTable.embedding}, ${queryEmbedding})`;
-      const rows = await this.db
+      const rows = await db
         .select({
           id: factsTable.id,
           text: factsTable.text,
@@ -339,8 +334,8 @@ export class Memory {
       }
     }
 
-    return this.queue.enqueue(async () =>
-      this.db.transaction(async (tx) => {
+    return this.database.run(async (db) =>
+      db.transaction(async (tx) => {
         const now = new Date();
         const sourceMessageIds = [...new Set(parsedFacts.data.map((fact) => fact.sourceMessageId))];
 
