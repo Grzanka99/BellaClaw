@@ -1,11 +1,6 @@
 import type { TBehaviorMetadata } from "@bellaclaw/behavior-logs";
 import type { TOption } from "@bellaclaw/shared";
-
-type TToolCall = {
-  id: string;
-  name: string;
-  arguments: unknown;
-};
+import type { TLogSafeField, TToolLogPolicy } from "../ai/tools/define-tool";
 
 type TNormalizedToolResult = {
   toolCallId: string;
@@ -21,35 +16,7 @@ type TSanitizedLogDetails = {
 };
 
 const ERROR_MAX_CHARS = 300;
-const CONTENT_PREVIEW_MAX_CHARS = 240;
-const CRON_TOOL_NAMES = new Set([
-  "list-cron-jobs",
-  "schedule-once",
-  "schedule-recurring",
-  "unschedule-cron-job",
-  "update-cron-job",
-]);
-
-/**
- * Cron errors can quote job names and reminder content, so only fixed codes reach the logs.
- */
-const CRON_TOOL_ERROR_CODES: ReadonlyArray<readonly [RegExp, string]> = [
-  [/^(Validation failed for tool|Invalid tool arguments:)/, "invalid-arguments"],
-  [/^(cancel failed: )?No job found with name:/, "job-not-found"],
-  [/^Provide either pattern or fireAt/, "conflicting-schedule-fields"],
-  [/^Provide reminderText/, "missing-content"],
-  [/^Provide only one of/, "conflicting-content-modes"],
-  [/^(reminderFallbackText|taskFallbackText) (is required|requires)/, "invalid-fallback-pairing"],
-  [/^(Invalid fireAt|fireAt must be local)/, "invalid-fire-at"],
-  [/^fireAt can only update/, "fire-at-on-recurring-job"],
-  [/^fireAt .* does not exist in /, "nonexistent-fire-at"],
-  [/^pattern can only update/, "pattern-on-one-time-job"],
-  [/^create failed: fireAt must be in the future/, "fire-at-in-past"],
-  [/^create failed: Job '.*' already exists/, "job-already-exists"],
-  [/^create failed: Cron pattern '.*' cannot be scheduled/, "unschedulable-pattern"],
-  [/^create failed:/, "create-failed"],
-  [/^cancel failed:/, "cancel-failed"],
-];
+const PREVIEW_MAX_CHARS = 240;
 
 export function sanitizeErrorMessage(error: TOption<string>): TOption<string> {
   if (error === undefined) {
@@ -77,10 +44,11 @@ export function sanitizeErrorMessage(error: TOption<string>): TOption<string> {
   return `${normalized.slice(0, ERROR_MAX_CHARS)}...`;
 }
 
-export function sanitizeToolCallArguments(toolCall: TToolCall): TSanitizedLogDetails {
-  const toolName = toolCall.name;
-  const args = toolCall.arguments;
-
+export function sanitizeToolCallArguments(
+  toolName: string,
+  args: unknown,
+  policy: TOption<TToolLogPolicy>,
+): TSanitizedLogDetails {
   if (!isRecord(args)) {
     return {
       summary: `${toolName} args invalid`,
@@ -90,77 +58,17 @@ export function sanitizeToolCallArguments(toolCall: TToolCall): TSanitizedLogDet
     };
   }
 
-  if (CRON_TOOL_NAMES.has(toolName)) {
-    return sanitizeCronToolArguments(toolName, args);
-  }
+  const metadata = summarizeShape(args, policy?.logSafe ?? []);
+  const summary = `${toolName} args${formatSummary(metadata)}`;
+  addPreviews(metadata, args, policy?.previews ?? []);
 
-  switch (toolName) {
-    case "search-memory": {
-      return sanitizeSearchMemoryArguments(args);
-    }
-    case "remember-memory": {
-      const fact = readString(args, "fact");
-      const sourceMessage = readString(args, "sourceMessage");
-      let supersedesFactCount = 0;
-      if (Array.isArray(args.supersedesFactIds)) {
-        supersedesFactCount = args.supersedesFactIds.length;
-      }
-      return {
-        summary: `remember-memory args factChars=${fact?.length ?? 0} sourceChars=${sourceMessage?.length ?? 0} supersedes=${supersedesFactCount}`,
-        metadata: {
-          factChars: fact?.length ?? 0,
-          sourceMessageChars: sourceMessage?.length ?? 0,
-          supersedesFactCount,
-        },
-      };
-    }
-    case "forget-memory": {
-      let factCount = 0;
-      if (Array.isArray(args.factIds)) {
-        factCount = args.factIds.length;
-      }
-      return {
-        summary: `forget-memory args factCount=${factCount}`,
-        metadata: { factCount },
-      };
-    }
-    case "web-search": {
-      return sanitizeWebSearchArguments(args);
-    }
-    case "web-fetch": {
-      return sanitizeWebFetchArguments(args);
-    }
-    case "get-settings": {
-      return { summary: "get-settings args", metadata: {} };
-    }
-    case "update-settings": {
-      return sanitizeUpdateSettingsArguments(args);
-    }
-    case "delegate-memory":
-    case "delegate-calendar":
-    case "delegate-settings":
-    case "delegate-scheduling": {
-      const task = readString(args, "task");
-      return {
-        summary: `${toolName} args taskChars=${task?.length ?? 0}`,
-        metadata: {
-          taskChars: task?.length ?? 0,
-          taskPreview: sanitizeContentPreview(task),
-        },
-      };
-    }
-    default: {
-      return {
-        summary: `${toolName} args keys=${Object.keys(args).join(",")}`,
-        metadata: {
-          argumentKeys: Object.keys(args),
-        },
-      };
-    }
-  }
+  return { summary, metadata };
 }
 
-export function sanitizeToolResult(result: TNormalizedToolResult): TSanitizedLogDetails {
+export function sanitizeToolResult(
+  result: TNormalizedToolResult,
+  policy: TOption<TToolLogPolicy>,
+): TSanitizedLogDetails {
   if (!result.success) {
     return {
       summary: `${result.toolName} failed`,
@@ -170,493 +78,135 @@ export function sanitizeToolResult(result: TNormalizedToolResult): TSanitizedLog
     };
   }
 
-  const data = result.data;
+  const metadata: TBehaviorMetadata = { status: "completed" };
 
-  if (CRON_TOOL_NAMES.has(result.toolName)) {
-    return sanitizeCronToolResult(result.toolName, data);
+  if (Array.isArray(result.data)) {
+    metadata.resultCount = result.data.length;
+  } else if (isRecord(result.data)) {
+    Object.assign(metadata, summarizeShape(result.data, policy?.logSafe ?? []));
+  } else {
+    metadata.dataKind = describeDataKind(result.data);
   }
 
-  switch (result.toolName) {
-    case "search-memory": {
-      return sanitizeSearchMemoryResult(data);
-    }
-    case "remember-memory": {
-      let rememberedFactCount = 0;
-      if (isRecord(data) && typeof data.rememberedFactId === "number") {
-        rememberedFactCount = 1;
-      }
-      return {
-        summary: `remember-memory stored ${rememberedFactCount} facts`,
-        metadata: { status: "completed", rememberedFactCount },
-      };
-    }
-    case "forget-memory": {
-      let forgottenFactCount = 0;
-      if (isRecord(data) && Array.isArray(data.forgottenFactIds)) {
-        forgottenFactCount = data.forgottenFactIds.length;
-      }
-      return {
-        summary: `forget-memory forgot ${forgottenFactCount} facts`,
-        metadata: { status: "completed", forgottenFactCount },
-      };
-    }
-    case "web-search": {
-      return sanitizeWebSearchResult(data);
-    }
-    case "web-fetch": {
-      return sanitizeWebFetchResult(data);
-    }
-    case "get-settings": {
-      return sanitizeSettingsResult("get-settings", data);
-    }
-    case "update-settings": {
-      return sanitizeSettingsResult("update-settings", data);
-    }
-    case "delegate-memory":
-    case "delegate-calendar":
-    case "delegate-settings":
-    case "delegate-scheduling": {
-      return sanitizeDelegationResult(result.toolName, data);
-    }
-    default: {
-      return sanitizeGenericToolResult(result.toolName, data);
-    }
+  const summary = `${result.toolName} completed${formatSummary(metadata)}`;
+
+  if (isRecord(result.data)) {
+    addPreviews(metadata, result.data, policy?.previews ?? []);
   }
+
+  return { summary, metadata };
 }
 
-export function sanitizeToolResultError(result: TNormalizedToolResult): TOption<string> {
+export function sanitizeToolResultError(
+  result: TNormalizedToolResult,
+  policy: TOption<TToolLogPolicy>,
+): TOption<string> {
   if (result.error === undefined) {
     return undefined;
   }
 
-  if (CRON_TOOL_NAMES.has(result.toolName)) {
-    for (const [pattern, code] of CRON_TOOL_ERROR_CODES) {
-      if (pattern.test(result.error)) {
-        return `${result.toolName} failed: ${code}`;
-      }
-    }
+  if (policy === undefined) {
+    return sanitizeErrorMessage(result.error);
+  }
 
+  if (isRecord(result.data) && typeof result.data.errorCode === "string") {
+    return `${result.toolName} failed: ${result.data.errorCode}`;
+  }
+
+  if (policy.privateErrors) {
     return `${result.toolName} failed`;
   }
 
   return sanitizeErrorMessage(result.error);
 }
 
-function sanitizeCronToolArguments(
-  toolName: string,
-  args: Record<string, unknown>,
-): TSanitizedLogDetails {
-  const metadata: TBehaviorMetadata = {};
-  const parts = [`${toolName} args`];
-  const name = readString(args, "name");
-  const pattern = readString(args, "pattern");
-  const fireAt = readString(args, "fireAt");
-  const group = readString(args, "group");
-  const overwrite = readBoolean(args, "overwrite");
-  const reminderText = readString(args, "reminderText");
-  const reminderPromptData = readString(args, "reminderPromptData");
-  const reminderFallbackText = readString(args, "reminderFallbackText");
-  const taskPrompt = readString(args, "taskPrompt");
-  const taskFallbackText = readString(args, "taskFallbackText");
-
-  if (name !== undefined) {
-    metadata.jobNameChars = name.length;
-    parts.push(`nameChars=${name.length}`);
-  }
-
-  if (pattern !== undefined) {
-    metadata.cronPattern = pattern;
-    parts.push(`pattern=${pattern}`);
-  }
-
-  if (fireAt !== undefined) {
-    metadata.fireAt = fireAt;
-    parts.push(`fireAt=${fireAt}`);
-  }
-
-  if (group !== undefined) {
-    metadata.group = group;
-  }
-
-  if (overwrite !== undefined) {
-    metadata.overwrite = overwrite;
-  }
-
-  addLength(metadata, "reminderTextChars", reminderText);
-  addLength(metadata, "reminderPromptDataChars", reminderPromptData);
-  addLength(metadata, "reminderFallbackTextChars", reminderFallbackText);
-  addLength(metadata, "taskPromptChars", taskPrompt);
-  addLength(metadata, "taskFallbackTextChars", taskFallbackText);
-
-  return { summary: parts.join(" "), metadata };
-}
-
-function sanitizeSearchMemoryArguments(args: Record<string, unknown>): TSanitizedLogDetails {
-  const query = readString(args, "query");
-  const limit = readNumber(args, "limit");
+/**
+ * Logs a record's shape, never its content: strings become `<key>Chars`, arrays `<key>Count`.
+ * Only `logSafe` fields keep their value; a safe nested record logs its keys.
+ */
+function summarizeShape(
+  record: Record<string, unknown>,
+  logSafe: ReadonlyArray<TLogSafeField>,
+): TBehaviorMetadata {
   const metadata: TBehaviorMetadata = {};
 
-  addLength(metadata, "queryChars", query);
+  for (const [key, value] of Object.entries(record)) {
+    let logKey: TOption<string>;
 
-  if (limit !== undefined) {
-    metadata.limit = limit;
-  }
-
-  return {
-    summary: `search-memory args queryChars=${query?.length ?? 0}`,
-    metadata,
-  };
-}
-
-function sanitizeWebSearchArguments(args: Record<string, unknown>): TSanitizedLogDetails {
-  const query = readString(args, "query");
-  const maxResults = readNumber(args, "maxResults");
-  const topic = readString(args, "topic");
-  const timeRange = readString(args, "timeRange");
-  const metadata: TBehaviorMetadata = {};
-
-  addLength(metadata, "queryChars", query);
-
-  if (maxResults !== undefined) {
-    metadata.maxResults = maxResults;
-  }
-
-  if (topic !== undefined) {
-    metadata.topic = topic;
-  }
-
-  if (timeRange !== undefined) {
-    metadata.timeRange = timeRange;
-  }
-
-  return {
-    summary: `web-search args queryChars=${query?.length ?? 0}`,
-    metadata,
-  };
-}
-
-function sanitizeWebFetchArguments(args: Record<string, unknown>): TSanitizedLogDetails {
-  const url = readString(args, "url");
-  const format = readString(args, "format");
-  const timeout = readNumber(args, "timeout");
-  const metadata: TBehaviorMetadata = {};
-  const host = extractUrlHost(url);
-
-  if (host !== undefined) {
-    metadata.urlHost = host;
-  }
-
-  if (format !== undefined) {
-    metadata.format = format;
-  }
-
-  if (timeout !== undefined) {
-    metadata.timeout = timeout;
-  }
-
-  return {
-    summary: `web-fetch args host=${host ?? "unknown"}`,
-    metadata,
-  };
-}
-
-function sanitizeUpdateSettingsArguments(args: Record<string, unknown>): TSanitizedLogDetails {
-  const settingKeys = Object.keys(args);
-  const metadata: TBehaviorMetadata = {
-    settingKeys,
-  };
-
-  for (const [key, value] of Object.entries(args)) {
-    if (typeof value === "string") {
-      metadata[`${key}Chars`] = value.length;
-    }
-  }
-
-  return {
-    summary: `update-settings args keys=${settingKeys.join(",")}`,
-    metadata,
-  };
-}
-
-function sanitizeCronToolResult(toolName: string, data: unknown): TSanitizedLogDetails {
-  if (Array.isArray(data)) {
-    const jobNameChars: number[] = [];
-
-    for (const item of data) {
-      if (!isRecord(item)) {
-        continue;
-      }
-
-      const name = readString(item, "name");
-
-      if (name !== undefined) {
-        jobNameChars.push(name.length);
+    for (const field of logSafe) {
+      if (field === key) {
+        logKey = key;
+      } else if (typeof field !== "string" && field[0] === key) {
+        logKey = field[1];
       }
     }
 
-    return {
-      summary: `${toolName} listed ${data.length} jobs`,
-      metadata: {
-        status: "completed",
-        cronJobCount: data.length,
-        jobNameChars,
-      },
-    };
+    if (Array.isArray(value)) {
+      metadata[`${key}Count`] = value.length;
+      continue;
+    }
+
+    if (logKey === undefined) {
+      if (typeof value === "string") {
+        metadata[`${key}Chars`] = value.length;
+      }
+
+      continue;
+    }
+
+    if (typeof value === "string" || typeof value === "boolean") {
+      metadata[logKey] = value;
+    } else if (typeof value === "number" && Number.isFinite(value)) {
+      metadata[logKey] = value;
+    } else if (value instanceof Date) {
+      metadata[logKey] = value.toISOString();
+    } else if (isRecord(value)) {
+      metadata[logKey] = Object.keys(value);
+    }
   }
-
-  if (!isRecord(data)) {
-    return sanitizeGenericToolResult(toolName, data);
-  }
-
-  const metadata = buildCronJobMetadata(data);
-  const name = readString(data, "name");
-  const type = readString(data, "type");
-  const pattern = readString(data, "pattern");
-  const nextRunAt = readDateLike(data, "nextRunAt");
-  const parts = [`${toolName} completed`];
-
-  if (name !== undefined) {
-    parts.push(`jobNameChars=${name.length}`);
-  }
-
-  if (type !== undefined) {
-    parts.push(`type=${type}`);
-  }
-
-  if (pattern !== undefined) {
-    parts.push(`pattern=${pattern}`);
-  }
-
-  if (nextRunAt !== undefined) {
-    parts.push(`next=${nextRunAt}`);
-  }
-
-  return { summary: parts.join(" "), metadata };
-}
-
-function buildCronJobMetadata(job: Record<string, unknown>): TBehaviorMetadata {
-  const metadata: TBehaviorMetadata = {
-    status: "completed",
-  };
-  const name = readString(job, "name");
-  const type = readString(job, "type");
-  const pattern = readString(job, "pattern");
-  const nextRunAt = readDateLike(job, "nextRunAt");
-  const timezone = readString(job, "timezone");
-  const status = readString(job, "status");
-  const reminderText = readString(job, "reminderText");
-  const reminderPromptData = readString(job, "reminderPromptData");
-  const reminderFallbackText = readString(job, "reminderFallbackText");
-  const taskPrompt = readString(job, "taskPrompt");
-  const taskFallbackText = readString(job, "taskFallbackText");
-
-  if (name !== undefined) {
-    metadata.jobNameChars = name.length;
-  }
-
-  if (type !== undefined) {
-    metadata.cronJobType = type;
-  }
-
-  if (pattern !== undefined) {
-    metadata.cronPattern = pattern;
-  }
-
-  if (nextRunAt !== undefined) {
-    metadata.nextRunAt = nextRunAt;
-  }
-
-  if (timezone !== undefined) {
-    metadata.timezone = timezone;
-  }
-
-  if (status !== undefined) {
-    metadata.status = status;
-  }
-
-  addLength(metadata, "reminderTextChars", reminderText);
-  addLength(metadata, "reminderPromptDataChars", reminderPromptData);
-  addLength(metadata, "reminderFallbackTextChars", reminderFallbackText);
-
-  if (taskPrompt !== undefined) {
-    metadata.contentMode = "task";
-  } else if (reminderPromptData !== undefined) {
-    metadata.contentMode = "generated-reminder";
-  } else if (reminderText !== undefined) {
-    metadata.contentMode = "direct-reminder";
-  }
-  addLength(metadata, "taskPromptChars", taskPrompt);
-  addLength(metadata, "taskFallbackTextChars", taskFallbackText);
 
   return metadata;
 }
 
-function sanitizeSearchMemoryResult(data: unknown): TSanitizedLogDetails {
-  let resultCount = 0;
+/** Adds `<key>Preview` for the tool's preview fields; kept out of the one-line summary. */
+function addPreviews(
+  metadata: TBehaviorMetadata,
+  record: Record<string, unknown>,
+  previews: ReadonlyArray<string>,
+) {
+  for (const key of previews) {
+    const value = record[key];
 
-  if (isRecord(data)) {
-    const facts = data.facts;
+    if (typeof value !== "string") {
+      continue;
+    }
 
-    if (Array.isArray(facts)) {
-      resultCount = facts.length;
+    const preview = redactSecrets(value).replace(/\s+/g, " ").trim();
+
+    if (preview.length <= PREVIEW_MAX_CHARS) {
+      metadata[`${key}Preview`] = preview;
+    } else {
+      metadata[`${key}Preview`] = `${preview.slice(0, PREVIEW_MAX_CHARS)}...`;
+    }
+  }
+}
+
+function formatSummary(metadata: TBehaviorMetadata): string {
+  let summary = "";
+
+  for (const [key, value] of Object.entries(metadata)) {
+    if (key === "status") {
+      continue;
+    }
+
+    if (Array.isArray(value)) {
+      summary += ` ${key}=${value.join(",")}`;
+    } else {
+      summary += ` ${key}=${String(value)}`;
     }
   }
 
-  return {
-    summary: `search-memory returned ${resultCount} facts`,
-    metadata: {
-      status: "completed",
-      resultCount,
-    },
-  };
-}
-
-function sanitizeWebSearchResult(data: unknown): TSanitizedLogDetails {
-  const hosts: string[] = [];
-  let resultCount = 0;
-  let queryChars = 0;
-
-  if (isRecord(data)) {
-    const query = readString(data, "query");
-
-    if (query !== undefined) {
-      queryChars = query.length;
-    }
-
-    const results = data.results;
-
-    if (Array.isArray(results)) {
-      resultCount = results.length;
-
-      for (const result of results) {
-        if (!isRecord(result)) {
-          continue;
-        }
-
-        const host = extractUrlHost(readString(result, "url"));
-
-        if (host !== undefined) {
-          hosts.push(host);
-        }
-      }
-    }
-  }
-
-  return {
-    summary: `web-search returned ${resultCount} results`,
-    metadata: {
-      status: "completed",
-      queryChars,
-      resultCount,
-      resultHosts: hosts,
-    },
-  };
-}
-
-function sanitizeWebFetchResult(data: unknown): TSanitizedLogDetails {
-  if (!isRecord(data)) {
-    return sanitizeGenericToolResult("web-fetch", data);
-  }
-
-  const url = readString(data, "url");
-  const host = extractUrlHost(url);
-  const contentType = readString(data, "contentType");
-  const format = readString(data, "format");
-  const content = readString(data, "content");
-  const truncated = readBoolean(data, "truncated");
-  const metadata: TBehaviorMetadata = {
-    status: "completed",
-  };
-
-  if (host !== undefined) {
-    metadata.urlHost = host;
-  }
-
-  if (contentType !== undefined) {
-    metadata.contentType = contentType;
-  }
-
-  if (format !== undefined) {
-    metadata.format = format;
-  }
-
-  if (truncated !== undefined) {
-    metadata.truncated = truncated;
-  }
-
-  addLength(metadata, "contentChars", content);
-
-  return {
-    summary: `web-fetch completed host=${host ?? "unknown"}`,
-    metadata,
-  };
-}
-
-function sanitizeSettingsResult(toolName: string, data: unknown): TSanitizedLogDetails {
-  let settingKeys: string[] = [];
-
-  if (isRecord(data) && isRecord(data.settings)) {
-    settingKeys = Object.keys(data.settings);
-  }
-
-  return {
-    summary: `${toolName} returned ${settingKeys.length} settings`,
-    metadata: {
-      status: "completed",
-      settingKeys,
-      settingCount: settingKeys.length,
-    },
-  };
-}
-
-function sanitizeGenericToolResult(toolName: string, data: unknown): TSanitizedLogDetails {
-  const metadata: TBehaviorMetadata = {
-    status: "completed",
-    dataKind: describeDataKind(data),
-  };
-
-  if (isRecord(data)) {
-    metadata.dataKeys = Object.keys(data);
-  }
-
-  if (Array.isArray(data)) {
-    metadata.resultCount = data.length;
-  }
-
-  return {
-    summary: `${toolName} completed dataKind=${describeDataKind(data)}`,
-    metadata,
-  };
-}
-
-function sanitizeDelegationResult(toolName: string, data: unknown): TSanitizedLogDetails {
-  let response: TOption<string>;
-
-  if (isRecord(data)) {
-    response = readString(data, "text");
-  }
-
-  return {
-    summary: `${toolName} completed responseChars=${response?.length ?? 0}`,
-    metadata: {
-      status: "completed",
-      responseChars: response?.length ?? 0,
-      responsePreview: sanitizeContentPreview(response),
-    },
-  };
-}
-
-function sanitizeContentPreview(value: TOption<string>): string {
-  if (value === undefined) {
-    return "";
-  }
-
-  const sanitized = redactSecrets(value).replace(/\s+/g, " ").trim();
-  if (sanitized.length <= CONTENT_PREVIEW_MAX_CHARS) {
-    return sanitized;
-  }
-
-  return `${sanitized.slice(0, CONTENT_PREVIEW_MAX_CHARS)}...`;
+  return summary;
 }
 
 const registeredSecrets = new Set<string>();
@@ -679,70 +229,6 @@ function redactSecrets(value: string): string {
   }
 
   return redacted;
-}
-
-function readString(record: Record<string, unknown>, key: string): TOption<string> {
-  const value = record[key];
-
-  if (typeof value === "string") {
-    return value;
-  }
-
-  return undefined;
-}
-
-function readNumber(record: Record<string, unknown>, key: string): TOption<number> {
-  const value = record[key];
-
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value;
-  }
-
-  return undefined;
-}
-
-function readBoolean(record: Record<string, unknown>, key: string): TOption<boolean> {
-  const value = record[key];
-
-  if (typeof value === "boolean") {
-    return value;
-  }
-
-  return undefined;
-}
-
-function readDateLike(record: Record<string, unknown>, key: string): TOption<string> {
-  const value = record[key];
-
-  if (value instanceof Date) {
-    return value.toISOString();
-  }
-
-  if (typeof value === "string") {
-    return value;
-  }
-
-  return undefined;
-}
-
-function addLength(metadata: TBehaviorMetadata, key: string, value: TOption<string>) {
-  if (value === undefined) {
-    return;
-  }
-
-  metadata[key] = value.length;
-}
-
-function extractUrlHost(value: TOption<string>): TOption<string> {
-  if (value === undefined) {
-    return undefined;
-  }
-
-  try {
-    return new URL(value).host;
-  } catch {
-    return undefined;
-  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

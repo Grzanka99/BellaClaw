@@ -10,8 +10,9 @@ import {
   startMcpAuthServer,
   stopMcpAuthServer,
 } from "./services/mcp/auth";
-import { MessageHandler } from "./services/message-handler";
+import { FactDistiller } from "./services/memory/distill";
 import { MessagingAdapter } from "./services/messaging";
+import { ScheduledDelivery } from "./services/scheduling/delivery";
 import { SignalSingleton } from "./services/signal";
 
 async function init(): Promise<void> {
@@ -54,8 +55,8 @@ async function init(): Promise<void> {
       DiscordSingleton.instance.setup(),
       SignalSingleton.instance.setup(),
     ]);
-    await MessagingAdapter.instance.setup();
-    await MessageHandler.scheduleFactDrainForAllChats(turnId);
+    await ScheduledDelivery.instance.setup();
+    await FactDistiller.instance.scheduleFactDrainForAllChats(turnId);
     startAiOAuthKeepAlive();
 
     AppLogger.instance.record({

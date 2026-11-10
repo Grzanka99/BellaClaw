@@ -1,5 +1,6 @@
-import { AsyncQueue, createLogger, type TLogger, type TOption } from "@bellaclaw/shared";
-import { and, asc, desc, eq, gt, inArray, isNull, lte, or, type SQL, sql } from "drizzle-orm";
+import { createLogger, type TLogger } from "@bellaclaw/shared";
+import { and, asc, desc, eq, gt, inArray, isNull, lte, sql } from "drizzle-orm";
+import type { LibSQLDatabase } from "drizzle-orm/libsql";
 import { z } from "zod";
 import { ERole } from "../ai/types";
 import { DatabaseConnector } from "../database";
@@ -10,10 +11,6 @@ import {
   memoriesTable,
 } from "../database/schema";
 import {
-  SFact,
-  SFactDistillationState,
-  SFactSearchResult,
-  SMemory,
   SPreparedFact,
   type TFact,
   type TFactCommitArgs,
@@ -22,8 +19,7 @@ import {
   type TFactSearchResult,
   type TFactWindow,
   type TLiveFactWindow,
-  type TMemory,
-  type TSaveArgs,
+  type TPreparedFact,
 } from "./types";
 
 const FACT_WINDOW_SIZE = 6;
@@ -38,15 +34,57 @@ const MAX_SUPERSESSION_COSINE_DISTANCE = 0.24;
 const SUPERSESSION_CANDIDATE_LIMIT = 10;
 const SQueryEmbedding = z.array(z.number()).length(EMBEDDING_DIMENSIONS);
 
+type TFactTransaction = Parameters<Parameters<LibSQLDatabase["transaction"]>[0]>[0];
+
+// Runs inside the caller's queued transaction: inserts one live fact and retires the facts it
+// supersedes, failing the whole transaction when any of them is no longer a same-chat live fact.
+async function insertFact(
+  tx: TFactTransaction,
+  chatId: string,
+  fact: TPreparedFact,
+  createdAt: Date,
+): Promise<TFact> {
+  const inserted = await tx
+    .insert(factsTable)
+    .values({
+      chatId,
+      text: fact.text,
+      embedding: fact.embedding,
+      createdAt,
+      supersededBy: null,
+      forgottenAt: null,
+      sourceMessageId: fact.sourceMessageId,
+    })
+    .returning()
+    .get();
+
+  if (fact.supersedesFactIds.length > 0) {
+    const result = await tx
+      .update(factsTable)
+      .set({ supersededBy: inserted.id })
+      .where(
+        and(
+          eq(factsTable.chatId, chatId),
+          inArray(factsTable.id, fact.supersedesFactIds),
+          isNull(factsTable.supersededBy),
+          isNull(factsTable.forgottenAt),
+        ),
+      );
+
+    if (result.rowsAffected !== fact.supersedesFactIds.length) {
+      throw new Error("Failed to supersede every prepared same-chat live fact");
+    }
+  }
+
+  return inserted;
+}
+
 export class Memory {
   private static _instance: Memory;
-  private db = DatabaseConnector.instance.database;
-  private queue: AsyncQueue;
+  private database = DatabaseConnector.instance;
   private logger: TLogger = createLogger("MEMORY");
 
-  private constructor() {
-    this.queue = new AsyncQueue();
-  }
+  private constructor() {}
 
   public static get instance() {
     if (!Memory._instance) {
@@ -55,71 +93,13 @@ export class Memory {
     return Memory._instance;
   }
 
-  public async findRecent(chatId: string, limit: number, platform?: string): Promise<TMemory[]> {
-    return this.queue.enqueue(async () => {
-      let platformFilter: TOption<SQL>;
-      if (platform !== undefined) {
-        platformFilter = or(isNull(memoriesTable.platform), eq(memoriesTable.platform, platform));
-      }
-      const rows = await this.db
-        .select()
-        .from(memoriesTable)
-        .where(
-          and(eq(memoriesTable.chatId, chatId), eq(memoriesTable.kind, "message"), platformFilter),
-        )
-        .orderBy(desc(memoriesTable.id))
-        .limit(limit);
-      const parsed = z.array(SMemory).safeParse(rows);
-      if (!parsed.success) {
-        throw new Error("Failed to parse memory from DB");
-      }
-      return parsed.data;
-    });
-  }
-
-  public async save(args: TSaveArgs): Promise<TMemory> {
-    const now = Date.now();
-    return this.queue.enqueue(async () => {
-      const row = await this.db
-        .insert(memoriesTable)
-        .values({
-          ...args,
-          createdAt: args.createdAt?.getTime() ?? now,
-          lastReadAt: now,
-        })
-        .returning()
-        .get();
-      const parsed = SMemory.safeParse(row);
-      if (!parsed.success) {
-        throw new Error("Failed to parse saved memory result");
-      }
-      return parsed.data;
-    });
-  }
-
-  public async findChatIds(): Promise<string[]> {
-    return this.queue.enqueue(async () => {
-      const rows = await this.db
-        .selectDistinct({ chatId: memoriesTable.chatId })
-        .from(memoriesTable)
-        .orderBy(asc(memoriesTable.chatId));
-      const parsed = z.array(z.object({ chatId: z.string() })).safeParse(rows);
-
-      if (!parsed.success) {
-        throw new Error("Failed to parse memory chat IDs");
-      }
-
-      return parsed.data.map((row) => row.chatId);
-    });
-  }
-
   public async loadLiveFactWindow(chatId: string): Promise<TLiveFactWindow> {
-    return this.queue.enqueue(async () => {
-      const state = await this.readLiveState(chatId);
+    return this.database.run(async (db) => {
+      const state = await this.readLiveState(db, chatId);
 
       return {
         state,
-        ...(await this.readTranscriptWindow(chatId, state.lastProcessedMessageId)),
+        ...(await this.readTranscriptWindow(db, chatId, state.lastProcessedMessageId)),
       };
     });
   }
@@ -145,11 +125,11 @@ export class Memory {
   }
 
   public async forgetFacts(chatId: string, factIds: number[]): Promise<number[]> {
-    return this.queue.enqueue(async () =>
-      this.db.transaction(async (tx) => {
+    return this.database.run(async (db) =>
+      db.transaction(async (tx) => {
         const result = await tx
           .update(factsTable)
-          .set({ forgottenAt: Date.now() })
+          .set({ forgottenAt: new Date() })
           .where(
             and(
               eq(factsTable.chatId, chatId),
@@ -175,8 +155,8 @@ export class Memory {
     embedding: number[],
     supersedesFactIds: number[],
   ): Promise<TFact> {
-    return this.queue.enqueue(async () =>
-      this.db.transaction(async (tx) => {
+    return this.database.run(async (db) =>
+      db.transaction(async (tx) => {
         const existing = await tx
           .select()
           .from(factsTable)
@@ -190,12 +170,7 @@ export class Memory {
           )
           .get();
         if (existing !== undefined) {
-          const parsedExisting = SFact.safeParse(existing);
-          if (!parsedExisting.success) {
-            throw new Error("Failed to parse existing remembered fact");
-          }
-
-          return parsedExisting.data;
+          return existing;
         }
 
         const source = await tx
@@ -225,50 +200,13 @@ export class Memory {
           throw new Error("Failed to validate remembered fact");
         }
 
-        const inserted = await tx
-          .insert(factsTable)
-          .values({
-            chatId,
-            text: prepared.data.text,
-            embedding: prepared.data.embedding,
-            createdAt: Date.now(),
-            supersededBy: null,
-            forgottenAt: null,
-            sourceMessageId: prepared.data.sourceMessageId,
-          })
-          .returning()
-          .get();
-        const parsed = SFact.safeParse(inserted);
-        if (!parsed.success) {
-          throw new Error("Failed to parse remembered fact");
-        }
-
-        if (prepared.data.supersedesFactIds.length > 0) {
-          const result = await tx
-            .update(factsTable)
-            .set({ supersededBy: parsed.data.id })
-            .where(
-              and(
-                eq(factsTable.chatId, chatId),
-                inArray(factsTable.id, prepared.data.supersedesFactIds),
-                isNull(factsTable.supersededBy),
-                isNull(factsTable.forgottenAt),
-              ),
-            );
-          if (result.rowsAffected !== prepared.data.supersedesFactIds.length) {
-            throw new Error("Failed to supersede every remembered same-chat live fact");
-          }
-        }
-
-        return parsed.data;
+        return insertFact(tx, chatId, prepared.data, new Date());
       }),
     );
   }
 
-  // readLiveState and readTranscriptWindow are queue-free by design: they run
-  // inside an existing queue.enqueue() callback, and enqueuing again from there would deadlock.
-  private async readLiveState(chatId: string): Promise<TFactDistillationState> {
-    const row = await this.db
+  private async readLiveState(db: LibSQLDatabase, chatId: string): Promise<TFactDistillationState> {
+    const row = await db
       .select()
       .from(factDistillationStateTable)
       .where(eq(factDistillationStateTable.chatId, chatId))
@@ -282,20 +220,15 @@ export class Memory {
       };
     }
 
-    const parsed = SFactDistillationState.safeParse(row);
-
-    if (!parsed.success) {
-      throw new Error("Failed to parse fact distillation state");
-    }
-
-    return parsed.data;
+    return row;
   }
 
   private async readTranscriptWindow(
+    db: LibSQLDatabase,
     chatId: string,
     lastProcessedMessageId: number,
   ): Promise<TFactWindow> {
-    const contextRows = await this.db
+    const contextRows = await db
       .select()
       .from(memoriesTable)
       .where(
@@ -307,7 +240,7 @@ export class Memory {
       )
       .orderBy(desc(memoriesTable.id))
       .limit(FACT_CONTEXT_SIZE);
-    const messageRows = await this.db
+    const messageRows = await db
       .select()
       .from(memoriesTable)
       .where(
@@ -319,18 +252,12 @@ export class Memory {
       )
       .orderBy(asc(memoriesTable.id))
       .limit(FACT_WINDOW_SIZE);
-    const parsedContext = z.array(SMemory).safeParse(contextRows);
-    const parsedMessages = z.array(SMemory).safeParse(messageRows);
 
-    if (!parsedContext.success || !parsedMessages.success) {
-      throw new Error("Failed to parse fact transcript window");
-    }
-
-    parsedContext.data.reverse();
+    contextRows.reverse();
 
     return {
-      context: parsedContext.data,
-      messages: parsedMessages.data,
+      context: contextRows,
+      messages: messageRows,
     };
   }
 
@@ -348,9 +275,9 @@ export class Memory {
 
     const queryEmbedding = new Float32Array(parsedEmbedding.data).buffer;
 
-    return this.queue.enqueue(async () => {
+    return this.database.run(async (db) => {
       const distance = sql<number>`vector_distance_cos(${factsTable.embedding}, ${queryEmbedding})`;
-      const rows = await this.db
+      const rows = await db
         .select({
           id: factsTable.id,
           text: factsTable.text,
@@ -368,20 +295,15 @@ export class Memory {
         )
         .orderBy(asc(distance))
         .limit(limit);
-      const parsed = z.array(SFactSearchResult).safeParse(rows);
-
-      if (!parsed.success) {
-        throw new Error("Failed to parse fact search results");
-      }
 
       // NOTE: the cutoff is applied here rather than in SQL so a miss can report how close it got;
       // taking the nearest `limit` rows first is equivalent because the filter is on that ordering
-      const within = parsed.data.filter((fact) => fact.distance <= maximumDistance);
+      const within = rows.filter((fact) => fact.distance <= maximumDistance);
 
-      if (within.length === 0 && parsed.data.length > 0) {
-        const closest = parsed.data[0];
+      if (within.length === 0 && rows.length > 0) {
+        const closest = rows[0];
         this.logger.info(
-          `findFactsByDistance: no fact within ${maximumDistance}, closest was ${closest?.distance.toFixed(4)} of ${parsed.data.length} live facts`,
+          `findFactsByDistance: no fact within ${maximumDistance}, closest was ${closest?.distance.toFixed(4)} of ${rows.length} live facts`,
         );
       }
 
@@ -412,9 +334,9 @@ export class Memory {
       }
     }
 
-    return this.queue.enqueue(async () =>
-      this.db.transaction(async (tx) => {
-        const now = Date.now();
+    return this.database.run(async (db) =>
+      db.transaction(async (tx) => {
+        const now = new Date();
         const sourceMessageIds = [...new Set(parsedFacts.data.map((fact) => fact.sourceMessageId))];
 
         if (sourceMessageIds.length > 0) {
@@ -471,43 +393,7 @@ export class Memory {
 
         const insertedFacts: TFact[] = [];
         for (const preparedFact of parsedFacts.data) {
-          const inserted = await tx
-            .insert(factsTable)
-            .values({
-              chatId: args.chatId,
-              text: preparedFact.text,
-              embedding: preparedFact.embedding,
-              createdAt: now,
-              supersededBy: null,
-              sourceMessageId: preparedFact.sourceMessageId,
-            })
-            .returning()
-            .get();
-          const parsedInserted = SFact.safeParse(inserted);
-
-          if (!parsedInserted.success) {
-            throw new Error("Failed to parse inserted fact");
-          }
-
-          if (preparedFact.supersedesFactIds.length > 0) {
-            const supersessionResult = await tx
-              .update(factsTable)
-              .set({ supersededBy: parsedInserted.data.id })
-              .where(
-                and(
-                  eq(factsTable.chatId, args.chatId),
-                  inArray(factsTable.id, preparedFact.supersedesFactIds),
-                  isNull(factsTable.supersededBy),
-                  isNull(factsTable.forgottenAt),
-                ),
-              );
-
-            if (supersessionResult.rowsAffected !== preparedFact.supersedesFactIds.length) {
-              throw new Error("Failed to supersede every prepared same-chat live fact");
-            }
-          }
-
-          insertedFacts.push(parsedInserted.data);
+          insertedFacts.push(await insertFact(tx, args.chatId, preparedFact, now));
         }
 
         return {

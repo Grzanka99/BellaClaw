@@ -4,17 +4,9 @@ import type { AgentMessage, AgentTool } from "@earendil-works/pi-agent-core";
 import { Agent } from "@earendil-works/pi-agent-core";
 import {
   type Api,
-  type AssistantMessage,
-  type Context,
   contentText,
   createAssistantMessageEventStream,
-  hasApi,
-  type JsonValue,
-  type Message,
   type Model,
-  type ModelThinkingLevel,
-  type SimpleStreamOptions,
-  type ThinkingLevel,
 } from "@earendil-works/pi-ai";
 import {
   arr,
@@ -34,118 +26,40 @@ import type {
   CreateMessageResultWithTools,
   ElicitRequest,
   ElicitResult,
-  ContentBlock as McpContentBlock,
-  SamplingMessageContentBlock,
-  ToolUseContent,
 } from "@modelcontextprotocol/sdk/types.js";
-import { z } from "zod";
 import {
-  sanitizeErrorMessage,
   sanitizeToolCallArguments,
   sanitizeToolResult,
   sanitizeToolResultError,
 } from "../../app-logger/sanitizers";
+import { startSpan, type TBehaviorSpan } from "../../app-logger/span";
 import { compactConversation } from "../../conversation/compaction";
 import { conversationMessages, type TConversation } from "../../conversation/types";
 import { McpService } from "../../mcp";
 import { loadMcpProfiles } from "../../mcp/config";
 import { McpRunRegistry, type TMcpRunStatus } from "../../mcp/runs";
-import { EConfigKey, type TConfigRecord } from "../../settings/schema";
+import { createMcpSamplingRequest, createMcpSamplingResult } from "../../mcp/sampling";
+import type { TConfigRecord } from "../../settings/schema";
+import { AGENTS, EAgentName } from "../agents";
+import baseInstructions from "../instructions/base-system.xml" with { type: "text" };
 import { createPlatformInstructions } from "../instructions/platform";
 import { readXmlAndInjectConfig } from "../instructions/read-xml-and-inject-config";
+import { emptyUsage, LlmClient } from "../llm";
+import { aiModels } from "../providers/registry";
 import {
-  decodeAiModelPreferences,
-  getAiModelPreference,
-  type TAiServiceTier,
-} from "../model-preferences";
-import {
-  aiModels,
-  getAiApiKey,
-  getAiModelConfig,
-  refreshAiModels,
-  supportsAiServiceTier,
-} from "../providers/registry";
-import { validateToolArguments } from "../tools/definition";
-import {
-  createCalendarTools,
-  createMemoryTools,
-  createSchedulingTools,
-  createSettingsTools,
-  createWebTools,
   type TToolExecutionContext,
-} from "../tools/executable";
-import { EAiProvider, EModelPurpose, ERole, type THistoryItem } from "../types";
-import {
-  EAgentName,
-  type TAgentRunArgs,
-  type TAgentRunResult,
-  type TMainAgentRunResult,
-} from "./types";
+  type TToolLogPolicy,
+  validateToolArguments,
+} from "../tools/define-tool";
+import { EModelPurpose } from "../types";
+import type { TAgentRunArgs, TAgentRunResult, TMainAgentRunResult } from "./types";
 
-const BASE_INSTRUCTIONS_PATH = "./src/services/ai/instructions/base-system.xml";
 const SEQUENTIAL: "sequential" = "sequential";
-const PARALLEL: "parallel" = "parallel";
-const AGENT_INSTRUCTIONS: Record<EAgentName, string> = {
-  [EAgentName.Calendar]: "./src/services/ai/agents/calendar/instructions.xml",
-  [EAgentName.Main]: "./src/services/ai/agents/main/instructions.xml",
-  [EAgentName.Mcp]: "./src/services/ai/agents/mcp/instructions.xml",
-  [EAgentName.Memory]: "./src/services/ai/agents/memory/instructions.xml",
-  [EAgentName.Settings]: "./src/services/ai/agents/settings/instructions.xml",
-  [EAgentName.Scheduling]: "./src/services/ai/agents/scheduling/instructions.xml",
-  [EAgentName.ScheduledTask]: "./src/services/ai/agents/scheduled-task/instructions.xml",
-};
-
-function sessionHeaders(provider: string, sessionId: string): Record<string, string> {
-  const headers: Record<string, string> = {};
-  if (provider === EAiProvider.OpencodeGo) {
-    headers["x-opencode-session"] = sessionId;
-  }
-  if (provider === EAiProvider.Openrouter) {
-    headers["x-session-id"] = sessionId;
-  }
-
-  return headers;
-}
-
-function withSession(
-  options: SimpleStreamOptions,
-  provider: string,
-  sessionId: string,
-): SimpleStreamOptions {
-  return {
-    ...options,
-    sessionId,
-    headers: { ...options.headers, ...sessionHeaders(provider, sessionId) },
-  };
-}
-
-// Simple requests cannot carry a service tier or Codex effort "none"; these need full stream options.
-function createAiStreamOptions(
-  model: Model<Api>,
-  options: SimpleStreamOptions,
-  effort: TOption<ModelThinkingLevel>,
-  serviceTier: TOption<TAiServiceTier>,
-) {
-  const isCodexEffortOff = effort === "off" && hasApi(model, "openai-codex-responses");
-
-  if (!isCodexEffortOff && (serviceTier === undefined || !supportsAiServiceTier(model))) {
-    return undefined;
-  }
-
-  let reasoningEffort: TOption<ThinkingLevel | "none">;
-
-  if (isCodexEffortOff) {
-    reasoningEffort = "none";
-  } else if (effort !== "off") {
-    reasoningEffort = effort;
-  }
-
-  return { ...options, reasoningEffort, serviceTier };
-}
 
 export class AgentHarness {
   private static _instance: TOption<AgentHarness>;
   private logger = createLogger("AGENT_HARNESS");
+  private llm = LlmClient.instance;
 
   public static get instance(): AgentHarness {
     if (AgentHarness._instance === undefined) {
@@ -156,15 +70,13 @@ export class AgentHarness {
   }
 
   public async runMain(
-    args: Omit<TAgentRunArgs, "name" | "purpose" | "maxIterations" | "parentToolCallId">,
+    args: Omit<TAgentRunArgs, "name" | "parentToolCallId">,
   ): Promise<TMainAgentRunResult> {
     let delegationCount = 0;
 
     return this.run({
       ...args,
       name: EAgentName.Main,
-      purpose: EModelPurpose.Main,
-      maxIterations: 30,
       parentToolCallId: undefined,
       delegationCount: () => {
         delegationCount += 1;
@@ -177,145 +89,14 @@ export class AgentHarness {
   }
 
   public async runScheduledTask(
-    args: Omit<TAgentRunArgs, "name" | "purpose" | "maxIterations" | "parentToolCallId">,
+    args: Omit<TAgentRunArgs, "name" | "parentToolCallId">,
   ): Promise<TAgentRunResult> {
     return this.run({
       ...args,
       name: EAgentName.ScheduledTask,
-      purpose: EModelPurpose.ScheduledTask,
-      maxIterations: 30,
       parentToolCallId: undefined,
       delegationCount: undefined,
     });
-  }
-
-  public async completeText(args: {
-    prompt: string;
-    instructions: string;
-    settings: TConfigRecord;
-    purpose: EModelPurpose;
-    trace: TOption<TBehaviorTraceContext>;
-    signal?: AbortSignal;
-  }): Promise<TOption<string>> {
-    const startedAt = performance.now();
-    const modelConfig = await this.resolveModel(args.settings, args.purpose, args.signal);
-    const sessionId = this.createSessionId(
-      modelConfig.model.provider,
-      args.trace?.chatId,
-      args.trace?.platform,
-    );
-    this.logDirectCompletionStarted(
-      args.trace,
-      modelConfig.model.provider,
-      modelConfig.model.id,
-      args.purpose,
-    );
-    let result: Awaited<ReturnType<typeof aiModels.completeSimple>>;
-    let reasoning: TOption<ThinkingLevel>;
-
-    if (modelConfig.effort !== "off") {
-      reasoning = modelConfig.effort;
-    }
-
-    try {
-      const context: Context = {
-        systemPrompt: args.instructions,
-        messages: [{ role: "user", content: args.prompt, timestamp: Date.now() }],
-        tools: [],
-      };
-      const options = withSession(
-        {
-          apiKey: this.resolveApiKey(modelConfig.model.provider),
-          signal: args.signal,
-        },
-        modelConfig.model.provider,
-        sessionId,
-      );
-      const streamOptions = createAiStreamOptions(
-        modelConfig.model,
-        options,
-        modelConfig.effort,
-        modelConfig.serviceTier,
-      );
-
-      if (streamOptions !== undefined) {
-        result = await aiModels.complete(modelConfig.model, context, streamOptions);
-      } else {
-        result = await aiModels.completeSimple(modelConfig.model, context, {
-          ...options,
-          reasoning,
-        });
-      }
-    } catch (error) {
-      this.logDirectCompletionCompleted(
-        args.trace,
-        modelConfig.model.provider,
-        modelConfig.model.id,
-        args.purpose,
-        startedAt,
-        false,
-        "error",
-        0,
-        String(error),
-      );
-      throw error;
-    }
-
-    this.logModelRequestCompleted({
-      trace: args.trace,
-      purpose: args.purpose,
-      agentName: undefined,
-      parentToolCallId: undefined,
-      iteration: 1,
-      startedAt,
-      message: result,
-    });
-
-    let text: TOption<string>;
-    let stopReason: string = result.stopReason;
-    if (result.stopReason !== "error" && result.stopReason !== "aborted") {
-      const response = contentText(result.content).trim();
-      if (response.length > 0) {
-        text = response;
-      } else {
-        stopReason = "blank";
-      }
-    }
-
-    this.logDirectCompletionCompleted(
-      args.trace,
-      modelConfig.model.provider,
-      modelConfig.model.id,
-      args.purpose,
-      startedAt,
-      text !== undefined,
-      stopReason,
-      text?.length ?? 0,
-      result.errorMessage,
-    );
-    return text;
-  }
-
-  public async verifySettings(
-    settings: TConfigRecord,
-    purposes: EModelPurpose[],
-  ): Promise<TOption<string>> {
-    for (const purpose of purposes) {
-      const response = await this.completeText({
-        prompt: "Reply with ok.",
-        instructions: "Reply with ok.",
-        settings,
-        purpose,
-        trace: undefined,
-        signal: AbortSignal.timeout(60_000),
-      });
-
-      if (response === undefined) {
-        return `Provider returned no response for ${purpose}`;
-      }
-    }
-
-    return undefined;
   }
 
   public async compactConversation(
@@ -323,26 +104,23 @@ export class AgentHarness {
     settings: TConfigRecord,
     chatId: string,
     platform: TAgentRunArgs["platform"],
-    trace?: TBehaviorTraceContext,
+    trace: TBehaviorTraceContext,
   ) {
-    const config = await this.resolveModel(settings, EModelPurpose.Main);
+    const config = await this.llm.resolveModel(settings, AGENTS[EAgentName.Main].purpose);
     const args = {
       name: EAgentName.Main,
-      purpose: EModelPurpose.Main,
       settings,
       chatId,
       platform,
       prompt: "",
-      history: [],
       currentTimeContext: undefined,
       trace,
       signal: undefined,
-      maxIterations: 30,
       parentToolCallId: undefined,
       delegationCount: undefined,
     };
     const tools = await this.createTools(args);
-    const systemPrompt = await this.createSystemPrompt(args, tools);
+    const systemPrompt = await this.createSystemPrompt(args);
     const fixedTokens = Math.ceil(
       (systemPrompt.length +
         JSON.stringify(
@@ -350,12 +128,12 @@ export class AgentHarness {
         ).length) /
         4,
     );
-    const sessionId = this.createSessionId(config.model.provider, chatId, platform);
+    const sessionId = this.llm.createSessionId(config.model.provider, chatId, platform);
     const model = {
       ...config.model,
       headers: {
         ...config.model.headers,
-        ...sessionHeaders(config.model.provider, sessionId),
+        ...this.llm.sessionHeaders(config.model.provider, sessionId),
       },
     };
     return compactConversation(state, aiModels, model, fixedTokens, trace);
@@ -364,9 +142,14 @@ export class AgentHarness {
   private async run(
     args: TAgentRunArgs & { delegationCount: TOption<() => void> },
   ): Promise<TMainAgentRunResult> {
-    const modelConfig = await this.resolveModel(args.settings, args.purpose, args.signal);
+    const agentDefinition = AGENTS[args.name];
+    const modelConfig = await this.llm.resolveModel(
+      args.settings,
+      agentDefinition.purpose,
+      args.signal,
+    );
     const tools = await this.createTools(args);
-    const systemPrompt = await this.createSystemPrompt(args, tools);
+    const systemPrompt = await this.createSystemPrompt(args);
     let iterations = 0;
     let toolCallCount = 0;
     let lastToolBatch: TOption<string>;
@@ -374,18 +157,31 @@ export class AgentHarness {
     let stopReason = "completed";
     let forceFinalization = false;
     let forcedFinalAttempt = false;
-    const startedAt = performance.now();
-    let requestStartedAt: TOption<number>;
-    const sessionId = this.createSessionId(modelConfig.model.provider, args.chatId, args.platform);
-
-    const toolStartedAt = new Map<string, number>();
-
-    let messages = this.createHistory(
-      args.history,
-      modelConfig.model.api,
+    const agentSpan = startSpan(args.trace, "agent.completed", "agent-harness", {
+      provider: modelConfig.model.provider,
+      model: modelConfig.model.id,
+      purpose: agentDefinition.purpose,
+    });
+    let requestSpan: TOption<TBehaviorSpan>;
+    const sessionId = this.llm.createSessionId(
       modelConfig.model.provider,
-      modelConfig.model.id,
+      args.chatId,
+      args.platform,
     );
+
+    const toolSpans = new Map<string, TBehaviorSpan>();
+    const toolLogPolicies = new Map<string, TToolLogPolicy>(
+      agentDefinition.tools.map((tool) => [tool.name, tool]),
+    );
+    for (const target of agentDefinition.delegates) {
+      toolLogPolicies.set(`delegate-${target}`, {
+        logSafe: [],
+        privateErrors: false,
+        previews: ["task", "text"],
+      });
+    }
+
+    let messages: AgentMessage[] = [];
     if (args.conversation !== undefined) {
       messages = structuredClone(conversationMessages(args.conversation));
     }
@@ -398,27 +194,15 @@ export class AgentHarness {
         messages,
       },
       streamFn: (model, context, options) => {
-        if (iterations >= args.maxIterations) {
+        if (iterations >= agentDefinition.maxIterations) {
           return createHardLimitStream(model);
         }
 
         iterations += 1;
-        requestStartedAt = performance.now();
-        const requestOptions = withSession(options ?? {}, model.provider, sessionId);
-        const streamOptions = createAiStreamOptions(
-          model,
-          requestOptions,
-          modelConfig.effort,
-          modelConfig.serviceTier,
-        );
-
-        if (streamOptions !== undefined) {
-          return aiModels.stream(model, context, streamOptions);
-        }
-
-        return aiModels.streamSimple(model, context, requestOptions);
+        requestSpan = startSpan(args.trace, "model.request.completed", "agent-harness");
+        return this.llm.stream(model, modelConfig, context, options ?? {}, sessionId);
       },
-      getApiKey: (provider) => this.resolveApiKey(provider),
+      getApiKey: (provider) => this.llm.resolveApiKey(provider),
       toolExecution: "parallel",
       prepareNextTurnWithContext: (context) => {
         let nextTools = context.context.tools;
@@ -439,7 +223,7 @@ export class AgentHarness {
           return undefined;
         }
 
-        if (forceFinalization || iterations >= args.maxIterations - 1) {
+        if (forceFinalization || iterations >= agentDefinition.maxIterations - 1) {
           forcedFinalAttempt = true;
           return {
             context: {
@@ -468,18 +252,17 @@ export class AgentHarness {
       if (
         event.type === "message_end" &&
         event.message.role === "assistant" &&
-        requestStartedAt !== undefined
+        requestSpan !== undefined
       ) {
-        this.logModelRequestCompleted({
-          trace: args.trace,
-          purpose: args.purpose,
+        this.llm.logModelRequestCompleted({
+          span: requestSpan,
+          purpose: agentDefinition.purpose,
           agentName: args.name,
           parentToolCallId: args.parentToolCallId,
           iteration: iterations,
-          startedAt: requestStartedAt,
           message: event.message,
         });
-        requestStartedAt = undefined;
+        requestSpan = undefined;
       }
 
       if (event.type === "turn_end") {
@@ -503,26 +286,85 @@ export class AgentHarness {
 
       if (event.type === "tool_execution_start") {
         toolCallCount += 1;
-        toolStartedAt.set(event.toolCallId, performance.now());
-        this.logToolStarted(args, event.toolCallId, event.toolName, event.args);
+        toolSpans.set(
+          event.toolCallId,
+          startSpan(args.trace, "tool.call.completed", "agent-harness", {
+            toolName: event.toolName,
+          }),
+        );
+        const details = sanitizeToolCallArguments(
+          event.toolName,
+          event.args,
+          toolLogPolicies.get(event.toolName),
+        );
+        AppLogger.instance.record({
+          trace: args.trace,
+          event: "tool.call.started",
+          component: "agent-harness",
+          toolName: event.toolName,
+          summary: details.summary,
+          metadata: {
+            ...details.metadata,
+            agentName: args.name,
+            toolCallId: event.toolCallId,
+            parentToolCallId: args.parentToolCallId ?? null,
+          },
+        });
       }
 
       if (event.type === "tool_execution_end") {
-        this.logToolCompleted(
-          args,
-          event.toolCallId,
-          event.toolName,
-          event.result,
-          event.isError,
-          toolStartedAt.get(event.toolCallId),
+        let resultDetails: unknown = event.result;
+        let resultError: TOption<string>;
+
+        if (isRecord(event.result)) {
+          resultDetails = event.result.details;
+
+          if (event.isError && Array.isArray(event.result.content)) {
+            resultError = contentText(event.result.content).trim();
+          }
+        }
+
+        const result = {
+          toolCallId: event.toolCallId,
+          toolName: event.toolName,
+          success: !event.isError,
+          data: resultDetails,
+          error: resultError,
+        };
+        const logPolicy = toolLogPolicies.get(event.toolName);
+        const details = sanitizeToolResult(result, logPolicy);
+
+        // NOTE: tool errors use the tool-specific sanitizer, so they bypass the span's own one.
+        toolSpans.get(event.toolCallId)?.end(
+          !event.isError,
+          {
+            summary: details.summary,
+            metadata: {
+              ...details.metadata,
+              agentName: args.name,
+              toolCallId: event.toolCallId,
+              parentToolCallId: args.parentToolCallId ?? null,
+            },
+            error: sanitizeToolResultError(result, logPolicy),
+          },
+          undefined,
         );
-        toolStartedAt.delete(event.toolCallId);
+        toolSpans.delete(event.toolCallId);
       }
 
       return undefined;
     });
 
-    this.logStarted(args, modelConfig.model.provider, modelConfig.model.id);
+    AppLogger.instance.record({
+      trace: args.trace,
+      event: "agent.started",
+      component: "agent-harness",
+      provider: modelConfig.model.provider,
+      model: modelConfig.model.id,
+      purpose: agentDefinition.purpose,
+      summary: `${args.name} agent started`,
+      metadata: { agentName: args.name, parentToolCallId: args.parentToolCallId ?? null },
+    });
     const abort = () => agent.abort();
     args.signal?.addEventListener("abort", abort, { once: true });
 
@@ -559,13 +401,15 @@ export class AgentHarness {
       }
     } catch (error) {
       stopReason = "error";
-      this.logFailure(
-        args,
-        modelConfig.model.provider,
-        modelConfig.model.id,
-        startedAt,
-        String(error),
-      );
+      agentSpan.fail(String(error), {
+        level: EBehaviorLogLevel.Error,
+        summary: `${args.name} agent failed`,
+        metadata: {
+          agentName: args.name,
+          parentToolCallId: args.parentToolCallId ?? null,
+          stopReason: "error",
+        },
+      });
       throw error;
     } finally {
       args.signal?.removeEventListener("abort", abort);
@@ -599,19 +443,26 @@ export class AgentHarness {
     } else if (agent.state.errorMessage !== undefined && finalText === undefined) {
       stopReason = "error";
       finalText = undefined;
-    } else if (iterations >= args.maxIterations) {
+    } else if (iterations >= agentDefinition.maxIterations) {
       stopReason = "iteration-limit";
     }
 
-    this.logCompleted(
-      args,
-      modelConfig.model.provider,
-      modelConfig.model.id,
-      iterations,
-      toolCallCount,
-      finalText,
-      stopReason,
-      startedAt,
+    // NOTE: an agent that ends without text still completed normally, so it stays at Info level.
+    agentSpan.end(
+      finalText !== undefined,
+      {
+        level: EBehaviorLogLevel.Info,
+        summary: `${args.name} agent completed`,
+        metadata: {
+          agentName: args.name,
+          parentToolCallId: args.parentToolCallId ?? null,
+          iterations,
+          toolCallCount,
+          stopReason,
+          responseChars: finalText?.length ?? 0,
+        },
+      },
+      undefined,
     );
     let transcript = (await agent.convertToLlm(agent.state.messages)).filter(
       (message) => message.role !== "system",
@@ -622,113 +473,13 @@ export class AgentHarness {
     return { text: finalText, iterations, toolCallCount, stopReason, messages: transcript };
   }
 
-  private async resolveModel(
-    settings: TConfigRecord,
-    purpose: EModelPurpose,
-    signal?: AbortSignal,
-  ) {
-    const provider = settings[EConfigKey.AiProvider];
-    const preferences = decodeAiModelPreferences(settings[EConfigKey.AiModelPreferences]);
-
-    switch (provider) {
-      case EAiProvider.OpenaiCodex:
-      case EAiProvider.Openrouter:
-      case EAiProvider.Ollama:
-      case EAiProvider.OpencodeGo:
-        await refreshAiModels(provider, false, signal);
-        return getAiModelConfig(
-          provider,
-          purpose,
-          getAiModelPreference(preferences, provider, purpose),
-        );
-      default:
-        throw new Error(`Unknown AI provider: ${provider}`);
-    }
-  }
-
-  private resolveApiKey(provider: string): TOption<string> {
-    switch (provider) {
-      case EAiProvider.OpenaiCodex:
-        return getAiApiKey(EAiProvider.OpenaiCodex);
-      case EAiProvider.Openrouter:
-        return getAiApiKey(EAiProvider.Openrouter);
-      case EAiProvider.Ollama:
-        return getAiApiKey(EAiProvider.Ollama);
-      case EAiProvider.OpencodeGo:
-        return getAiApiKey(EAiProvider.OpencodeGo);
-      default:
-        return undefined;
-    }
-  }
-
-  private createSessionId(
-    provider: string,
-    chatId: TOption<string>,
-    platform: TOption<string>,
-  ): string {
-    if (chatId === undefined) {
-      return crypto.randomUUID();
-    }
-
-    return new Bun.CryptoHasher("sha256", this.resolveApiKey(provider))
-      .update(`${platform ?? "unknown"}:${chatId}`)
-      .digest("hex");
-  }
-
-  private createHistory(
-    history: TOption<THistoryItem[]>,
-    api: Api,
-    provider: string,
-    model: string,
-  ): AgentMessage[] {
-    if (history === undefined) {
-      return [];
-    }
-
-    const timestamp = Date.now();
-    const messages: AgentMessage[] = [];
-
-    for (const item of history) {
-      if (item.role === ERole.System) {
-        continue;
-      }
-
-      if (item.role === ERole.User) {
-        messages.push({ role: "user", content: item.content, timestamp });
-        continue;
-      }
-
-      messages.push({
-        role: "assistant",
-        content: [{ type: "text", text: item.content }],
-        api,
-        provider,
-        model,
-        usage: this.emptyUsage(),
-        stopReason: "stop",
-        timestamp,
-      });
-    }
-
-    return messages;
-  }
-
-  private async createSystemPrompt(
-    args: TAgentRunArgs,
-    tools: Array<{ instructionsPath?: string } | AgentTool>,
-  ): Promise<string> {
-    const toolPaths = tools.flatMap((tool) => {
-      if (!("instructionsPath" in tool) || tool.instructionsPath === undefined) {
-        return [];
-      }
-      return [tool.instructionsPath];
-    });
-    const [base, agentInstructions, ...toolInstructions] = await Promise.all([
-      readXmlAndInjectConfig(BASE_INSTRUCTIONS_PATH, args.settings),
-      readXmlAndInjectConfig(AGENT_INSTRUCTIONS[args.name], args.settings),
-      ...toolPaths.map((path) => readXmlAndInjectConfig(path, args.settings)),
-    ]);
-    const parts = [base, agentInstructions, ...toolInstructions];
+  private async createSystemPrompt(args: TAgentRunArgs): Promise<string> {
+    const agentDefinition = AGENTS[args.name];
+    const parts = [
+      baseInstructions,
+      agentDefinition.instructions,
+      ...agentDefinition.tools.map((tool) => tool.instructions),
+    ].map((instructions) => readXmlAndInjectConfig(instructions, args.settings));
 
     if (args.mcp !== undefined) {
       parts.push(
@@ -764,102 +515,51 @@ export class AgentHarness {
     const context: TToolExecutionContext = {
       chatId: args.chatId,
       settings: args.settings,
-      verifySettings: this.verifySettings.bind(this),
+      trace: args.trace,
+      verifySettings: (settings, purposes) => {
+        return this.llm.verifySettings(settings, purposes, args.trace);
+      },
     };
-    switch (args.name) {
-      case EAgentName.Calendar:
-        return [...createCalendarTools(context), ...createWebTools()];
-      case EAgentName.Main:
-        return [
-          ...createWebTools(),
-          ...this.createDelegationTools(args),
-          ...(await this.createMcpDelegationTools(args)),
-        ];
-      case EAgentName.Mcp:
-        if (args.mcp === undefined) {
-          return [];
-        }
-        return args.mcp.tools;
-      case EAgentName.Memory:
-        return createMemoryTools(context);
-      case EAgentName.Settings:
-        return createSettingsTools(context);
-      case EAgentName.Scheduling:
-        return [...createSchedulingTools(context), ...createWebTools()];
-      case EAgentName.ScheduledTask:
-        return [
-          ...createMemoryTools(context).filter((tool) => tool.name === "search-memory"),
-          ...createWebTools(),
-          ...createCalendarTools(context).filter((tool) => {
-            return (
-              tool.name === "list-calendar-events" || tool.name === "find-calendar-availability"
-            );
-          }),
-          ...createSchedulingTools(context).filter((tool) => tool.name === "list-cron-jobs"),
-          ...(await this.createMcpDelegationTools(args)),
-        ];
+    const agentDefinition = AGENTS[args.name];
+    const tools = [
+      ...agentDefinition.tools.map((tool) => tool.createAgentTool(context)),
+      ...this.createDelegationTools(args),
+    ];
+
+    if (agentDefinition.mcp) {
+      tools.push(...(await this.createMcpDelegationTools(args)));
     }
+
+    if (args.mcp !== undefined) {
+      tools.push(...args.mcp.tools);
+    }
+
+    return tools;
   }
 
-  private createDelegationTools(args: TAgentRunArgs & { delegationCount: TOption<() => void> }) {
+  private createDelegationTools(
+    args: TAgentRunArgs & { delegationCount: TOption<() => void> },
+  ): AgentTool[] {
     const schema = obj(
       {
         task: str({ minLength: 1, description: "Focused task for the specialist" }),
       },
       { open: true },
     );
-    const delegates: Array<{
-      name: string;
-      label: string;
-      target: EAgentName;
-      purpose: EModelPurpose;
-    }> = [
-      {
-        name: "delegate-calendar",
-        label: "Delegate calendar",
-        target: EAgentName.Calendar,
-        purpose: EModelPurpose.SpecialistAccurate,
-      },
-      {
-        name: "delegate-memory",
-        label: "Delegate memory",
-        target: EAgentName.Memory,
-        purpose: EModelPurpose.Specialist,
-      },
-      {
-        name: "delegate-settings",
-        label: "Delegate settings",
-        target: EAgentName.Settings,
-        purpose: EModelPurpose.Specialist,
-      },
-      {
-        name: "delegate-scheduling",
-        label: "Delegate scheduling",
-        target: EAgentName.Scheduling,
-        purpose: EModelPurpose.SpecialistAccurate,
-      },
-    ];
 
-    return delegates.map((delegate) => {
-      let executionMode: typeof SEQUENTIAL | typeof PARALLEL = PARALLEL;
-      let description = `Run the ${delegate.target} specialist for this focused task`;
+    return AGENTS[args.name].delegates.map((target) => {
+      const delegation = AGENTS[target].delegation;
 
-      if (delegate.target === EAgentName.Calendar || delegate.target === EAgentName.Scheduling) {
-        executionMode = SEQUENTIAL;
-      }
-
-      if (delegate.target === EAgentName.Memory) {
-        description =
-          "Required for personal user facts and forget requests. Run the Memory specialist to retrieve or forget the relevant facts.";
+      if (delegation === undefined) {
+        throw new Error(`${target} agent cannot be delegated to`);
       }
 
       return {
-        name: delegate.name,
-        label: delegate.label,
-        description,
+        name: `delegate-${target}`,
+        label: `Delegate ${target}`,
+        description: delegation.description,
         parameters: schema,
-        instructionsPath: undefined,
-        executionMode,
+        executionMode: delegation.mode,
         execute: async (toolCallId: string, parameters: unknown, signal?: AbortSignal) => {
           const parsedParameters: Static<typeof schema> = validateToolArguments(schema, parameters);
           args.delegationCount?.();
@@ -871,19 +571,16 @@ export class AgentHarness {
 
           const result = await this.run({
             ...args,
-            name: delegate.target,
-            purpose: delegate.purpose,
+            name: target,
             prompt: `Original user message:\n${args.prompt}\n\nDelegated task:\n${parsedParameters.task}`,
-            history: undefined,
             conversation: undefined,
-            maxIterations: 12,
             parentToolCallId: toolCallId,
             delegationCount: undefined,
             signal: delegationSignal,
           });
 
           if (result.text === undefined || result.text.trim().length === 0) {
-            throw new Error(`${delegate.target} specialist returned no final response`);
+            throw new Error(`${target} specialist returned no final response`);
           }
 
           return {
@@ -968,7 +665,7 @@ export class AgentHarness {
             const session = await McpService.instance.open({
               chatId,
               profileId: profile.id,
-              turnId: args.trace?.turnId,
+              turnId: args.trace.turnId,
               signal: controller.signal,
               sample: (params, requestSignal) => {
                 sampleCount += 1;
@@ -999,11 +696,8 @@ export class AgentHarness {
                 const result = await this.run({
                   ...args,
                   name: EAgentName.Mcp,
-                  purpose: EModelPurpose.SpecialistAccurate,
                   prompt: this.createMcpPrompt(args.prompt, parsed.task, parsed.context),
-                  history: undefined,
                   conversation: undefined,
-                  maxIterations: 12,
                   parentToolCallId: toolCallId,
                   signal: AbortSignal.any([runSignal, session.signal]),
                   delegationCount: undefined,
@@ -1093,7 +787,7 @@ export class AgentHarness {
     settings: TConfigRecord,
     chatId: TAgentRunArgs["chatId"],
     platform: TAgentRunArgs["platform"],
-    trace: TOption<TBehaviorTraceContext>,
+    trace: TBehaviorTraceContext,
     parentToolCallId: string,
     iteration: number,
     signal: AbortSignal,
@@ -1101,520 +795,37 @@ export class AgentHarness {
     if (params.toolChoice?.mode === "required") {
       throw new Error("MCP sampling toolChoice mode 'required' is not supported");
     }
-    const modelConfig = await this.resolveModel(settings, EModelPurpose.SpecialistAccurate, signal);
-    const tools = params.tools?.map((tool) => {
-      return {
-        name: tool.name,
-        description: tool.description ?? `MCP sampling tool ${tool.name}`,
-        parameters: tool.inputSchema,
-      };
-    });
-    const context: Context = {
-      systemPrompt: params.systemPrompt,
-      messages: this.createMcpSamplingMessages(params, modelConfig.model),
-      tools,
-    };
-    let reasoning: TOption<ThinkingLevel>;
-    if (modelConfig.effort !== "off") {
-      reasoning = modelConfig.effort;
-    }
-    let toolChoice: SimpleStreamOptions["toolChoice"];
-    if (params.toolChoice?.mode === "none") {
-      toolChoice = "none";
-    } else if (tools !== undefined && tools.length > 0) {
-      toolChoice = "auto";
-    }
-    const startedAt = performance.now();
-    const sessionId = this.createSessionId(modelConfig.model.provider, chatId, platform);
-    const options = withSession(
+    const modelConfig = await this.llm.resolveModel(
+      settings,
+      EModelPurpose.SpecialistAccurate,
+      signal,
+    );
+    const request = createMcpSamplingRequest(params, modelConfig.model);
+    const span = startSpan(trace, "model.request.completed", "agent-harness");
+    const sessionId = this.llm.createSessionId(modelConfig.model.provider, chatId, platform);
+    const result = await this.llm.complete(
+      modelConfig,
+      request.context,
       {
-        apiKey: this.resolveApiKey(modelConfig.model.provider),
         signal,
         maxTokens: Math.min(params.maxTokens, modelConfig.model.maxTokens),
         temperature: params.temperature,
-        toolChoice,
+        toolChoice: request.toolChoice,
       },
-      modelConfig.model.provider,
       sessionId,
     );
-    let result: Awaited<ReturnType<typeof aiModels.completeSimple>>;
-    const streamOptions = createAiStreamOptions(
-      modelConfig.model,
-      options,
-      modelConfig.effort,
-      modelConfig.serviceTier,
-    );
-    if (streamOptions !== undefined) {
-      result = await aiModels.complete(modelConfig.model, context, streamOptions);
-    } else {
-      result = await aiModels.completeSimple(modelConfig.model, context, {
-        ...options,
-        reasoning,
-      });
-    }
-    this.logModelRequestCompleted({
-      trace,
+    this.llm.logModelRequestCompleted({
+      span,
       purpose: EModelPurpose.SpecialistAccurate,
       agentName: EAgentName.Mcp,
       parentToolCallId,
       iteration,
-      startedAt,
       message: result,
     });
     if (result.stopReason === "error" || result.stopReason === "aborted") {
       throw new Error(result.errorMessage ?? `MCP sampling ${result.stopReason}`);
     }
-    const toolUses: ToolUseContent[] = [];
-    const textParts: string[] = [];
-    for (const block of result.content) {
-      if (block.type === "text") {
-        textParts.push(block.text);
-      } else if (block.type === "toolCall") {
-        toolUses.push({
-          type: "tool_use",
-          id: block.id,
-          name: block.name,
-          input: block.arguments,
-        });
-      }
-    }
-    let stopReason: string = "endTurn";
-    if (result.stopReason === "toolUse") {
-      stopReason = "toolUse";
-    } else if (result.stopReason === "length") {
-      stopReason = "maxTokens";
-    }
-    const responseModel = result.responseModel ?? modelConfig.model.id;
-    if (toolUses.length > 0) {
-      const response: CreateMessageResultWithTools = {
-        role: "assistant",
-        content: toolUses,
-        model: responseModel,
-        stopReason,
-      };
-      return response;
-    }
-    return {
-      role: "assistant",
-      content: { type: "text", text: textParts.join("\n") },
-      model: responseModel,
-      stopReason,
-    };
-  }
-
-  private createMcpSamplingMessages(
-    params: CreateMessageRequest["params"],
-    model: Model<string>,
-  ): Message[] {
-    const messages: Message[] = [];
-    const timestamp = Date.now();
-    for (const message of params.messages) {
-      let blocks: SamplingMessageContentBlock[];
-      if (Array.isArray(message.content)) {
-        blocks = message.content;
-      } else {
-        blocks = [message.content];
-      }
-      if (message.role === "assistant") {
-        const content: AssistantMessage["content"] = [];
-        for (const block of blocks) {
-          if (block.type === "text") {
-            content.push({ type: "text", text: block.text });
-          } else if (block.type === "tool_use") {
-            const input = z.record(z.string(), z.json()).safeParse(block.input);
-            if (!input.success) {
-              throw new Error("MCP sampling tool input must contain JSON values");
-            }
-            content.push({
-              type: "toolCall",
-              id: block.id,
-              name: block.name,
-              arguments: input.data,
-            });
-          } else {
-            content.push({ type: "text", text: this.describeMcpBlock(block) });
-          }
-        }
-        let stopReason: AssistantMessage["stopReason"] = "stop";
-        if (content.some((block) => block.type === "toolCall")) {
-          stopReason = "toolUse";
-        }
-        messages.push({
-          role: "assistant",
-          content,
-          api: model.api,
-          provider: model.provider,
-          model: model.id,
-          usage: this.emptyUsage(),
-          stopReason,
-          timestamp,
-        });
-        continue;
-      }
-      const userContent: Array<
-        { type: "text"; text: string } | { type: "image"; data: string; mimeType: string }
-      > = [];
-      for (const block of blocks) {
-        if (block.type === "tool_result") {
-          if (userContent.length > 0) {
-            messages.push({ role: "user", content: userContent.splice(0), timestamp });
-          }
-          const resultContent: Array<
-            { type: "text"; text: string } | { type: "image"; data: string; mimeType: string }
-          > = [];
-          for (const item of block.content) {
-            if (item.type === "text" || item.type === "image") {
-              resultContent.push(item);
-            } else {
-              resultContent.push({ type: "text", text: this.describeMcpBlock(item) });
-            }
-          }
-          let details: TOption<JsonValue>;
-          if (block.structuredContent !== undefined) {
-            const parsed = z.json().safeParse(block.structuredContent);
-            if (!parsed.success) {
-              throw new Error("MCP sampling structured content must contain JSON values");
-            }
-            details = parsed.data;
-          }
-          messages.push({
-            role: "toolResult",
-            toolCallId: block.toolUseId,
-            toolName: "mcp-sampling-tool",
-            content: resultContent,
-            details,
-            isError: block.isError ?? false,
-            timestamp,
-          });
-        } else if (block.type === "text" || block.type === "image") {
-          userContent.push(block);
-        } else {
-          userContent.push({ type: "text", text: this.describeMcpBlock(block) });
-        }
-      }
-      if (userContent.length > 0) {
-        messages.push({ role: "user", content: userContent, timestamp });
-      }
-    }
-    return messages;
-  }
-
-  private describeMcpBlock(block: SamplingMessageContentBlock | McpContentBlock): string {
-    if (block.type === "audio") {
-      return `[Audio content: ${block.mimeType}]`;
-    }
-    if (block.type === "image") {
-      return `[Image content: ${block.mimeType}]`;
-    }
-    if (block.type === "tool_result") {
-      return JSON.stringify(block.structuredContent ?? block.content);
-    }
-    if (block.type === "tool_use") {
-      return JSON.stringify({ tool: block.name, arguments: block.input });
-    }
-    if (block.type === "text") {
-      return block.text;
-    }
-    return JSON.stringify(block);
-  }
-
-  private emptyUsage(): AssistantMessage["usage"] {
-    return {
-      input: 0,
-      output: 0,
-      cacheRead: 0,
-      cacheWrite: 0,
-      totalTokens: 0,
-      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-    };
-  }
-
-  private logStarted(args: TAgentRunArgs, provider: string, model: string) {
-    if (args.trace === undefined) {
-      return;
-    }
-
-    AppLogger.instance.record({
-      trace: args.trace,
-      event: "agent.started",
-      component: "agent-harness",
-      provider,
-      model,
-      purpose: args.purpose,
-      summary: `${args.name} agent started`,
-      metadata: { agentName: args.name, parentToolCallId: args.parentToolCallId ?? null },
-    });
-  }
-
-  private logCompleted(
-    args: TAgentRunArgs,
-    provider: string,
-    model: string,
-    iterations: number,
-    toolCallCount: number,
-    text: TOption<string>,
-    stopReason: string,
-    startedAt: number,
-  ) {
-    if (args.trace === undefined) {
-      return;
-    }
-
-    AppLogger.instance.record({
-      trace: args.trace,
-      event: "agent.completed",
-      component: "agent-harness",
-      provider,
-      model,
-      purpose: args.purpose,
-      success: text !== undefined,
-      durationMs: performance.now() - startedAt,
-      summary: `${args.name} agent completed`,
-      metadata: {
-        agentName: args.name,
-        parentToolCallId: args.parentToolCallId ?? null,
-        iterations,
-        toolCallCount,
-        stopReason,
-        responseChars: text?.length ?? 0,
-      },
-    });
-  }
-
-  private logToolStarted(
-    args: TAgentRunArgs,
-    toolCallId: string,
-    toolName: string,
-    toolArgs: unknown,
-  ) {
-    if (args.trace === undefined) {
-      return;
-    }
-
-    const details = sanitizeToolCallArguments({ id: "", name: toolName, arguments: toolArgs });
-    AppLogger.instance.record({
-      trace: args.trace,
-      event: "tool.call.started",
-      component: "agent-harness",
-      toolName,
-      summary: details.summary,
-      metadata: {
-        ...details.metadata,
-        agentName: args.name,
-        toolCallId,
-        parentToolCallId: args.parentToolCallId ?? null,
-      },
-    });
-  }
-
-  private logToolCompleted(
-    args: TAgentRunArgs,
-    toolCallId: string,
-    toolName: string,
-    result: unknown,
-    isError: boolean,
-    startedAt: TOption<number>,
-  ) {
-    if (args.trace === undefined) {
-      return;
-    }
-
-    let resultDetails: unknown = result;
-    let resultError: TOption<string>;
-
-    if (isRecord(result)) {
-      resultDetails = result.details;
-
-      if (isError && Array.isArray(result.content)) {
-        resultError = contentText(result.content).trim();
-      }
-    }
-
-    const details = sanitizeToolResult({
-      toolCallId,
-      toolName,
-      success: !isError,
-      data: resultDetails,
-      error: resultError,
-    });
-    const error = sanitizeToolResultError({
-      toolCallId,
-      toolName,
-      success: !isError,
-      data: resultDetails,
-      error: resultError,
-    });
-    let level = EBehaviorLogLevel.Info;
-
-    if (isError) {
-      level = EBehaviorLogLevel.Warning;
-    }
-
-    let durationMs: TOption<number>;
-
-    if (startedAt !== undefined) {
-      durationMs = performance.now() - startedAt;
-    }
-
-    AppLogger.instance.record({
-      trace: args.trace,
-      event: "tool.call.completed",
-      component: "agent-harness",
-      level,
-      toolName,
-      success: !isError,
-      durationMs,
-      summary: details.summary,
-      metadata: {
-        ...details.metadata,
-        agentName: args.name,
-        toolCallId,
-        parentToolCallId: args.parentToolCallId ?? null,
-      },
-      error,
-    });
-  }
-
-  private logFailure(
-    args: TAgentRunArgs,
-    provider: string,
-    model: string,
-    startedAt: number,
-    error: TOption<string>,
-  ) {
-    if (args.trace === undefined) {
-      return;
-    }
-
-    AppLogger.instance.record({
-      trace: args.trace,
-      event: "agent.completed",
-      component: "agent-harness",
-      level: EBehaviorLogLevel.Error,
-      provider,
-      model,
-      purpose: args.purpose,
-      success: false,
-      durationMs: performance.now() - startedAt,
-      summary: `${args.name} agent failed`,
-      metadata: {
-        agentName: args.name,
-        parentToolCallId: args.parentToolCallId ?? null,
-        stopReason: "error",
-      },
-      error: sanitizeErrorMessage(error),
-    });
-  }
-
-  private logModelRequestCompleted(args: {
-    trace: TOption<TBehaviorTraceContext>;
-    purpose: EModelPurpose;
-    agentName: TOption<EAgentName>;
-    parentToolCallId: TOption<string>;
-    iteration: number;
-    startedAt: number;
-    message: AssistantMessage;
-  }) {
-    if (args.trace === undefined) {
-      return;
-    }
-
-    const { usage, stopReason } = args.message;
-    const inputTokens = usage.input + usage.cacheRead + usage.cacheWrite;
-    let cacheHitPercent: number | null = null;
-    if (inputTokens > 0) {
-      cacheHitPercent = (usage.cacheRead / inputTokens) * 100;
-    }
-
-    const success = stopReason !== "error" && stopReason !== "aborted";
-    let level = EBehaviorLogLevel.Info;
-    if (!success) {
-      level = EBehaviorLogLevel.Warning;
-    }
-
-    AppLogger.instance.record({
-      trace: args.trace,
-      event: "model.request.completed",
-      component: "agent-harness",
-      provider: args.message.provider,
-      model: args.message.model,
-      purpose: args.purpose,
-      level,
-      success,
-      durationMs: performance.now() - args.startedAt,
-      summary: `model request completed cacheRead=${usage.cacheRead} inputTokens=${inputTokens}`,
-      error: sanitizeErrorMessage(args.message.errorMessage),
-      metadata: {
-        agentName: args.agentName ?? null,
-        parentToolCallId: args.parentToolCallId ?? null,
-        iteration: args.iteration,
-        stopReason,
-        input: usage.input,
-        output: usage.output,
-        cacheRead: usage.cacheRead,
-        cacheWrite: usage.cacheWrite,
-        inputTokens,
-        cacheHitPercent,
-      },
-    });
-  }
-
-  private logDirectCompletionStarted(
-    trace: TOption<TBehaviorTraceContext>,
-    provider: string,
-    model: string,
-    purpose: EModelPurpose,
-  ) {
-    if (trace === undefined) {
-      return;
-    }
-
-    AppLogger.instance.record({
-      trace,
-      event: "direct-completion.started",
-      component: "agent-harness",
-      provider,
-      model,
-      purpose,
-      summary: "direct completion started",
-    });
-  }
-
-  private logDirectCompletionCompleted(
-    trace: TOption<TBehaviorTraceContext>,
-    provider: string,
-    model: string,
-    purpose: EModelPurpose,
-    startedAt: number,
-    success: boolean,
-    stopReason: string,
-    responseChars: number,
-    error: TOption<string>,
-  ) {
-    if (trace === undefined) {
-      return;
-    }
-
-    let level = EBehaviorLogLevel.Warning;
-
-    if (success) {
-      level = EBehaviorLogLevel.Info;
-    }
-
-    AppLogger.instance.record({
-      trace,
-      event: "direct-completion.completed",
-      component: "agent-harness",
-      level,
-      provider,
-      model,
-      purpose,
-      success,
-      durationMs: performance.now() - startedAt,
-      summary: "direct completion completed",
-      metadata: { stopReason, responseChars },
-      error: sanitizeErrorMessage(error),
-    });
+    return createMcpSamplingResult(result, modelConfig.model.id);
   }
 }
 
@@ -1665,7 +876,11 @@ export function isSerializedToolCall(text: string, tools: Array<{ name: string }
   }
 
   const names = new Set(tools.map((tool) => tool.name));
-  const candidates: unknown[] = Array.isArray(parsed) ? parsed : [parsed];
+  let candidates: unknown[] = [parsed];
+
+  if (Array.isArray(parsed)) {
+    candidates = parsed;
+  }
 
   return candidates.some((candidate) => {
     if (!isRecord(candidate)) {
@@ -1692,14 +907,7 @@ function createHardLimitStream(model: Model<Api>) {
     api: model.api,
     provider: model.provider,
     model: model.id,
-    usage: {
-      input: 0,
-      output: 0,
-      cacheRead: 0,
-      cacheWrite: 0,
-      totalTokens: 0,
-      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-    },
+    usage: emptyUsage(),
     stopReason: "error" as const,
     errorMessage: "Agent iteration limit reached",
     timestamp: Date.now(),
@@ -1714,4 +922,3 @@ function createHardLimitStream(model: Model<Api>) {
 }
 
 export type { TAgentRunResult } from "./types";
-export { EAgentName } from "./types";

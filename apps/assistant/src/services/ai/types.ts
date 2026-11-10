@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 export enum EAiProvider {
   OpenaiCodex = "openai-codex",
   Openrouter = "openrouter",
@@ -5,16 +7,13 @@ export enum EAiProvider {
   OpencodeGo = "opencode-go",
 }
 
+export const SAiProvider = z.enum(EAiProvider);
+
 export enum ERole {
   System = "system",
   User = "user",
   Assistant = "assistant",
 }
-
-export type THistoryItem = {
-  content: string;
-  role: ERole;
-};
 
 export type TToolCall = {
   id: string;

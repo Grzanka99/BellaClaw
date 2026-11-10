@@ -8,14 +8,15 @@ for (const [path, name] of [
   ["../services/calendar", "CalendarService"],
   ["../services/discord", "DiscordSingleton"],
   ["../services/messaging", "MessagingAdapter"],
+  ["../services/scheduling/delivery", "ScheduledDelivery"],
   ["../services/signal", "SignalSingleton"],
 ]) {
   if (path !== undefined && name !== undefined) {
     mock.module(path, () => ({ [name]: { instance: { setup: async () => undefined } } }));
   }
 }
-mock.module("../services/message-handler", () => ({
-  MessageHandler: { scheduleFactDrainForAllChats: async () => undefined },
+mock.module("../services/memory/distill", () => ({
+  FactDistiller: { instance: { scheduleFactDrainForAllChats: async () => undefined } },
 }));
 mock.module("../services/mcp/auth", () => ({
   registerMcpAuthConnectedListener: () => undefined,

@@ -1,5 +1,5 @@
 import type { TOption } from "@bellaclaw/shared";
-import { AsyncQueue, createLogger, type TLogger } from "@bellaclaw/shared";
+import { createLogger, type TLogger } from "@bellaclaw/shared";
 import { z } from "zod";
 import { DatabaseConnector } from "../database";
 import { messageAuthorizationsTable } from "../database/schema";
@@ -23,8 +23,7 @@ export type TAuthorizationResult = {
 export class AuthorizationService {
   private static _instance: TOption<AuthorizationService>;
   private logger: TLogger = createLogger("AUTHORIZATION");
-  private db = DatabaseConnector.instance.database;
-  private queue = new AsyncQueue();
+  private database = DatabaseConnector.instance;
   private cache = new Map<string, TAuthorizationState>();
   private activationToken: TOption<string>;
   private setupPromise: TOption<Promise<void>>;
@@ -95,7 +94,7 @@ export class AuthorizationService {
       };
     }
 
-    return this.queue.enqueue(async () => {
+    return this.database.run(async (db) => {
       const current = this.cache.get(chatId);
 
       if (current?.status === EAuthorizationStatus.Authorized) {
@@ -141,7 +140,7 @@ export class AuthorizationService {
         failedAttempts,
       };
 
-      await this.db
+      await db
         .insert(messageAuthorizationsTable)
         .values(nextState)
         .onConflictDoUpdate({
@@ -169,8 +168,8 @@ export class AuthorizationService {
       return;
     }
 
-    const rows = await this.queue.enqueue(async () => {
-      return this.db.select().from(messageAuthorizationsTable);
+    const rows = await this.database.run(async (db) => {
+      return db.select().from(messageAuthorizationsTable);
     });
     const parsed = z.array(SAuthorizationState).safeParse(rows);
 

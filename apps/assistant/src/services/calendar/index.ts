@@ -1,24 +1,29 @@
 import type { TOption } from "@bellaclaw/shared";
-import { AsyncQueue, createLogger, repositoryPath } from "@bellaclaw/shared";
+import { createLogger, repositoryPath } from "@bellaclaw/shared";
 import { and, eq, ne } from "drizzle-orm";
-import type { LibSQLDatabase } from "drizzle-orm/libsql";
+import { z } from "zod";
 import { DatabaseConnector } from "../database";
 import { calendarsTable } from "../database/schema";
 import { calculateAvailability } from "./availability";
 import { GwsCalendarClient } from "./gws";
-import { countRuleOccurrencesBefore, splitRecurrence } from "./recurrence";
+import {
+  ALL_DAY_DATE,
+  countRuleOccurrencesBefore,
+  splitRecurrence,
+  type TRecurrenceSplit,
+} from "./recurrence";
 import type {
   TAvailabilityArguments,
   TAvailabilityResult,
   TCalendar,
   TCalendarAccess,
   TCalendarEvent,
-  TCalendarPerson,
   TCreateEventArguments,
   TDeleteEventArguments,
   TEventDateTime,
   TListEventsArguments,
   TListEventsResult,
+  TRecurrenceScope,
   TUpdateEventArguments,
   TUpdateEventPatch,
 } from "./types";
@@ -32,151 +37,109 @@ type TCalendarStatus = {
   error: TOption<string>;
 };
 
-function readString(value: unknown, key: string): TOption<string> {
-  if (typeof value === "object" && value !== null) {
-    const candidate = Reflect.get(value, key);
-    if (typeof candidate === "string") {
-      return candidate;
-    }
-  }
-  return undefined;
-}
+type TMutationTarget =
+  | { kind: "single"; event: TCalendarEvent }
+  | {
+      kind: "following";
+      master: TCalendarEvent;
+      occurrence: TCalendarEvent;
+      originalStartTime: TEventDateTime;
+    };
 
-function readBoolean(value: unknown, key: string): TOption<boolean> {
-  if (typeof value === "object" && value !== null && typeof Reflect.get(value, key) === "boolean") {
-    return Reflect.get(value, key);
-  }
-  return undefined;
-}
+const SOptionalString = z.string().or(z.undefined()).catch(undefined);
+const SOptionalNumber = z.number().or(z.undefined()).catch(undefined);
+const SOptionalBoolean = z.boolean().or(z.undefined()).catch(undefined);
+const SLenientRecord = z.record(z.string(), z.unknown()).catch(() => ({}));
+const SUnknownArray = z.array(z.unknown()).catch(() => []);
 
-function readNumber(value: unknown, key: string): TOption<number> {
-  if (typeof value === "object" && value !== null && typeof Reflect.get(value, key) === "number") {
-    return Reflect.get(value, key);
-  }
-  return undefined;
-}
+const SGoogleDateTime = SLenientRecord.pipe(
+  z.object({
+    date: SOptionalString,
+    dateTime: SOptionalString,
+    timeZone: SOptionalString,
+  }),
+);
 
-function readObject(value: unknown, key: string): TOption<unknown> {
-  if (typeof value === "object" && value !== null) {
-    return Reflect.get(value, key);
-  }
-  return undefined;
-}
+const SGooglePerson = SLenientRecord.pipe(
+  z.object({
+    id: SOptionalString,
+    email: SOptionalString,
+    displayName: SOptionalString,
+    responseStatus: SOptionalString,
+    self: SOptionalBoolean,
+    optional: SOptionalBoolean,
+    resource: SOptionalBoolean,
+    comment: SOptionalString,
+    additionalGuests: SOptionalNumber,
+  }),
+);
 
-function readStringArray(value: unknown, key: string): string[] {
-  const candidate = readObject(value, key);
-  if (!Array.isArray(candidate)) {
-    return [];
-  }
-  return candidate.filter((item) => typeof item === "string");
-}
+const SGooglePayload = z.record(z.string(), z.unknown());
 
-function readArray(value: unknown, key: string): unknown[] {
-  const candidate = readObject(value, key);
-  if (Array.isArray(candidate)) {
-    return candidate;
-  }
-  return [];
-}
+const SGoogleEvent = z.object({
+  id: SOptionalString,
+  etag: SOptionalString,
+  status: SOptionalString,
+  colorId: SOptionalString,
+  eventLabelId: SOptionalString,
+  eventLabelVersion: SOptionalString,
+  sequence: SOptionalNumber,
+  endTimeUnspecified: SOptionalBoolean,
+  attendeesOmitted: SOptionalBoolean,
+  gadget: z.unknown(),
+  eventType: SOptionalString,
+  summary: SOptionalString,
+  description: SOptionalString,
+  location: SOptionalString,
+  start: SGoogleDateTime,
+  end: SGoogleDateTime,
+  transparency: SOptionalString,
+  recurrence: SUnknownArray.transform((lines) => lines.filter((line) => typeof line === "string")),
+  recurringEventId: SOptionalString,
+  originalStartTime: z.undefined().or(SGoogleDateTime),
+  organizer: z.undefined().or(SGooglePerson),
+  creator: z.undefined().or(SGooglePerson),
+  attendees: z.array(SGooglePerson).catch(() => []),
+  attachments: SUnknownArray,
+  hangoutLink: SOptionalString,
+  conferenceData: z.unknown(),
+  htmlLink: SOptionalString,
+  visibility: SOptionalString,
+  created: SOptionalString,
+  updated: SOptionalString,
+  iCalUID: SOptionalString,
+  reminders: z.unknown(),
+});
 
-function mapDateTime(value: unknown): TEventDateTime {
-  return {
-    date: readString(value, "date"),
-    dateTime: readString(value, "dateTime"),
-    timeZone: readString(value, "timeZone"),
-  };
-}
-
-function mapPerson(value: unknown): TCalendarPerson {
-  return {
-    id: readString(value, "id"),
-    email: readString(value, "email"),
-    displayName: readString(value, "displayName"),
-    responseStatus: readString(value, "responseStatus"),
-    self: readBoolean(value, "self"),
-    optional: readBoolean(value, "optional"),
-    resource: readBoolean(value, "resource"),
-    comment: readString(value, "comment"),
-    additionalGuests: readNumber(value, "additionalGuests"),
-  };
-}
+const UNSUPPORTED_MANAGED_FIELDS = [
+  "extendedProperties",
+  "source",
+  "anyoneCanAddSelf",
+  "guestsCanInviteOthers",
+  "guestsCanModify",
+  "guestsCanSeeOtherGuests",
+  "privateCopy",
+  "locked",
+  "workingLocationProperties",
+  "outOfOfficeProperties",
+  "focusTimeProperties",
+  "birthdayProperties",
+];
 
 function mapEvent(calendarId: string, value: unknown): TCalendarEvent {
-  const id = readString(value, "id");
-  if (id === undefined) {
+  const payload = SGooglePayload.safeParse(value);
+  const event = SGoogleEvent.safeParse(payload.data);
+  if (!payload.success || !event.success || event.data.id === undefined) {
     throw new Error(`Google returned an event without an id for calendar ${calendarId}`);
-  }
-  const attendeesValue = readObject(value, "attendees");
-  const attendees: TCalendarPerson[] = [];
-  if (Array.isArray(attendeesValue)) {
-    for (const attendee of attendeesValue) {
-      attendees.push(mapPerson(attendee));
-    }
-  }
-  const organizerValue = readObject(value, "organizer");
-  let organizer: TOption<TCalendarPerson>;
-  if (organizerValue !== undefined) {
-    organizer = mapPerson(organizerValue);
-  }
-  const creatorValue = readObject(value, "creator");
-  let creator: TOption<TCalendarPerson>;
-  if (creatorValue !== undefined) {
-    creator = mapPerson(creatorValue);
-  }
-  let originalStartTime: TOption<TEventDateTime>;
-  const originalStartValue = readObject(value, "originalStartTime");
-  if (originalStartValue !== undefined) {
-    originalStartTime = mapDateTime(originalStartValue);
   }
   return {
     calendarId,
-    id,
-    etag: readString(value, "etag"),
-    status: readString(value, "status"),
-    colorId: readString(value, "colorId"),
-    eventLabelId: readString(value, "eventLabelId"),
-    eventLabelVersion: readString(value, "eventLabelVersion"),
-    sequence: readNumber(value, "sequence"),
-    endTimeUnspecified: readBoolean(value, "endTimeUnspecified"),
-    attendeesOmitted: readBoolean(value, "attendeesOmitted"),
-    gadget: readObject(value, "gadget"),
-    eventType: readString(value, "eventType"),
-    summary: readString(value, "summary"),
-    description: readString(value, "description"),
-    location: readString(value, "location"),
-    start: mapDateTime(readObject(value, "start")),
-    end: mapDateTime(readObject(value, "end")),
-    transparency: readString(value, "transparency"),
-    recurrence: readStringArray(value, "recurrence"),
-    recurringEventId: readString(value, "recurringEventId"),
-    originalStartTime,
-    organizer,
-    creator,
-    attendees,
-    attachments: readArray(value, "attachments"),
-    hangoutLink: readString(value, "hangoutLink"),
-    conferenceData: readObject(value, "conferenceData"),
-    htmlLink: readString(value, "htmlLink"),
-    visibility: readString(value, "visibility"),
-    created: readString(value, "created"),
-    updated: readString(value, "updated"),
-    iCalUID: readString(value, "iCalUID"),
-    reminders: readObject(value, "reminders"),
+    ...event.data,
+    id: event.data.id,
     googleDetails: value,
-    unsupportedManagedFields: [
-      "extendedProperties",
-      "source",
-      "anyoneCanAddSelf",
-      "guestsCanInviteOthers",
-      "guestsCanModify",
-      "guestsCanSeeOtherGuests",
-      "privateCopy",
-      "locked",
-      "workingLocationProperties",
-      "outOfOfficeProperties",
-      "focusTimeProperties",
-      "birthdayProperties",
-    ].filter((key) => readObject(value, key) !== undefined),
+    unsupportedManagedFields: UNSUPPORTED_MANAGED_FIELDS.filter(
+      (key) => payload.data[key] !== undefined,
+    ),
   };
 }
 
@@ -189,26 +152,27 @@ function assertMutableEvent(event: TCalendarEvent): void {
   }
 }
 
-function nextDate(date: string): string {
-  const timestamp = Date.parse(`${date}T00:00:00Z`);
-  if (Number.isNaN(timestamp)) {
-    throw new Error(`Invalid all-day date: ${date}`);
-  }
-  return new Date(timestamp + 86_400_000).toISOString().slice(0, 10);
-}
-
 function normalizeEventTimes(
   start: string,
   end: TOption<string>,
   timezone: string,
+  defaultDurationMs: TOption<number>,
 ): { start: Record<string, unknown>; end: Record<string, unknown> } {
-  if (/^\d{4}-\d{2}-\d{2}$/.test(start)) {
-    if (end !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(end)) {
-      throw new Error("All-day event end must also be a date");
+  if (ALL_DAY_DATE.test(start)) {
+    if (end !== undefined) {
+      if (!ALL_DAY_DATE.test(end)) {
+        throw new Error("All-day event end must also be a date");
+      }
+      return { start: { date: start }, end: { date: end } };
     }
+    const timestamp = Date.parse(`${start}T00:00:00Z`);
+    if (Number.isNaN(timestamp)) {
+      throw new Error(`Invalid all-day date: ${start}`);
+    }
+    const endTimestamp = timestamp + (defaultDurationMs ?? 86_400_000);
     return {
       start: { date: start },
-      end: { date: end ?? nextDate(start) },
+      end: { date: new Date(endTimestamp).toISOString().slice(0, 10) },
     };
   }
 
@@ -218,7 +182,7 @@ function normalizeEventTimes(
   }
   let endValue = end;
   if (endValue === undefined) {
-    endValue = new Date(startTimestamp + 60 * 60_000).toISOString();
+    endValue = new Date(startTimestamp + (defaultDurationMs ?? 60 * 60_000)).toISOString();
   }
   const endTimestamp = Date.parse(endValue);
   if (Number.isNaN(endTimestamp) || endTimestamp <= startTimestamp) {
@@ -349,48 +313,39 @@ function applyPatch(
     body.recurrence = patch.recurrence;
   }
   if (patch.start !== undefined) {
-    let end = patch.end;
-    if (end === undefined) {
-      const patchIsAllDay = /^\d{4}-\d{2}-\d{2}$/.test(patch.start);
-      if (patchIsAllDay) {
+    let defaultDurationMs: TOption<number>;
+    if (patch.end === undefined) {
+      if (ALL_DAY_DATE.test(patch.start)) {
         if (currentEvent.start.date === undefined || currentEvent.end.date === undefined) {
           throw new Error("Changing between timed and all-day events requires an explicit end");
         }
         const currentStart = Date.parse(`${currentEvent.start.date}T00:00:00Z`);
         const currentEnd = Date.parse(`${currentEvent.end.date}T00:00:00Z`);
-        const newStart = Date.parse(`${patch.start}T00:00:00Z`);
         const duration = currentEnd - currentStart;
         if (
           Number.isNaN(currentStart) ||
           Number.isNaN(currentEnd) ||
-          Number.isNaN(newStart) ||
           duration <= 0 ||
           duration % 86_400_000 !== 0
         ) {
           throw new Error("Existing all-day event has invalid start or end");
         }
-        end = new Date(newStart + duration).toISOString().slice(0, 10);
+        defaultDurationMs = duration;
       } else {
         if (currentEvent.start.dateTime === undefined || currentEvent.end.dateTime === undefined) {
           throw new Error("Changing between all-day and timed events requires an explicit end");
         }
         const currentStart = Date.parse(currentEvent.start.dateTime);
         const currentEnd = Date.parse(currentEvent.end.dateTime);
-        const newStart = Date.parse(patch.start);
         const duration = currentEnd - currentStart;
-        if (
-          Number.isNaN(currentStart) ||
-          Number.isNaN(currentEnd) ||
-          Number.isNaN(newStart) ||
-          duration <= 0
-        ) {
+        if (Number.isNaN(currentStart) || Number.isNaN(currentEnd) || duration <= 0) {
           throw new Error("Existing timed event has invalid start or end");
         }
-        end = new Date(newStart + duration).toISOString();
+        defaultDurationMs = duration;
       }
     }
     const timezone = patch.timezone ?? currentEvent.start.timeZone ?? "UTC";
-    const times = normalizeEventTimes(patch.start, end, timezone);
+    const times = normalizeEventTimes(patch.start, patch.end, timezone, defaultDurationMs);
     body.start = times.start;
     body.end = times.end;
   } else if (patch.end !== undefined || patch.timezone !== undefined) {
@@ -401,11 +356,10 @@ function applyPatch(
 export class CalendarService {
   private static _instance: CalendarService;
   private logger = createLogger("CALENDAR");
-  private queue = new AsyncQueue();
   private status: TCalendarStatus = { ready: false, error: "Calendar setup has not run" };
 
   public constructor(
-    private db: LibSQLDatabase = DatabaseConnector.instance.database,
+    private database: DatabaseConnector = DatabaseConnector.instance,
     private client: GwsCalendarClient = new GwsCalendarClient(),
   ) {}
 
@@ -428,8 +382,8 @@ export class CalendarService {
 
   private async requireWriteCalendarId(userId: string): Promise<string> {
     this.requireReady();
-    const rows = await this.queue.enqueue(() =>
-      this.db
+    const rows = await this.database.run((db) =>
+      db
         .select()
         .from(calendarsTable)
         .where(and(eq(calendarsTable.userId, userId), eq(calendarsTable.access, "write"))),
@@ -465,8 +419,8 @@ export class CalendarService {
       );
     }
     const addedAt = Date.now();
-    await this.queue.enqueue(async () => {
-      await this.db.transaction(async (transaction) => {
+    await this.database.run(async (db) => {
+      await db.transaction(async (transaction) => {
         await transaction
           .delete(calendarsTable)
           .where(and(eq(calendarsTable.userId, userId), eq(calendarsTable.access, "write")));
@@ -490,8 +444,8 @@ export class CalendarService {
 
   public async listCalendars(userId: string, signal?: AbortSignal): Promise<TCalendar[]> {
     this.requireReady();
-    const rows = await this.queue.enqueue(() =>
-      this.db.select().from(calendarsTable).where(eq(calendarsTable.userId, userId)),
+    const rows = await this.database.run((db) =>
+      db.select().from(calendarsTable).where(eq(calendarsTable.userId, userId)),
     );
     return Promise.all(
       rows.map(async (row) => {
@@ -537,8 +491,8 @@ export class CalendarService {
       );
     }
     const addedAt = Date.now();
-    const inserted = await this.queue.enqueue(() =>
-      this.db
+    const inserted = await this.database.run((db) =>
+      db
         .insert(calendarsTable)
         .values({ userId, calendarId, access: "read", addedAt })
         .onConflictDoUpdate({
@@ -562,8 +516,8 @@ export class CalendarService {
 
   public async removeReadonlyCalendar(userId: string, calendarId: string): Promise<void> {
     this.requireReady();
-    const removed = await this.queue.enqueue(() =>
-      this.db
+    const removed = await this.database.run((db) =>
+      db
         .delete(calendarsTable)
         .where(
           and(
@@ -584,8 +538,8 @@ export class CalendarService {
     if (Date.parse(args.timeMin) >= Date.parse(args.timeMax)) {
       throw new Error("timeMax must be after timeMin");
     }
-    const rows = await this.queue.enqueue(() =>
-      this.db.select().from(calendarsTable).where(eq(calendarsTable.userId, args.userId)),
+    const rows = await this.database.run((db) =>
+      db.select().from(calendarsTable).where(eq(calendarsTable.userId, args.userId)),
     );
     const events: TCalendarEvent[] = [];
     const failures: Array<{ calendarId: string; error: string }> = [];
@@ -647,7 +601,7 @@ export class CalendarService {
 
   public async createEvent(args: TCreateEventArguments): Promise<TCalendarEvent> {
     const calendarId = await this.requireWriteCalendarId(args.userId);
-    const times = normalizeEventTimes(args.start, args.end, args.timezone);
+    const times = normalizeEventTimes(args.start, args.end, args.timezone, undefined);
     const body: Record<string, unknown> = {
       summary: args.summary,
       start: times.start,
@@ -682,28 +636,14 @@ export class CalendarService {
     return event;
   }
 
-  private async resolveOccurrenceNumber(
-    master: TCalendarEvent,
-    occurrence: TCalendarEvent,
+  private async resolveTarget(
+    calendarId: string,
+    eventId: string,
+    scope: TRecurrenceScope,
     signal?: AbortSignal,
-  ): Promise<TOption<number[]>> {
-    if (!master.recurrence.some((line) => line.includes("COUNT="))) {
-      return undefined;
-    }
-    if (occurrence.originalStartTime === undefined) {
-      throw new Error("COUNT recurrence boundary cannot be resolved");
-    }
-    const originalStartTime = occurrence.originalStartTime;
-    signal?.throwIfAborted();
-    return master.recurrence
-      .filter((line) => line.startsWith("RRULE:") && line.includes("COUNT="))
-      .map((line) => countRuleOccurrencesBefore([line], master.start, originalStartTime));
-  }
-
-  public async updateEvent(args: TUpdateEventArguments): Promise<TCalendarEvent> {
-    const calendarId = await this.requireWriteCalendarId(args.userId);
-    const resolved = await this.resolveMutation(calendarId, args.eventId, args.signal);
-    if (args.scope === "occurrence") {
+  ): Promise<TMutationTarget> {
+    const resolved = await this.resolveMutation(calendarId, eventId, signal);
+    if (scope === "occurrence") {
       const hasRecurringId = resolved.recurringEventId !== undefined;
       const hasOriginalStart = resolved.originalStartTime !== undefined;
       if (hasRecurringId !== hasOriginalStart || resolved.recurrence.length > 0) {
@@ -711,51 +651,64 @@ export class CalendarService {
           "Occurrence scope requires a concrete recurring occurrence or a non-recurring event",
         );
       }
-      const body: Record<string, unknown> = {};
-      applyPatch(body, args.patch, resolved);
-      return mapEvent(
-        calendarId,
-        await this.client.patchEvent(calendarId, resolved.id, body, args.signal),
-      );
+      return { kind: "single", event: resolved };
     }
-
     const masterId = resolved.recurringEventId ?? resolved.id;
-    const master = await this.resolveMutation(calendarId, masterId, args.signal);
-    if (args.scope === "series") {
-      const body: Record<string, unknown> = {};
-      applyPatch(body, args.patch, master);
-      return mapEvent(
-        calendarId,
-        await this.client.patchEvent(calendarId, master.id, body, args.signal),
-      );
+    const master = await this.resolveMutation(calendarId, masterId, signal);
+    if (scope === "series") {
+      return { kind: "single", event: master };
     }
     if (resolved.recurringEventId === undefined || resolved.originalStartTime === undefined) {
       throw new Error("Following scope requires a concrete recurring occurrence");
     }
     if (isFirstOccurrence(master, resolved)) {
+      return { kind: "single", event: master };
+    }
+    return {
+      kind: "following",
+      master,
+      occurrence: resolved,
+      originalStartTime: resolved.originalStartTime,
+    };
+  }
+
+  private splitFollowing(
+    master: TCalendarEvent,
+    originalStartTime: TEventDateTime,
+    signal?: AbortSignal,
+  ): TRecurrenceSplit {
+    let occurrenceNumber: TOption<number[]>;
+    if (master.recurrence.some((line) => line.includes("COUNT="))) {
+      signal?.throwIfAborted();
+      occurrenceNumber = master.recurrence
+        .filter((line) => line.startsWith("RRULE:") && line.includes("COUNT="))
+        .map((line) => countRuleOccurrencesBefore([line], master.start, originalStartTime));
+    }
+    return splitRecurrence(master.recurrence, master.start, originalStartTime, occurrenceNumber);
+  }
+
+  public async updateEvent(args: TUpdateEventArguments): Promise<TCalendarEvent> {
+    const calendarId = await this.requireWriteCalendarId(args.userId);
+    const target = await this.resolveTarget(calendarId, args.eventId, args.scope, args.signal);
+    if (target.kind === "single") {
       const body: Record<string, unknown> = {};
-      applyPatch(body, args.patch, master);
+      applyPatch(body, args.patch, target.event);
       return mapEvent(
         calendarId,
-        await this.client.patchEvent(calendarId, master.id, body, args.signal),
+        await this.client.patchEvent(calendarId, target.event.id, body, args.signal),
       );
     }
 
+    const { master, occurrence } = target;
     assertFollowingSplitSafe(master);
-    const occurrenceNumber = await this.resolveOccurrenceNumber(master, resolved, args.signal);
-    const split = splitRecurrence(
-      master.recurrence,
-      master.start,
-      resolved.originalStartTime,
-      occurrenceNumber,
-    );
+    const split = this.splitFollowing(master, target.originalStartTime, args.signal);
     const successor = eventBody(master);
-    successor.start = resolved.start;
-    successor.end = resolved.end;
+    successor.start = occurrence.start;
+    successor.end = occurrence.end;
     successor.recurrence = split.successor;
-    const deterministicId = successorId(calendarId, master.id, resolved);
+    const deterministicId = successorId(calendarId, master.id, occurrence);
     successor.id = deterministicId;
-    applyPatch(successor, args.patch, resolved);
+    applyPatch(successor, args.patch, occurrence);
     await this.client.patchEvent(
       calendarId,
       master.id,
@@ -804,41 +757,15 @@ export class CalendarService {
 
   public async deleteEvent(args: TDeleteEventArguments): Promise<void> {
     const calendarId = await this.requireWriteCalendarId(args.userId);
-    const resolved = await this.resolveMutation(calendarId, args.eventId, args.signal);
-    if (args.scope === "occurrence") {
-      const hasRecurringId = resolved.recurringEventId !== undefined;
-      const hasOriginalStart = resolved.originalStartTime !== undefined;
-      if (hasRecurringId !== hasOriginalStart || resolved.recurrence.length > 0) {
-        throw new Error(
-          "Occurrence scope requires a concrete recurring occurrence or a non-recurring event",
-        );
-      }
-      await this.client.deleteEvent(calendarId, resolved.id, args.signal);
+    const target = await this.resolveTarget(calendarId, args.eventId, args.scope, args.signal);
+    if (target.kind === "single") {
+      await this.client.deleteEvent(calendarId, target.event.id, args.signal);
       return;
     }
-    const masterId = resolved.recurringEventId ?? resolved.id;
-    const master = await this.resolveMutation(calendarId, masterId, args.signal);
-    if (args.scope === "series") {
-      await this.client.deleteEvent(calendarId, master.id, args.signal);
-      return;
-    }
-    if (resolved.recurringEventId === undefined || resolved.originalStartTime === undefined) {
-      throw new Error("Following scope requires a concrete recurring occurrence");
-    }
-    if (isFirstOccurrence(master, resolved)) {
-      await this.client.deleteEvent(calendarId, master.id, args.signal);
-      return;
-    }
-    const occurrenceNumber = await this.resolveOccurrenceNumber(master, resolved, args.signal);
-    const split = splitRecurrence(
-      master.recurrence,
-      master.start,
-      resolved.originalStartTime,
-      occurrenceNumber,
-    );
+    const split = this.splitFollowing(target.master, target.originalStartTime, args.signal);
     await this.client.patchEvent(
       calendarId,
-      master.id,
+      target.master.id,
       { recurrence: split.original },
       args.signal,
     );

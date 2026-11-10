@@ -1,7 +1,8 @@
 import type { TOption } from "@bellaclaw/shared";
+import { CronSchedulerError, type TCronJob, type TJobContent } from "../../cron/types";
+import { ToolError } from "./define-tool";
 
 type TCronContentFields = {
-  group?: string;
   reminderText?: string;
   reminderPromptData?: string;
   reminderFallbackText?: string;
@@ -18,47 +19,137 @@ export function absentIfBlank(value?: string): TOption<string> {
 }
 
 /**
+ * Converts the model-facing content fields to job content.
  * Models routinely send "" or whitespace for optional content fields they mean
- * to omit. Blank values must be treated as absent so they neither trip the
- * one-content-mode checks nor overwrite stored job content.
+ * to omit, so blank values are treated as absent. Returns undefined when no
+ * content mode is given and `required` is false.
  */
-export function normalizeCronContentFields(args: TCronContentFields): TCronContentFields {
-  return {
-    group: absentIfBlank(args.group),
-    reminderText: absentIfBlank(args.reminderText),
-    reminderPromptData: absentIfBlank(args.reminderPromptData),
-    reminderFallbackText: absentIfBlank(args.reminderFallbackText),
-    taskPrompt: absentIfBlank(args.taskPrompt),
-    taskFallbackText: absentIfBlank(args.taskFallbackText),
-  };
-}
-
-export function countCronContentModes(args: TCronContentFields): number {
-  return [args.reminderText, args.reminderPromptData, args.taskPrompt].filter(
+export function parseCronContent(args: TCronContentFields, required: true): TJobContent;
+export function parseCronContent(args: TCronContentFields, required: false): TOption<TJobContent>;
+export function parseCronContent(
+  args: TCronContentFields,
+  required: boolean,
+): TOption<TJobContent> {
+  const reminderText = absentIfBlank(args.reminderText);
+  const reminderPromptData = absentIfBlank(args.reminderPromptData);
+  const reminderFallbackText = absentIfBlank(args.reminderFallbackText);
+  const taskPrompt = absentIfBlank(args.taskPrompt);
+  const taskFallbackText = absentIfBlank(args.taskFallbackText);
+  const contentModeCount = [reminderText, reminderPromptData, taskPrompt].filter(
     (field) => field !== undefined,
   ).length;
-}
 
-export function validateCronFallbackPairing(args: TCronContentFields): void {
-  if (args.reminderPromptData !== undefined && args.reminderFallbackText === undefined) {
-    throw new Error("reminderFallbackText is required when reminderPromptData is set");
+  if (contentModeCount === 0 && required) {
+    throw new ToolError(
+      "missing-content",
+      "Provide reminderText, reminderPromptData, or taskPrompt",
+    );
+  }
+
+  if (contentModeCount > 1) {
+    throw new ToolError(
+      "conflicting-content-modes",
+      "Provide only one of reminderText, reminderPromptData, or taskPrompt",
+    );
+  }
+
+  if (reminderPromptData !== undefined && reminderFallbackText === undefined) {
+    throw new ToolError(
+      "invalid-fallback-pairing",
+      "reminderFallbackText is required when reminderPromptData is set",
+    );
   }
 
   if (
-    args.reminderFallbackText !== undefined &&
-    args.reminderText === undefined &&
-    args.reminderPromptData === undefined
+    reminderFallbackText !== undefined &&
+    reminderText === undefined &&
+    reminderPromptData === undefined
   ) {
-    throw new Error("reminderFallbackText requires reminderText or reminderPromptData");
+    throw new ToolError(
+      "invalid-fallback-pairing",
+      "reminderFallbackText requires reminderText or reminderPromptData",
+    );
   }
 
-  if (args.taskPrompt !== undefined && args.taskFallbackText === undefined) {
-    throw new Error("taskFallbackText is required when taskPrompt is set");
+  if (taskPrompt !== undefined && taskFallbackText === undefined) {
+    throw new ToolError(
+      "invalid-fallback-pairing",
+      "taskFallbackText is required when taskPrompt is set",
+    );
   }
 
-  if (args.taskFallbackText !== undefined && args.taskPrompt === undefined) {
-    throw new Error("taskFallbackText requires taskPrompt");
+  if (taskFallbackText !== undefined && taskPrompt === undefined) {
+    throw new ToolError("invalid-fallback-pairing", "taskFallbackText requires taskPrompt");
   }
+
+  if (reminderText !== undefined) {
+    return { kind: "text", text: reminderText };
+  }
+
+  if (reminderPromptData !== undefined && reminderFallbackText !== undefined) {
+    return { kind: "generated", promptData: reminderPromptData, fallback: reminderFallbackText };
+  }
+
+  if (taskPrompt !== undefined && taskFallbackText !== undefined) {
+    return { kind: "task", prompt: taskPrompt, fallback: taskFallbackText };
+  }
+
+  return undefined;
+}
+
+/**
+ * Runs a scheduler call and returns the job in the flat shape the model has
+ * always seen; scheduler failures become tool errors with their stable code.
+ */
+export async function runCronJobOperation(operation: () => Promise<TCronJob>) {
+  try {
+    return toCronJobResult(await operation());
+  } catch (error) {
+    if (error instanceof CronSchedulerError) {
+      throw new ToolError(error.code, `${error.operation} failed: ${error.message}`);
+    }
+
+    throw error;
+  }
+}
+
+export function toCronJobResult(job: TCronJob) {
+  let reminderText: TOption<string>;
+  let reminderPromptData: TOption<string>;
+  let reminderFallbackText: TOption<string>;
+  let taskPrompt: TOption<string>;
+  let taskFallbackText: TOption<string>;
+
+  if (job.content.kind === "text") {
+    reminderText = job.content.text;
+    reminderFallbackText = job.content.text;
+  } else if (job.content.kind === "generated") {
+    reminderPromptData = job.content.promptData;
+    reminderFallbackText = job.content.fallback;
+  } else {
+    taskPrompt = job.content.prompt;
+    taskFallbackText = job.content.fallback;
+  }
+
+  return {
+    id: job.id,
+    name: job.name,
+    scope: job.scope,
+    type: job.type,
+    pattern: job.pattern ?? undefined,
+    nextRunAt: job.nextRunAt,
+    lastRunAt: job.lastRunAt ?? undefined,
+    createdAt: job.createdAt,
+    status: job.status,
+    finishedAt: job.finishedAt ?? undefined,
+    finishedReason: job.finishedReason ?? undefined,
+    timezone: job.timezone ?? undefined,
+    reminderText,
+    reminderPromptData,
+    reminderFallbackText,
+    taskPrompt,
+    taskFallbackText,
+  };
 }
 
 export const LOCAL_FIRE_AT_PATTERN = "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(:\\d{2})?$";
@@ -89,13 +180,16 @@ function getTimezoneOffsetMs(timestamp: number, timezone: string): number {
  */
 export function parseLocalFireAt(fireAt: string, timezone: string): Date {
   if (!new RegExp(LOCAL_FIRE_AT_PATTERN).test(fireAt)) {
-    throw new Error("fireAt must be local time, YYYY-MM-DDTHH:mm[:ss], with no Z or offset");
+    throw new ToolError(
+      "invalid-fire-at",
+      "fireAt must be local time, YYYY-MM-DDTHH:mm[:ss], with no Z or offset",
+    );
   }
 
   const wallTime = Date.parse(`${fireAt}Z`);
 
   if (Number.isNaN(wallTime)) {
-    throw new Error(`Invalid fireAt: ${fireAt}`);
+    throw new ToolError("invalid-fire-at", `Invalid fireAt: ${fireAt}`);
   }
 
   const firstOffset = getTimezoneOffsetMs(wallTime, timezone);
@@ -104,7 +198,7 @@ export function parseLocalFireAt(fireAt: string, timezone: string): Date {
 
   // Rejects normalized calendar dates (April 31) and times skipped by a DST change.
   if (!formatLocalDateTime(resolved, timezone).startsWith(fireAt)) {
-    throw new Error(`fireAt ${fireAt} does not exist in ${timezone}`);
+    throw new ToolError("nonexistent-fire-at", `fireAt ${fireAt} does not exist in ${timezone}`);
   }
 
   return new Date(resolved);

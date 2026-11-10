@@ -6,6 +6,7 @@ import { createModels, createProvider, type OAuthCredential } from "@earendil-wo
 import { openAICodexResponsesApi } from "@earendil-works/pi-ai/api/openai-codex-responses.lazy";
 import { SettingsService } from "../../settings";
 import { EConfigKey } from "../../settings/schema";
+import { FileCredentialStore } from "../providers/file-credential-store";
 import { EAiProvider } from "../types";
 import {
   checkAiOAuth,
@@ -14,7 +15,6 @@ import {
   getAiAuthState,
   registerAiAuthChannel,
 } from ".";
-import { FileCredentialStore } from "./file-credential-store";
 
 let directory: string;
 let sent: { chatId: string; text: string }[];
@@ -83,6 +83,22 @@ test("refreshes and persists expired OAuth credentials", async () => {
 
   expect(await store.read(EAiProvider.OpenaiCodex)).toMatchObject({ refresh: "new-refresh" });
   expect(await store.read(EAiProvider.OpencodeGo)).toMatchObject({ refresh: "new-refresh" });
+  expect(sent).toEqual([]);
+});
+
+test("stays silent about an expired login while another provider is connected", async () => {
+  const { models, store } = await createTestModels(() =>
+    Promise.reject(new Error("token refresh failed (401): invalid_grant")),
+  );
+  await store.modify(EAiProvider.OpencodeGo, async () => ({
+    type: "oauth",
+    access: "access",
+    refresh: "refresh",
+    expires: Date.now() + 60 * 60 * 1000,
+  }));
+
+  await checkAiOAuth(models);
+
   expect(sent).toEqual([]);
 });
 

@@ -1,11 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { sql } from "drizzle-orm";
 import { ERole } from "../ai/types";
+import { ConversationStore } from "../conversation";
 import { DatabaseConnector } from "../database";
 
 const { Memory } = await import("./index");
-
-import { EMemoryImportance } from "./types";
 
 async function resetTestDatabase() {
   const db = DatabaseConnector.instance.database;
@@ -54,85 +53,23 @@ describe("Memory", () => {
     });
   });
 
-  describe("save", () => {
-    test("saves a memory and returns the saved data", async () => {
-      const memory = Memory.instance;
-      const result = await memory.save({
-        chatId: "chat-123",
-        author: ERole.User,
-        importance: EMemoryImportance.Medium,
-        message: "Test memory",
-      });
-
-      expect(result).toEqual({
-        id: expect.any(Number),
-        chatId: "chat-123",
-        author: ERole.User,
-        importance: EMemoryImportance.Medium,
-        message: "Test memory",
-        createdAt: expect.any(Date),
-        lastReadAt: expect.any(Date),
-      });
-    });
-
-    test("sets createdAt and lastReadAt to the same timestamp", async () => {
-      const memory = Memory.instance;
-      const result = await memory.save({
-        chatId: "chat-timestamp",
-        author: ERole.User,
-        importance: EMemoryImportance.Low,
-        message: "Timestamp test",
-      });
-
-      expect(result.createdAt.getTime()).toBe(result.lastReadAt.getTime());
-    });
-  });
-
-  describe("findRecent", () => {
-    test("returns limited memories ordered by createdAt DESC", async () => {
-      const memory = Memory.instance;
-      for (let i = 0; i < 5; i++) {
-        await memory.save({
-          chatId: "chat-recent",
-          author: ERole.User,
-          importance: EMemoryImportance.Low,
-          message: `Memory ${i}`,
-        });
-        await new Promise((resolve) => setTimeout(resolve, 10));
-      }
-
-      const result = await memory.findRecent("chat-recent", 3);
-
-      expect(result.length).toBe(3);
-      expect(result[0]?.message).toBe("Memory 4");
-      expect(result[2]?.message).toBe("Memory 2");
-    });
-
-    test("returns empty result when no memories exist", async () => {
-      const memory = Memory.instance;
-      const result = await memory.findRecent("nonexistent", 10);
-
-      expect(result).toEqual([]);
-    });
-  });
-
   describe("fact persistence", () => {
     test("round-trips vectors and searches live same-chat facts by distance and cutoff", async () => {
       const memory = Memory.instance;
       for (let index = 1; index <= 3; index += 1) {
-        await memory.save({
-          chatId: "chat-a",
-          author: ERole.User,
-          importance: EMemoryImportance.Medium,
-          message: `Fact source ${index}`,
-        });
+        await ConversationStore.instance.saveUserMessage(
+          "chat-a",
+          ERole.User,
+          `Fact source ${index}`,
+          new Date(),
+        );
       }
-      await memory.save({
-        chatId: "chat-b",
-        author: ERole.User,
-        importance: EMemoryImportance.Medium,
-        message: "Another chat fact source",
-      });
+      await ConversationStore.instance.saveUserMessage(
+        "chat-b",
+        ERole.User,
+        "Another chat fact source",
+        new Date(),
+      );
 
       const result = await memory.commitLiveFactWindow({
         chatId: "chat-a",
@@ -221,12 +158,12 @@ describe("Memory", () => {
       );
       expect((await memory.searchFacts("chat-a", survivor.embedding, 10))[0]?.id).toBe(survivor.id);
 
-      await memory.save({
-        chatId: "chat-a",
-        author: ERole.User,
-        importance: EMemoryImportance.Medium,
-        message: "The bicycle is named Comet again.",
-      });
+      await ConversationStore.instance.saveUserMessage(
+        "chat-a",
+        ERole.User,
+        "The bicycle is named Comet again.",
+        new Date(),
+      );
       await memory.rememberFact(
         "chat-a",
         "The bicycle is named Comet again.",
@@ -254,19 +191,21 @@ describe("Memory", () => {
           author = ERole.Assistant;
         }
 
-        await memory.save({
-          chatId: "chat-window",
+        await ConversationStore.instance.saveUserMessage(
+          "chat-window",
           author,
-          importance: EMemoryImportance.Medium,
-          message: `Window message ${index}`,
-        });
+          `Window message ${index}`,
+          new Date(),
+        );
       }
-      await memory.save({
-        chatId: "chat-other",
-        author: ERole.User,
-        importance: EMemoryImportance.Medium,
-        message: "Other chat message",
-      });
+      await ConversationStore.instance.saveUserMessage(
+        "chat-other",
+        ERole.User,
+        "Other chat message",
+        new Date(),
+      );
+
+      expect(await ConversationStore.instance.findChatIds()).toEqual(["chat-other", "chat-window"]);
 
       const firstWindow = await memory.loadLiveFactWindow("chat-window");
       expect(firstWindow.state.lastProcessedMessageId).toBe(0);
@@ -297,12 +236,12 @@ describe("Memory", () => {
 
     test("commits supersessions atomically and rolls back failures", async () => {
       const memory = Memory.instance;
-      await memory.save({
-        chatId: "chat-atomic",
-        author: ERole.User,
-        importance: EMemoryImportance.Medium,
-        message: "The bicycle used to be called Spark.",
-      });
+      await ConversationStore.instance.saveUserMessage(
+        "chat-atomic",
+        ERole.User,
+        "The bicycle used to be called Spark.",
+        new Date(),
+      );
       const initial = await memory.commitLiveFactWindow({
         chatId: "chat-atomic",
         expectedLastProcessedMessageId: 0,
@@ -325,12 +264,12 @@ describe("Memory", () => {
         throw new Error("Expected initial fact");
       }
 
-      await memory.save({
-        chatId: "chat-atomic",
-        author: ERole.User,
-        importance: EMemoryImportance.Medium,
-        message: "The bicycle is now called Comet.",
-      });
+      await ConversationStore.instance.saveUserMessage(
+        "chat-atomic",
+        ERole.User,
+        "The bicycle is now called Comet.",
+        new Date(),
+      );
       const replacement = await memory.commitLiveFactWindow({
         chatId: "chat-atomic",
         expectedLastProcessedMessageId: 1,
@@ -349,12 +288,12 @@ describe("Memory", () => {
         (await memory.searchFacts("chat-atomic", embedding(1), 10)).map((fact) => fact.text),
       ).toEqual(["The bicycle is now called Comet."]);
 
-      await memory.save({
-        chatId: "chat-atomic",
-        author: ERole.User,
-        importance: EMemoryImportance.Medium,
-        message: "This transaction must roll back.",
-      });
+      await ConversationStore.instance.saveUserMessage(
+        "chat-atomic",
+        ERole.User,
+        "This transaction must roll back.",
+        new Date(),
+      );
       await expect(
         memory.commitLiveFactWindow({
           chatId: "chat-atomic",
@@ -378,12 +317,12 @@ describe("Memory", () => {
     test("rejects a stale live checkpoint without writing facts", async () => {
       const memory = Memory.instance;
       for (let index = 1; index <= 5; index += 1) {
-        await memory.save({
-          chatId: "chat-stale",
-          author: ERole.User,
-          importance: EMemoryImportance.Medium,
-          message: `Stale source ${index}`,
-        });
+        await ConversationStore.instance.saveUserMessage(
+          "chat-stale",
+          ERole.User,
+          `Stale source ${index}`,
+          new Date(),
+        );
       }
       await memory.commitLiveFactWindow({
         chatId: "chat-stale",
@@ -426,12 +365,12 @@ describe("Memory", () => {
 
     test("rejects fact provenance outside the current same-chat user window", async () => {
       const memory = Memory.instance;
-      await memory.save({
-        chatId: "chat-provenance",
-        author: ERole.Assistant,
-        importance: EMemoryImportance.Medium,
-        message: "Assistant context only",
-      });
+      await ConversationStore.instance.saveUserMessage(
+        "chat-provenance",
+        ERole.Assistant,
+        "Assistant context only",
+        new Date(),
+      );
 
       await expect(
         memory.commitLiveFactWindow({

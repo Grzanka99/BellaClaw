@@ -50,7 +50,6 @@
       <toolCall>
         <name>laundry-reminder</name>
         <fireAt>2026-05-22T14:20:00</fireAt>
-        <group>home</group>
         <reminderText>Przypomnienie: wyjmij pranie.</reminderText>
       </toolCall>
       <reasoning>A relative timer that fires once.</reasoning>

@@ -81,14 +81,18 @@ concurrency and background processing under this human usage model.
 
 ## Naming Conventions
 
-- Type aliases: `T*` prefix (e.g. `TMemory`, `TOption<T>`)
-- Enums: `E*` prefix (e.g. `EMemoryImportance`, `EMemoryAuthor`)
-- Zod schemas: `S*` prefix (e.g. `SMemory`, `SSaveArgs`)
+- Type aliases: `T*` prefix (e.g. `TFact`, `TOption<T>`)
+- Enums: `E*` prefix (e.g. `EConfigKey`, `EModelPurpose`)
+- Zod schemas: `S*` prefix (e.g. `SPreparedFact`, `SConversationMessage`)
 - Singleton accessor: `public static get instance()` — always this name, no variants
 
-## AsyncQueue
+## Database Access
 
-All SQLite operations must go through `this.queue.enqueue()`. Never call `this.db.*` directly outside of an enqueued callback.
+All database work goes through `DatabaseConnector.instance.run((db) => ...)`, one queue for the whole connection. Services keep no queue of their own for the database and use only the `db` handle the callback receives.
+
+- `run` is not re-entrant: a callback or transaction body must never call `run` again, directly or through another service's method. Pass `db` to helpers instead.
+- Keep model, embedding, network and subprocess calls outside the callback.
+- `DatabaseConnector.instance.database` is for tests and standalone scripts only.
 
 ## Zod Usage
 
@@ -117,14 +121,14 @@ Each tool lives in its own directory under `apps/assistant/src/services/ai/tools
 
 ```
 apps/assistant/src/services/ai/tools/<tool-name>/
-  definition.ts    — exports pi-schema schema and Pi tool metadata
-  handler.ts       — typed execution and domain validation
+  index.ts         — exports one `defineTool()` object
   instructions.xml — detailed instructions for the AI on when/how to use the tool
+  index.test.ts    — tests, when the tool has them
 ```
 
-- `definition.ts`: Use `createToolDefinition()` with an `S*` pi-schema schema.
-- `handler.ts`: Treat tool arguments as structured data. Pi validates shape; keep cross-field domain validation in handlers and throw descriptive errors. Never apply `JSON.parse` to tool arguments.
+- `index.ts`: `defineTool({ name, label, description, schema, instructions, mode, execute })` with an `S*` pi-schema schema and `import instructions from "./instructions.xml" with { type: "text" }`. `defineTool` validates arguments and wraps the result; `execute(context, args, signal)` returns plain data. Treat tool arguments as structured data. Pi validates shape; keep cross-field domain validation in `execute` and throw descriptive errors. Never apply `JSON.parse` to tool arguments.
 - `instructions.xml`: XML format with `<purpose>`, `<tool>`, `<usage_rules>`, and `<examples>` sections.
+- Agents pick tools by reference in the `AGENTS` table in `apps/assistant/src/services/ai/agents/index.ts`.
 
 ## Scope Rules
 

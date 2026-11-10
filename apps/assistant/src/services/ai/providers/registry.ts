@@ -9,10 +9,10 @@ import {
 } from "@earendil-works/pi-ai";
 import { openaiCodexProvider } from "@earendil-works/pi-ai/providers/openai-codex";
 import { openrouterProvider } from "@earendil-works/pi-ai/providers/openrouter";
-import { FileCredentialStore } from "../auth/file-credential-store";
 import type { TAiModelPreference, TAiModelPreferences, TAiServiceTier } from "../model-preferences";
 import { getAiModelPreference } from "../model-preferences";
 import { EAiProvider, EModelPurpose } from "../types";
+import { FileCredentialStore } from "./file-credential-store";
 import { ollamaProvider } from "./ollama";
 import { opencodeGoProvider } from "./opencode-go";
 

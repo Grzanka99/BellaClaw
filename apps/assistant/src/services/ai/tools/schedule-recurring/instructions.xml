@@ -65,7 +65,6 @@
       <toolCall>
         <name>study-checkin</name>
         <pattern>*/30 * * * *</pattern>
-        <group>study</group>
         <reminderPromptData>{\"topic\":\"study\",\"tone\":\"encouraging\"}</reminderPromptData>
         <reminderFallbackText>Quick study check-in: stay focused and keep going.</reminderFallbackText>
       </toolCall>

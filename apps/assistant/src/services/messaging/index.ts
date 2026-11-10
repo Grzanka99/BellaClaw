@@ -1,48 +1,30 @@
 import {
   AppLogger,
-  createCronTurnId,
   createMessageTurnId,
   EBehaviorLogLevel,
   type TBehaviorTraceContext,
 } from "@bellaclaw/behavior-logs";
 import type { TOption } from "@bellaclaw/shared";
 import { createLogger, type TLogger } from "@bellaclaw/shared";
-import {
-  generateReminderText,
-  generateScheduledTaskText,
-  type TScheduledTaskResult,
-} from "../../handlers/generate-reminder-text";
-import type { TCronJobContext } from "../../lib/cron-engine";
-import { AgentHarness } from "../ai/agent-harness";
 import { ERole } from "../ai/types";
-import {
-  logHandlerCompleted,
-  logHandlerStarted,
-  logMemorySaveCompleted,
-} from "../app-logger/operations";
-import { sanitizeErrorMessage } from "../app-logger/sanitizers";
+import { startHandlerSpan } from "../app-logger/operations";
+import { startSpan } from "../app-logger/span";
 import {
   AuthorizationService,
   EAuthorizationDecision,
   type TAuthorizationResult,
 } from "../authorization";
-import { CronSingleton } from "../cron";
-import { EMemoryImportance } from "../memory/types";
+import { runCommand } from "../commands";
 import { MessageHandler } from "../message-handler";
-import { attachMessageTrace } from "../message-handler/trace";
 import type { TIncommingMessage } from "../message-handler/types";
 import { createCanonicalChatKey, parseCanonicalChatKey } from "./chat-key";
-import { runCommand } from "./commands";
 import type { EMessagePlatform, TMessageTransport, TPlatformMessage } from "./types";
 
 export class MessagingAdapter {
   private static _instance: TOption<MessagingAdapter>;
   private logger: TLogger = createLogger("MESSAGING");
   private transports = new Map<EMessagePlatform, TMessageTransport>();
-  private ai = AgentHarness.instance;
   private authorization = AuthorizationService.instance;
-  private cronListenerRegistered = false;
-  private runningCronTaskKeys = new Set<string>();
   private transportWaitAttempts = 60;
   private transportWaitIntervalMs = 1000;
 
@@ -58,12 +40,6 @@ export class MessagingAdapter {
 
   public registerTransport(transport: TMessageTransport) {
     this.transports.set(transport.platform, transport);
-    this.ensureCronListener();
-  }
-
-  public async setup() {
-    this.ensureCronListener();
-    await CronSingleton.instance.setup();
   }
 
   public async sendMcpConnectedMessage(chatId: string, profileId: string): Promise<void> {
@@ -85,26 +61,18 @@ export class MessagingAdapter {
   public async handleInboundMessage(message: TPlatformMessage) {
     const receivedAt = new Date();
     const canonicalChatId = createCanonicalChatKey(message.platform, message.chatId);
-    const handlerStart = performance.now();
     const trace: TBehaviorTraceContext = {
       turnId: createMessageTurnId(),
       chatId: canonicalChatId,
       platform: message.platform,
     };
+    const span = startHandlerSpan(trace, "messaging");
 
     try {
       const transport = this.transports.get(message.platform);
       if (transport === undefined) {
         this.logger.error(`handleInboundMessage: no transport for platform ${message.platform}`);
-        logHandlerCompleted(
-          trace,
-          "messaging",
-          handlerStart,
-          false,
-          0,
-          "missing transport",
-          undefined,
-        );
+        span.fail("missing transport", 0);
         return;
       }
 
@@ -157,82 +125,56 @@ export class MessagingAdapter {
       if (commandReply !== undefined) {
         incomingMessage.message.content = commandReply.prompt;
       }
-      attachMessageTrace(incomingMessage, trace);
 
       const handler = MessageHandler.getInstance(canonicalChatId);
-      const reply = await handler.handleMessage(incomingMessage, message.platform);
+      const reply = await handler.handleMessage(incomingMessage, trace, message.platform);
 
       if (reply.trim().length === 0) {
-        logHandlerCompleted(trace, "messaging", handlerStart, true, 0, "empty reply", undefined);
+        span.ok("empty reply", 0);
         return;
       }
 
       const sendError = await this.sendText(transport, message.chatId, reply, trace);
       if (sendError !== undefined) {
-        logHandlerCompleted(
-          trace,
-          "messaging",
-          handlerStart,
-          false,
-          reply.length,
-          "send failed",
-          sendError,
-        );
+        span.fail("send failed", reply.length, sendError);
         return;
       }
 
-      logHandlerCompleted(
-        trace,
-        "messaging",
-        handlerStart,
-        true,
-        reply.length,
-        "completed",
-        undefined,
-      );
+      span.ok("completed", reply.length);
     } catch (error) {
-      logHandlerCompleted(trace, "messaging", handlerStart, false, 0, "failed", String(error));
+      span.fail("failed", 0, String(error));
       throw error;
     }
   }
 
-  private async sendText(
+  public async sendText(
     transport: TMessageTransport,
     chatId: string,
     text: string,
     trace: TBehaviorTraceContext,
   ): Promise<TOption<string>> {
-    const start = performance.now();
-    let failure: TOption<string>;
+    const span = startSpan(trace, "transport.send.completed", "messaging", {
+      summary: `transport send completed platform=${transport.platform}`,
+      metadata: {
+        platform: transport.platform,
+        replyChars: text.length,
+      },
+    });
     try {
       await transport.sendText(chatId, text);
     } catch (error) {
-      failure = String(error);
+      const failure = String(error);
       this.logger.error(
         `sendText: failed to send to ${transport.platform} chat ${chatId}: ${failure}`,
       );
+      span.fail(failure, { level: EBehaviorLogLevel.Error });
+      return failure;
     }
-    logTransportSendCompleted(
-      trace,
-      start,
-      transport.platform,
-      failure === undefined,
-      text.length,
-      failure,
-    );
-    return failure;
+    span.ok();
+    return undefined;
   }
 
-  private ensureCronListener() {
-    if (this.cronListenerRegistered) {
-      return;
-    }
-
-    CronSingleton.instance.onFire(this.handleCronFire.bind(this));
-    this.cronListenerRegistered = true;
-  }
-
-  private async waitForTransport(platform: EMessagePlatform): Promise<TOption<TMessageTransport>> {
+  public async waitForTransport(platform: EMessagePlatform): Promise<TOption<TMessageTransport>> {
     for (let attempt = 0; attempt < this.transportWaitAttempts; attempt += 1) {
       const transport = this.transports.get(platform);
 
@@ -244,201 +186,6 @@ export class MessagingAdapter {
     }
 
     return this.transports.get(platform);
-  }
-
-  private async handleCronFire(ctx: TCronJobContext) {
-    const trace: TBehaviorTraceContext = {
-      turnId: createCronTurnId(),
-      chatId: ctx.scope,
-      platform: undefined,
-    };
-    const handlerStart = performance.now();
-    logHandlerStarted(trace, "cron-fire");
-
-    const canonicalChatId = ctx.scope;
-    if (canonicalChatId === undefined) {
-      this.logger.warning(`handleCronFire: job "${ctx.name}" has no scope, skipping delivery`);
-      logHandlerCompleted(trace, "cron-fire", handlerStart, false, 0, "missing scope", undefined);
-      return;
-    }
-
-    const parsedScope = parseCanonicalChatKey(canonicalChatId);
-    if (parsedScope === undefined) {
-      this.logger.warning(
-        `handleCronFire: job "${ctx.name}" has invalid scope "${canonicalChatId}", skipping delivery`,
-      );
-      logHandlerCompleted(trace, "cron-fire", handlerStart, false, 0, "invalid scope", undefined);
-      return;
-    }
-
-    trace.platform = parsedScope.platform;
-
-    const transport = await this.waitForTransport(parsedScope.platform);
-    if (transport === undefined) {
-      this.logger.warning(
-        `handleCronFire: no ${parsedScope.platform} transport for reminder "${ctx.name}", skipping delivery`,
-      );
-      logHandlerCompleted(
-        trace,
-        "cron-fire",
-        handlerStart,
-        false,
-        0,
-        "missing transport",
-        undefined,
-      );
-      return;
-    }
-
-    if (ctx.taskPrompt !== undefined) {
-      const taskKey = JSON.stringify([canonicalChatId, ctx.name]);
-
-      if (this.runningCronTaskKeys.has(taskKey)) {
-        this.logger.warning(`handleCronFire: task "${ctx.name}" is already running, skipping`);
-        logHandlerCompleted(
-          trace,
-          "cron-fire",
-          handlerStart,
-          true,
-          0,
-          "task overlap skipped",
-          undefined,
-        );
-        return;
-      }
-
-      this.runningCronTaskKeys.add(taskKey);
-
-      try {
-        await this.handleCronDelivery(
-          ctx,
-          canonicalChatId,
-          parsedScope,
-          transport,
-          trace,
-          handlerStart,
-        );
-      } finally {
-        this.runningCronTaskKeys.delete(taskKey);
-      }
-
-      return;
-    }
-
-    await this.handleCronDelivery(
-      ctx,
-      canonicalChatId,
-      parsedScope,
-      transport,
-      trace,
-      handlerStart,
-    );
-  }
-
-  private async handleCronDelivery(
-    ctx: TCronJobContext,
-    canonicalChatId: string,
-    parsedScope: { platform: EMessagePlatform; chatId: string },
-    transport: TMessageTransport,
-    trace: TBehaviorTraceContext,
-    handlerStart: number,
-  ) {
-    let text: TOption<string>;
-    let memoryPrefix = "CRON REMINDER";
-
-    if (ctx.taskPrompt !== undefined) {
-      const taskResult = await generateScheduledTaskText(ctx, this.ai, trace);
-      text = taskResult.text;
-      memoryPrefix = "CRON TASK";
-      logCronTaskCompleted(trace, taskResult);
-    } else {
-      text = await generateReminderText(ctx, this.ai, trace);
-    }
-
-    if (text === undefined) {
-      this.logger.info(`handleCronFire: job "${ctx.name}" has no reminder text, skipping delivery`);
-      logHandlerCompleted(
-        trace,
-        "cron-fire",
-        handlerStart,
-        false,
-        0,
-        "missing reminder text",
-        undefined,
-      );
-      return;
-    }
-
-    if (text.trim().length === 0) {
-      this.logger.info(
-        `handleCronFire: job "${ctx.name}" has blank reminder text, skipping delivery`,
-      );
-      logHandlerCompleted(
-        trace,
-        "cron-fire",
-        handlerStart,
-        false,
-        0,
-        "blank reminder text",
-        undefined,
-      );
-      return;
-    }
-
-    const sendError = await this.sendText(transport, parsedScope.chatId, text, trace);
-    if (sendError !== undefined) {
-      logHandlerCompleted(
-        trace,
-        "cron-fire",
-        handlerStart,
-        false,
-        text.length,
-        "send failed",
-        sendError,
-      );
-      return;
-    }
-
-    const deliveredAt = Date.now();
-    const saveStart = performance.now();
-
-    try {
-      await MessageHandler.getInstance(canonicalChatId).saveDeliveredMessage(
-        `[${memoryPrefix} ${ctx.name}]: ${text}`,
-        parsedScope.platform,
-        deliveredAt,
-      );
-      logMemorySaveCompleted(
-        trace,
-        saveStart,
-        ERole.Assistant,
-        EMemoryImportance.Low,
-        text.length,
-        undefined,
-      );
-    } catch (error) {
-      this.logger.error(
-        `handleCronFire: failed to save reminder "${ctx.name}" to memory for chat ${canonicalChatId}: ${String(error)}`,
-      );
-      logMemorySaveCompleted(
-        trace,
-        saveStart,
-        ERole.Assistant,
-        EMemoryImportance.Low,
-        text.length,
-        String(error),
-      );
-    }
-
-    logHandlerCompleted(
-      trace,
-      "cron-fire",
-      handlerStart,
-      true,
-      text.length,
-      "completed",
-      undefined,
-    );
   }
 }
 
@@ -478,53 +225,5 @@ function logMessageReceived(trace: TBehaviorTraceContext, message: TPlatformMess
       platform: message.platform,
       messageChars: message.message.content.length,
     },
-  });
-}
-
-function logCronTaskCompleted(trace: TBehaviorTraceContext, result: TScheduledTaskResult) {
-  AppLogger.instance.record({
-    trace,
-    event: "cron.task.completed",
-    component: "messaging",
-    success: result.text !== undefined && result.text.trim().length > 0,
-    durationMs: result.durationMs,
-    summary: "scheduled task completed",
-    metadata: {
-      mode: "task",
-      iterations: result.iterations,
-      toolCallCount: result.toolCallCount,
-      stopReason: result.stopReason ?? "threw",
-      deliveredTextChars: result.text?.length ?? 0,
-    },
-  });
-}
-
-function logTransportSendCompleted(
-  trace: TBehaviorTraceContext,
-  start: number,
-  platform: string,
-  success: boolean,
-  replyChars: number,
-  error: TOption<string>,
-) {
-  let level = EBehaviorLogLevel.Info;
-
-  if (!success) {
-    level = EBehaviorLogLevel.Error;
-  }
-
-  AppLogger.instance.record({
-    trace,
-    event: "transport.send.completed",
-    component: "messaging",
-    level,
-    success,
-    durationMs: performance.now() - start,
-    summary: `transport send completed platform=${platform}`,
-    metadata: {
-      platform,
-      replyChars,
-    },
-    error: sanitizeErrorMessage(error),
   });
 }

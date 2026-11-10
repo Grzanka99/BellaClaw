@@ -1,97 +1,36 @@
+import type { TOption } from "@bellaclaw/shared";
 import { z } from "zod";
-import { ERole } from "../ai/types";
-import { EMBEDDING_DIMENSIONS } from "../database/schema";
+import {
+  EMBEDDING_DIMENSIONS,
+  type factDistillationStateTable,
+  type factsTable,
+  type TSelectMemory,
+} from "../database/schema";
 
-export enum EMemoryImportance {
-  Low = "low",
-  Medium = "medium",
-  High = "high",
-}
-
-export const SMemory = z.object({
-  id: z.number(),
-  chatId: z.string(),
-  author: z.enum(ERole),
-  importance: z.enum(EMemoryImportance),
-  message: z.string(),
-  createdAt: z.coerce.date(),
-  lastReadAt: z.coerce.date(),
-});
-
-export const SSaveArgs = SMemory.omit({ id: true, createdAt: true, lastReadAt: true }).extend({
-  platform: z.string().optional(),
-  createdAt: z.date().optional(),
-});
-
-export type TMemory = z.infer<typeof SMemory>;
-export type TSaveArgs = z.infer<typeof SSaveArgs>;
-
-const SFactEmbedding = z.array(z.number()).length(EMBEDDING_DIMENSIONS);
-const SOptionalFactId = z
-  .number()
-  .nullable()
-  .transform((value) => {
-    if (value === null) {
-      return undefined;
-    }
-
-    return value;
-  });
-export const SFact = z.object({
-  id: z.number(),
-  chatId: z.string(),
+export const SPreparedFact = z.object({
   text: z.string(),
-  embedding: SFactEmbedding,
-  createdAt: z.coerce.date(),
-  supersededBy: SOptionalFactId,
-  forgottenAt: z
-    .number()
-    .nullable()
-    .transform((value) => {
-      if (value === null) {
-        return undefined;
-      }
-
-      return new Date(value);
-    }),
+  embedding: z.array(z.number()).length(EMBEDDING_DIMENSIONS),
   sourceMessageId: z.number(),
-});
-
-export const SPreparedFact = SFact.omit({
-  id: true,
-  chatId: true,
-  createdAt: true,
-  supersededBy: true,
-  forgottenAt: true,
-}).extend({
   supersedesFactIds: z.array(z.number().int().positive()),
 });
 
-export type TFact = z.infer<typeof SFact>;
+export type TFact = typeof factsTable.$inferSelect;
 export type TPreparedFact = z.infer<typeof SPreparedFact>;
 
-export const SFactSearchResult = SFact.pick({
-  id: true,
-  text: true,
-  createdAt: true,
-  sourceMessageId: true,
-}).extend({
-  distance: z.number(),
-});
+export type TFactSearchResult = Pick<TFact, "id" | "text" | "createdAt" | "sourceMessageId"> & {
+  distance: number;
+};
 
-export type TFactSearchResult = z.infer<typeof SFactSearchResult>;
-
-export const SFactDistillationState = z.object({
-  chatId: z.string(),
-  lastProcessedMessageId: z.number(),
-  updatedAt: z.coerce.date().optional(),
-});
-
-export type TFactDistillationState = z.infer<typeof SFactDistillationState>;
+export type TFactDistillationState = Omit<
+  typeof factDistillationStateTable.$inferSelect,
+  "updatedAt"
+> & {
+  updatedAt: TOption<Date>;
+};
 
 export type TFactWindow = {
-  context: TMemory[];
-  messages: TMemory[];
+  context: TSelectMemory[];
+  messages: TSelectMemory[];
 };
 
 export type TLiveFactWindow = TFactWindow & {

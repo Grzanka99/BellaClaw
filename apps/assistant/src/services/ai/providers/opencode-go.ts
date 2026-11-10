@@ -9,7 +9,7 @@ import {
 } from "@earendil-works/pi-ai";
 import { opencodeGoProvider as bundledOpencodeGoProvider } from "@earendil-works/pi-ai/providers/opencode-go";
 import { z } from "zod";
-import { opencodeOAuth } from "../auth/opencode-oauth";
+import { opencodeOAuth } from "./opencode-oauth";
 
 const BASE_URL = "https://opencode.ai/inference/go";
 const CATALOG_TTL = 60 * 60 * 1000;

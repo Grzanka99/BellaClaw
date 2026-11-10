@@ -22,9 +22,9 @@ beforeEach(async () => {
       chatId: "chat-a",
       text: `fact ${index}`,
       embedding: embedding(0.25),
-      createdAt: index,
+      createdAt: new Date(index),
       supersededBy: index === 0 ? 2 : null,
-      forgottenAt: index === 1 ? 5 : null,
+      forgottenAt: index === 1 ? new Date(5) : null,
       sourceMessageId: index,
     })),
   );

@@ -1,4 +1,3 @@
-import { AsyncQueue } from "@bellaclaw/shared";
 import { and, eq } from "drizzle-orm";
 import { DatabaseConnector } from "../database";
 import { type TSelectUserConfig, userConfigsTable } from "../database/schema";
@@ -18,13 +17,10 @@ export type TConfigUpdate = {
 export class SettingsService {
   private static _instance: SettingsService;
 
-  private db = DatabaseConnector.instance.database;
-  private queue: AsyncQueue;
+  private database = DatabaseConnector.instance;
   private cache: Map<string, TConfigRecord> = new Map();
 
-  private constructor() {
-    this.queue = new AsyncQueue();
-  }
+  private constructor() {}
 
   public static get instance() {
     if (!SettingsService._instance) {
@@ -89,8 +85,8 @@ export class SettingsService {
 
     const now = Date.now();
 
-    await this.queue.enqueue(async () => {
-      await this.db.transaction(async (tx) => {
+    await this.database.run(async (db) => {
+      await db.transaction(async (tx) => {
         for (const update of validatedUpdates) {
           if (update.value === DefaultConfigRecord[update.key]) {
             await tx
@@ -149,8 +145,8 @@ export class SettingsService {
   }
 
   private async selectOwnerRows(ownerKey: string): Promise<TSelectUserConfig[]> {
-    return this.queue.enqueue(async () => {
-      return this.db.select().from(userConfigsTable).where(eq(userConfigsTable.ownerKey, ownerKey));
+    return this.database.run(async (db) => {
+      return db.select().from(userConfigsTable).where(eq(userConfigsTable.ownerKey, ownerKey));
     });
   }
 }

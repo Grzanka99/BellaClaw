@@ -514,6 +514,17 @@ function credentialKey(chatId: string, profile: TMcpProfile): string {
 
   const clientIdEnv = profile.transport.oauth?.clientIdEnv;
   const clientSecretEnv = profile.transport.oauth?.clientSecretEnv;
+  let clientId: TOption<string>;
+  let clientSecret: TOption<string>;
+
+  if (clientIdEnv !== undefined) {
+    clientId = Bun.env[clientIdEnv];
+  }
+
+  if (clientSecretEnv !== undefined) {
+    clientSecret = Bun.env[clientSecretEnv];
+  }
+
   const fingerprint = createHash("sha256")
     .update(
       JSON.stringify({
@@ -521,9 +532,9 @@ function credentialKey(chatId: string, profile: TMcpProfile): string {
         scopes: profile.transport.oauth?.scopes,
         authorizationParams: profile.transport.oauth?.authorizationParams,
         clientIdEnv,
-        clientId: clientIdEnv === undefined ? undefined : Bun.env[clientIdEnv],
+        clientId,
         clientSecretEnv,
-        clientSecret: clientSecretEnv === undefined ? undefined : Bun.env[clientSecretEnv],
+        clientSecret,
       }),
     )
     .digest("base64url")

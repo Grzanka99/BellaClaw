@@ -132,6 +132,7 @@ export async function describeAiAuthProblem(
 }
 
 // Refreshes every OAuth credential and sends one alert to all chats when logins break.
+// Stays silent while any provider is connected: a chat on a broken one is switched to it.
 export async function checkAiOAuth(models: Models = aiModels): Promise<void> {
   const chatIds = (await channel?.listChatIds()) ?? [];
   const selectedProviders = new Set<string>();
@@ -143,10 +144,15 @@ export async function checkAiOAuth(models: Models = aiModels): Promise<void> {
 
   const problems: string[] = [];
   const newProblemProviders: EAiProvider[] = [];
+  let anyConnected = false;
 
   for (const providerId of AI_OAUTH_PROVIDERS) {
     const state = await getAiAuthState(providerId, models);
     let problem: TOption<string>;
+
+    if (state === EAiAuthState.Connected) {
+      anyConnected = true;
+    }
 
     if (state === EAiAuthState.LoginExpired) {
       problem = `${providerId}: login expired. ${loginHint(providerId)}`;
@@ -165,7 +171,7 @@ export async function checkAiOAuth(models: Models = aiModels): Promise<void> {
     }
   }
 
-  if (newProblemProviders.length === 0) {
+  if (anyConnected || newProblemProviders.length === 0) {
     return;
   }
 

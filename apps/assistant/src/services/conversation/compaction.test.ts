@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import type { TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
 import {
   createModels,
   fauxAssistantMessage,
@@ -9,6 +10,12 @@ import {
 } from "@earendil-works/pi-ai";
 import { compactConversation } from "./compaction";
 import type { TConversation } from "./types";
+
+const TEST_TRACE: TBehaviorTraceContext = {
+  turnId: "test",
+  chatId: undefined,
+  platform: undefined,
+};
 
 function fixture() {
   const faux = fauxProvider({
@@ -45,7 +52,7 @@ describe("conversation compaction", () => {
   test("does not summarize below 65k", async () => {
     const { state, models, model, faux } = fixture();
     state.entries = state.entries.slice(2);
-    expect(await compactConversation(state, models, model, 3000)).toBeUndefined();
+    expect(await compactConversation(state, models, model, 3000, TEST_TRACE)).toBeUndefined();
     expect(faux.state.callCount).toBe(0);
   });
 
@@ -68,7 +75,7 @@ describe("conversation compaction", () => {
         return fauxAssistantMessage("Chose train option B. Calendar still needs confirmation.");
       },
     ]);
-    const result = await compactConversation(state, models, model, 3000);
+    const result = await compactConversation(state, models, model, 3000, TEST_TRACE);
     expect(result?.state.entries).toEqual(state.entries.slice(2));
     expect(result?.state.summarizedThroughId).toBe(2);
     expect(result?.tokensAfter).toBeLessThan(25_000);
@@ -76,7 +83,9 @@ describe("conversation compaction", () => {
     if (result === undefined) {
       throw new Error("Expected compaction");
     }
-    expect(await compactConversation(result.state, models, model, 3000)).toBeUndefined();
+    expect(
+      await compactConversation(result.state, models, model, 3000, TEST_TRACE),
+    ).toBeUndefined();
     result.state.entries.unshift(...state.entries.slice(0, 2));
     faux.setResponses([
       (context) => {
@@ -84,9 +93,9 @@ describe("conversation compaction", () => {
         return fauxAssistantMessage("Updated train and calendar summary");
       },
     ]);
-    expect((await compactConversation(result.state, models, model, 3000))?.state.summary).toContain(
-      "Updated",
-    );
+    expect(
+      (await compactConversation(result.state, models, model, 3000, TEST_TRACE))?.state.summary,
+    ).toContain("Updated");
   });
 
   test.each([
@@ -127,7 +136,7 @@ describe("conversation compaction", () => {
         return fauxAssistantMessage("Calendar result recorded; results are historical.");
       },
     ]);
-    const result = await compactConversation(state, models, model, 3000);
+    const result = await compactConversation(state, models, model, 3000, TEST_TRACE);
     expect(result?.state.entries).toEqual([]);
     expect(result?.tokensAfter).toBeLessThan(25_000);
   });
@@ -136,7 +145,9 @@ describe("conversation compaction", () => {
     const { state, models, model, faux } = fixture();
     const original = structuredClone(state);
     faux.setResponses([fauxAssistantMessage(" ")]);
-    await expect(compactConversation(state, models, model, 3000)).rejects.toThrow("empty summary");
+    await expect(compactConversation(state, models, model, 3000, TEST_TRACE)).rejects.toThrow(
+      "empty summary",
+    );
     expect(state).toEqual(original);
   });
 
@@ -150,7 +161,7 @@ describe("conversation compaction", () => {
     const { state, models, model, faux } = fixture();
     const original = structuredClone(state);
     faux.setResponses([response]);
-    await expect(compactConversation(state, models, model, 3000)).rejects.toThrow(
+    await expect(compactConversation(state, models, model, 3000, TEST_TRACE)).rejects.toThrow(
       "stopReason=length",
     );
     expect(state).toEqual(original);

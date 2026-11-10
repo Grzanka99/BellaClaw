@@ -2,12 +2,19 @@ import { describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
 import type { TOption } from "@bellaclaw/shared";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { DefaultConfigRecord } from "../../settings/schema";
-import { AgentHarness, EAgentName } from "../agent-harness";
+import { AgentHarness } from "../agent-harness";
 import type { TAgentRunArgs } from "../agent-harness/types";
-import { EModelPurpose } from "../types";
+import { EAgentName } from ".";
+
+const TEST_TRACE: TBehaviorTraceContext = {
+  turnId: "test",
+  chatId: undefined,
+  platform: undefined,
+};
 
 const EXPECTED_TOOL_NAMES: Record<EAgentName, readonly string[]> = {
   [EAgentName.Calendar]: [
@@ -73,15 +80,12 @@ describe("agent permissions", () => {
 
         const tools = await harness.createTools({
           name,
-          purpose: EModelPurpose.Main,
           prompt: "test",
           chatId: "discord:1",
           settings: DefaultConfigRecord,
           currentTimeContext: undefined,
           platform: undefined,
-          trace: undefined,
-          history: [],
-          maxIterations: 30,
+          trace: TEST_TRACE,
           parentToolCallId: undefined,
           signal: undefined,
           delegationCount,
@@ -128,15 +132,12 @@ describe("agent permissions", () => {
       );
       const configuredTools = await harness.createTools({
         name: EAgentName.Main,
-        purpose: EModelPurpose.Main,
         prompt: "test",
         chatId: "discord:1",
         settings: DefaultConfigRecord,
         currentTimeContext: undefined,
         platform: undefined,
-        trace: undefined,
-        history: [],
-        maxIterations: 30,
+        trace: TEST_TRACE,
         parentToolCallId: undefined,
         signal: undefined,
         delegationCount: () => undefined,

@@ -1,19 +1,26 @@
 import { expect, test } from "bun:test";
 import { fauxAssistantMessage, fauxToolCall, type Message } from "@earendil-works/pi-ai";
+import { and, desc, eq } from "drizzle-orm";
 import { ERole } from "../ai/types";
+import { DatabaseConnector } from "../database";
+import { memoriesTable } from "../database/schema";
 import { Memory } from "../memory";
-import { EMemoryImportance } from "../memory/types";
 import { ConversationStore } from ".";
 import type { TConversation } from "./types";
 
+async function transcriptMessages(chatId: string) {
+  const rows = await DatabaseConnector.instance.database
+    .select()
+    .from(memoriesTable)
+    .where(and(eq(memoriesTable.chatId, chatId), eq(memoriesTable.kind, "message")))
+    .orderBy(desc(memoriesTable.id));
+  return rows.map((row) => row.message);
+}
+
 test("replays native messages after restart; compaction preserves fact source history", async () => {
   const chatId = "conversation-restart";
-  const source = await Memory.instance.save({
-    chatId,
-    author: ERole.User,
-    importance: EMemoryImportance.Medium,
-    message: "Check calendar",
-  });
+  const store = new ConversationStore();
+  const source = await store.saveUserMessage(chatId, ERole.User, "Check calendar", new Date());
   const call = fauxAssistantMessage(fauxToolCall("calendar", {}, { id: "calendar-1" }));
   call.content.push({
     type: "thinking",
@@ -33,58 +40,37 @@ test("replays native messages after restart; compaction preserves fact source hi
     },
     fauxAssistantMessage("Free"),
   ];
-  const store = new ConversationStore();
-  const persisted = await store.saveTurn(chatId, "discord", messages, source.id, undefined);
-  expect((await new ConversationStore().load(chatId, "discord"))?.entries).toEqual(
-    persisted.entries,
-  );
+  const persisted = await store.saveTurn(chatId, messages, source.id, undefined);
+  expect((await new ConversationStore().load(chatId))?.entries).toEqual(persisted.entries);
   expect(persisted.entries.map((entry) => entry.message)).toEqual(messages);
   expect(new Set(persisted.entries.map((entry) => entry.id)).size).toBe(4);
-  await store.saveSummary(chatId, "discord", {
+  await store.saveSummary(chatId, {
     summary: "Calendar was free",
     summaryTimestamp: 3,
     entries: [],
     summarizedThroughId: persisted.entries.at(-1)?.id ?? 0,
   });
-  expect((await store.load(chatId, "discord"))?.entries).toEqual([]);
-  expect((await Memory.instance.findRecent(chatId, 10)).map((row) => row.message)).toEqual([
-    "Free",
-    "Check calendar",
-  ]);
+  expect((await store.load(chatId))?.entries).toEqual([]);
+  expect(await transcriptMessages(chatId)).toEqual(["Free", "Check calendar"]);
   expect(
     (await Memory.instance.loadLiveFactWindow(chatId)).messages.map((row) => row.author),
   ).toEqual([ERole.User, ERole.Assistant]);
 });
 
-test("bootstraps existing rows once, appends later turns and reloads the retained tail", async () => {
+test("appends later turns, skips rows without replay and reloads the retained tail", async () => {
   const store = new ConversationStore();
   const chatId = "summary-cutoff";
-  const legacy = await Memory.instance.save({
-    chatId,
-    author: ERole.User,
-    importance: EMemoryImportance.Medium,
-    message: "legacy",
-  });
+  await store.saveUserMessage(chatId, ERole.User, "failed turn", new Date());
+  expect(await store.load(chatId)).toBeUndefined();
   let state: TConversation | undefined;
-  for (const text of ["first", "second"]) {
-    const source = await Memory.instance.save({
-      chatId,
-      platform: "discord",
-      author: ERole.User,
-      importance: EMemoryImportance.Medium,
-      message: text,
-    });
-    let history: Message[] = [
-      { role: "user", content: "legacy with original timestamp", timestamp: 1 },
-    ];
-    let bootstrapIds = [legacy.id];
+  for (const text of ["first", "second", "third"]) {
+    const source = await store.saveUserMessage(chatId, ERole.User, text, new Date());
+    let history: Message[] = [];
     if (state !== undefined) {
       history = state.entries.map((entry) => entry.message);
-      bootstrapIds = [];
     }
     state = await store.saveTurn(
       chatId,
-      "discord",
       [
         ...history,
         { role: "user", content: text, timestamp: source.createdAt.getTime() },
@@ -92,70 +78,42 @@ test("bootstraps existing rows once, appends later turns and reloads the retaine
       ],
       source.id,
       state,
-      bootstrapIds,
     );
   }
-  expect(state?.entries).toHaveLength(5);
   if (state === undefined) {
     throw new Error("Expected persisted turns");
   }
+  expect(state.entries).toHaveLength(6);
   const persisted = state;
-  expect((await store.load(chatId, "discord"))?.entries).toEqual(persisted.entries);
-  expect(persisted.entries[0]?.id).toBe(legacy.id);
-  const summaryState = {
+  expect((await store.load(chatId))?.entries).toEqual(persisted.entries);
+  await store.saveSummary(chatId, {
     ...persisted,
     summary: "First exchange summarized",
     summaryTimestamp: Date.now(),
-    entries: persisted.entries.slice(3),
-    summarizedThroughId: persisted.entries[2]?.id ?? 0,
-  };
-  await store.saveSummary(chatId, "discord", summaryState);
-  expect(await new ConversationStore().load(chatId, "discord")).toEqual(summaryState);
-  const other = await Memory.instance.save({
-    chatId,
-    platform: "signal",
-    author: ERole.User,
-    importance: EMemoryImportance.Medium,
-    message: "separate",
+    entries: persisted.entries.slice(2),
+    summarizedThroughId: persisted.entries[1]?.id ?? 0,
   });
-  await store.saveTurn(
-    chatId,
-    "signal",
-    [
-      { role: "user", content: "separate", timestamp: Date.now() },
-      fauxAssistantMessage("Other reply"),
-    ],
-    other.id,
-    undefined,
-  );
-  expect(await store.load(chatId, "discord")).toEqual(summaryState);
-  expect(
-    (await Memory.instance.findRecent(chatId, 30, "signal")).map((row) => row.message),
-  ).toEqual(["Other reply", "separate"]);
+  const summaryState = {
+    ...persisted,
+    summary: "Two exchanges summarized",
+    summaryTimestamp: Date.now(),
+    entries: persisted.entries.slice(4),
+    summarizedThroughId: persisted.entries[3]?.id ?? 0,
+  };
+  await store.saveSummary(chatId, summaryState);
+  expect(await new ConversationStore().load(chatId)).toEqual(summaryState);
 });
 
-test("a missing user row rolls back bootstrap writes", async () => {
+test("a missing user row fails the turn", async () => {
   const chatId = "missing-source";
-  const source = await Memory.instance.save({
-    chatId,
-    author: ERole.User,
-    importance: EMemoryImportance.Medium,
-    message: "legacy",
-  });
   const store = new ConversationStore();
   await expect(
     store.saveTurn(
       chatId,
-      "discord",
-      [
-        { role: "user", content: "legacy", timestamp: 1 },
-        { role: "user", content: "missing", timestamp: 2 },
-        fauxAssistantMessage("answer"),
-      ],
+      [{ role: "user", content: "missing", timestamp: 2 }, fauxAssistantMessage("answer")],
       999999,
       undefined,
-      [source.id],
     ),
   ).rejects.toThrow("missing");
-  expect(await store.load(chatId, "discord")).toBeUndefined();
+  expect(await store.load(chatId)).toBeUndefined();
 });
