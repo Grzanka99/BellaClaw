@@ -12,6 +12,7 @@ import {
   type ThinkingLevel,
   type Usage,
 } from "@earendil-works/pi-ai";
+import type { z } from "zod";
 import { sanitizeErrorMessage } from "../../app-logger/sanitizers";
 import { EConfigKey, type TConfigRecord } from "../../settings/schema";
 import {
@@ -63,6 +64,18 @@ function createAiStreamOptions(
   }
 
   return { ...options, reasoningEffort, serviceTier };
+}
+
+// NOTE: retryable separates a missing reply (a transient model outage) from a reply the model did
+// produce but that cannot be used, which callers may retry or give up on
+export class LlmResponseError extends Error {
+  public readonly retryable: boolean;
+
+  public constructor(message: string, retryable: boolean) {
+    super(message);
+    this.name = "LlmResponseError";
+    this.retryable = retryable;
+  }
 }
 
 export class LlmClient {
@@ -268,6 +281,31 @@ export class LlmClient {
       result.errorMessage,
     );
     return text;
+  }
+
+  public async completeJson<T>(
+    schema: z.ZodType<T>,
+    args: Parameters<LlmClient["completeText"]>[0],
+  ): Promise<T> {
+    const response = await this.completeText(args);
+
+    if (response === undefined) {
+      throw new LlmResponseError("model returned no response", true);
+    }
+
+    let responseJson: unknown;
+    try {
+      responseJson = JSON.parse(response);
+    } catch (error) {
+      throw new LlmResponseError(`response was not valid JSON: ${String(error)}`, false);
+    }
+
+    const parsed = schema.safeParse(responseJson);
+    if (!parsed.success) {
+      throw new LlmResponseError("response did not match expected shape", false);
+    }
+
+    return parsed.data;
   }
 
   public async verifySettings(

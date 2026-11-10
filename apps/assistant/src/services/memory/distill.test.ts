@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { LlmClient, LlmResponseError } from "../ai/llm";
 import { EModelPurpose, ERole } from "../ai/types";
 import { SettingsService } from "../settings";
 import { DefaultConfigRecord } from "../settings/schema";
@@ -10,6 +11,7 @@ import { EMemoryImportance } from "./types";
 type TDistillerInternals = {
   ai: {
     completeText: ReturnType<typeof mock>;
+    completeJson: LlmClient["completeJson"];
   };
   embedding: {
     embedMany: ReturnType<typeof mock>;
@@ -75,8 +77,10 @@ function resetDistiller() {
 function setupDistiller() {
   const distiller = FactDistiller.instance;
   const internals = distiller as unknown as TDistillerInternals;
+  // NOTE: completeJson runs for real on top of the mocked completeText, so parsing stays covered
   internals.ai = {
     completeText: mock(async () => undefined),
+    completeJson: LlmClient.prototype.completeJson,
   };
   internals.embedding = {
     embedMany: mock(async () => undefined),
@@ -104,15 +108,12 @@ describe("FactDistiller", () => {
 
     const result = await distiller.distill(window, DefaultConfigRecord, undefined);
 
-    expect(result).toEqual({
-      success: true,
-      facts: [
-        {
-          text: "The user attends ceramics on Tuesdays.",
-          sourceMessageId: 11,
-        },
-      ],
-    });
+    expect(result).toEqual([
+      {
+        text: "The user attends ceramics on Tuesdays.",
+        sourceMessageId: 11,
+      },
+    ]);
     expect(internals.ai.completeText).toHaveBeenCalledWith(
       expect.objectContaining({
         purpose: EModelPurpose.Utility,
@@ -130,20 +131,24 @@ describe("FactDistiller", () => {
     const { distiller, internals } = setupDistiller();
     internals.ai.completeText = mock(async () => "not-json");
 
-    await expect(distiller.distill(makeWindow(), DefaultConfigRecord, undefined)).resolves.toEqual({
-      success: false,
-      retryable: false,
-    });
+    const error = await distiller
+      .distill(makeWindow(), DefaultConfigRecord, undefined)
+      .catch((thrown: unknown) => thrown);
+
+    expect(error).toBeInstanceOf(LlmResponseError);
+    expect(error).toHaveProperty("retryable", false);
   });
 
   test("rejects an invalid structured response", async () => {
     const { distiller, internals } = setupDistiller();
     internals.ai.completeText = mock(async () => '{"facts":[{"text":"Missing provenance"}]}');
 
-    await expect(distiller.distill(makeWindow(), DefaultConfigRecord, undefined)).resolves.toEqual({
-      success: false,
-      retryable: false,
-    });
+    const error = await distiller
+      .distill(makeWindow(), DefaultConfigRecord, undefined)
+      .catch((thrown: unknown) => thrown);
+
+    expect(error).toBeInstanceOf(LlmResponseError);
+    expect(error).toHaveProperty("retryable", false);
   });
 
   test.each([
@@ -158,10 +163,9 @@ describe("FactDistiller", () => {
       }),
     );
 
-    await expect(distiller.distill(makeWindow(), DefaultConfigRecord, undefined)).resolves.toEqual({
-      success: true,
-      facts: [],
-    });
+    await expect(distiller.distill(makeWindow(), DefaultConfigRecord, undefined)).resolves.toEqual(
+      [],
+    );
   });
 
   test("commits a grounded claim followed by a comma and question", async () => {
@@ -176,13 +180,13 @@ describe("FactDistiller", () => {
     const vector = makeEmbedding(0.25);
     internals.embedding.embedMany = mock(async () => [vector]);
 
-    const result = await distiller.processWindow({
-      window,
-      settings: DefaultConfigRecord,
-      trace: undefined,
-    });
-
-    expect(result).toEqual({ success: true });
+    await expect(
+      distiller.processWindow({
+        window,
+        settings: DefaultConfigRecord,
+        trace: undefined,
+      }),
+    ).resolves.toBeUndefined();
     expect(internals.memory.commitLiveFactWindow).toHaveBeenCalledWith({
       chatId: "chat-comet",
       expectedLastProcessedMessageId: 10,
@@ -210,7 +214,7 @@ describe("FactDistiller", () => {
 
     const result = await distiller.distill(window, DefaultConfigRecord, undefined);
 
-    expect(result).toEqual({ success: true, facts: [] });
+    expect(result).toEqual([]);
     expect(internals.ai.completeText).toHaveBeenCalledWith(
       expect.objectContaining({
         purpose: EModelPurpose.Utility,
@@ -231,13 +235,13 @@ describe("FactDistiller", () => {
     const commit = mock(async () => ({ committed: true as const, facts: [] }));
     internals.memory.commitLiveFactWindow = commit;
 
-    const result = await distiller.processWindow({
-      window: makeWindow(),
-      settings: DefaultConfigRecord,
-      trace: undefined,
-    });
-
-    expect(result).toEqual({ success: true });
+    await expect(
+      distiller.processWindow({
+        window: makeWindow(),
+        settings: DefaultConfigRecord,
+        trace: undefined,
+      }),
+    ).resolves.toBeUndefined();
     expect(internals.embedding.embedMany).not.toHaveBeenCalled();
     expect(internals.memory.findLiveFactCandidates).not.toHaveBeenCalled();
     expect(commit).toHaveBeenCalledWith({
@@ -263,13 +267,13 @@ describe("FactDistiller", () => {
     internals.memory.commitLiveFactWindow = commit;
     internals.embedding.embedMany = mock(async () => [makeEmbedding(0.25)]);
 
-    const result = await distiller.processWindow({
-      window: makeWindow(),
-      settings: DefaultConfigRecord,
-      trace: undefined,
-    });
-
-    expect(result).toEqual({ success: true });
+    await expect(
+      distiller.processWindow({
+        window: makeWindow(),
+        settings: DefaultConfigRecord,
+        trace: undefined,
+      }),
+    ).resolves.toBeUndefined();
     expect(calls).toBe(2);
     expect(commit).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -284,13 +288,13 @@ describe("FactDistiller", () => {
     const commit = mock(async () => ({ committed: true as const, facts: [] }));
     internals.memory.commitLiveFactWindow = commit;
 
-    const result = await distiller.processWindow({
-      window: makeWindow(),
-      settings: DefaultConfigRecord,
-      trace: undefined,
-    });
-
-    expect(result).toEqual({ success: true });
+    await expect(
+      distiller.processWindow({
+        window: makeWindow(),
+        settings: DefaultConfigRecord,
+        trace: undefined,
+      }),
+    ).resolves.toBeUndefined();
     expect(commit).toHaveBeenCalledWith({
       chatId: "chat-comet",
       expectedLastProcessedMessageId: 10,
@@ -305,13 +309,13 @@ describe("FactDistiller", () => {
     const commit = mock(async () => ({ committed: true as const, facts: [] }));
     internals.memory.commitLiveFactWindow = commit;
 
-    const result = await distiller.processWindow({
-      window: makeWindow(),
-      settings: DefaultConfigRecord,
-      trace: undefined,
-    });
-
-    expect(result).toEqual({ success: false, reason: "distillation" });
+    await expect(
+      distiller.processWindow({
+        window: makeWindow(),
+        settings: DefaultConfigRecord,
+        trace: undefined,
+      }),
+    ).rejects.toThrow(new LlmResponseError("model returned no response", true));
     expect(commit).not.toHaveBeenCalled();
   });
 
@@ -324,13 +328,13 @@ describe("FactDistiller", () => {
     const commit = mock(async () => ({ committed: true as const, facts: [] }));
     internals.memory.commitLiveFactWindow = commit;
 
-    const result = await distiller.processWindow({
-      window: makeWindow(),
-      settings: DefaultConfigRecord,
-      trace: undefined,
-    });
-
-    expect(result).toEqual({ success: false, reason: "embedding" });
+    await expect(
+      distiller.processWindow({
+        window: makeWindow(),
+        settings: DefaultConfigRecord,
+        trace: undefined,
+      }),
+    ).rejects.toThrow("embedding failed");
     expect(internals.memory.findLiveFactCandidates).not.toHaveBeenCalled();
     expect(commit).not.toHaveBeenCalled();
   });
@@ -346,13 +350,13 @@ describe("FactDistiller", () => {
     const commit = mock(async () => ({ committed: true as const, facts: [] }));
     internals.memory.commitLiveFactWindow = commit;
 
-    const result = await distiller.processWindow({
-      window: makeWindow(),
-      settings: DefaultConfigRecord,
-      trace: undefined,
-    });
-
-    expect(result).toEqual({ success: true });
+    await expect(
+      distiller.processWindow({
+        window: makeWindow(),
+        settings: DefaultConfigRecord,
+        trace: undefined,
+      }),
+    ).resolves.toBeUndefined();
     expect(internals.embedding.embedMany).toHaveBeenCalledWith(["The bicycle is named Comet."]);
     expect(internals.memory.findLiveFactCandidates).toHaveBeenCalledWith("chat-comet", vector);
     expect(commit).toHaveBeenCalledWith({
@@ -418,13 +422,13 @@ describe("FactDistiller", () => {
     internals.ai.completeText = mock(async () => JSON.stringify({ facts }));
     internals.embedding.embedMany = mock(async (texts: string[]) => texts.map(() => vector));
 
-    const result = await distiller.processWindow({
-      window: await memory.loadLiveFactWindow(chatId),
-      settings: DefaultConfigRecord,
-      trace: undefined,
-    });
-
-    expect(result).toEqual({ success: true });
+    await expect(
+      distiller.processWindow({
+        window: await memory.loadLiveFactWindow(chatId),
+        settings: DefaultConfigRecord,
+        trace: undefined,
+      }),
+    ).resolves.toBeUndefined();
     const expectedSources = scenario.sourceIndexes.map((index) => {
       const source = sources[index];
       if (source === undefined) {
@@ -461,13 +465,13 @@ describe("FactDistiller", () => {
     const commit = mock(async () => ({ committed: true as const, facts: [] }));
     internals.memory.commitLiveFactWindow = commit;
 
-    const result = await distiller.processWindow({
-      window: makeWindow(),
-      settings: DefaultConfigRecord,
-      trace: undefined,
-    });
-
-    expect(result).toEqual({ success: true });
+    await expect(
+      distiller.processWindow({
+        window: makeWindow(),
+        settings: DefaultConfigRecord,
+        trace: undefined,
+      }),
+    ).resolves.toBeUndefined();
     expect(internals.ai.completeText).toHaveBeenCalledTimes(2);
     expect(internals.ai.completeText.mock.calls[1]?.[0]).toEqual(
       expect.objectContaining({
@@ -502,13 +506,13 @@ describe("FactDistiller", () => {
     const commit = mock(async () => ({ committed: true as const, facts: [] }));
     internals.memory.commitLiveFactWindow = commit;
 
-    const result = await distiller.processWindow({
-      window: makeWindow(),
-      settings: DefaultConfigRecord,
-      trace: undefined,
-    });
-
-    expect(result).toEqual({ success: true });
+    await expect(
+      distiller.processWindow({
+        window: makeWindow(),
+        settings: DefaultConfigRecord,
+        trace: undefined,
+      }),
+    ).resolves.toBeUndefined();
     expect(commit).toHaveBeenCalledWith(
       expect.objectContaining({
         facts: [expect.objectContaining({ supersedesFactIds: [44, 45] })],
@@ -533,13 +537,13 @@ describe("FactDistiller", () => {
     const commit = mock(async () => ({ committed: true as const, facts: [] }));
     internals.memory.commitLiveFactWindow = commit;
 
-    const result = await distiller.processWindow({
-      window: makeWindow(),
-      settings: DefaultConfigRecord,
-      trace: undefined,
-    });
-
-    expect(result).toEqual({ success: false, reason: "supersession" });
+    await expect(
+      distiller.processWindow({
+        window: makeWindow(),
+        settings: DefaultConfigRecord,
+        trace: undefined,
+      }),
+    ).rejects.toThrow("response selected an unoffered fact ID");
     expect(commit).not.toHaveBeenCalled();
   });
 
@@ -568,13 +572,13 @@ describe("FactDistiller", () => {
     const commit = mock(async () => ({ committed: true as const, facts: [] }));
     internals.memory.commitLiveFactWindow = commit;
 
-    const result = await distiller.processWindow({
-      window: makeWindow(),
-      settings: DefaultConfigRecord,
-      trace: undefined,
-    });
-
-    expect(result).toEqual({ success: true });
+    await expect(
+      distiller.processWindow({
+        window: makeWindow(),
+        settings: DefaultConfigRecord,
+        trace: undefined,
+      }),
+    ).resolves.toBeUndefined();
     expect(internals.ai.completeText).toHaveBeenCalledTimes(2);
     expect(commit).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -598,13 +602,13 @@ describe("FactDistiller", () => {
     const commit = mock(async () => ({ committed: true as const, facts: [] }));
     internals.memory.commitLiveFactWindow = commit;
 
-    const result = await distiller.processWindow({
-      window: makeWindow(),
-      settings: DefaultConfigRecord,
-      trace: undefined,
-    });
-
-    expect(result).toEqual({ success: false, reason: "candidate-search" });
+    await expect(
+      distiller.processWindow({
+        window: makeWindow(),
+        settings: DefaultConfigRecord,
+        trace: undefined,
+      }),
+    ).rejects.toThrow("candidate database unavailable");
     expect(commit).not.toHaveBeenCalled();
   });
 
@@ -615,7 +619,7 @@ describe("FactDistiller", () => {
     };
     const windows = [makeWindow(), { ...makeWindow(), messages: [] }];
     internals.memory.loadLiveFactWindow = mock(async () => windows.shift());
-    internals.processWindow = mock(async () => ({ success: true }));
+    internals.processWindow = mock(async () => undefined);
 
     distiller.scheduleFactDrain("chat-comet", undefined);
     for (

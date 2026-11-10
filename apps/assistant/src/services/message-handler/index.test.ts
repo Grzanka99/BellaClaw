@@ -51,7 +51,7 @@ function wireFactDistiller(memory: THandlerInternals["memory"]) {
     memory: THandlerInternals["memory"];
   };
   distiller.memory = memory;
-  distiller.processWindow = mock(async () => ({ success: true }));
+  distiller.processWindow = mock(async () => undefined);
   return distiller;
 }
 
@@ -675,10 +675,8 @@ describe("MessageHandler", () => {
     internals.factDistiller.processWindow = mock(async () => {
       processCount += 1;
       if (processCount === 1) {
-        return { success: false as const, reason: "embedding" as const };
+        throw new Error("embedding failed");
       }
-
-      return { success: true as const };
     });
 
     await handler.handleMessage(

@@ -1,15 +1,15 @@
 import type { TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
 import type { TOption } from "@bellaclaw/shared";
 import { createLogger } from "@bellaclaw/shared";
-import type { TCronJobContext } from "../lib/cron-engine";
-import type { AgentHarness } from "../services/ai/agent-harness";
-import { createPlatformInstructions } from "../services/ai/instructions/platform";
-import { readXmlAndInjectConfig } from "../services/ai/instructions/read-xml-and-inject-config";
-import type { LlmClient } from "../services/ai/llm";
-import { EModelPurpose } from "../services/ai/types";
-import type { EMessagePlatform } from "../services/messaging/types";
-import { SettingsService } from "../services/settings";
-import { DefaultConfigRecord, EConfigKey, type TConfigRecord } from "../services/settings/schema";
+import type { TCronJobContext } from "../../lib/cron-engine";
+import type { AgentHarness } from "../ai/agent-harness";
+import { createPlatformInstructions } from "../ai/instructions/platform";
+import { readXmlAndInjectConfig } from "../ai/instructions/read-xml-and-inject-config";
+import type { LlmClient } from "../ai/llm";
+import { EModelPurpose } from "../ai/types";
+import type { EMessagePlatform } from "../messaging/types";
+import { SettingsService } from "../settings";
+import { DefaultConfigRecord, EConfigKey, type TConfigRecord } from "../settings/schema";
 
 type TReminderAi = Pick<LlmClient, "completeText">;
 type TScheduledTaskAi = Pick<AgentHarness, "runScheduledTask">;

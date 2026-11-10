@@ -23,6 +23,7 @@ import {
   type TFactWindow,
   type TLiveFactWindow,
   type TMemory,
+  type TPreparedFact,
   type TSaveArgs,
 } from "./types";
 
@@ -37,6 +38,58 @@ const MAX_FACT_COSINE_DISTANCE = 0.31;
 const MAX_SUPERSESSION_COSINE_DISTANCE = 0.24;
 const SUPERSESSION_CANDIDATE_LIMIT = 10;
 const SQueryEmbedding = z.array(z.number()).length(EMBEDDING_DIMENSIONS);
+
+type TFactTransaction = Parameters<
+  Parameters<typeof DatabaseConnector.instance.database.transaction>[0]
+>[0];
+
+// Runs inside the caller's queued transaction: inserts one live fact and retires the facts it
+// supersedes, failing the whole transaction when any of them is no longer a same-chat live fact.
+async function insertFact(
+  tx: TFactTransaction,
+  chatId: string,
+  fact: TPreparedFact,
+  createdAt: number,
+): Promise<TFact> {
+  const inserted = await tx
+    .insert(factsTable)
+    .values({
+      chatId,
+      text: fact.text,
+      embedding: fact.embedding,
+      createdAt,
+      supersededBy: null,
+      forgottenAt: null,
+      sourceMessageId: fact.sourceMessageId,
+    })
+    .returning()
+    .get();
+  const parsed = SFact.safeParse(inserted);
+
+  if (!parsed.success) {
+    throw new Error("Failed to parse inserted fact");
+  }
+
+  if (fact.supersedesFactIds.length > 0) {
+    const result = await tx
+      .update(factsTable)
+      .set({ supersededBy: parsed.data.id })
+      .where(
+        and(
+          eq(factsTable.chatId, chatId),
+          inArray(factsTable.id, fact.supersedesFactIds),
+          isNull(factsTable.supersededBy),
+          isNull(factsTable.forgottenAt),
+        ),
+      );
+
+    if (result.rowsAffected !== fact.supersedesFactIds.length) {
+      throw new Error("Failed to supersede every prepared same-chat live fact");
+    }
+  }
+
+  return parsed.data;
+}
 
 export class Memory {
   private static _instance: Memory;
@@ -225,42 +278,7 @@ export class Memory {
           throw new Error("Failed to validate remembered fact");
         }
 
-        const inserted = await tx
-          .insert(factsTable)
-          .values({
-            chatId,
-            text: prepared.data.text,
-            embedding: prepared.data.embedding,
-            createdAt: Date.now(),
-            supersededBy: null,
-            forgottenAt: null,
-            sourceMessageId: prepared.data.sourceMessageId,
-          })
-          .returning()
-          .get();
-        const parsed = SFact.safeParse(inserted);
-        if (!parsed.success) {
-          throw new Error("Failed to parse remembered fact");
-        }
-
-        if (prepared.data.supersedesFactIds.length > 0) {
-          const result = await tx
-            .update(factsTable)
-            .set({ supersededBy: parsed.data.id })
-            .where(
-              and(
-                eq(factsTable.chatId, chatId),
-                inArray(factsTable.id, prepared.data.supersedesFactIds),
-                isNull(factsTable.supersededBy),
-                isNull(factsTable.forgottenAt),
-              ),
-            );
-          if (result.rowsAffected !== prepared.data.supersedesFactIds.length) {
-            throw new Error("Failed to supersede every remembered same-chat live fact");
-          }
-        }
-
-        return parsed.data;
+        return insertFact(tx, chatId, prepared.data, Date.now());
       }),
     );
   }
@@ -471,43 +489,7 @@ export class Memory {
 
         const insertedFacts: TFact[] = [];
         for (const preparedFact of parsedFacts.data) {
-          const inserted = await tx
-            .insert(factsTable)
-            .values({
-              chatId: args.chatId,
-              text: preparedFact.text,
-              embedding: preparedFact.embedding,
-              createdAt: now,
-              supersededBy: null,
-              sourceMessageId: preparedFact.sourceMessageId,
-            })
-            .returning()
-            .get();
-          const parsedInserted = SFact.safeParse(inserted);
-
-          if (!parsedInserted.success) {
-            throw new Error("Failed to parse inserted fact");
-          }
-
-          if (preparedFact.supersedesFactIds.length > 0) {
-            const supersessionResult = await tx
-              .update(factsTable)
-              .set({ supersededBy: parsedInserted.data.id })
-              .where(
-                and(
-                  eq(factsTable.chatId, args.chatId),
-                  inArray(factsTable.id, preparedFact.supersedesFactIds),
-                  isNull(factsTable.supersededBy),
-                  isNull(factsTable.forgottenAt),
-                ),
-              );
-
-            if (supersessionResult.rowsAffected !== preparedFact.supersedesFactIds.length) {
-              throw new Error("Failed to supersede every prepared same-chat live fact");
-            }
-          }
-
-          insertedFacts.push(parsedInserted.data);
+          insertedFacts.push(await insertFact(tx, args.chatId, preparedFact, now));
         }
 
         return {

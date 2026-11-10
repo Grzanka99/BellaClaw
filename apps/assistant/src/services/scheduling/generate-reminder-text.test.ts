@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
-import { ECronJobType, type TCronJobContext } from "../lib/cron-engine";
-import type { AgentHarness } from "../services/ai/agent-harness";
-import type { LlmClient } from "../services/ai/llm";
-import { EModelPurpose } from "../services/ai/types";
-import { EMessagePlatform } from "../services/messaging/types";
-import { SettingsService } from "../services/settings";
-import { DefaultConfigRecord, EConfigKey } from "../services/settings/schema";
+import { ECronJobType, type TCronJobContext } from "../../lib/cron-engine";
+import type { AgentHarness } from "../ai/agent-harness";
+import type { LlmClient } from "../ai/llm";
+import { EModelPurpose } from "../ai/types";
+import { EMessagePlatform } from "../messaging/types";
+import { SettingsService } from "../settings";
+import { DefaultConfigRecord, EConfigKey } from "../settings/schema";
 import { generateReminderText, generateScheduledTaskText } from "./generate-reminder-text";
 
 function context(overrides: Partial<TCronJobContext> = {}): TCronJobContext {

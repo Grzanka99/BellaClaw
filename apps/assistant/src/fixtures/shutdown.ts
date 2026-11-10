@@ -8,6 +8,7 @@ for (const [path, name] of [
   ["../services/calendar", "CalendarService"],
   ["../services/discord", "DiscordSingleton"],
   ["../services/messaging", "MessagingAdapter"],
+  ["../services/scheduling/delivery", "ScheduledDelivery"],
   ["../services/signal", "SignalSingleton"],
 ]) {
   if (path !== undefined && name !== undefined) {

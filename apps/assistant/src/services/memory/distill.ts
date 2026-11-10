@@ -2,7 +2,7 @@ import type { TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
 import type { TOption } from "@bellaclaw/shared";
 import { AsyncQueue, createLogger } from "@bellaclaw/shared";
 import { z } from "zod";
-import { LlmClient } from "../ai/llm";
+import { LlmClient, LlmResponseError } from "../ai/llm";
 import { EModelPurpose, ERole } from "../ai/types";
 import { EmbeddingClient } from "../embedding";
 import { SettingsService } from "../settings";
@@ -29,51 +29,11 @@ const DISTILLATION_ATTEMPTS = 2;
 
 export type TDistilledFact = z.infer<typeof SDistilledFact>;
 
-// NOTE: retryable separates a transient model outage, which must not advance the checkpoint, from
-// output this window will always produce, which would otherwise block the drain loop forever
-export type TDistillationResult =
-  | {
-      success: true;
-      facts: TDistilledFact[];
-    }
-  | {
-      success: false;
-      retryable: boolean;
-    };
-
 export type TProcessFactWindowArgs = {
   window: TLiveFactWindow;
   settings: TConfigRecord;
   trace: TOption<TBehaviorTraceContext>;
 };
-
-export type TFactWindowProcessResult =
-  | {
-      success: true;
-    }
-  | {
-      success: false;
-      reason: "distillation" | "embedding" | "candidate-search" | "supersession" | "commit";
-    };
-
-type TSupersessionSelection =
-  | {
-      success: true;
-      factIds: number[];
-    }
-  | {
-      success: false;
-    };
-
-type TFactPreparationResult =
-  | {
-      success: true;
-      facts: TPreparedFact[];
-    }
-  | {
-      success: false;
-      reason: "embedding" | "candidate-search" | "supersession";
-    };
 
 export class FactDistiller {
   private static _instance: TOption<FactDistiller>;
@@ -145,8 +105,8 @@ export class FactDistiller {
     window: TLiveFactWindow,
     settings: TConfigRecord,
     trace: TOption<TBehaviorTraceContext>,
-  ): Promise<TDistillationResult> {
-    const response = await this.ai.completeText({
+  ): Promise<TDistilledFact[]> {
+    const response = await this.ai.completeJson(SDistillationResponse, {
       prompt: this.createDistillationPrompt(window),
       instructions: [
         "Extract durable facts explicitly stated by the user.",
@@ -179,25 +139,6 @@ export class FactDistiller {
       signal: AbortSignal.timeout(MODEL_REQUEST_TIMEOUT_MS),
     });
 
-    if (response === undefined) {
-      this.logger.error("distill: utility model returned no response");
-      return { success: false, retryable: true };
-    }
-
-    let responseJson: unknown;
-    try {
-      responseJson = JSON.parse(response);
-    } catch (error) {
-      this.logger.error(`distill: response was not valid JSON: ${String(error)}`);
-      return { success: false, retryable: false };
-    }
-
-    const parsed = SDistillationResponse.safeParse(responseJson);
-    if (!parsed.success) {
-      this.logger.error("distill: response did not match expected shape");
-      return { success: false, retryable: false };
-    }
-
     const eligibleSourceIds = new Set<number>();
     for (const message of window.messages) {
       if (isEligibleFactSource(message, window.state.chatId)) {
@@ -206,7 +147,7 @@ export class FactDistiller {
     }
 
     const eligibleFacts = new Map<string, TDistilledFact>();
-    for (const fact of parsed.data.facts) {
+    for (const fact of response.facts) {
       if (!eligibleSourceIds.has(fact.sourceMessageId)) {
         this.logger.error(
           `distill: response cited ineligible source ${fact.sourceMessageId}, eligible were [${[...eligibleSourceIds].join(",")}]`,
@@ -222,98 +163,62 @@ export class FactDistiller {
       eligibleFacts.set(fact.text, fact);
     }
 
-    return { success: true, facts: [...eligibleFacts.values()] };
+    return [...eligibleFacts.values()];
   }
 
-  public async processWindow(args: TProcessFactWindowArgs): Promise<TFactWindowProcessResult> {
+  public async processWindow(args: TProcessFactWindowArgs): Promise<void> {
     const finalMessage = args.window.messages.at(-1);
     if (finalMessage === undefined) {
-      return { success: true };
-    }
-
-    let distillation: TDistillationResult = { success: false, retryable: false };
-    for (let attempt = 1; attempt <= DISTILLATION_ATTEMPTS; attempt += 1) {
-      try {
-        distillation = await this.distill(args.window, args.settings, args.trace);
-      } catch (error) {
-        this.logger.error(`processWindow: distillation failed: ${String(error)}`);
-        return {
-          success: false,
-          reason: "distillation",
-        };
-      }
-
-      if (distillation.success || distillation.retryable) {
-        break;
-      }
-
-      if (attempt < DISTILLATION_ATTEMPTS) {
-        this.logger.warning(
-          `processWindow: retrying window through ${finalMessage.id} after unusable distillation output`,
-        );
-      }
+      return;
     }
 
     let distilledFacts: TDistilledFact[] = [];
-    if (distillation.success) {
-      distilledFacts = distillation.facts;
-    } else if (distillation.retryable) {
-      return {
-        success: false,
-        reason: "distillation",
-      };
-    } else {
-      this.logger.warning(
-        `processWindow: skipping window through ${finalMessage.id} after ${DISTILLATION_ATTEMPTS} unusable distillation responses`,
-      );
-    }
+    for (let attempt = 1; attempt <= DISTILLATION_ATTEMPTS; attempt += 1) {
+      try {
+        distilledFacts = await this.distill(args.window, args.settings, args.trace);
+        break;
+      } catch (error) {
+        if (!(error instanceof LlmResponseError) || error.retryable) {
+          throw error;
+        }
 
-    const prepared = await this.prepareFacts(distilledFacts, args);
-    if (!prepared.success) {
-      return prepared;
-    }
-
-    try {
-      const result = await this.memory.commitLiveFactWindow({
-        chatId: args.window.state.chatId,
-        expectedLastProcessedMessageId: args.window.state.lastProcessedMessageId,
-        lastProcessedMessageId: finalMessage.id,
-        facts: prepared.facts,
-      });
-
-      if (!result.committed) {
-        this.logger.error("processWindow: fact window checkpoint was stale");
-        return {
-          success: false,
-          reason: "commit",
-        };
+        if (attempt < DISTILLATION_ATTEMPTS) {
+          this.logger.warning(
+            `processWindow: retrying window through ${finalMessage.id} after unusable distillation output: ${error.message}`,
+          );
+        } else {
+          this.logger.warning(
+            `processWindow: skipping window through ${finalMessage.id} after ${DISTILLATION_ATTEMPTS} unusable distillation responses: ${error.message}`,
+          );
+        }
       }
-    } catch (error) {
-      this.logger.error(`processWindow: fact window commit failed: ${String(error)}`);
-      return {
-        success: false,
-        reason: "commit",
-      };
     }
 
-    return { success: true };
+    const facts = await this.prepareFacts(distilledFacts, args);
+
+    const result = await this.memory.commitLiveFactWindow({
+      chatId: args.window.state.chatId,
+      expectedLastProcessedMessageId: args.window.state.lastProcessedMessageId,
+      lastProcessedMessageId: finalMessage.id,
+      facts,
+    });
+
+    if (!result.committed) {
+      throw new Error("fact window checkpoint was stale");
+    }
   }
 
   private async prepareFacts(
     distilledFacts: TDistilledFact[],
     args: TProcessFactWindowArgs,
-  ): Promise<TFactPreparationResult> {
+  ): Promise<TPreparedFact[]> {
     let embeddings: number[][] = [];
     if (distilledFacts.length > 0) {
       const embeddingResult = await this.embedding.embedMany(
         distilledFacts.map((fact) => fact.text),
       );
       if (embeddingResult === undefined) {
-        this.logger.error("prepareFacts: embedding failed");
-        return {
-          success: false,
-          reason: "embedding",
-        };
+        throw new Error("embedding failed");
       }
 
       embeddings = embeddingResult;
@@ -325,60 +230,28 @@ export class FactDistiller {
       const fact = distilledFacts[index];
       const embedding = embeddings[index];
       if (fact === undefined || embedding === undefined) {
-        this.logger.error("prepareFacts: embedding result did not match distilled facts");
-        return {
-          success: false,
-          reason: "embedding",
-        };
+        throw new Error("embedding result did not match distilled facts");
       }
 
-      let searchResults: TFactSearchResult[];
-      try {
-        searchResults = await this.memory.findLiveFactCandidates(
-          args.window.state.chatId,
-          embedding,
-        );
-      } catch (error) {
-        this.logger.error(`prepareFacts: candidate search failed: ${String(error)}`);
-        return {
-          success: false,
-          reason: "candidate-search",
-        };
-      }
-
+      const searchResults = await this.memory.findLiveFactCandidates(
+        args.window.state.chatId,
+        embedding,
+      );
       const candidates = searchResults.filter(
         (candidate) => !selectedSupersededFactIds.has(candidate.id),
       );
       let supersedesFactIds: number[] = [];
       if (candidates.length > 0) {
-        let selection: TSupersessionSelection;
-        try {
-          selection = await this.selectSupersededFactIds(
-            fact,
-            candidates,
-            args.settings,
-            args.trace,
-          );
-        } catch (error) {
-          this.logger.error(`prepareFacts: supersession selection failed: ${String(error)}`);
-          return {
-            success: false,
-            reason: "supersession",
-          };
-        }
+        supersedesFactIds = await this.selectSupersededFactIds(
+          fact,
+          candidates,
+          args.settings,
+          args.trace,
+        );
 
-        if (!selection.success) {
-          return {
-            success: false,
-            reason: "supersession",
-          };
-        }
-
-        for (const factId of selection.factIds) {
+        for (const factId of supersedesFactIds) {
           selectedSupersededFactIds.add(factId);
         }
-
-        supersedesFactIds = selection.factIds;
       }
 
       facts.push({
@@ -389,10 +262,7 @@ export class FactDistiller {
       });
     }
 
-    return {
-      success: true,
-      facts,
-    };
+    return facts;
   }
 
   private createDistillationPrompt(window: TLiveFactWindow): string {
@@ -452,10 +322,10 @@ export class FactDistiller {
         return true;
       }
 
-      const result = await this.processWindow({ window, settings, trace });
-
-      if (!result.success) {
-        this.logger.error(`drainLiveFactWindows: stopped after ${result.reason} failure`);
+      try {
+        await this.processWindow({ window, settings, trace });
+      } catch (error) {
+        this.logger.error(`drainLiveFactWindows: stopped after failure: ${String(error)}`);
         return false;
       }
     }
@@ -466,10 +336,10 @@ export class FactDistiller {
     candidates: TFactSearchResult[],
     settings: TConfigRecord,
     trace: TOption<TBehaviorTraceContext>,
-  ): Promise<TSupersessionSelection> {
+  ): Promise<number[]> {
     const offeredIds = new Set(candidates.map((candidate) => candidate.id));
     const candidateLines = candidates.map((candidate) => `[id=${candidate.id}] ${candidate.text}`);
-    const response = await this.ai.completeText({
+    const response = await this.ai.completeJson(SSupersessionResponse, {
       prompt: [`NEW FACT: ${fact.text}`, "", "LIVE CANDIDATES:", ...candidateLines].join("\n"),
       instructions: [
         "Decide which of the offered live facts the new fact makes obsolete.",
@@ -486,36 +356,13 @@ export class FactDistiller {
       signal: AbortSignal.timeout(MODEL_REQUEST_TIMEOUT_MS),
     });
 
-    if (response === undefined) {
-      this.logger.error("selectSupersededFactIds: utility model returned no response");
-      return { success: false };
-    }
-
-    let responseJson: unknown;
-    try {
-      responseJson = JSON.parse(response);
-    } catch (error) {
-      this.logger.error(`selectSupersededFactIds: response was not valid JSON: ${String(error)}`);
-      return { success: false };
-    }
-
-    const parsed = SSupersessionResponse.safeParse(responseJson);
-    if (!parsed.success) {
-      this.logger.error("selectSupersededFactIds: response did not match expected shape");
-      return { success: false };
-    }
-
-    for (const factId of parsed.data.factIds) {
+    for (const factId of response.factIds) {
       if (!offeredIds.has(factId)) {
-        this.logger.error("selectSupersededFactIds: response selected an unoffered fact ID");
-        return { success: false };
+        throw new Error("response selected an unoffered fact ID");
       }
     }
 
-    return {
-      success: true,
-      factIds: [...new Set(parsed.data.factIds)],
-    };
+    return [...new Set(response.factIds)];
   }
 }
 
