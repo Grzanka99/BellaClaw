@@ -211,7 +211,6 @@ describe("MessageHandler", () => {
           author: { type: ERole.User },
         },
         TEST_TRACE,
-        "",
       );
       await waitForCall(internals.ai.compactConversation, 1);
       const second = handler.handleMessage(
@@ -222,7 +221,6 @@ describe("MessageHandler", () => {
           author: { type: ERole.User },
         },
         TEST_TRACE,
-        "",
       );
       setSystemTime(processingTime);
       release();
@@ -305,7 +303,6 @@ describe("MessageHandler", () => {
           author: { type: ERole.User },
         },
         TEST_TRACE,
-        "",
         EMessagePlatform.Discord,
       );
       await flushAsyncWork();
@@ -318,7 +315,6 @@ describe("MessageHandler", () => {
           author: { type: ERole.User },
         },
         TEST_TRACE,
-        "",
         EMessagePlatform.Discord,
       );
       await flushAsyncWork();
@@ -375,7 +371,6 @@ describe("MessageHandler", () => {
         author: { type: ERole.User },
       },
       TEST_TRACE,
-      "",
       EMessagePlatform.Discord,
     );
     await flushAsyncWork();
@@ -432,7 +427,7 @@ describe("MessageHandler", () => {
       message: { content: "first" },
       author: { type: ERole.User },
     };
-    expect(await handler.handleMessage(message, TEST_TRACE, "")).toBe("Final answer");
+    expect(await handler.handleMessage(message, TEST_TRACE)).toBe("Final answer");
     await waitForCall(internals.ai.compactConversation, 1);
     const second = handler.handleMessage(
       {
@@ -440,7 +435,6 @@ describe("MessageHandler", () => {
         message: { content: "second" },
       },
       TEST_TRACE,
-      "",
     );
     await flushAsyncWork();
     expect(internals.ai.runMain).toHaveBeenCalledTimes(1);
@@ -465,10 +459,10 @@ describe("MessageHandler", () => {
       message: { content: "first" },
       author: { type: ERole.User },
     };
-    await handler.handleMessage(message, TEST_TRACE, "");
+    await handler.handleMessage(message, TEST_TRACE);
     await waitForCall(internals.conversations.saveSummary, 1);
     expect((await internals.conversations.load())?.summary).toBe("");
-    await handler.handleMessage(message, TEST_TRACE, "");
+    await handler.handleMessage(message, TEST_TRACE);
     expect(internals.ai.runMain.mock.calls[1]?.[0].conversation.summary).toBe("compact summary");
     await flushAsyncWork();
   });
@@ -516,7 +510,6 @@ describe("MessageHandler", () => {
         author: { type: ERole.User },
       },
       TEST_TRACE,
-      "",
     );
     sharedSettings[EConfigKey.AiInstructionsTimezone] = "Asia/Tokyo";
     await flushAsyncWork();
@@ -543,7 +536,6 @@ describe("MessageHandler", () => {
           author: { type: ERole.User },
         },
         TEST_TRACE,
-        "",
       ),
     ).rejects.toThrow("database unavailable");
 
@@ -566,7 +558,6 @@ describe("MessageHandler", () => {
           author: { type: ERole.User },
         },
         TEST_TRACE,
-        "",
       ),
     ).rejects.toThrow("database unavailable");
     expect(internals.memory.loadLiveFactWindow).not.toHaveBeenCalled();
@@ -598,7 +589,6 @@ describe("MessageHandler", () => {
         author: { type: ERole.User },
       },
       TEST_TRACE,
-      "",
     );
     await waitForCall(internals.conversations.saveTurn, 1);
     expect(events).toEqual(["save-start"]);
@@ -620,7 +610,6 @@ describe("MessageHandler", () => {
         author: { type: ERole.User },
       },
       TEST_TRACE,
-      "",
     );
     await waitForCall(internals.memory.loadLiveFactWindow, 1);
 
@@ -632,7 +621,6 @@ describe("MessageHandler", () => {
         author: { type: ERole.User },
       },
       TEST_TRACE,
-      "",
     );
 
     expect(secondReply).toBe("Final answer");
@@ -662,7 +650,6 @@ describe("MessageHandler", () => {
         author: { type: ERole.User },
       },
       TEST_TRACE,
-      "",
     );
     await waitForCall(internals.memory.loadLiveFactWindow, 3);
 
@@ -707,7 +694,6 @@ describe("MessageHandler", () => {
         author: { type: ERole.User },
       },
       TEST_TRACE,
-      "",
     );
     await waitForCall(internals.factDistiller.processWindow, 1);
     await flushAsyncWork();
@@ -722,7 +708,6 @@ describe("MessageHandler", () => {
         author: { type: ERole.User },
       },
       TEST_TRACE,
-      "",
     );
     await waitForCall(internals.memory.loadLiveFactWindow, 3);
 
@@ -761,7 +746,6 @@ describe("MessageHandler", () => {
           author: { type: ERole.User },
         },
         TEST_TRACE,
-        "",
       ),
     ).toBe("Something went wrong.");
     await flushAsyncWork();
@@ -778,7 +762,6 @@ describe("MessageHandler", () => {
         author: { type: ERole.User },
       },
       TEST_TRACE,
-      "",
     );
     expect(internals.ai.runMain.mock.calls[1]?.[0].conversation).toBeUndefined();
     expect(JSON.stringify(internals.ai.runMain.mock.calls[1]?.[0].history)).not.toContain(
@@ -806,7 +789,6 @@ describe("MessageHandler", () => {
           author: { type: ERole.User },
         },
         TEST_TRACE,
-        "",
       ),
     ).toBe("opencode-go is not connected. Run !ai-auth login opencode-go.");
   });

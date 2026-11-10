@@ -3,6 +3,7 @@ import type { TOption } from "@bellaclaw/shared";
 import { createLogger } from "@bellaclaw/shared";
 import type { TCronJobContext } from "../../lib/cron-engine";
 import type { AgentHarness } from "../ai/agent-harness";
+import baseInstructions from "../ai/instructions/base-system.xml" with { type: "text" };
 import { createPlatformInstructions } from "../ai/instructions/platform";
 import { readXmlAndInjectConfig } from "../ai/instructions/read-xml-and-inject-config";
 import type { LlmClient } from "../ai/llm";
@@ -53,7 +54,6 @@ async function resolveCronScopeContext(ctx: TCronJobContext, logPrefix: string) 
 export async function generateReminderText(
   ctx: TCronJobContext,
   platform: TOption<EMessagePlatform>,
-  commands: string,
   ai: TReminderAi,
   trace: TBehaviorTraceContext,
 ): Promise<TOption<string>> {
@@ -78,11 +78,7 @@ export async function generateReminderText(
 
   try {
     const instructions = [
-      await readXmlAndInjectConfig(
-        "./src/services/ai/instructions/base-system.xml",
-        settings,
-        commands,
-      ),
+      readXmlAndInjectConfig(baseInstructions, settings),
       "Generate one reminder message from the provided reminder payload and firing context. Use the firing context for any date, time, or weekday-relative wording. Return only the final reminder text with no quotes or explanation.",
     ];
     const platformInstructions = createPlatformInstructions(platform);
@@ -120,7 +116,6 @@ export async function generateReminderText(
 export async function generateScheduledTaskText(
   ctx: TCronJobContext,
   platform: TOption<EMessagePlatform>,
-  commands: string,
   ai: TScheduledTaskAi,
   trace: TBehaviorTraceContext,
 ): Promise<TScheduledTaskResult> {
@@ -145,7 +140,6 @@ export async function generateScheduledTaskText(
       currentTimeContext: `Scheduled firing context JSON:\n${JSON.stringify(createFiringContext(ctx.nextRunAt, timezone))}`,
       chatId: ctx.scope,
       settings,
-      commands,
       platform,
       trace,
       signal: undefined,

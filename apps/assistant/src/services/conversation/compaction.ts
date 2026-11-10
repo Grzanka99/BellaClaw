@@ -4,6 +4,7 @@ import {
   calculateContextTokens,
   estimateMessageTokens,
 } from "@earendil-works/pi-ai/utils/estimate";
+import compactionInstructions from "../ai/instructions/compaction.xml" with { type: "text" };
 import { conversationMessages, type TConversation } from "./types";
 
 const COMPACTION_TRIGGER = 65_000;
@@ -117,13 +118,10 @@ export async function compactConversation(
     cacheRetention: "none",
     sessionId: crypto.randomUUID(),
   } satisfies Parameters<Models["completeSimple"]>[2];
-  const systemPrompt = await Bun.file(
-    new URL("../ai/instructions/compaction.xml", import.meta.url),
-  ).text();
   const result = await models.completeSimple(
     model,
     {
-      systemPrompt,
+      systemPrompt: compactionInstructions,
       messages: [
         {
           role: "user",

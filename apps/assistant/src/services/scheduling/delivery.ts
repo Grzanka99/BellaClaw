@@ -16,7 +16,6 @@ import { EMemoryImportance } from "../memory/types";
 import { MessageHandler } from "../message-handler";
 import { MessagingAdapter } from "../messaging";
 import { parseCanonicalChatKey } from "../messaging/chat-key";
-import { formatCommandList } from "../messaging/commands";
 import type { EMessagePlatform, TMessageTransport } from "../messaging/types";
 import {
   generateReminderText,
@@ -118,24 +117,12 @@ export class ScheduledDelivery {
     let memoryPrefix = "CRON REMINDER";
 
     if (ctx.taskPrompt !== undefined) {
-      const taskResult = await generateScheduledTaskText(
-        ctx,
-        parsedScope.platform,
-        formatCommandList(),
-        this.ai,
-        trace,
-      );
+      const taskResult = await generateScheduledTaskText(ctx, parsedScope.platform, this.ai, trace);
       text = taskResult.text;
       memoryPrefix = "CRON TASK";
       logCronTaskCompleted(trace, taskResult);
     } else {
-      text = await generateReminderText(
-        ctx,
-        parsedScope.platform,
-        formatCommandList(),
-        this.llm,
-        trace,
-      );
+      text = await generateReminderText(ctx, parsedScope.platform, this.llm, trace);
     }
 
     if (text === undefined) {

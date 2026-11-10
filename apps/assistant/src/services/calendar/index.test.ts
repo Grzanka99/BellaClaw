@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdir } from "node:fs/promises";
 import { repositoryPath } from "@bellaclaw/shared";
 import type { LibSQLDatabase } from "drizzle-orm/libsql";
-import { validateUpdateCalendarEventArgs } from "../ai/tools/update-calendar-event/handler";
+import { validateUpdateCalendarEventArgs } from "../ai/tools/update-calendar-event";
 import { CalendarService } from ".";
 import type { GwsCalendarClient } from "./gws";
 

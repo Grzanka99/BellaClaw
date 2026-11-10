@@ -52,7 +52,6 @@ describe("generateReminderText", () => {
       await generateReminderText(
         context({ reminderText: "  Call Mum.  " }),
         EMessagePlatform.Signal,
-        "",
         ai,
         TEST_TRACE,
       ),
@@ -77,7 +76,6 @@ describe("generateReminderText", () => {
     const result = await generateReminderText(
       context(),
       EMessagePlatform.Signal,
-      "",
       { completeText },
       TEST_TRACE,
     );
@@ -102,7 +100,6 @@ describe("generateReminderText", () => {
       await generateReminderText(
         context(),
         EMessagePlatform.Signal,
-        "",
         {
           completeText: mock(async () => "   "),
         },
@@ -113,7 +110,6 @@ describe("generateReminderText", () => {
       await generateReminderText(
         context(),
         EMessagePlatform.Signal,
-        "",
         {
           completeText: mock(async () => {
             throw new Error("provider failed");
@@ -148,7 +144,6 @@ describe("generateScheduledTaskText", () => {
         taskFallbackText: "Briefing unavailable.",
       }),
       EMessagePlatform.Signal,
-      "",
       { runScheduledTask },
       TEST_TRACE,
     );
@@ -183,7 +178,6 @@ describe("generateScheduledTaskText", () => {
         await generateScheduledTaskText(
           task,
           EMessagePlatform.Signal,
-          "",
           {
             runScheduledTask: mock(async () => ({
               text: " ",
@@ -201,7 +195,6 @@ describe("generateScheduledTaskText", () => {
         await generateScheduledTaskText(
           task,
           EMessagePlatform.Signal,
-          "",
           {
             runScheduledTask: mock(async () => {
               throw new Error("provider failed");

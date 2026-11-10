@@ -6,9 +6,9 @@ import type { TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
 import type { TOption } from "@bellaclaw/shared";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { DefaultConfigRecord } from "../../settings/schema";
-import { AgentHarness, EAgentName } from "../agent-harness";
+import { AgentHarness } from "../agent-harness";
 import type { TAgentRunArgs } from "../agent-harness/types";
-import { EModelPurpose } from "../types";
+import { EAgentName } from ".";
 
 const TEST_TRACE: TBehaviorTraceContext = {
   turnId: "test",
@@ -80,16 +80,13 @@ describe("agent permissions", () => {
 
         const tools = await harness.createTools({
           name,
-          purpose: EModelPurpose.Main,
           prompt: "test",
           chatId: "discord:1",
           settings: DefaultConfigRecord,
-          commands: "",
           currentTimeContext: undefined,
           platform: undefined,
           trace: TEST_TRACE,
           history: [],
-          maxIterations: 30,
           parentToolCallId: undefined,
           signal: undefined,
           delegationCount,
@@ -136,16 +133,13 @@ describe("agent permissions", () => {
       );
       const configuredTools = await harness.createTools({
         name: EAgentName.Main,
-        purpose: EModelPurpose.Main,
         prompt: "test",
         chatId: "discord:1",
         settings: DefaultConfigRecord,
-        commands: "",
         currentTimeContext: undefined,
         platform: undefined,
         trace: TEST_TRACE,
         history: [],
-        maxIterations: 30,
         parentToolCallId: undefined,
         signal: undefined,
         delegationCount: () => undefined,

@@ -6,31 +6,19 @@ import type { TConversation } from "../../conversation/types";
 import type { TMcpProfile } from "../../mcp/config";
 import type { EMessagePlatform } from "../../messaging/types";
 import type { TConfigRecord } from "../../settings/schema";
-import type { EModelPurpose, THistoryItem } from "../types";
-
-export enum EAgentName {
-  Calendar = "calendar",
-  Main = "main",
-  Mcp = "mcp",
-  Memory = "memory",
-  Settings = "settings",
-  Scheduling = "scheduling",
-  ScheduledTask = "scheduled-task",
-}
+import type { EAgentName } from "../agents";
+import type { THistoryItem } from "../types";
 
 export type TAgentRunArgs = {
   name: EAgentName;
-  purpose: EModelPurpose;
   prompt: string;
   chatId: TOption<string>;
   settings: TConfigRecord;
-  commands: string;
   currentTimeContext: TOption<string>;
   platform: TOption<EMessagePlatform>;
   trace: TBehaviorTraceContext;
   history: TOption<THistoryItem[]>;
   conversation?: TConversation;
-  maxIterations: number;
   parentToolCallId: TOption<string>;
   signal: TOption<AbortSignal>;
   mcp?: { profile: TMcpProfile; tools: AgentTool[] };

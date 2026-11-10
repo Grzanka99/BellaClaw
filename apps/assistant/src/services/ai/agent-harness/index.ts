@@ -40,39 +40,17 @@ import { loadMcpProfiles } from "../../mcp/config";
 import { McpRunRegistry, type TMcpRunStatus } from "../../mcp/runs";
 import { createMcpSamplingRequest, createMcpSamplingResult } from "../../mcp/sampling";
 import type { TConfigRecord } from "../../settings/schema";
+import { AGENTS, EAgentName } from "../agents";
+import baseInstructions from "../instructions/base-system.xml" with { type: "text" };
 import { createPlatformInstructions } from "../instructions/platform";
 import { readXmlAndInjectConfig } from "../instructions/read-xml-and-inject-config";
 import { emptyUsage, LlmClient } from "../llm";
 import { aiModels } from "../providers/registry";
-import { validateToolArguments } from "../tools/definition";
-import {
-  createCalendarTools,
-  createMemoryTools,
-  createSchedulingTools,
-  createSettingsTools,
-  createWebTools,
-  type TToolExecutionContext,
-} from "../tools/executable";
+import { type TToolExecutionContext, validateToolArguments } from "../tools/define-tool";
 import { EModelPurpose, ERole, type THistoryItem } from "../types";
-import {
-  EAgentName,
-  type TAgentRunArgs,
-  type TAgentRunResult,
-  type TMainAgentRunResult,
-} from "./types";
+import type { TAgentRunArgs, TAgentRunResult, TMainAgentRunResult } from "./types";
 
-const BASE_INSTRUCTIONS_PATH = "./src/services/ai/instructions/base-system.xml";
 const SEQUENTIAL: "sequential" = "sequential";
-const PARALLEL: "parallel" = "parallel";
-const AGENT_INSTRUCTIONS: Record<EAgentName, string> = {
-  [EAgentName.Calendar]: "./src/services/ai/agents/calendar/instructions.xml",
-  [EAgentName.Main]: "./src/services/ai/agents/main/instructions.xml",
-  [EAgentName.Mcp]: "./src/services/ai/agents/mcp/instructions.xml",
-  [EAgentName.Memory]: "./src/services/ai/agents/memory/instructions.xml",
-  [EAgentName.Settings]: "./src/services/ai/agents/settings/instructions.xml",
-  [EAgentName.Scheduling]: "./src/services/ai/agents/scheduling/instructions.xml",
-  [EAgentName.ScheduledTask]: "./src/services/ai/agents/scheduled-task/instructions.xml",
-};
 
 export class AgentHarness {
   private static _instance: TOption<AgentHarness>;
@@ -88,15 +66,13 @@ export class AgentHarness {
   }
 
   public async runMain(
-    args: Omit<TAgentRunArgs, "name" | "purpose" | "maxIterations" | "parentToolCallId">,
+    args: Omit<TAgentRunArgs, "name" | "parentToolCallId">,
   ): Promise<TMainAgentRunResult> {
     let delegationCount = 0;
 
     return this.run({
       ...args,
       name: EAgentName.Main,
-      purpose: EModelPurpose.Main,
-      maxIterations: 30,
       parentToolCallId: undefined,
       delegationCount: () => {
         delegationCount += 1;
@@ -109,13 +85,11 @@ export class AgentHarness {
   }
 
   public async runScheduledTask(
-    args: Omit<TAgentRunArgs, "name" | "purpose" | "maxIterations" | "parentToolCallId">,
+    args: Omit<TAgentRunArgs, "name" | "parentToolCallId">,
   ): Promise<TAgentRunResult> {
     return this.run({
       ...args,
       name: EAgentName.ScheduledTask,
-      purpose: EModelPurpose.ScheduledTask,
-      maxIterations: 30,
       parentToolCallId: undefined,
       delegationCount: undefined,
     });
@@ -126,15 +100,12 @@ export class AgentHarness {
     settings: TConfigRecord,
     chatId: string,
     platform: TAgentRunArgs["platform"],
-    commands: string,
     trace: TBehaviorTraceContext,
   ) {
-    const config = await this.llm.resolveModel(settings, EModelPurpose.Main);
+    const config = await this.llm.resolveModel(settings, AGENTS[EAgentName.Main].purpose);
     const args = {
       name: EAgentName.Main,
-      purpose: EModelPurpose.Main,
       settings,
-      commands,
       chatId,
       platform,
       prompt: "",
@@ -142,12 +113,11 @@ export class AgentHarness {
       currentTimeContext: undefined,
       trace,
       signal: undefined,
-      maxIterations: 30,
       parentToolCallId: undefined,
       delegationCount: undefined,
     };
     const tools = await this.createTools(args);
-    const systemPrompt = await this.createSystemPrompt(args, tools);
+    const systemPrompt = await this.createSystemPrompt(args);
     const fixedTokens = Math.ceil(
       (systemPrompt.length +
         JSON.stringify(
@@ -169,9 +139,14 @@ export class AgentHarness {
   private async run(
     args: TAgentRunArgs & { delegationCount: TOption<() => void> },
   ): Promise<TMainAgentRunResult> {
-    const modelConfig = await this.llm.resolveModel(args.settings, args.purpose, args.signal);
+    const agentDefinition = AGENTS[args.name];
+    const modelConfig = await this.llm.resolveModel(
+      args.settings,
+      agentDefinition.purpose,
+      args.signal,
+    );
     const tools = await this.createTools(args);
-    const systemPrompt = await this.createSystemPrompt(args, tools);
+    const systemPrompt = await this.createSystemPrompt(args);
     let iterations = 0;
     let toolCallCount = 0;
     let lastToolBatch: TOption<string>;
@@ -182,7 +157,7 @@ export class AgentHarness {
     const agentSpan = startSpan(args.trace, "agent.completed", "agent-harness", {
       provider: modelConfig.model.provider,
       model: modelConfig.model.id,
-      purpose: args.purpose,
+      purpose: agentDefinition.purpose,
     });
     let requestSpan: TOption<TBehaviorSpan>;
     const sessionId = this.llm.createSessionId(
@@ -211,7 +186,7 @@ export class AgentHarness {
         messages,
       },
       streamFn: (model, context, options) => {
-        if (iterations >= args.maxIterations) {
+        if (iterations >= agentDefinition.maxIterations) {
           return createHardLimitStream(model);
         }
 
@@ -240,7 +215,7 @@ export class AgentHarness {
           return undefined;
         }
 
-        if (forceFinalization || iterations >= args.maxIterations - 1) {
+        if (forceFinalization || iterations >= agentDefinition.maxIterations - 1) {
           forcedFinalAttempt = true;
           return {
             context: {
@@ -273,7 +248,7 @@ export class AgentHarness {
       ) {
         this.llm.logModelRequestCompleted({
           span: requestSpan,
-          purpose: args.purpose,
+          purpose: agentDefinition.purpose,
           agentName: args.name,
           parentToolCallId: args.parentToolCallId,
           iteration: iterations,
@@ -377,7 +352,7 @@ export class AgentHarness {
       component: "agent-harness",
       provider: modelConfig.model.provider,
       model: modelConfig.model.id,
-      purpose: args.purpose,
+      purpose: agentDefinition.purpose,
       summary: `${args.name} agent started`,
       metadata: { agentName: args.name, parentToolCallId: args.parentToolCallId ?? null },
     });
@@ -459,7 +434,7 @@ export class AgentHarness {
     } else if (agent.state.errorMessage !== undefined && finalText === undefined) {
       stopReason = "error";
       finalText = undefined;
-    } else if (iterations >= args.maxIterations) {
+    } else if (iterations >= agentDefinition.maxIterations) {
       stopReason = "iteration-limit";
     }
 
@@ -527,22 +502,13 @@ export class AgentHarness {
     return messages;
   }
 
-  private async createSystemPrompt(
-    args: TAgentRunArgs,
-    tools: Array<{ instructionsPath?: string } | AgentTool>,
-  ): Promise<string> {
-    const toolPaths = tools.flatMap((tool) => {
-      if (!("instructionsPath" in tool) || tool.instructionsPath === undefined) {
-        return [];
-      }
-      return [tool.instructionsPath];
-    });
-    const [base, agentInstructions, ...toolInstructions] = await Promise.all([
-      readXmlAndInjectConfig(BASE_INSTRUCTIONS_PATH, args.settings, args.commands),
-      readXmlAndInjectConfig(AGENT_INSTRUCTIONS[args.name], args.settings, args.commands),
-      ...toolPaths.map((path) => readXmlAndInjectConfig(path, args.settings, args.commands)),
-    ]);
-    const parts = [base, agentInstructions, ...toolInstructions];
+  private async createSystemPrompt(args: TAgentRunArgs): Promise<string> {
+    const agentDefinition = AGENTS[args.name];
+    const parts = [
+      baseInstructions,
+      agentDefinition.instructions,
+      ...agentDefinition.tools.map((tool) => tool.instructions),
+    ].map((instructions) => readXmlAndInjectConfig(instructions, args.settings));
 
     if (args.mcp !== undefined) {
       parts.push(
@@ -583,100 +549,46 @@ export class AgentHarness {
         return this.llm.verifySettings(settings, purposes, args.trace);
       },
     };
-    switch (args.name) {
-      case EAgentName.Calendar:
-        return [...createCalendarTools(context), ...createWebTools()];
-      case EAgentName.Main:
-        return [
-          ...createWebTools(),
-          ...this.createDelegationTools(args),
-          ...(await this.createMcpDelegationTools(args)),
-        ];
-      case EAgentName.Mcp:
-        if (args.mcp === undefined) {
-          return [];
-        }
-        return args.mcp.tools;
-      case EAgentName.Memory:
-        return createMemoryTools(context);
-      case EAgentName.Settings:
-        return createSettingsTools(context);
-      case EAgentName.Scheduling:
-        return [...createSchedulingTools(context), ...createWebTools()];
-      case EAgentName.ScheduledTask:
-        return [
-          ...createMemoryTools(context).filter((tool) => tool.name === "search-memory"),
-          ...createWebTools(),
-          ...createCalendarTools(context).filter((tool) => {
-            return (
-              tool.name === "list-calendar-events" || tool.name === "find-calendar-availability"
-            );
-          }),
-          ...createSchedulingTools(context).filter((tool) => tool.name === "list-cron-jobs"),
-          ...(await this.createMcpDelegationTools(args)),
-        ];
+    const agentDefinition = AGENTS[args.name];
+    const tools = [
+      ...agentDefinition.tools.map((tool) => tool.createAgentTool(context)),
+      ...this.createDelegationTools(args),
+    ];
+
+    if (agentDefinition.mcp) {
+      tools.push(...(await this.createMcpDelegationTools(args)));
     }
+
+    if (args.mcp !== undefined) {
+      tools.push(...args.mcp.tools);
+    }
+
+    return tools;
   }
 
-  private createDelegationTools(args: TAgentRunArgs & { delegationCount: TOption<() => void> }) {
+  private createDelegationTools(
+    args: TAgentRunArgs & { delegationCount: TOption<() => void> },
+  ): AgentTool[] {
     const schema = obj(
       {
         task: str({ minLength: 1, description: "Focused task for the specialist" }),
       },
       { open: true },
     );
-    const delegates: Array<{
-      name: string;
-      label: string;
-      target: EAgentName;
-      purpose: EModelPurpose;
-    }> = [
-      {
-        name: "delegate-calendar",
-        label: "Delegate calendar",
-        target: EAgentName.Calendar,
-        purpose: EModelPurpose.SpecialistAccurate,
-      },
-      {
-        name: "delegate-memory",
-        label: "Delegate memory",
-        target: EAgentName.Memory,
-        purpose: EModelPurpose.Specialist,
-      },
-      {
-        name: "delegate-settings",
-        label: "Delegate settings",
-        target: EAgentName.Settings,
-        purpose: EModelPurpose.Specialist,
-      },
-      {
-        name: "delegate-scheduling",
-        label: "Delegate scheduling",
-        target: EAgentName.Scheduling,
-        purpose: EModelPurpose.SpecialistAccurate,
-      },
-    ];
 
-    return delegates.map((delegate) => {
-      let executionMode: typeof SEQUENTIAL | typeof PARALLEL = PARALLEL;
-      let description = `Run the ${delegate.target} specialist for this focused task`;
+    return AGENTS[args.name].delegates.map((target) => {
+      const delegation = AGENTS[target].delegation;
 
-      if (delegate.target === EAgentName.Calendar || delegate.target === EAgentName.Scheduling) {
-        executionMode = SEQUENTIAL;
-      }
-
-      if (delegate.target === EAgentName.Memory) {
-        description =
-          "Required for personal user facts and forget requests. Run the Memory specialist to retrieve or forget the relevant facts.";
+      if (delegation === undefined) {
+        throw new Error(`${target} agent cannot be delegated to`);
       }
 
       return {
-        name: delegate.name,
-        label: delegate.label,
-        description,
+        name: `delegate-${target}`,
+        label: `Delegate ${target}`,
+        description: delegation.description,
         parameters: schema,
-        instructionsPath: undefined,
-        executionMode,
+        executionMode: delegation.mode,
         execute: async (toolCallId: string, parameters: unknown, signal?: AbortSignal) => {
           const parsedParameters: Static<typeof schema> = validateToolArguments(schema, parameters);
           args.delegationCount?.();
@@ -688,19 +600,17 @@ export class AgentHarness {
 
           const result = await this.run({
             ...args,
-            name: delegate.target,
-            purpose: delegate.purpose,
+            name: target,
             prompt: `Original user message:\n${args.prompt}\n\nDelegated task:\n${parsedParameters.task}`,
             history: undefined,
             conversation: undefined,
-            maxIterations: 12,
             parentToolCallId: toolCallId,
             delegationCount: undefined,
             signal: delegationSignal,
           });
 
           if (result.text === undefined || result.text.trim().length === 0) {
-            throw new Error(`${delegate.target} specialist returned no final response`);
+            throw new Error(`${target} specialist returned no final response`);
           }
 
           return {
@@ -816,11 +726,9 @@ export class AgentHarness {
                 const result = await this.run({
                   ...args,
                   name: EAgentName.Mcp,
-                  purpose: EModelPurpose.SpecialistAccurate,
                   prompt: this.createMcpPrompt(args.prompt, parsed.task, parsed.context),
                   history: undefined,
                   conversation: undefined,
-                  maxIterations: 12,
                   parentToolCallId: toolCallId,
                   signal: AbortSignal.any([runSignal, session.signal]),
                   delegationCount: undefined,
@@ -1041,4 +949,3 @@ function createHardLimitStream(model: Model<Api>) {
 }
 
 export type { TAgentRunResult } from "./types";
-export { EAgentName } from "./types";

@@ -182,7 +182,6 @@ describe("MessagingAdapter", () => {
       async (
         message: TIncommingMessage,
         trace: TBehaviorTraceContext,
-        _commands: string,
         platform: EMessagePlatform,
       ) => {
         receivedMessage = message;

@@ -14,10 +14,10 @@ import {
   EAuthorizationDecision,
   type TAuthorizationResult,
 } from "../authorization";
+import { runCommand } from "../commands";
 import { MessageHandler } from "../message-handler";
 import type { TIncommingMessage } from "../message-handler/types";
 import { createCanonicalChatKey, parseCanonicalChatKey } from "./chat-key";
-import { formatCommandList, runCommand } from "./commands";
 import type { EMessagePlatform, TMessageTransport, TPlatformMessage } from "./types";
 
 export class MessagingAdapter {
@@ -127,12 +127,7 @@ export class MessagingAdapter {
       }
 
       const handler = MessageHandler.getInstance(canonicalChatId);
-      const reply = await handler.handleMessage(
-        incomingMessage,
-        trace,
-        formatCommandList(),
-        message.platform,
-      );
+      const reply = await handler.handleMessage(incomingMessage, trace, message.platform);
 
       if (reply.trim().length === 0) {
         span.ok("empty reply", 0);

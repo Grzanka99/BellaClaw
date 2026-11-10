@@ -48,10 +48,9 @@ export class MessageHandler {
   public async handleMessage(
     message: TIncommingMessage,
     trace: TBehaviorTraceContext,
-    commands: string,
     platform?: EMessagePlatform,
   ): Promise<string> {
-    return this.turnQueue.enqueue(() => this.handleTurn(message, trace, commands, platform));
+    return this.turnQueue.enqueue(() => this.handleTurn(message, trace, platform));
   }
 
   public saveDeliveredMessage(
@@ -70,7 +69,6 @@ export class MessageHandler {
   private async handleTurn(
     message: TIncommingMessage,
     trace: TBehaviorTraceContext,
-    commands: string,
     platform: TOption<EMessagePlatform>,
   ): Promise<string> {
     const handleMessageStart = performance.now();
@@ -83,7 +81,7 @@ export class MessageHandler {
       await this.queue.enqueue(async () => undefined);
       let conversation = await this.conversations.load(message.chatId, platform ?? "unknown");
       if (conversation !== undefined) {
-        conversation = await this.compact(conversation, settings, commands, platform, trace);
+        conversation = await this.compact(conversation, settings, platform, trace);
       }
       let last30: TMemory[] = [];
       if (conversation === undefined) {
@@ -115,7 +113,6 @@ export class MessageHandler {
         currentTimeContext: createCurrentTimeContext(settings, savedMessage.createdAt),
         chatId: message.chatId,
         settings,
-        commands,
         platform,
         trace,
         signal: undefined,
@@ -174,7 +171,7 @@ export class MessageHandler {
         .catch((error) => this.logger.error(`handleMessage: fact drain failed: ${String(error)}`));
       void this.queue
         .enqueue(async () => {
-          await this.compact(persisted, settings, commands, platform, trace);
+          await this.compact(persisted, settings, platform, trace);
         })
         .catch((error) => this.logger.error(`handleMessage: compaction failed: ${String(error)}`));
 
@@ -192,7 +189,6 @@ export class MessageHandler {
   private async compact(
     state: TConversation,
     settings: TConfigRecord,
-    commands: string,
     platform: TOption<EMessagePlatform>,
     trace: TBehaviorTraceContext,
   ): Promise<TConversation> {
@@ -203,7 +199,6 @@ export class MessageHandler {
         settings,
         this.chatId,
         platform,
-        commands,
         trace,
       );
       if (result === undefined) {
