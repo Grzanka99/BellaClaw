@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
-import { DatabaseConnector } from "../../services/database";
-import { cronEngineJobsTable } from "../../services/database/schema";
-import { resetCronEngineJobsTable } from "../../services/database/test-utils";
+import { DatabaseConnector } from "../database";
+import { cronEngineJobsTable } from "../database/schema";
+import { resetCronEngineJobsTable } from "../database/test-utils";
 import { CronScheduler } from "./index";
 
 type TSchedulerInternals = {
@@ -17,10 +17,7 @@ async function fireJob(scheduler: CronScheduler, id: number) {
 async function forceJobNextRunAt(id: number, nextRunAt: Date) {
   const db = DatabaseConnector.instance.database;
 
-  await db
-    .update(cronEngineJobsTable)
-    .set({ nextRunAt: nextRunAt.getTime() })
-    .where(eq(cronEngineJobsTable.id, id));
+  await db.update(cronEngineJobsTable).set({ nextRunAt }).where(eq(cronEngineJobsTable.id, id));
 }
 
 describe("CronScheduler runtime safety", () => {
@@ -40,11 +37,8 @@ describe("CronScheduler runtime safety", () => {
       name: "error",
       scope: "scope-a",
       fireAt: new Date(Date.now() + 60_000),
+      content: { kind: "text", text: "Hi." },
     });
-
-    if ("error" in scheduled) {
-      throw new Error(String(scheduled.error));
-    }
     await forceJobNextRunAt(scheduled.id, new Date(Date.now() - 1_000));
 
     const fireEvents: string[] = [];

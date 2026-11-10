@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { ChannelType } from "discord.js";
-import { CronSingleton } from "../cron";
+import { CronScheduler } from "../cron";
 import { resetCronEngineJobsTable } from "../database/test-utils";
 import { MessageHandler } from "../message-handler";
 import { MessagingAdapter } from "../messaging";
@@ -29,8 +29,8 @@ type TDiscordSingletonStatic = {
   _instance: DiscordSingleton | undefined;
 };
 
-type TCronSingletonStatic = {
-  _instance: CronSingleton | undefined;
+type TCronSchedulerStatic = {
+  _instance: CronScheduler | undefined;
 };
 
 type TMessagingAdapterStatic = {
@@ -40,9 +40,9 @@ type TMessagingAdapterStatic = {
 const originalDiscordToken = Bun.env.DISCORD_TOKEN;
 
 function cleanupSingletons() {
-  const CronSingletonWithInternals = CronSingleton as unknown as TCronSingletonStatic;
-  CronSingletonWithInternals._instance?.destroy();
-  CronSingletonWithInternals._instance = undefined;
+  const CronSchedulerWithInternals = CronScheduler as unknown as TCronSchedulerStatic;
+  CronSchedulerWithInternals._instance?.destroy();
+  CronSchedulerWithInternals._instance = undefined;
 
   const DiscordSingletonWithInternals = DiscordSingleton as unknown as TDiscordSingletonStatic;
   DiscordSingletonWithInternals._instance = undefined;
@@ -80,7 +80,7 @@ describe("DiscordSingleton", () => {
 
   test("does not start cron after Discord client is ready", async () => {
     const discord = DiscordSingleton.instance as unknown as TDiscordSingletonInternals;
-    const cron = CronSingleton.instance as unknown as { setup: () => void };
+    const cron = CronScheduler.instance as unknown as { setup: () => void };
     const setupMock = mock(() => {});
 
     cron.setup = setupMock;

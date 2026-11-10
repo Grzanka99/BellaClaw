@@ -1,6 +1,7 @@
 import { obj, str } from "@earendil-works/pi-schema";
-import { CronSingleton } from "../../cron";
-import { defineTool, requireChatId, ToolError } from "./define-tool";
+import { CronScheduler } from "../../cron";
+import { runCronJobOperation } from "./cron-content";
+import { defineTool, requireChatId } from "./define-tool";
 import instructions from "./unschedule-cron-job.xml" with { type: "text" };
 
 export const unscheduleCronJob = defineTool({
@@ -17,15 +18,8 @@ export const unscheduleCronJob = defineTool({
   logSafe: ["type", ["pattern", "cronPattern"], "nextRunAt", "timezone", "status"],
   privateErrors: true,
   execute: async (context, args) => {
-    const result = await CronSingleton.instance.cancel(args.name, requireChatId(context.chatId));
+    const scope = requireChatId(context.chatId);
 
-    if ("error" in result) {
-      throw new ToolError(
-        `${result.operation}-failed`,
-        `${result.operation} failed: ${String(result.error)}`,
-      );
-    }
-
-    return result;
+    return runCronJobOperation(() => CronScheduler.instance.cancel(args.name, scope));
   },
 });

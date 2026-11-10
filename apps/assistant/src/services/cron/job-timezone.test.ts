@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
-import { DatabaseConnector } from "../../services/database";
-import { cronEngineJobsTable } from "../../services/database/schema";
-import { resetCronEngineJobsTable } from "../../services/database/test-utils";
-import { CronScheduler, ECronJobStatus, ECronJobType } from "./index";
+import { DatabaseConnector } from "../database";
+import { cronEngineJobsTable } from "../database/schema";
+import { resetCronEngineJobsTable } from "../database/test-utils";
+import { CronScheduler } from "./index";
+import { ECronJobStatus, ECronJobType } from "./types";
 
 type TSchedulerInternals = {
   fire: (id: number) => Promise<void>;
@@ -29,10 +30,7 @@ async function fireJob(scheduler: CronScheduler, id: number) {
 async function forceJobNextRunAt(id: number, nextRunAt: Date) {
   const db = DatabaseConnector.instance.database;
 
-  await db
-    .update(cronEngineJobsTable)
-    .set({ nextRunAt: nextRunAt.getTime() })
-    .where(eq(cronEngineJobsTable.id, id));
+  await db.update(cronEngineJobsTable).set({ nextRunAt }).where(eq(cronEngineJobsTable.id, id));
 }
 
 async function insertRecurringJobWithoutTimezone() {
@@ -43,15 +41,13 @@ async function insertRecurringJobWithoutTimezone() {
     .values({
       name: "default-tz-recurring",
       scope: "scope-a",
-      group: null,
       type: ECronJobType.Recurring,
       pattern: "0 9 * * *",
-      reminderText: null,
-      reminderPromptData: null,
-      reminderFallbackText: null,
-      nextRunAt: Date.now() - 1_000,
+      contentKind: "text",
+      contentBody: "Hi.",
+      nextRunAt: new Date(Date.now() - 1_000),
       lastRunAt: null,
-      createdAt: Date.now(),
+      createdAt: new Date(),
       status: ECronJobStatus.Active,
       finishedAt: null,
       finishedReason: null,
@@ -75,15 +71,13 @@ describe("CronScheduler per-job timezone", () => {
   });
 
   test("recurring job scheduled with explicit timezone stores it and uses it for first run", async () => {
-    const result = await scheduler.createRecurring({
+    await scheduler.createRecurring({
       name: "tz-recurring",
       scope: "scope-a",
       pattern: "0 9 * * *",
       timezone: "America/New_York",
-      reminderText: "Hi.",
+      content: { kind: "text", text: "Hi." },
     });
-
-    expect("error" in result).toBe(false);
 
     const job = await scheduler.get("tz-recurring", "scope-a");
 
@@ -101,12 +95,9 @@ describe("CronScheduler per-job timezone", () => {
       scope: "scope-a",
       pattern: "0 9 * * *",
       timezone: "America/New_York",
-      reminderText: "Hi.",
+      content: { kind: "text", text: "Hi." },
     });
 
-    if ("error" in result) {
-      throw new Error(String(result.error));
-    }
     const fireAt = new Date(Date.now() - 60_000);
     await forceJobNextRunAt(result.id, fireAt);
 
@@ -159,7 +150,7 @@ describe("CronScheduler per-job timezone", () => {
         throw new Error("Expected job after fire");
       }
 
-      expect(job.timezone).toBeUndefined();
+      expect(job.timezone).toBeNull();
       expect(formatWall(job.nextRunAt, "Europe/Warsaw")).toMatch(/ 09:00:00$/);
       expect(job.nextRunAt.getTime()).toBeGreaterThan(Date.now());
     } finally {
@@ -169,15 +160,13 @@ describe("CronScheduler per-job timezone", () => {
 
   test("one-time job scheduled with timezone stores it and keeps fireAt absolute", async () => {
     const fireAt = new Date(Date.now() + 60_000);
-    const result = await scheduler.createOnce({
+    await scheduler.createOnce({
       name: "tz-onetime",
       scope: "scope-a",
       fireAt,
       timezone: "America/New_York",
-      reminderText: "Hi.",
+      content: { kind: "text", text: "Hi." },
     });
-
-    expect("error" in result).toBe(false);
 
     const job = await scheduler.get("tz-onetime", "scope-a");
 
@@ -190,14 +179,12 @@ describe("CronScheduler per-job timezone", () => {
   });
 
   test("recurring job scheduled without timezone preserves existing local behavior", async () => {
-    const result = await scheduler.createRecurring({
+    await scheduler.createRecurring({
       name: "no-tz-recurring",
       scope: "scope-a",
       pattern: "*/5 * * * *",
-      reminderText: "Hi.",
+      content: { kind: "text", text: "Hi." },
     });
-
-    expect("error" in result).toBe(false);
 
     const job = await scheduler.get("no-tz-recurring", "scope-a");
 
@@ -205,7 +192,7 @@ describe("CronScheduler per-job timezone", () => {
       throw new Error("Expected scheduled job");
     }
 
-    expect(job.timezone).toBeUndefined();
+    expect(job.timezone).toBeNull();
     expect(job.nextRunAt.getTime()).toBeGreaterThan(Date.now());
   });
 });

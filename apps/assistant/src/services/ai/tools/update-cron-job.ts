@@ -1,13 +1,12 @@
 import { obj, opt, type Static, str } from "@earendil-works/pi-schema";
-import { ECronJobType } from "../../../lib/cron-engine";
-import { CronSingleton } from "../../cron";
+import { CronScheduler } from "../../cron";
+import { ECronJobType } from "../../cron/types";
 import { EConfigKey } from "../../settings/schema";
 import {
   absentIfBlank,
-  countCronContentModes,
-  normalizeCronContentFields,
+  parseCronContent,
   parseLocalFireAt,
-  validateCronFallbackPairing,
+  runCronJobOperation,
 } from "./cron-content";
 import { defineTool, requireChatId, ToolError } from "./define-tool";
 import instructions from "./update-cron-job.xml" with { type: "text" };
@@ -26,7 +25,6 @@ export const SUpdateCronJobArgs = obj({
         "New future local date-time for a one-time job in the owner's timezone, YYYY-MM-DDTHH:mm[:ss]; omit for recurring jobs and to keep the current time",
     }),
   ),
-  group: opt(str({ description: "New group label; omit to preserve the current group" })),
   reminderText: opt(str({ description: "New plain reminder text" })),
   reminderPromptData: opt(str({ description: "New structured reminder prompt data" })),
   reminderFallbackText: opt(str({ description: "Fallback text required with reminderPromptData" })),
@@ -34,33 +32,18 @@ export const SUpdateCronJobArgs = obj({
   taskFallbackText: opt(str({ description: "Fallback text required with taskPrompt" })),
 });
 
-export function validateUpdateCronJobArgs(
-  rawArgs: Static<typeof SUpdateCronJobArgs>,
-): Static<typeof SUpdateCronJobArgs> {
-  const args = {
-    ...rawArgs,
-    ...normalizeCronContentFields(rawArgs),
-    pattern: absentIfBlank(rawArgs.pattern),
-    fireAt: absentIfBlank(rawArgs.fireAt),
-  };
+export function validateUpdateCronJobArgs(args: Static<typeof SUpdateCronJobArgs>) {
+  const pattern = absentIfBlank(args.pattern);
+  const fireAt = absentIfBlank(args.fireAt);
 
-  if (args.pattern !== undefined && args.fireAt !== undefined) {
+  if (pattern !== undefined && fireAt !== undefined) {
     throw new ToolError(
       "conflicting-schedule-fields",
       "Provide either pattern or fireAt, not both",
     );
   }
 
-  if (countCronContentModes(args) > 1) {
-    throw new ToolError(
-      "conflicting-content-modes",
-      "Provide only one of reminderText, reminderPromptData, or taskPrompt",
-    );
-  }
-
-  validateCronFallbackPairing(args);
-
-  return args;
+  return { name: args.name, pattern, fireAt, content: parseCronContent(args, false) };
 }
 
 export const updateCronJob = defineTool({
@@ -76,37 +59,13 @@ export const updateCronJob = defineTool({
   execute: async (context, parsedArgs) => {
     const chatId = requireChatId(context.chatId);
     const validatedArgs = validateUpdateCronJobArgs(parsedArgs);
-    const existing = await CronSingleton.instance.get(validatedArgs.name, chatId);
+    const existing = await CronScheduler.instance.get(validatedArgs.name, chatId);
 
     if (existing === undefined) {
       throw new ToolError("job-not-found", `No job found with name: ${validatedArgs.name}`);
     }
 
-    let reminderText = existing.reminderText;
-    let reminderPromptData = existing.reminderPromptData;
-    let reminderFallbackText = existing.reminderFallbackText;
-    let taskPrompt = existing.taskPrompt;
-    let taskFallbackText = existing.taskFallbackText;
-
-    if (validatedArgs.reminderText !== undefined) {
-      reminderText = validatedArgs.reminderText;
-      reminderPromptData = undefined;
-      reminderFallbackText = validatedArgs.reminderFallbackText ?? existing.reminderFallbackText;
-      taskPrompt = undefined;
-      taskFallbackText = undefined;
-    } else if (validatedArgs.reminderPromptData !== undefined) {
-      reminderText = undefined;
-      reminderPromptData = validatedArgs.reminderPromptData;
-      reminderFallbackText = validatedArgs.reminderFallbackText ?? existing.reminderFallbackText;
-      taskPrompt = undefined;
-      taskFallbackText = undefined;
-    } else if (validatedArgs.taskPrompt !== undefined) {
-      reminderText = undefined;
-      reminderPromptData = undefined;
-      reminderFallbackText = undefined;
-      taskPrompt = validatedArgs.taskPrompt;
-      taskFallbackText = validatedArgs.taskFallbackText ?? existing.taskFallbackText;
-    }
+    const content = validatedArgs.content ?? existing.content;
 
     if (existing.type === ECronJobType.Recurring) {
       if (validatedArgs.fireAt !== undefined) {
@@ -118,32 +77,20 @@ export const updateCronJob = defineTool({
 
       const pattern = validatedArgs.pattern ?? existing.pattern;
 
-      if (pattern === undefined) {
+      if (pattern === null) {
         throw new Error("Existing recurring reminder has no pattern");
       }
 
-      const result = await CronSingleton.instance.createRecurring({
-        name: existing.name,
-        scope: chatId,
-        group: validatedArgs.group ?? existing.group,
-        pattern,
-        reminderText,
-        reminderPromptData,
-        reminderFallbackText,
-        taskPrompt,
-        taskFallbackText,
-        overwrite: true,
-        timezone: existing.timezone,
-      });
-
-      if ("error" in result) {
-        throw new ToolError(
-          `${result.operation}-failed`,
-          `${result.operation} failed: ${String(result.error)}`,
-        );
-      }
-
-      return result;
+      return runCronJobOperation(() =>
+        CronScheduler.instance.createRecurring({
+          name: existing.name,
+          scope: chatId,
+          pattern,
+          content,
+          overwrite: true,
+          timezone: existing.timezone ?? undefined,
+        }),
+      );
     }
 
     if (validatedArgs.pattern !== undefined) {
@@ -162,27 +109,15 @@ export const updateCronJob = defineTool({
       );
     }
 
-    const result = await CronSingleton.instance.createOnce({
-      name: existing.name,
-      scope: chatId,
-      group: validatedArgs.group ?? existing.group,
-      fireAt,
-      reminderText,
-      reminderPromptData,
-      reminderFallbackText,
-      taskPrompt,
-      taskFallbackText,
-      overwrite: true,
-      timezone: existing.timezone,
-    });
-
-    if ("error" in result) {
-      throw new ToolError(
-        `${result.operation}-failed`,
-        `${result.operation} failed: ${String(result.error)}`,
-      );
-    }
-
-    return result;
+    return runCronJobOperation(() =>
+      CronScheduler.instance.createOnce({
+        name: existing.name,
+        scope: chatId,
+        fireAt,
+        content,
+        overwrite: true,
+        timezone: existing.timezone ?? undefined,
+      }),
+    );
   },
 });

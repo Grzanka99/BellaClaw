@@ -4,11 +4,11 @@ import { fauxAssistantMessage, type Message, normalizeContext } from "@earendil-
 import { convertResponsesMessages } from "@earendil-works/pi-ai/api/openai-responses-shared";
 import { transformMessages } from "@earendil-works/pi-ai/api/transform-messages";
 import { eq } from "drizzle-orm";
-import { ECronJobType, type TCronJobContext } from "../../lib/cron-engine";
 import type { AgentHarness } from "../ai/agent-harness";
 import { getAiModelConfig } from "../ai/providers/registry";
 import { EAiProvider, EModelPurpose, ERole } from "../ai/types";
 import { conversationMessages, type TConversation } from "../conversation/types";
+import { ECronJobType, type TCronJobContext } from "../cron/types";
 import { DatabaseConnector } from "../database";
 import { memoriesTable } from "../database/schema";
 import { Memory } from "../memory";
@@ -47,14 +47,9 @@ function cron(overrides: Partial<TCronJobContext> = {}): TCronJobContext {
   return {
     name: "daily",
     scope: "signal:+100",
-    group: undefined,
     type: ECronJobType.Recurring,
     pattern: "0 9 * * *",
-    reminderText: "Take a break.",
-    reminderPromptData: undefined,
-    reminderFallbackText: undefined,
-    taskPrompt: undefined,
-    taskFallbackText: undefined,
+    content: { kind: "text", text: "Take a break." },
     lastRunAt: undefined,
     nextRunAt: new Date("2026-07-24T08:00:00.000Z"),
     createdAt: new Date("2026-07-01T08:00:00.000Z"),
@@ -146,7 +141,10 @@ describe("ScheduledDelivery", () => {
     let context = cron({ scope: chatId });
     let transcript = "[CRON REMINDER daily]: Take a break.";
     if (kind === "task") {
-      context = cron({ scope: chatId, taskPrompt: "Prepare briefing", taskFallbackText: "Failed" });
+      context = cron({
+        scope: chatId,
+        content: { kind: "task", prompt: "Prepare briefing", fallback: "Failed" },
+      });
       transcript = "[CRON TASK daily]: Your briefing is ready.";
     }
 
@@ -309,9 +307,7 @@ describe("ScheduledDelivery", () => {
       }),
     };
     const task = cron({
-      reminderText: undefined,
-      taskPrompt: "Prepare briefing.",
-      taskFallbackText: "Briefing unavailable.",
+      content: { kind: "task", prompt: "Prepare briefing.", fallback: "Briefing unavailable." },
     });
 
     const first = internals.handleCronFire(task);
@@ -347,7 +343,7 @@ describe("ScheduledDelivery", () => {
       });
     }, 5);
 
-    await internals.handleCronFire(cron({ reminderText: "Take a break." }));
+    await internals.handleCronFire(cron({ content: { kind: "text", text: "Take a break." } }));
 
     expect(sendTextMock).toHaveBeenCalledWith("+100", "Take a break.");
   });

@@ -1,7 +1,6 @@
 import { AppLogger, createCronTurnId, type TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
 import type { TOption } from "@bellaclaw/shared";
 import { createLogger, type TLogger } from "@bellaclaw/shared";
-import type { TCronJobContext } from "../../lib/cron-engine";
 import { AgentHarness } from "../ai/agent-harness";
 import { LlmClient } from "../ai/llm";
 import { ERole } from "../ai/types";
@@ -11,7 +10,8 @@ import {
   startMemorySaveSpan,
   type THandlerSpan,
 } from "../app-logger/operations";
-import { CronSingleton } from "../cron";
+import { CronScheduler } from "../cron";
+import type { TCronJobContext } from "../cron/types";
 import { MessageHandler } from "../message-handler";
 import { MessagingAdapter } from "../messaging";
 import { parseCanonicalChatKey } from "../messaging/chat-key";
@@ -41,8 +41,8 @@ export class ScheduledDelivery {
   }
 
   public async setup() {
-    CronSingleton.instance.onFire(this.handleCronFire.bind(this));
-    await CronSingleton.instance.setup();
+    CronScheduler.instance.onFire(this.handleCronFire.bind(this));
+    await CronScheduler.instance.setup();
   }
 
   private async handleCronFire(ctx: TCronJobContext) {
@@ -55,12 +55,6 @@ export class ScheduledDelivery {
     const span = startHandlerSpan(trace, "cron-fire");
 
     const canonicalChatId = ctx.scope;
-    if (canonicalChatId === undefined) {
-      this.logger.warning(`handleCronFire: job "${ctx.name}" has no scope, skipping delivery`);
-      span.fail("missing scope", 0);
-      return;
-    }
-
     const parsedScope = parseCanonicalChatKey(canonicalChatId);
     if (parsedScope === undefined) {
       this.logger.warning(
@@ -81,7 +75,7 @@ export class ScheduledDelivery {
       return;
     }
 
-    if (ctx.taskPrompt !== undefined) {
+    if (ctx.content.kind === "task") {
       const taskKey = JSON.stringify([canonicalChatId, ctx.name]);
 
       if (this.runningCronTaskKeys.has(taskKey)) {
@@ -115,7 +109,7 @@ export class ScheduledDelivery {
     let text: TOption<string>;
     let memoryPrefix = "CRON REMINDER";
 
-    if (ctx.taskPrompt !== undefined) {
+    if (ctx.content.kind === "task") {
       const taskResult = await generateScheduledTaskText(ctx, parsedScope.platform, this.ai, trace);
       text = taskResult.text;
       memoryPrefix = "CRON TASK";

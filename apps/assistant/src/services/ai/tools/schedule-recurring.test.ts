@@ -20,8 +20,7 @@ describe("schedule-recurring", () => {
       taskPrompt: "",
       taskFallbackText: "   ",
     });
-    expect(recurring.reminderText).toBe("Reminder");
-    expect(recurring.taskPrompt).toBeUndefined();
+    expect(recurring.content).toEqual({ kind: "text", text: "Reminder" });
   });
 
   test("enforce cron domain constraints", () => {

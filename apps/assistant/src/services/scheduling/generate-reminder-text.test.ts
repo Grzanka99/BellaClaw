@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
 import type { TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
-import { ECronJobType, type TCronJobContext } from "../../lib/cron-engine";
 import type { AgentHarness } from "../ai/agent-harness";
 import type { LlmClient } from "../ai/llm";
 import { EModelPurpose } from "../ai/types";
+import { ECronJobType, type TCronJobContext } from "../cron/types";
 import { EMessagePlatform } from "../messaging/types";
 import { SettingsService } from "../settings";
 import { DefaultConfigRecord, EConfigKey } from "../settings/schema";
@@ -19,14 +19,13 @@ function context(overrides: Partial<TCronJobContext> = {}): TCronJobContext {
   return {
     name: "briefing",
     scope: "signal:+100",
-    group: undefined,
     type: ECronJobType.Recurring,
     pattern: "0 9 * * *",
-    reminderText: undefined,
-    reminderPromptData: '{"topic":"study"}',
-    reminderFallbackText: "Reminder unavailable.",
-    taskPrompt: undefined,
-    taskFallbackText: undefined,
+    content: {
+      kind: "generated",
+      promptData: '{"topic":"study"}',
+      fallback: "Reminder unavailable.",
+    },
     lastRunAt: undefined,
     nextRunAt: new Date("2026-01-05T08:00:00.000Z"),
     createdAt: new Date("2026-01-01T08:00:00.000Z"),
@@ -50,7 +49,7 @@ describe("generateReminderText", () => {
     const ai = { completeText: mock(async () => "unused") };
     expect(
       await generateReminderText(
-        context({ reminderText: "  Call Mum.  " }),
+        context({ content: { kind: "text", text: "  Call Mum.  " } }),
         EMessagePlatform.Signal,
         ai,
         TEST_TRACE,
@@ -138,10 +137,7 @@ describe("generateScheduledTaskText", () => {
 
     const result = await generateScheduledTaskText(
       context({
-        reminderPromptData: undefined,
-        reminderFallbackText: undefined,
-        taskPrompt: "Prepare a briefing.",
-        taskFallbackText: "Briefing unavailable.",
+        content: { kind: "task", prompt: "Prepare a briefing.", fallback: "Briefing unavailable." },
       }),
       EMessagePlatform.Signal,
       { runScheduledTask },
@@ -166,10 +162,7 @@ describe("generateScheduledTaskText", () => {
   test("uses fallback for blank output and thrown failures", async () => {
     settings();
     const task = context({
-      reminderPromptData: undefined,
-      reminderFallbackText: undefined,
-      taskPrompt: "Prepare a briefing.",
-      taskFallbackText: "Briefing unavailable.",
+      content: { kind: "task", prompt: "Prepare a briefing.", fallback: "Briefing unavailable." },
     });
 
     expect(

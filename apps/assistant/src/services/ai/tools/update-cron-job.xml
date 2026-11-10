@@ -2,7 +2,7 @@
 
   <purpose>
     Update existing scheduled reminders or autonomous tasks created by schedule-once or schedule-recurring.
-    Use this tool when the user wants to change the time, recurrence, group, or reminder content
+    Use this tool when the user wants to change the time, recurrence, or reminder content
     of a reminder that already exists.
   </purpose>
 

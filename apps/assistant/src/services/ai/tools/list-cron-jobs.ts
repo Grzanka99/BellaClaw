@@ -1,5 +1,6 @@
 import { obj } from "@earendil-works/pi-schema";
-import { CronSingleton } from "../../cron";
+import { CronScheduler } from "../../cron";
+import { toCronJobResult } from "./cron-content";
 import { defineTool, requireChatId } from "./define-tool";
 import instructions from "./list-cron-jobs.xml" with { type: "text" };
 
@@ -14,6 +15,8 @@ export const listCronJobs = defineTool({
   logSafe: [],
   privateErrors: true,
   execute: async (context) => {
-    return CronSingleton.instance.list(requireChatId(context.chatId));
+    const jobs = await CronScheduler.instance.list(requireChatId(context.chatId));
+
+    return jobs.map((job) => toCronJobResult(job));
   },
 });

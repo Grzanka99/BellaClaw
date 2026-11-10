@@ -1,13 +1,13 @@
 import type { TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
 import type { TOption } from "@bellaclaw/shared";
 import { createLogger } from "@bellaclaw/shared";
-import type { TCronJobContext } from "../../lib/cron-engine";
 import type { AgentHarness } from "../ai/agent-harness";
 import baseInstructions from "../ai/instructions/base-system.xml" with { type: "text" };
 import { createPlatformInstructions } from "../ai/instructions/platform";
 import { readXmlAndInjectConfig } from "../ai/instructions/read-xml-and-inject-config";
 import type { LlmClient } from "../ai/llm";
 import { EModelPurpose } from "../ai/types";
+import type { TCronJobContext } from "../cron/types";
 import type { EMessagePlatform } from "../messaging/types";
 import { SettingsService } from "../settings";
 import { DefaultConfigRecord, EConfigKey, type TConfigRecord } from "../settings/schema";
@@ -29,19 +29,17 @@ async function resolveCronScopeContext(ctx: TCronJobContext, logPrefix: string) 
   let timezone: TOption<string> = ctx.timezone;
   let settings: TConfigRecord = DefaultConfigRecord;
 
-  if (ctx.scope !== undefined) {
-    try {
-      const loaded = await SettingsService.instance.getAll(ctx.scope);
-      settings = loaded;
+  try {
+    const loaded = await SettingsService.instance.getAll(ctx.scope);
+    settings = loaded;
 
-      if (timezone === undefined) {
-        timezone = loaded[EConfigKey.AiInstructionsTimezone];
-      }
-    } catch (error) {
-      logger.warning(
-        `${logPrefix}: failed to load settings for scope "${ctx.scope}": ${String(error)}`,
-      );
+    if (timezone === undefined) {
+      timezone = loaded[EConfigKey.AiInstructionsTimezone];
     }
+  } catch (error) {
+    logger.warning(
+      `${logPrefix}: failed to load settings for scope "${ctx.scope}": ${String(error)}`,
+    );
   }
 
   if (timezone === undefined) {
@@ -57,21 +55,14 @@ export async function generateReminderText(
   ai: TReminderAi,
   trace: TBehaviorTraceContext,
 ): Promise<TOption<string>> {
-  if (ctx.reminderText !== undefined) {
-    const reminderText = ctx.reminderText.trim();
+  const content = ctx.content;
 
-    if (reminderText.length > 0) {
-      return reminderText;
-    }
-
-    logger.warning(
-      `generateReminderText: empty reminderText for job "${ctx.name}", using fallback`,
-    );
-    return ctx.reminderFallbackText;
+  if (content.kind === "text") {
+    return content.text.trim();
   }
 
-  if (ctx.reminderPromptData === undefined) {
-    return ctx.reminderFallbackText;
+  if (content.kind !== "generated") {
+    return undefined;
   }
 
   const { settings, timezone } = await resolveCronScopeContext(ctx, "generateReminderText");
@@ -90,7 +81,7 @@ export async function generateReminderText(
     const generatedText = await ai.completeText({
       prompt: [
         "Reminder prompt data JSON:",
-        ctx.reminderPromptData,
+        content.promptData,
         "",
         "Firing context JSON:",
         JSON.stringify(createFiringContext(ctx.nextRunAt, timezone)),
@@ -106,10 +97,10 @@ export async function generateReminderText(
     }
 
     logger.warning(`generateReminderText: empty reminder for job "${ctx.name}", using fallback`);
-    return ctx.reminderFallbackText;
+    return content.fallback;
   } catch (error) {
     logger.error(`generateReminderText: failed for job "${ctx.name}": ${String(error)}`);
-    return ctx.reminderFallbackText;
+    return content.fallback;
   }
 }
 
@@ -121,7 +112,9 @@ export async function generateScheduledTaskText(
 ): Promise<TScheduledTaskResult> {
   const startedAt = performance.now();
 
-  if (ctx.taskPrompt === undefined || ctx.taskFallbackText === undefined) {
+  const content = ctx.content;
+
+  if (content.kind !== "task") {
     return {
       text: undefined,
       stopReason: undefined,
@@ -135,7 +128,7 @@ export async function generateScheduledTaskText(
 
   try {
     const result = await ai.runScheduledTask({
-      prompt: ctx.taskPrompt,
+      prompt: content.prompt,
       currentTimeContext: `Scheduled firing context JSON:\n${JSON.stringify(createFiringContext(ctx.nextRunAt, timezone))}`,
       chatId: ctx.scope,
       settings,
@@ -155,7 +148,7 @@ export async function generateScheduledTaskText(
     }
 
     return {
-      text: ctx.taskFallbackText,
+      text: content.fallback,
       stopReason: result.stopReason,
       iterations: result.iterations,
       toolCallCount: result.toolCallCount,
@@ -164,7 +157,7 @@ export async function generateScheduledTaskText(
   } catch (error) {
     logger.error(`generateScheduledTaskText: failed for job "${ctx.name}": ${String(error)}`);
     return {
-      text: ctx.taskFallbackText,
+      text: content.fallback,
       stopReason: undefined,
       iterations: 0,
       toolCallCount: 0,

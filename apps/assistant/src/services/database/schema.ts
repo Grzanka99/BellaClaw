@@ -9,6 +9,7 @@ import {
   text,
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
+import type { ECronFinishedReason, ECronJobStatus, ECronJobType } from "../cron/types";
 
 export const EMBEDDING_DIMENSIONS = 768;
 
@@ -102,20 +103,17 @@ export const cronEngineJobsTable = sqliteTable(
     id: integer("id").primaryKey({ autoIncrement: true }),
     name: text("name").notNull(),
     scope: text("scope").notNull(),
-    group: text("group"),
-    type: text("type").notNull(),
+    type: text("type").$type<ECronJobType>().notNull(),
     pattern: text("pattern"),
-    reminderText: text("reminderText"),
-    reminderPromptData: text("reminderPromptData"),
-    reminderFallbackText: text("reminderFallbackText"),
-    taskPrompt: text("taskPrompt"),
-    taskFallbackText: text("taskFallbackText"),
-    nextRunAt: integer("nextRunAt").notNull(),
-    lastRunAt: integer("lastRunAt"),
-    createdAt: integer("createdAt").notNull(),
-    status: text("status").notNull().default("active"),
-    finishedAt: integer("finishedAt"),
-    finishedReason: text("finishedReason"),
+    contentKind: text("contentKind", { enum: ["text", "generated", "task"] }).notNull(),
+    contentBody: text("contentBody").notNull(),
+    contentFallback: text("contentFallback"),
+    nextRunAt: integer("nextRunAt", { mode: "timestamp_ms" }).notNull(),
+    lastRunAt: integer("lastRunAt", { mode: "timestamp_ms" }),
+    createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull(),
+    status: text("status").$type<ECronJobStatus>().notNull().default(sql`'active'`),
+    finishedAt: integer("finishedAt", { mode: "timestamp_ms" }),
+    finishedReason: text("finishedReason").$type<ECronFinishedReason>(),
     timezone: text("timezone"),
   },
   (table) => [

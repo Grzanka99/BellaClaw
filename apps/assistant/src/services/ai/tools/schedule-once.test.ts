@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
 import { compile } from "@earendil-works/pi-schema";
 import { formats } from "@earendil-works/pi-schema/formats";
-import { ECronJobStatus, ECronJobType } from "../../../lib/cron-engine";
-import { CronSingleton } from "../../cron";
+import { CronScheduler } from "../../cron";
+import { ECronJobStatus, ECronJobType } from "../../cron/types";
 import { DefaultConfigRecord } from "../../settings/schema";
 import { SScheduleOnceArgs, scheduleOnce, validateScheduleOnceArgs } from "./schedule-once";
 
@@ -14,7 +14,7 @@ const context = {
 };
 
 afterEach(() => {
-  (CronSingleton as unknown as { _instance: unknown })._instance = undefined;
+  (CronScheduler as unknown as { _instance: unknown })._instance = undefined;
 });
 
 describe("schedule-once", () => {
@@ -62,8 +62,7 @@ describe("schedule-once", () => {
       },
       "Europe/Warsaw",
     );
-    expect(once.reminderText).toBe("Reminder");
-    expect(once.taskPrompt).toBeUndefined();
+    expect(once.content).toEqual({ kind: "text", text: "Reminder" });
   });
 
   test("uses the schedule-once handler validation and date conversion", async () => {
@@ -73,12 +72,13 @@ describe("schedule-once", () => {
       type: ECronJobType.OneTime,
       status: ECronJobStatus.Active,
       nextRunAt: args.fireAt,
-      lastRunAt: undefined,
+      pattern: null,
+      lastRunAt: null,
       createdAt: new Date(),
-      finishedAt: undefined,
-      finishedReason: undefined,
+      finishedAt: null,
+      finishedReason: null,
     }));
-    (CronSingleton as unknown as { _instance: unknown })._instance = { createOnce };
+    (CronScheduler as unknown as { _instance: unknown })._instance = { createOnce };
     const tool = scheduleOnce.createAgentTool(context);
 
     await expect(
@@ -107,8 +107,7 @@ describe("schedule-once", () => {
       expect.objectContaining({
         scope: "discord:1",
         fireAt: new Date("2026-08-01T08:00:00.000Z"),
-        reminderText: "Call Mum",
-        reminderFallbackText: "Reminder unavailable",
+        content: { kind: "text", text: "Call Mum" },
       }),
     );
   });

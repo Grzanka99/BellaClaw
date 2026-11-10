@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { resetCronEngineJobsTable } from "../../services/database/test-utils";
+import { resetCronEngineJobsTable } from "../database/test-utils";
 import { CronScheduler } from "./index";
 
 describe("CronScheduler scheduleOnce timezone validation", () => {
@@ -15,19 +15,18 @@ describe("CronScheduler scheduleOnce timezone validation", () => {
   });
 
   test("rejects invalid one-time job timezones before storing", async () => {
-    const result = await engine.createOnce({
-      name: "invalid-onetime-timezone",
-      scope: "scope-a",
-      fireAt: new Date(Date.now() + 60_000),
-      timezone: "Not/A_Timezone",
-      reminderText: "Hi.",
+    await expect(
+      engine.createOnce({
+        name: "invalid-onetime-timezone",
+        scope: "scope-a",
+        fireAt: new Date(Date.now() + 60_000),
+        timezone: "Not/A_Timezone",
+        content: { kind: "text", text: "Hi." },
+      }),
+    ).rejects.toMatchObject({
+      code: "create-failed",
+      message: "Error: Invalid timezone: Not/A_Timezone",
     });
-
-    if (!("error" in result)) {
-      throw new Error("Expected invalid timezone to fail");
-    }
-
-    expect(String(result.error)).toContain("Invalid timezone");
 
     const job = await engine.get("invalid-onetime-timezone", "scope-a");
     expect(job).toBeUndefined();

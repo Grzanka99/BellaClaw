@@ -1,14 +1,13 @@
 import { bool, obj, opt, type Static, str } from "@earendil-works/pi-schema";
-import { CronSingleton } from "../../cron";
+import { CronScheduler } from "../../cron";
 import { EConfigKey } from "../../settings/schema";
 import {
-  countCronContentModes,
   LOCAL_FIRE_AT_PATTERN,
-  normalizeCronContentFields,
+  parseCronContent,
   parseLocalFireAt,
-  validateCronFallbackPairing,
+  runCronJobOperation,
 } from "./cron-content";
-import { defineTool, requireChatId, ToolError } from "./define-tool";
+import { defineTool, requireChatId } from "./define-tool";
 import instructions from "./schedule-once.xml" with { type: "text" };
 
 export const SScheduleOnceArgs = obj({
@@ -19,7 +18,6 @@ export const SScheduleOnceArgs = obj({
     pattern: LOCAL_FIRE_AT_PATTERN,
     description: "Future local date-time in the owner's timezone, YYYY-MM-DDTHH:mm[:ss], no offset",
   }),
-  group: opt(str({ description: "Optional group label stored with the cron job" })),
   reminderText: opt(
     str({ description: "Plain reminder text for a direct, non-generated reminder" }),
   ),
@@ -32,32 +30,12 @@ export const SScheduleOnceArgs = obj({
   overwrite: opt(bool({ description: "Replace an existing one-time job with the same name" })),
 });
 
-export function validateScheduleOnceArgs(
-  rawArgs: Static<typeof SScheduleOnceArgs>,
-  timezone: string,
-) {
-  const args = { ...rawArgs, ...normalizeCronContentFields(rawArgs) };
-  const contentModeCount = countCronContentModes(args);
-
-  if (contentModeCount === 0) {
-    throw new ToolError(
-      "missing-content",
-      "Provide reminderText, reminderPromptData, or taskPrompt",
-    );
-  }
-
-  if (contentModeCount > 1) {
-    throw new ToolError(
-      "conflicting-content-modes",
-      "Provide only one of reminderText, reminderPromptData, or taskPrompt",
-    );
-  }
-
-  validateCronFallbackPairing(args);
-
+export function validateScheduleOnceArgs(args: Static<typeof SScheduleOnceArgs>, timezone: string) {
   return {
-    ...args,
+    name: args.name,
+    content: parseCronContent(args, true),
     fireAt: parseLocalFireAt(args.fireAt, timezone),
+    overwrite: args.overwrite,
   };
 }
 
@@ -82,19 +60,10 @@ export const scheduleOnce = defineTool({
   execute: async (context, args) => {
     const ownerTimezone = context.settings[EConfigKey.AiInstructionsTimezone];
     const validatedArgs = validateScheduleOnceArgs(args, ownerTimezone);
-    const result = await CronSingleton.instance.createOnce({
-      ...validatedArgs,
-      scope: requireChatId(context.chatId),
-      timezone: ownerTimezone,
-    });
+    const scope = requireChatId(context.chatId);
 
-    if ("error" in result) {
-      throw new ToolError(
-        `${result.operation}-failed`,
-        `${result.operation} failed: ${String(result.error)}`,
-      );
-    }
-
-    return result;
+    return runCronJobOperation(() =>
+      CronScheduler.instance.createOnce({ ...validatedArgs, scope, timezone: ownerTimezone }),
+    );
   },
 });

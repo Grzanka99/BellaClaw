@@ -20,9 +20,9 @@ describe("validateToolArguments", () => {
           name: "x",
           fireAt: "2026-09-01T10:00:00",
           reminderText: "Reminder",
-          group: null,
+          taskPrompt: null,
         },
-        path: "/group",
+        path: "/taskPrompt",
         reason: "expected string, got null",
       },
       {
