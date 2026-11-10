@@ -117,17 +117,17 @@ Use `Bun.env.*` — never `process.env`.
 
 ## Tool Definitions Pattern
 
-Each tool is one file plus its instructions, flat under `apps/assistant/src/services/ai/tools/`:
+Each tool lives in its own directory under `apps/assistant/src/services/ai/tools/`:
 
 ```
-apps/assistant/src/services/ai/tools/
-  <tool-name>.ts      — exports one `defineTool()` object
-  <tool-name>.xml     — detailed instructions for the AI on when/how to use the tool
-  <tool-name>.test.ts — tests, when the tool has them
+apps/assistant/src/services/ai/tools/<tool-name>/
+  index.ts         — exports one `defineTool()` object
+  instructions.xml — detailed instructions for the AI on when/how to use the tool
+  index.test.ts    — tests, when the tool has them
 ```
 
-- `<tool-name>.ts`: `defineTool({ name, label, description, schema, instructions, mode, execute })` with an `S*` pi-schema schema and `import instructions from "./<tool-name>.xml" with { type: "text" }`. `defineTool` validates arguments and wraps the result; `execute(context, args, signal)` returns plain data. Treat tool arguments as structured data. Pi validates shape; keep cross-field domain validation in `execute` and throw descriptive errors. Never apply `JSON.parse` to tool arguments.
-- `<tool-name>.xml`: XML format with `<purpose>`, `<tool>`, `<usage_rules>`, and `<examples>` sections.
+- `index.ts`: `defineTool({ name, label, description, schema, instructions, mode, execute })` with an `S*` pi-schema schema and `import instructions from "./instructions.xml" with { type: "text" }`. `defineTool` validates arguments and wraps the result; `execute(context, args, signal)` returns plain data. Treat tool arguments as structured data. Pi validates shape; keep cross-field domain validation in `execute` and throw descriptive errors. Never apply `JSON.parse` to tool arguments.
+- `instructions.xml`: XML format with `<purpose>`, `<tool>`, `<usage_rules>`, and `<examples>` sections.
 - Agents pick tools by reference in the `AGENTS` table in `apps/assistant/src/services/ai/agents/index.ts`.
 
 ## Scope Rules
