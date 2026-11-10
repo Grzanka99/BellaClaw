@@ -12,7 +12,6 @@ import {
   type THandlerSpan,
 } from "../app-logger/operations";
 import { CronSingleton } from "../cron";
-import { EMemoryImportance } from "../memory/types";
 import { MessageHandler } from "../message-handler";
 import { MessagingAdapter } from "../messaging";
 import { parseCanonicalChatKey } from "../messaging/chat-key";
@@ -146,17 +145,11 @@ export class ScheduledDelivery {
     }
 
     const deliveredAt = Date.now();
-    const saveSpan = startMemorySaveSpan(
-      trace,
-      ERole.Assistant,
-      EMemoryImportance.Low,
-      text.length,
-    );
+    const saveSpan = startMemorySaveSpan(trace, ERole.Assistant, text.length);
 
     try {
       await MessageHandler.getInstance(canonicalChatId).saveDeliveredMessage(
         `[${memoryPrefix} ${ctx.name}]: ${text}`,
-        parsedScope.platform,
         deliveredAt,
       );
       saveSpan.ok();

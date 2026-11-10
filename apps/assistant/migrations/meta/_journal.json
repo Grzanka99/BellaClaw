@@ -78,6 +78,13 @@
       "when": 1789652666626,
       "tag": "0010_conversation_compaction",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1794304823747,
+      "tag": "0011_transcript_cleanup",
+      "breakpoints": true
     }
   ]
 }

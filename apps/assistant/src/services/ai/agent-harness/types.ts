@@ -7,7 +7,6 @@ import type { TMcpProfile } from "../../mcp/config";
 import type { EMessagePlatform } from "../../messaging/types";
 import type { TConfigRecord } from "../../settings/schema";
 import type { EAgentName } from "../agents";
-import type { THistoryItem } from "../types";
 
 export type TAgentRunArgs = {
   name: EAgentName;
@@ -17,7 +16,6 @@ export type TAgentRunArgs = {
   currentTimeContext: TOption<string>;
   platform: TOption<EMessagePlatform>;
   trace: TBehaviorTraceContext;
-  history: TOption<THistoryItem[]>;
   conversation?: TConversation;
   parentToolCallId: TOption<string>;
   signal: TOption<AbortSignal>;

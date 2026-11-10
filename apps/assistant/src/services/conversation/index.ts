@@ -1,11 +1,10 @@
 import { AsyncQueue, type TOption } from "@bellaclaw/shared";
 import { type AssistantMessage, contentText, type Message } from "@earendil-works/pi-ai";
-import { and, asc, desc, eq, gt, isNotNull, ne } from "drizzle-orm";
+import { and, asc, eq, gt, isNotNull } from "drizzle-orm";
 import { emptyUsage } from "../ai/llm";
 import { ERole } from "../ai/types";
 import { DatabaseConnector } from "../database";
-import { memoriesTable } from "../database/schema";
-import { EMemoryImportance } from "../memory/types";
+import { conversationSummariesTable, memoriesTable, type TSelectMemory } from "../database/schema";
 import { SConversationMessage, type TConversation } from "./types";
 
 export class ConversationStore {
@@ -20,22 +19,44 @@ export class ConversationStore {
     return ConversationStore._instance;
   }
 
-  public load(chatId: string, platform: string): Promise<TOption<TConversation>> {
+  public saveUserMessage(
+    chatId: string,
+    author: ERole,
+    message: string,
+    createdAt: Date,
+  ): Promise<TSelectMemory> {
+    return this.queue.enqueue(() =>
+      this.db
+        .insert(memoriesTable)
+        .values({ chatId, author, message, createdAt })
+        .returning()
+        .get(),
+    );
+  }
+
+  public findChatIds(): Promise<string[]> {
     return this.queue.enqueue(async () => {
-      const scope = and(eq(memoriesTable.chatId, chatId), eq(memoriesTable.platform, platform));
+      const rows = await this.db
+        .selectDistinct({ chatId: memoriesTable.chatId })
+        .from(memoriesTable)
+        .orderBy(asc(memoriesTable.chatId));
+      return rows.map((row) => row.chatId);
+    });
+  }
+
+  public load(chatId: string): Promise<TOption<TConversation>> {
+    return this.queue.enqueue(async () => {
       const summary = await this.db
         .select()
-        .from(memoriesTable)
-        .where(and(scope, eq(memoriesTable.kind, "summary")))
-        .orderBy(desc(memoriesTable.id))
+        .from(conversationSummariesTable)
+        .where(eq(conversationSummariesTable.chatId, chatId))
         .get();
       const rows = await this.db
         .select()
         .from(memoriesTable)
         .where(
           and(
-            scope,
-            ne(memoriesTable.kind, "summary"),
+            eq(memoriesTable.chatId, chatId),
             gt(memoriesTable.id, summary?.summarizedThroughId ?? 0),
             isNotNull(memoriesTable.modelMessage),
           ),
@@ -53,8 +74,8 @@ export class ConversationStore {
         entries.push({ id: row.id, message: parsed.data });
       }
       return {
-        summary: summary?.message ?? "",
-        summaryTimestamp: summary?.createdAt ?? 0,
+        summary: summary?.summary ?? "",
+        summaryTimestamp: summary?.createdAt.getTime() ?? 0,
         summarizedThroughId: summary?.summarizedThroughId ?? 0,
         entries,
       };
@@ -63,31 +84,27 @@ export class ConversationStore {
 
   public saveTurn(
     chatId: string,
-    platform: string,
     messages: Message[],
     userMessageId: number,
     previous: TOption<TConversation>,
-    bootstrapIds: number[] = [],
   ): Promise<TConversation> {
     return this.queue.enqueue(() =>
       this.db.transaction(async (tx) => {
         const entries = [...(previous?.entries ?? [])];
         const pending = messages.slice(entries.length);
-        const sourceIds = [...bootstrapIds, userMessageId];
         for (const [index, message] of pending.entries()) {
-          const sourceId = sourceIds[index];
-          if (sourceId !== undefined) {
+          if (index === 0) {
             const updated = await tx
               .update(memoriesTable)
-              .set({ modelMessage: JSON.stringify(message), platform })
-              .where(and(eq(memoriesTable.id, sourceId), eq(memoriesTable.chatId, chatId)));
+              .set({ modelMessage: JSON.stringify(message) })
+              .where(and(eq(memoriesTable.id, userMessageId), eq(memoriesTable.chatId, chatId)));
             if (updated.rowsAffected !== 1) {
               throw new Error("Conversation source message is missing");
             }
-            entries.push({ id: sourceId, message });
+            entries.push({ id: userMessageId, message });
             continue;
           }
-          let kind = "tool";
+          let kind: TSelectMemory["kind"] = "tool";
           if (index === pending.length - 1 && message.role === "assistant") {
             kind = "message";
           }
@@ -101,14 +118,11 @@ export class ConversationStore {
             .insert(memoriesTable)
             .values({
               chatId,
-              platform,
               kind,
               author: message.role,
-              importance: EMemoryImportance.Medium,
               message: text,
               modelMessage: JSON.stringify(message),
-              createdAt: message.timestamp,
-              lastReadAt: message.timestamp,
+              createdAt: new Date(message.timestamp),
             })
             .returning({ id: memoriesTable.id })
             .get();
@@ -124,12 +138,7 @@ export class ConversationStore {
     );
   }
 
-  public saveDeliveredMessage(
-    chatId: string,
-    platform: string,
-    text: string,
-    deliveredAt: number,
-  ): Promise<void> {
+  public saveDeliveredMessage(chatId: string, text: string, deliveredAt: number): Promise<void> {
     const message: AssistantMessage = {
       role: "assistant",
       content: [{ type: "text", text }],
@@ -143,31 +152,26 @@ export class ConversationStore {
     return this.queue.enqueue(async () => {
       await this.db.insert(memoriesTable).values({
         chatId,
-        platform,
         kind: "message",
         author: ERole.Assistant,
-        importance: EMemoryImportance.Low,
         message: text,
         modelMessage: JSON.stringify(message),
-        createdAt: deliveredAt,
-        lastReadAt: deliveredAt,
+        createdAt: new Date(deliveredAt),
       });
     });
   }
 
-  public saveSummary(chatId: string, platform: string, state: TConversation): Promise<void> {
+  public saveSummary(chatId: string, state: TConversation): Promise<void> {
     return this.queue.enqueue(async () => {
-      await this.db.insert(memoriesTable).values({
-        chatId,
-        platform,
-        kind: "summary",
-        author: ERole.System,
-        importance: EMemoryImportance.Medium,
-        message: state.summary,
+      const values = {
+        summary: state.summary,
         summarizedThroughId: state.summarizedThroughId,
-        createdAt: state.summaryTimestamp,
-        lastReadAt: state.summaryTimestamp,
-      });
+        createdAt: new Date(state.summaryTimestamp),
+      };
+      await this.db
+        .insert(conversationSummariesTable)
+        .values({ chatId, ...values })
+        .onConflictDoUpdate({ target: conversationSummariesTable.chatId, set: values });
     });
   }
 }

@@ -54,18 +54,23 @@ export const memoriesTable = sqliteTable(
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
     chatId: text("chatId").notNull(),
-    author: text("author").notNull(),
-    importance: text("importance").notNull(),
+    author: text("author", { enum: ["system", "user", "assistant", "toolResult"] }).notNull(),
     message: text("message").notNull(),
     modelMessage: text("modelMessage"),
-    kind: text("kind").notNull().default("message"),
-    summarizedThroughId: integer("summarizedThroughId"),
-    platform: text("platform"),
-    createdAt: integer("createdAt").notNull(),
-    lastReadAt: integer("lastReadAt").notNull(),
+    kind: text("kind", { enum: ["message", "tool"] })
+      .notNull()
+      .default("message"),
+    createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull(),
   },
   (table) => [index("memories_chat_id_idx").on(table.chatId, table.id)],
 );
+
+export const conversationSummariesTable = sqliteTable("conversation_summaries", {
+  chatId: text("chatId").primaryKey(),
+  summary: text("summary").notNull(),
+  summarizedThroughId: integer("summarizedThroughId").notNull(),
+  createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull(),
+});
 
 export const factsTable = sqliteTable(
   "facts",
@@ -74,9 +79,9 @@ export const factsTable = sqliteTable(
     chatId: text("chatId").notNull(),
     text: text("text").notNull(),
     embedding: f32Blob("embedding").notNull(),
-    createdAt: integer("createdAt").notNull(),
+    createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull(),
     supersededBy: integer("supersededBy"),
-    forgottenAt: integer("forgottenAt"),
+    forgottenAt: integer("forgottenAt", { mode: "timestamp_ms" }),
     sourceMessageId: integer("sourceMessageId").notNull(),
   },
   (table) => [
@@ -88,7 +93,7 @@ export const factsTable = sqliteTable(
 export const factDistillationStateTable = sqliteTable("fact_distillation_state", {
   chatId: text("chatId").primaryKey(),
   lastProcessedMessageId: integer("lastProcessedMessageId").notNull(),
-  updatedAt: integer("updatedAt").notNull(),
+  updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull(),
 });
 
 export const cronEngineJobsTable = sqliteTable(

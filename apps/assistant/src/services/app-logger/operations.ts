@@ -1,6 +1,5 @@
 import { AppLogger, type TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
 import type { ERole } from "../ai/types";
-import type { EMemoryImportance } from "../memory/types";
 import { startSpan } from "./span";
 
 export function logHandlerStarted(trace: TBehaviorTraceContext, handler: string) {
@@ -33,14 +32,12 @@ export function startHandlerSpan(trace: TBehaviorTraceContext, handler: string) 
 export function startMemorySaveSpan(
   trace: TBehaviorTraceContext,
   author: ERole,
-  importance: EMemoryImportance,
   messageChars: number,
 ) {
   return startSpan(trace, "memory.save.completed", "memory", {
-    summary: `memory save completed author=${author} importance=${importance}`,
+    summary: `memory save completed author=${author}`,
     metadata: {
       author,
-      importance,
       messageChars,
     },
   });

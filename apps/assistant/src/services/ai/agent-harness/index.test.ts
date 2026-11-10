@@ -30,7 +30,7 @@ import { DefaultConfigRecord, EConfigKey } from "../../settings/schema";
 import { EAgentName } from "../agents";
 import { LlmClient } from "../llm";
 import { aiModels, getAiModelConfig, getAiModelConfigs } from "../providers/registry";
-import { EAiProvider, EModelPurpose, ERole, type THistoryItem } from "../types";
+import { EAiProvider, EModelPurpose } from "../types";
 import { AgentHarness, isSerializedToolCall } from ".";
 import type { TAgentRunArgs, TAgentRunResult } from "./types";
 
@@ -103,7 +103,6 @@ describe("AgentHarness", () => {
     ]);
     const args = {
       prompt: "hello",
-      history: [],
       chatId: "discord:1",
       settings: { ...DefaultConfigRecord, [EConfigKey.AiProvider]: EAiProvider.Openrouter },
       currentTimeContext: undefined,
@@ -131,7 +130,7 @@ describe("AgentHarness", () => {
     }
   });
 
-  test("uses the configured model and supplied history with stable conversation routing", async () => {
+  test("uses the configured model with stable conversation routing", async () => {
     const contexts: Array<{ messages: TranscriptContext["messages"]; toolNames: string[] }> = [];
     const models: Model<string>[] = [];
     const sessionIds: Array<string | undefined> = [];
@@ -163,7 +162,6 @@ describe("AgentHarness", () => {
     const harness = AgentHarness.instance;
     const first = await harness.runMain({
       prompt: "first prompt",
-      history: [{ role: ERole.User, content: "stored history" }],
       chatId: "discord:1",
       settings,
       currentTimeContext: "time one",
@@ -179,7 +177,6 @@ describe("AgentHarness", () => {
     });
     const second = await harness.runMain({
       prompt: "second prompt",
-      history: [],
       chatId: "discord:1",
       settings,
       currentTimeContext: "time two",
@@ -196,7 +193,7 @@ describe("AgentHarness", () => {
     ]);
     expect(sessionIds[0]).toMatch(/^[0-9a-f]{64}$/);
     expect(sessionIds[1]).toBe(sessionIds[0]);
-    expect(contexts[0]?.messages.filter((message) => message.role === "user")).toHaveLength(2);
+    expect(contexts[0]?.messages.filter((message) => message.role === "user")).toHaveLength(1);
     expect(contexts[1]?.messages.filter((message) => message.role === "user")).toHaveLength(1);
     expect(contexts[1]?.messages.filter((message) => message.role === "user")).toMatchObject([
       { role: "user", content: [{ type: "text", text: "time two\n\nsecond prompt" }] },
@@ -257,7 +254,6 @@ describe("AgentHarness", () => {
 
       const result = await AgentHarness.instance.runMain({
         prompt: "Use docs",
-        history: [],
         chatId,
         settings: { ...DefaultConfigRecord, [EConfigKey.AiProvider]: EAiProvider.Openrouter },
         currentTimeContext: undefined,
@@ -325,7 +321,6 @@ describe("AgentHarness", () => {
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
       trace: TEST_TRACE,
-      history: [],
       parentToolCallId: "delegate-call",
       signal: undefined,
       delegationCount: undefined,
@@ -716,7 +711,6 @@ describe("AgentHarness", () => {
     ]);
     const args = {
       prompt: `What do I prefer? ${"background ".repeat(41_000)}`,
-      history: [],
       chatId: "replay-tools",
       settings: { ...DefaultConfigRecord, [EConfigKey.AiProvider]: EAiProvider.Openrouter },
       platform: EMessagePlatform.Discord,
@@ -811,7 +805,6 @@ describe("AgentHarness", () => {
 
     const conversation = await AgentHarness.instance.runMain({
       prompt: "hello",
-      history: [],
       chatId: "discord:1",
       settings,
       currentTimeContext: undefined,
@@ -821,7 +814,6 @@ describe("AgentHarness", () => {
     });
     const sameConversation = await AgentHarness.instance.runMain({
       prompt: "hello again",
-      history: [],
       chatId: "discord:1",
       settings,
       currentTimeContext: undefined,
@@ -831,7 +823,6 @@ describe("AgentHarness", () => {
     });
     const otherConversation = await AgentHarness.instance.runMain({
       prompt: "hello elsewhere",
-      history: [],
       chatId: "discord:2",
       settings,
       currentTimeContext: undefined,
@@ -936,7 +927,6 @@ describe("AgentHarness", () => {
     const settings = { ...DefaultConfigRecord, [EConfigKey.AiProvider]: provider };
     const args = {
       prompt: "Hello",
-      history: [],
       chatId: "chat-1",
       settings,
       currentTimeContext: undefined,
@@ -1025,7 +1015,6 @@ describe("AgentHarness", () => {
     try {
       await AgentHarness.instance.runMain({
         prompt: "Check my notes",
-        history: [],
         chatId: "discord:1",
         settings: { ...DefaultConfigRecord, [EConfigKey.AiProvider]: EAiProvider.Openrouter },
         currentTimeContext: undefined,
@@ -1072,7 +1061,6 @@ describe("AgentHarness", () => {
     try {
       await AgentHarness.instance.runMain({
         prompt: "Append to my note every minute",
-        history: [],
         chatId: "discord:1",
         settings: { ...DefaultConfigRecord, [EConfigKey.AiProvider]: EAiProvider.Openrouter },
         currentTimeContext: undefined,
@@ -1106,7 +1094,6 @@ describe("AgentHarness", () => {
     ]);
     const args = {
       prompt: "Remind me tomorrow",
-      history: [],
       chatId: "discord:1",
       settings: { ...DefaultConfigRecord, [EConfigKey.AiProvider]: EAiProvider.Openrouter },
       currentTimeContext: "Message received at:\nUTC: 2026-09-10T10:00:00.000Z",
@@ -1156,7 +1143,6 @@ describe("AgentHarness", () => {
     ]);
     const args = {
       prompt: "hello",
-      history: [],
       chatId: "discord:1",
       settings: {
         ...DefaultConfigRecord,
@@ -1184,7 +1170,6 @@ describe("AgentHarness", () => {
 
     const result = await AgentHarness.instance.runMain({
       prompt: "cancelled",
-      history: [],
       chatId: "discord:1",
       settings: {
         ...DefaultConfigRecord,
@@ -1209,7 +1194,6 @@ describe("AgentHarness", () => {
 
     const root = await AgentHarness.instance.runMain({
       prompt: "loop",
-      history: [],
       chatId: "discord:1",
       settings: {
         ...DefaultConfigRecord,
@@ -1238,7 +1222,6 @@ describe("AgentHarness", () => {
         currentTimeContext: undefined;
         platform: EMessagePlatform;
         trace: TBehaviorTraceContext;
-        history: THistoryItem[];
         parentToolCallId: undefined;
         signal: undefined;
         delegationCount: undefined;
@@ -1255,7 +1238,6 @@ describe("AgentHarness", () => {
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
       trace: TEST_TRACE,
-      history: [],
       parentToolCallId: undefined,
       signal: undefined,
       delegationCount: undefined,
@@ -1274,7 +1256,6 @@ describe("AgentHarness", () => {
 
     const result = await AgentHarness.instance.runMain({
       prompt: "refuse final",
-      history: [],
       chatId: "discord:1",
       settings: {
         ...DefaultConfigRecord,
@@ -1303,7 +1284,6 @@ describe("AgentHarness", () => {
 
     const result = await AgentHarness.instance.runMain({
       prompt: "fail after tool",
-      history: [],
       chatId: "discord:1",
       settings: {
         ...DefaultConfigRecord,
@@ -1337,7 +1317,6 @@ describe("AgentHarness", () => {
 
     const pending = AgentHarness.instance.runMain({
       prompt: "cancel active",
-      history: [],
       chatId: "discord:1",
       settings: {
         ...DefaultConfigRecord,
@@ -1371,7 +1350,6 @@ describe("AgentHarness", () => {
 
     const result = await AgentHarness.instance.runMain({
       prompt: "repeat",
-      history: [],
       chatId: "discord:1",
       settings: {
         ...DefaultConfigRecord,
@@ -1408,7 +1386,6 @@ describe("AgentHarness", () => {
 
     const result = await AgentHarness.instance.runMain({
       prompt: "repeat nested",
-      history: [],
       chatId: "discord:1",
       settings: {
         ...DefaultConfigRecord,
@@ -1455,7 +1432,6 @@ describe("AgentHarness", () => {
 
     const result = await AgentHarness.instance.runMain({
       prompt: "Use memory and settings",
-      history: [],
       chatId: "discord:1",
       settings: {
         ...DefaultConfigRecord,
@@ -1495,7 +1471,6 @@ describe("AgentHarness", () => {
 
     const result = await AgentHarness.instance.runMain({
       prompt: "Recall the date, then schedule it",
-      history: [],
       chatId: "discord:1",
       settings: {
         ...DefaultConfigRecord,
@@ -1536,7 +1511,6 @@ describe("AgentHarness", () => {
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
       trace: { turnId: "turn", chatId: "discord:1", platform: EMessagePlatform.Discord },
-      history: [],
       parentToolCallId: undefined,
       signal: undefined,
       delegationCount: () => {
@@ -1562,7 +1536,6 @@ describe("AgentHarness", () => {
     expect(harness.run).toHaveBeenCalledWith(
       expect.objectContaining({
         name: EAgentName.Memory,
-        history: undefined,
         parentToolCallId: "call-0",
         delegationCount: undefined,
       }),
@@ -1641,7 +1614,6 @@ describe("AgentHarness", () => {
     try {
       await AgentHarness.instance.runMain({
         prompt: "Recall alpha",
-        history: [{ role: ERole.Assistant, content: "Old response must not be counted" }],
         chatId: "discord:1",
         settings,
         currentTimeContext: undefined,
@@ -1742,7 +1714,6 @@ describe("AgentHarness", () => {
 
     await AgentHarness.instance.runMain({
       prompt: "What did project alpha use?",
-      history: [],
       chatId: "discord:1",
       settings,
       currentTimeContext: undefined,
@@ -1826,7 +1797,6 @@ describe("AgentHarness", () => {
 
     await AgentHarness.instance.runMain({
       prompt: "Test tool failure",
-      history: [],
       chatId: "discord:1",
       settings,
       currentTimeContext: undefined,

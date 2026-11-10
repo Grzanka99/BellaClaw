@@ -136,7 +136,6 @@ export async function generateScheduledTaskText(
   try {
     const result = await ai.runScheduledTask({
       prompt: ctx.taskPrompt,
-      history: undefined,
       currentTimeContext: `Scheduled firing context JSON:\n${JSON.stringify(createFiringContext(ctx.nextRunAt, timezone))}`,
       chatId: ctx.scope,
       settings,

@@ -51,7 +51,7 @@ import {
   type TToolLogPolicy,
   validateToolArguments,
 } from "../tools/define-tool";
-import { EModelPurpose, ERole, type THistoryItem } from "../types";
+import { EModelPurpose } from "../types";
 import type { TAgentRunArgs, TAgentRunResult, TMainAgentRunResult } from "./types";
 
 const SEQUENTIAL: "sequential" = "sequential";
@@ -113,7 +113,6 @@ export class AgentHarness {
       chatId,
       platform,
       prompt: "",
-      history: [],
       currentTimeContext: undefined,
       trace,
       signal: undefined,
@@ -182,12 +181,7 @@ export class AgentHarness {
       });
     }
 
-    let messages = this.createHistory(
-      args.history,
-      modelConfig.model.api,
-      modelConfig.model.provider,
-      modelConfig.model.id,
-    );
+    let messages: AgentMessage[] = [];
     if (args.conversation !== undefined) {
       messages = structuredClone(conversationMessages(args.conversation));
     }
@@ -479,44 +473,6 @@ export class AgentHarness {
     return { text: finalText, iterations, toolCallCount, stopReason, messages: transcript };
   }
 
-  private createHistory(
-    history: TOption<THistoryItem[]>,
-    api: Api,
-    provider: string,
-    model: string,
-  ): AgentMessage[] {
-    if (history === undefined) {
-      return [];
-    }
-
-    const timestamp = Date.now();
-    const messages: AgentMessage[] = [];
-
-    for (const item of history) {
-      if (item.role === ERole.System) {
-        continue;
-      }
-
-      if (item.role === ERole.User) {
-        messages.push({ role: "user", content: item.content, timestamp });
-        continue;
-      }
-
-      messages.push({
-        role: "assistant",
-        content: [{ type: "text", text: item.content }],
-        api,
-        provider,
-        model,
-        usage: emptyUsage(),
-        stopReason: "stop",
-        timestamp,
-      });
-    }
-
-    return messages;
-  }
-
   private async createSystemPrompt(args: TAgentRunArgs): Promise<string> {
     const agentDefinition = AGENTS[args.name];
     const parts = [
@@ -617,7 +573,6 @@ export class AgentHarness {
             ...args,
             name: target,
             prompt: `Original user message:\n${args.prompt}\n\nDelegated task:\n${parsedParameters.task}`,
-            history: undefined,
             conversation: undefined,
             parentToolCallId: toolCallId,
             delegationCount: undefined,
@@ -742,7 +697,6 @@ export class AgentHarness {
                   ...args,
                   name: EAgentName.Mcp,
                   prompt: this.createMcpPrompt(args.prompt, parsed.task, parsed.context),
-                  history: undefined,
                   conversation: undefined,
                   parentToolCallId: toolCallId,
                   signal: AbortSignal.any([runSignal, session.signal]),

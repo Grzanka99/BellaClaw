@@ -160,7 +160,6 @@ describe("generateScheduledTaskText", () => {
     expect(args?.chatId).toBe("signal:+100");
     expect(args?.platform).toBe(EMessagePlatform.Signal);
     expect(args?.settings).toBe(ownerSettings);
-    expect(args?.history).toBeUndefined();
     expect(args?.currentTimeContext).toContain('"fireTimestamp":"2026-01-05T08:00:00.000Z"');
   });
 

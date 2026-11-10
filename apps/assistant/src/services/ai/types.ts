@@ -15,11 +15,6 @@ export enum ERole {
   Assistant = "assistant",
 }
 
-export type THistoryItem = {
-  content: string;
-  role: ERole;
-};
-
 export type TToolCall = {
   id: string;
   name: string;

@@ -3,14 +3,15 @@ import type { TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
 import { fauxAssistantMessage, type Message, normalizeContext } from "@earendil-works/pi-ai";
 import { convertResponsesMessages } from "@earendil-works/pi-ai/api/openai-responses-shared";
 import { transformMessages } from "@earendil-works/pi-ai/api/transform-messages";
+import { eq } from "drizzle-orm";
 import { ECronJobType, type TCronJobContext } from "../../lib/cron-engine";
 import type { AgentHarness } from "../ai/agent-harness";
 import { getAiModelConfig } from "../ai/providers/registry";
 import { EAiProvider, EModelPurpose, ERole } from "../ai/types";
-import { ConversationStore } from "../conversation";
 import { conversationMessages, type TConversation } from "../conversation/types";
+import { DatabaseConnector } from "../database";
+import { memoriesTable } from "../database/schema";
 import { Memory } from "../memory";
-import { EMemoryImportance } from "../memory/types";
 import { MessageHandler } from "../message-handler";
 import type { TIncommingMessage } from "../message-handler/types";
 import { MessagingAdapter } from "../messaging";
@@ -171,12 +172,11 @@ describe("ScheduledDelivery", () => {
       new Set(),
     );
     expect(JSON.stringify(request)).toContain(transcript);
-    expect(await ConversationStore.instance.load(chatId, EMessagePlatform.Discord)).toBeUndefined();
-    const memories = await Memory.instance.findRecent(chatId, 10, EMessagePlatform.Signal);
+    const memories = await DatabaseConnector.instance.database
+      .select()
+      .from(memoriesTable)
+      .where(eq(memoriesTable.chatId, chatId));
     expect(memories.filter((row) => row.message === transcript)).toHaveLength(1);
-    expect(memories.find((row) => row.message === transcript)?.importance).toBe(
-      EMemoryImportance.Low,
-    );
   });
 
   test.each([
@@ -241,9 +241,12 @@ describe("ScheduledDelivery", () => {
         timestamp: deliveredAt,
       });
       expect(conversation?.entries[0]?.id).toBeGreaterThan(conversation?.summarizedThroughId ?? 0);
-      const saved = (await Memory.instance.findRecent(chatId, 10)).find((row) =>
-        row.message.includes("CRON REMINDER"),
-      );
+      const saved = (
+        await DatabaseConnector.instance.database
+          .select()
+          .from(memoriesTable)
+          .where(eq(memoriesTable.chatId, chatId))
+      ).find((row) => row.message.includes("CRON REMINDER"));
       expect(saved?.createdAt.getTime()).toBe(deliveredAt);
     } finally {
       finish.resolve();
@@ -265,7 +268,6 @@ describe("ScheduledDelivery", () => {
     expect(sendText).toHaveBeenCalledWith("+100", "Take a break.");
     expect(save).toHaveBeenCalledWith(
       "signal:+100",
-      EMessagePlatform.Signal,
       "[CRON REMINDER daily]: Take a break.",
       expect.any(Number),
     );
@@ -323,7 +325,6 @@ describe("ScheduledDelivery", () => {
     expect(sendText).toHaveBeenCalledWith("+100", "Briefing unavailable.");
     expect(save).toHaveBeenCalledWith(
       "signal:+100",
-      EMessagePlatform.Signal,
       "[CRON TASK daily]: Briefing unavailable.",
       expect.any(Number),
     );

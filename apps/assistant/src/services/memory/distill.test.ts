@@ -2,12 +2,13 @@ import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import type { TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
 import { LlmClient, LlmResponseError } from "../ai/llm";
 import { EModelPurpose, ERole } from "../ai/types";
+import { ConversationStore } from "../conversation";
+import type { TSelectMemory } from "../database/schema";
 import { SettingsService } from "../settings";
 import { DefaultConfigRecord } from "../settings/schema";
 import { Memory } from ".";
 import { FactDistiller } from "./distill";
-import type { TFactSearchResult, TLiveFactWindow, TMemory } from "./types";
-import { EMemoryImportance } from "./types";
+import type { TFactSearchResult, TLiveFactWindow } from "./types";
 
 const TEST_TRACE: TBehaviorTraceContext = {
   turnId: "test",
@@ -27,20 +28,22 @@ type TDistillerInternals = {
     findLiveFactCandidates: ReturnType<typeof mock>;
     commitLiveFactWindow: ReturnType<typeof mock>;
     loadLiveFactWindow: ReturnType<typeof mock>;
+  };
+  conversations: {
     findChatIds: ReturnType<typeof mock>;
   };
   processWindow: ReturnType<typeof mock>;
 };
 
-function makeMemory(id: number, author: ERole, message: string): TMemory {
+function makeMemory(id: number, author: ERole, message: string): TSelectMemory {
   return {
     id,
     chatId: "chat-comet",
     author,
-    importance: EMemoryImportance.Medium,
     message,
+    modelMessage: null,
+    kind: "message",
     createdAt: new Date("2026-01-01T00:00:00.000Z"),
-    lastReadAt: new Date("2026-01-01T00:00:00.000Z"),
   };
 }
 
@@ -96,6 +99,8 @@ function setupDistiller() {
     findLiveFactCandidates: mock(async () => []),
     commitLiveFactWindow: mock(async () => ({ committed: true, facts: [] })),
     loadLiveFactWindow: mock(async () => ({ ...makeWindow(), messages: [] })),
+  };
+  internals.conversations = {
     findChatIds: mock(async () => []),
   };
   return { distiller, internals };
@@ -405,18 +410,18 @@ describe("FactDistiller", () => {
     if (scenario.distinct) {
       secondText = "The user's bicycle is blue.";
     }
-    const first = await memory.save({
+    const first = await ConversationStore.instance.saveUserMessage(
       chatId,
-      author: ERole.User,
-      importance: EMemoryImportance.Medium,
-      message: firstText,
-    });
-    const second = await memory.save({
+      ERole.User,
+      firstText,
+      new Date(),
+    );
+    const second = await ConversationStore.instance.saveUserMessage(
       chatId,
-      author: ERole.User,
-      importance: EMemoryImportance.Medium,
-      message: secondText,
-    });
+      ERole.User,
+      secondText,
+      new Date(),
+    );
     const sources = [first, second];
     const facts = [
       { text: firstText, sourceMessageId: first.id },
@@ -644,7 +649,7 @@ describe("FactDistiller", () => {
 
   test("a boot fact drain sweep never rejects when chat discovery fails", async () => {
     const { distiller, internals } = setupDistiller();
-    internals.memory.findChatIds = mock(async () => {
+    internals.conversations.findChatIds = mock(async () => {
       throw new Error("turso unreachable");
     });
 

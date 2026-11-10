@@ -4,11 +4,13 @@ import { AsyncQueue, createLogger } from "@bellaclaw/shared";
 import { z } from "zod";
 import { LlmClient, LlmResponseError } from "../ai/llm";
 import { EModelPurpose, ERole } from "../ai/types";
+import { ConversationStore } from "../conversation";
+import type { TSelectMemory } from "../database/schema";
 import { EmbeddingClient } from "../embedding";
 import { SettingsService } from "../settings";
 import type { TConfigRecord } from "../settings/schema";
 import { Memory } from ".";
-import type { TFactSearchResult, TLiveFactWindow, TMemory, TPreparedFact } from "./types";
+import type { TFactSearchResult, TLiveFactWindow, TPreparedFact } from "./types";
 
 const SDistilledFact = z
   .object({
@@ -41,6 +43,7 @@ export class FactDistiller {
   private ai = LlmClient.instance;
   private embedding = EmbeddingClient.instance;
   private memory = Memory.instance;
+  private conversations = ConversationStore.instance;
   // NOTE: fact drains get their own per-chat queue so a slow distillation run never delays the
   // transcript saves that the reply path awaits on the message handler queue
   private factQueues = new Map<string, AsyncQueue>();
@@ -60,7 +63,7 @@ export class FactDistiller {
   // and must never fail boot — messaging works fine against a partially distilled store.
   public async scheduleFactDrainForAllChats(turnId: string): Promise<void> {
     try {
-      const chatIds = await this.memory.findChatIds();
+      const chatIds = await this.conversations.findChatIds();
 
       for (const chatId of chatIds) {
         this.scheduleFactDrain(chatId, {
@@ -366,6 +369,6 @@ export class FactDistiller {
   }
 }
 
-function isEligibleFactSource(message: TMemory, chatId: string): boolean {
+function isEligibleFactSource(message: TSelectMemory, chatId: string): boolean {
   return message.chatId === chatId && message.author === ERole.User;
 }

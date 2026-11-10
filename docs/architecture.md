@@ -25,10 +25,10 @@ moving a file cannot silently change which directory it reads.
 
 1. A Discord or Signal transport receives a direct message.
 2. The messaging adapter creates a platform-scoped chat key and behavior trace.
-3. The message handler loads settings and structured conversation state. It bootstraps from the
-   latest 30 stored messages when no replay exists.
-4. It saves the user transcript at Medium importance before generating a reply.
-5. A fresh Main agent receives the current message with structured replay or bootstrap history.
+3. The message handler loads settings and structured conversation state. A chat without replay
+   starts with an empty conversation.
+4. It saves the user transcript before generating a reply.
+5. A fresh Main agent receives the current message with the structured replay.
 6. Main answers directly or delegates focused work to a specialist.
 7. The completed model turn, including tool exchanges, is persisted for replay. Fact distillation
    and conversation compaction run in the background.
