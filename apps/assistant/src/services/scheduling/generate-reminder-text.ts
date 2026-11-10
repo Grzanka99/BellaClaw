@@ -114,14 +114,20 @@ export async function generateScheduledTaskText(
 
   const content = ctx.content;
 
+  const toResult = (
+    text: TOption<string>,
+    run: Pick<TScheduledTaskResult, "stopReason" | "iterations" | "toolCallCount">,
+  ): TScheduledTaskResult => ({
+    text,
+    stopReason: run.stopReason,
+    iterations: run.iterations,
+    toolCallCount: run.toolCallCount,
+    durationMs: performance.now() - startedAt,
+  });
+  const noRun = { stopReason: undefined, iterations: 0, toolCallCount: 0 };
+
   if (content.kind !== "task") {
-    return {
-      text: undefined,
-      stopReason: undefined,
-      iterations: 0,
-      toolCallCount: 0,
-      durationMs: performance.now() - startedAt,
-    };
+    return toResult(undefined, noRun);
   }
 
   const { settings, timezone } = await resolveCronScopeContext(ctx, "generateScheduledTaskText");
@@ -138,31 +144,13 @@ export async function generateScheduledTaskText(
     });
 
     if (result.text !== undefined && result.text.trim().length > 0) {
-      return {
-        text: result.text,
-        stopReason: result.stopReason,
-        iterations: result.iterations,
-        toolCallCount: result.toolCallCount,
-        durationMs: performance.now() - startedAt,
-      };
+      return toResult(result.text, result);
     }
 
-    return {
-      text: content.fallback,
-      stopReason: result.stopReason,
-      iterations: result.iterations,
-      toolCallCount: result.toolCallCount,
-      durationMs: performance.now() - startedAt,
-    };
+    return toResult(content.fallback, result);
   } catch (error) {
     logger.error(`generateScheduledTaskText: failed for job "${ctx.name}": ${String(error)}`);
-    return {
-      text: content.fallback,
-      stopReason: undefined,
-      iterations: 0,
-      toolCallCount: 0,
-      durationMs: performance.now() - startedAt,
-    };
+    return toResult(content.fallback, noRun);
   }
 }
 

@@ -80,7 +80,7 @@ const SUpdateSettingsArgs = {
 
 type TUpdateSettingsArgs = Static<typeof SUpdateSettingsArgs>;
 
-function validateUpdateSettingsArgs(args: TUpdateSettingsArgs): void {
+function validateUpdateSettingsArgs(args: TUpdateSettingsArgs): boolean {
   const hasModelOperation =
     args.aiModel !== undefined ||
     args.aiReasoningEffort !== undefined ||
@@ -105,6 +105,8 @@ function validateUpdateSettingsArgs(args: TUpdateSettingsArgs): void {
   if (args.resetAiReasoningEffort === true && args.aiReasoningEffort !== undefined) {
     throw new Error("Choose aiReasoningEffort or resetAiReasoningEffort, not both");
   }
+
+  return hasModelOperation;
 }
 
 export const updateSettings = defineTool({
@@ -118,7 +120,7 @@ export const updateSettings = defineTool({
   logSafe: [["settings", "settingKeys"]],
   execute: async (context, parsedArgs) => {
     const chatId = requireChatId(context.chatId);
-    validateUpdateSettingsArgs(parsedArgs);
+    const hasModelOperation = validateUpdateSettingsArgs(parsedArgs);
 
     const updates: TConfigUpdate[] = [];
     const fields: Array<{ field: keyof TUpdateSettingsArgs; key: EConfigKey }> = [
@@ -152,12 +154,6 @@ export const updateSettings = defineTool({
       provider = parsedArgs.aiProvider;
     }
 
-    const hasModelOperation =
-      parsedArgs.aiModel !== undefined ||
-      parsedArgs.aiReasoningEffort !== undefined ||
-      parsedArgs.aiServiceTier !== undefined ||
-      parsedArgs.resetAiModel === true ||
-      parsedArgs.resetAiReasoningEffort === true;
     if (hasModelOperation || parsedArgs.aiProvider !== undefined) {
       const forceRefresh =
         parsedArgs.aiModel !== undefined &&

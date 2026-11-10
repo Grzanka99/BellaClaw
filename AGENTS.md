@@ -81,9 +81,9 @@ concurrency and background processing under this human usage model.
 
 ## Naming Conventions
 
-- Type aliases: `T*` prefix (e.g. `TMemory`, `TOption<T>`)
-- Enums: `E*` prefix (e.g. `EMemoryImportance`, `EMemoryAuthor`)
-- Zod schemas: `S*` prefix (e.g. `SMemory`, `SSaveArgs`)
+- Type aliases: `T*` prefix (e.g. `TFact`, `TOption<T>`)
+- Enums: `E*` prefix (e.g. `EConfigKey`, `EModelPurpose`)
+- Zod schemas: `S*` prefix (e.g. `SPreparedFact`, `SConversationMessage`)
 - Singleton accessor: `public static get instance()` — always this name, no variants
 
 ## Database Access

@@ -1,5 +1,6 @@
 import { arr, obj, oneOf, opt, type Static, str } from "@earendil-works/pi-schema";
 import { CalendarService } from "../../calendar";
+import { ALL_DAY_DATE } from "../../calendar/recurrence";
 import { EConfigKey } from "../../settings/schema";
 import instructions from "./create-calendar-event.xml" with { type: "text" };
 import { defineTool, requireChatId } from "./define-tool";
@@ -36,7 +37,6 @@ export const SCreateCalendarEventArgs = obj({
   recurrence: opt(SCalendarEventFields.recurrence),
 });
 
-const ALL_DAY = /^\d{4}-\d{2}-\d{2}$/;
 const EXPLICIT_TIMEZONE = /T.*(?:Z|[+-]\d{2}:\d{2})$/;
 const RECURRENCE = /^(RRULE|RDATE|EXDATE)(?:;[^:]*)?:/;
 
@@ -51,7 +51,7 @@ function allDayTimestamp(value: string, field: string): number {
 export function validateCreateCalendarEventArgs(
   args: Static<typeof SCreateCalendarEventArgs>,
 ): Static<typeof SCreateCalendarEventArgs> {
-  const startAllDay = ALL_DAY.test(args.start);
+  const startAllDay = ALL_DAY_DATE.test(args.start);
   let startTimestamp: number;
   if (startAllDay) {
     startTimestamp = allDayTimestamp(args.start, "start");
@@ -64,7 +64,7 @@ export function validateCreateCalendarEventArgs(
     }
   }
   if (args.end !== undefined) {
-    const endAllDay = ALL_DAY.test(args.end);
+    const endAllDay = ALL_DAY_DATE.test(args.end);
 
     if (startAllDay !== endAllDay) {
       throw new Error("start and end must both be all-day dates or timed date-times");

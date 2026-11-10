@@ -1,7 +1,6 @@
 import type { TOption } from "@bellaclaw/shared";
 import { aiAuthCommand } from "./ai-auth";
-import { calendarAddReadCommand } from "./calendar-add-read";
-import { calendarAddWriteCommand } from "./calendar-add-write";
+import { calendarAddReadCommand, calendarAddWriteCommand } from "./calendar-add";
 import { mcpAuthCommand } from "./mcp-auth";
 import { mcpPromptCommand, mcpPromptsCommand } from "./mcp-prompts";
 import { COMMAND_PREFIX, type TCommand, type TCommandResult } from "./types";

@@ -876,7 +876,11 @@ export function isSerializedToolCall(text: string, tools: Array<{ name: string }
   }
 
   const names = new Set(tools.map((tool) => tool.name));
-  const candidates: unknown[] = Array.isArray(parsed) ? parsed : [parsed];
+  let candidates: unknown[] = [parsed];
+
+  if (Array.isArray(parsed)) {
+    candidates = parsed;
+  }
 
   return candidates.some((candidate) => {
     if (!isRecord(candidate)) {
