@@ -232,8 +232,12 @@ describe("ScheduledDelivery", () => {
 
       const conversation = runMain.mock.calls[1]?.[0].conversation;
       expect(conversation?.summary).toBe("The normal turn was summarized.");
-      expect(conversation?.entries).toHaveLength(1);
+      expect(conversation?.entries).toHaveLength(2);
       expect(conversation?.entries[0]?.message).toMatchObject({
+        role: "user",
+        timestamp: deliveredAt,
+      });
+      expect(conversation?.entries[1]?.message).toMatchObject({
         role: "assistant",
         content: [{ type: "text", text: "[CRON REMINDER daily]: Take a break." }],
         timestamp: deliveredAt,

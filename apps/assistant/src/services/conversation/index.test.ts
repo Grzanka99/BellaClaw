@@ -117,3 +117,17 @@ test("a missing user row fails the turn", async () => {
   ).rejects.toThrow("missing");
   expect(await store.load(chatId)).toBeUndefined();
 });
+
+test("a scheduled delivery replays after a scheduler notice the model cannot merge into its reply", async () => {
+  const chatId = "conversation-delivery";
+  const store = new ConversationStore();
+  const deliveredAt = Date.UTC(2026, 10, 10, 16, 6);
+  await store.saveDeliveredMessage(chatId, "[CRON REMINDER oven]: Check the oven.", deliveredAt);
+
+  const roles = (await store.load(chatId))?.entries.map((entry) => entry.message.role);
+  expect(roles).toEqual(["user", "assistant"]);
+  expect(JSON.stringify((await store.load(chatId))?.entries[0]?.message)).toContain(
+    "2026-11-10T16:06:00.000Z",
+  );
+  expect(await transcriptMessages(chatId)).toEqual(["[CRON REMINDER oven]: Check the oven."]);
+});

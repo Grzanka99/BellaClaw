@@ -1,5 +1,10 @@
 import type { TOption } from "@bellaclaw/shared";
-import { type AssistantMessage, contentText, type Message } from "@earendil-works/pi-ai";
+import {
+  type AssistantMessage,
+  contentText,
+  type Message,
+  type UserMessage,
+} from "@earendil-works/pi-ai";
 import { and, asc, eq, gt, isNotNull } from "drizzle-orm";
 import { emptyUsage } from "../ai/llm";
 import { ERole } from "../ai/types";
@@ -144,16 +149,30 @@ export class ConversationStore {
       stopReason: "stop",
       timestamp: deliveredAt,
     };
-    return this.database.run(async (db) => {
-      await db.insert(memoriesTable).values({
-        chatId,
-        kind: "message",
-        author: ERole.Assistant,
-        message: text,
-        modelMessage: JSON.stringify(message),
-        createdAt: new Date(deliveredAt),
-      });
-    });
+    // NOTE: without a user turn before it, providers merge the delivery into the previous
+    // assistant reply, and the model then disowns it as text it wrote itself.
+    const noticeText = `Scheduler notice, not from the user: a scheduled job fired at ${new Date(deliveredAt).toISOString()}. The next assistant message is its delivery.`;
+    const notice: UserMessage = { role: "user", content: noticeText, timestamp: deliveredAt };
+    return this.database.run((db) =>
+      db.transaction(async (tx) => {
+        await tx.insert(memoriesTable).values({
+          chatId,
+          kind: "tool",
+          author: ERole.User,
+          message: noticeText,
+          modelMessage: JSON.stringify(notice),
+          createdAt: new Date(deliveredAt),
+        });
+        await tx.insert(memoriesTable).values({
+          chatId,
+          kind: "message",
+          author: ERole.Assistant,
+          message: text,
+          modelMessage: JSON.stringify(message),
+          createdAt: new Date(deliveredAt),
+        });
+      }),
+    );
   }
 
   public saveSummary(chatId: string, state: TConversation): Promise<void> {
