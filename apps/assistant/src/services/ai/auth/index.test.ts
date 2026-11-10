@@ -86,6 +86,22 @@ test("refreshes and persists expired OAuth credentials", async () => {
   expect(sent).toEqual([]);
 });
 
+test("stays silent about an expired login while another provider is connected", async () => {
+  const { models, store } = await createTestModels(() =>
+    Promise.reject(new Error("token refresh failed (401): invalid_grant")),
+  );
+  await store.modify(EAiProvider.OpencodeGo, async () => ({
+    type: "oauth",
+    access: "access",
+    refresh: "refresh",
+    expires: Date.now() + 60 * 60 * 1000,
+  }));
+
+  await checkAiOAuth(models);
+
+  expect(sent).toEqual([]);
+});
+
 test("sends one combined alert for rejected and missing logins", async () => {
   const { models } = await createTestModels(() =>
     Promise.reject(new Error("token refresh failed (401): invalid_grant")),
