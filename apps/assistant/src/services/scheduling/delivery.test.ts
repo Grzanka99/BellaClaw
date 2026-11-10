@@ -271,6 +271,7 @@ describe("ScheduledDelivery", () => {
     expect(save).toHaveBeenCalledWith(
       "signal:+100",
       "[CRON REMINDER daily]: Take a break.",
+      expect.stringContaining('reminder "daily" fired at'),
       expect.any(Number),
     );
 
@@ -326,6 +327,7 @@ describe("ScheduledDelivery", () => {
     expect(save).toHaveBeenCalledWith(
       "signal:+100",
       "[CRON TASK daily]: Briefing unavailable.",
+      expect.stringContaining('scheduled task "daily" ran at'),
       expect.any(Number),
     );
     expect(internals.runningCronTaskKeys.size).toBe(0);

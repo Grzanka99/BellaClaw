@@ -122,7 +122,12 @@ test("a scheduled delivery replays after a scheduler notice the model cannot mer
   const chatId = "conversation-delivery";
   const store = new ConversationStore();
   const deliveredAt = Date.UTC(2026, 10, 10, 16, 6);
-  await store.saveDeliveredMessage(chatId, "[CRON REMINDER oven]: Check the oven.", deliveredAt);
+  await store.saveDeliveredMessage(
+    chatId,
+    "[CRON REMINDER oven]: Check the oven.",
+    'Scheduler notice, not from the user: reminder "oven" fired at 2026-11-10T16:06:00.000Z.',
+    deliveredAt,
+  );
 
   const roles = (await store.load(chatId))?.entries.map((entry) => entry.message.role);
   expect(roles).toEqual(["user", "assistant"]);

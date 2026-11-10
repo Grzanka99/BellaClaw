@@ -138,7 +138,12 @@ export class ConversationStore {
     );
   }
 
-  public saveDeliveredMessage(chatId: string, text: string, deliveredAt: number): Promise<void> {
+  public saveDeliveredMessage(
+    chatId: string,
+    text: string,
+    notice: string,
+    deliveredAt: number,
+  ): Promise<void> {
     const message: AssistantMessage = {
       role: "assistant",
       content: [{ type: "text", text }],
@@ -151,16 +156,15 @@ export class ConversationStore {
     };
     // NOTE: without a user turn before it, providers merge the delivery into the previous
     // assistant reply, and the model then disowns it as text it wrote itself.
-    const noticeText = `Scheduler notice, not from the user: a scheduled job fired at ${new Date(deliveredAt).toISOString()}. The next assistant message is its delivery.`;
-    const notice: UserMessage = { role: "user", content: noticeText, timestamp: deliveredAt };
+    const noticeMessage: UserMessage = { role: "user", content: notice, timestamp: deliveredAt };
     return this.database.run((db) =>
       db.transaction(async (tx) => {
         await tx.insert(memoriesTable).values({
           chatId,
           kind: "tool",
           author: ERole.User,
-          message: noticeText,
-          modelMessage: JSON.stringify(notice),
+          message: notice,
+          modelMessage: JSON.stringify(noticeMessage),
           createdAt: new Date(deliveredAt),
         });
         await tx.insert(memoriesTable).values({
