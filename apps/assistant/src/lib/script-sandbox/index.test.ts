@@ -216,6 +216,18 @@ describe("runScript", () => {
     expect(result.fetches).toHaveLength(3);
   });
 
+  test("rejects an oversized URL inside the sandbox", async () => {
+    const result = await run(
+      `export default async (ctx, host) => {
+        await host.fetchText("${ORIGIN}/" + "a".repeat(100000));
+        return { kind: "silent" };
+      }`,
+    );
+
+    expect(expectError(result)).toContain("URL too long (max 4096 characters)");
+    expect(result.fetches).toHaveLength(0);
+  });
+
   test("does not log fetches rejected by maxFetches", async () => {
     const result = await run(
       `export default async (ctx, host) => {

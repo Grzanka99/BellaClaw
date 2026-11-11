@@ -16,6 +16,7 @@ import {
 
 const MAX_LOG_LINE_CHARS = 500;
 const MAX_ERROR_CHARS = 500;
+const MAX_URL_CHARS = 4096;
 // Must stay below the Bun Worker's native stack, or deep recursion crashes the worker
 // before QuickJS can raise its own stack overflow error.
 const STACK_SIZE_BYTES = 256 * 1024;
@@ -256,11 +257,18 @@ async function run(message: TRunMessage): Promise<void> {
   try {
     const fetchTextRaw = own(
       context.newFunction("fetchTextRaw", (urlHandle) => {
+        const url = context.getString(urlHandle);
+
+        // The URL leaves the sandbox's memory limit here, so its size is bounded first.
+        if (url.length > MAX_URL_CHARS) {
+          throw new Error(`URL too long (max ${MAX_URL_CHARS} characters)`);
+        }
+
         const id = nextFetchId;
         nextFetchId += 1;
         const deferred = context.newPromise();
         pendingFetches.set(id, deferred);
-        send({ type: "fetch", id, url: context.getString(urlHandle) });
+        send({ type: "fetch", id, url });
 
         return deferred.handle;
       }),
