@@ -13,7 +13,8 @@ services:
   sim-vault:
     image: localhost/bellaclaw-sim-vault:local
     build:
-      context: ${SIGNAL_SIM_VAULT_CONTEXT:-https://github.com/Grzanka99/vault-sync-and-mcp.git}
+      # NOTE: pinned to a commit, so a change upstream cannot alter what dev:sim builds and runs
+      context: ${SIGNAL_SIM_VAULT_CONTEXT:-https://github.com/Grzanka99/vault-sync-and-mcp.git#de97e6e3cef064bee309fc2bd673afedc3b0bfe1}
       dockerfile: Containerfile
     container_name: bellaclaw-sim-vault
     ports:
