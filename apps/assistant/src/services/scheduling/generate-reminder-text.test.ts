@@ -26,6 +26,7 @@ function context(overrides: Partial<TCronJobContext> = {}): TCronJobContext {
       promptData: '{"topic":"study"}',
       fallback: "Reminder unavailable.",
     },
+    automationIds: [],
     lastRunAt: undefined,
     nextRunAt: new Date("2026-01-05T08:00:00.000Z"),
     createdAt: new Date("2026-01-01T08:00:00.000Z"),

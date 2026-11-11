@@ -57,6 +57,35 @@ describe("fetchTextWithLimit", () => {
     expect(performance.now() - startedAt).toBeLessThan(100);
   });
 
+  test("rejects a redirect target before requesting it when validateRedirectUrl throws", async () => {
+    const requestedUrls: string[] = [];
+    const request = async (args: { resolved: { href: string } }) => {
+      requestedUrls.push(args.resolved.href);
+
+      return new Response(null, {
+        status: 302,
+        headers: { location: "https://other.example.org/collect" },
+      });
+    };
+
+    await expect(
+      fetchTextWithLimit(
+        {
+          url: "https://example.com/redirect",
+          timeoutMs: 1_000,
+          maxBytes: 5_000,
+          validateRedirectUrl(url) {
+            if (new URL(url).origin !== "https://example.com") {
+              throw new Error("redirect not allowed");
+            }
+          },
+        },
+        { lookup: async () => [{ address: "93.184.216.34" }], request },
+      ),
+    ).rejects.toThrow("redirect not allowed");
+    expect(requestedUrls).toEqual(["https://example.com/redirect"]);
+  });
+
   test("blocks redirects to non-public IP addresses", async () => {
     let requests = 0;
     const request = async () => {

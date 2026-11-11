@@ -49,9 +49,11 @@ Main can use web tools and delegate to:
 | Memory | Search and manage stored conversation facts. |
 | Settings | Read and update per-chat settings. |
 | Scheduling | Create, update, list, and remove reminders or recurring tasks. |
+| Automations | Write, preview, save, run, pause, and delete automation scripts. |
 
-Specialists receive only role-specific tools and cannot delegate again. Only the Memory specialist
-can write conversation facts; other specialists do not write conversation memory.
+Specialists receive only role-specific tools and cannot delegate again. Scheduling can dry-run a
+job with automations, which starts a scheduled-task agent run without MCP tools. Only the Memory
+specialist can write conversation facts; other specialists do not write conversation memory.
 
 ## Scheduled Work
 
@@ -62,3 +64,16 @@ Scheduled-task agents can read memory, use web tools, and read calendar data. Th
 calendar events, schedules, settings, or memory.
 
 Reminder and scheduled-task output is saved to conversation memory only after successful delivery.
+
+### Automations
+
+An automation is a script saved per chat. It runs in a QuickJS sandbox inside a worker with memory,
+CPU, time, fetch-count, and output limits. Its only access to the outside is a fetch bridge that
+reaches the automation's allowed origins on public addresses.
+
+A script returns text, data, or nothing. An automation is saved only after the user approves the
+output of a preview run. Three consecutive failed runs pause it and send a notice to the chat.
+
+A cron job can list automations to run when it fires. Without a task prompt, their text outputs are
+sent as written and a failed run sends a short notice. With a task prompt, the scheduled-task agent
+receives the outputs as untrusted data and writes the message.

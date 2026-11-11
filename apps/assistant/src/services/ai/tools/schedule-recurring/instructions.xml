@@ -32,9 +32,14 @@
     <rule>Choose clear, descriptive names for jobs so they can be easily referenced later</rule>
     <rule>If a job with the same name already exists, set overwrite to true only if the user explicitly agrees to replace it</rule>
     <rule>Validate that the cron pattern matches the user's intended schedule before calling</rule>
-    <rule>Provide exactly one mode: reminderText; reminderPromptData plus reminderFallbackText; or taskPrompt plus taskFallbackText</rule>
+    <rule>Provide exactly one mode: reminderText; reminderPromptData plus reminderFallbackText; or taskPrompt plus taskFallbackText; a job with automations may omit the mode</rule>
     <rule>Use taskPrompt for work requiring tools at firing time; use reminderPromptData for fresh wording without tools</rule>
     <rule>Pass reminderPromptData as a serialized JSON string, not as a nested object</rule>
+    <rule>automations attaches saved automations by name; they run in list order at firing time</rule>
+    <rule>automations without a content mode: the automations' text outputs are sent exactly as written, joined in order; data outputs are not sent, if no automation returns text nothing is sent, and a failed automation sends a short failure notice</rule>
+    <rule>automations with taskPrompt plus taskFallbackText: the scheduled task reads the automation outputs and writes the message; use this when outputs need interpretation, combination, or data formatting</rule>
+    <rule>Never combine automations with reminderText or reminderPromptData</rule>
+    <rule>Before creating a job with automations, dry-run it with preview-cron-job and wait for the user's confirmation</rule>
     <rule>Inform the user of the next fire time after successfully scheduling</rule>
   </usage_rules>
 
@@ -48,6 +53,28 @@
         <taskFallbackText>I could not prepare today's AI news briefing.</taskFallbackText>
       </toolCall>
       <reasoning>The answer depends on fresh web information at firing time, so use scheduled-task mode.</reasoning>
+    </example>
+
+    <example>
+      <context>User confirmed the preview of: "Every weekday at 7, send me what my bus-departures automation says"</context>
+      <toolCall>
+        <name>bus-departures-morning</name>
+        <pattern>0 7 * * 1-5</pattern>
+        <automations>["bus-departures"]</automations>
+      </toolCall>
+      <reasoning>No taskPrompt, so the automation's text is sent as written.</reasoning>
+    </example>
+
+    <example>
+      <context>User confirmed the preview of: "Every morning at 8 tell me if I need an umbrella, using my weather automation"</context>
+      <toolCall>
+        <name>umbrella-check</name>
+        <pattern>0 8 * * *</pattern>
+        <taskPrompt>Using the weather automation output, tell me in one sentence whether I need an umbrella today.</taskPrompt>
+        <taskFallbackText>I could not check the weather today.</taskFallbackText>
+        <automations>["weather"]</automations>
+      </toolCall>
+      <reasoning>The automation returns data that needs interpretation, so combine it with taskPrompt.</reasoning>
     </example>
 
     <example>

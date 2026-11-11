@@ -1,5 +1,12 @@
 import type { TOption } from "@bellaclaw/shared";
 import type { ToolExecutionMode } from "@earendil-works/pi-agent-core";
+import { automationDelete } from "../tools/automation-delete";
+import { automationGet } from "../tools/automation-get";
+import { automationList } from "../tools/automation-list";
+import { automationPreview } from "../tools/automation-preview";
+import { automationRun } from "../tools/automation-run";
+import { automationSave } from "../tools/automation-save";
+import { automationSetStatus } from "../tools/automation-set-status";
 import { createCalendarEvent } from "../tools/create-calendar-event";
 import type { TTool } from "../tools/define-tool";
 import { deleteCalendarEvent } from "../tools/delete-calendar-event";
@@ -9,6 +16,7 @@ import { getSettings } from "../tools/get-settings";
 import { listCalendarEvents } from "../tools/list-calendar-events";
 import { listCalendars } from "../tools/list-calendars";
 import { listCronJobs } from "../tools/list-cron-jobs";
+import { previewCronJob } from "../tools/preview-cron-job";
 import { rememberMemory } from "../tools/remember-memory";
 import { removeReadonlyCalendar } from "../tools/remove-readonly-calendar";
 import { scheduleOnce } from "../tools/schedule-once";
@@ -21,6 +29,7 @@ import { updateSettings } from "../tools/update-settings";
 import { webFetch } from "../tools/web-fetch";
 import { webSearch } from "../tools/web-search";
 import { EModelPurpose } from "../types";
+import automationsInstructions from "./automations.xml" with { type: "text" };
 import calendarInstructions from "./calendar.xml" with { type: "text" };
 import mainInstructions from "./main.xml" with { type: "text" };
 import mcpInstructions from "./mcp.xml" with { type: "text" };
@@ -30,6 +39,7 @@ import schedulingInstructions from "./scheduling.xml" with { type: "text" };
 import settingsInstructions from "./settings.xml" with { type: "text" };
 
 export enum EAgentName {
+  Automations = "automations",
   Calendar = "calendar",
   Main = "main",
   Mcp = "mcp",
@@ -54,6 +64,27 @@ type TAgentDefinition = {
 const WEB_TOOLS = [webSearch, webFetch];
 
 export const AGENTS: Record<EAgentName, TAgentDefinition> = {
+  [EAgentName.Automations]: {
+    purpose: EModelPurpose.SpecialistAccurate,
+    maxIterations: 20,
+    instructions: automationsInstructions,
+    tools: [
+      automationList,
+      automationGet,
+      automationPreview,
+      automationSave,
+      automationRun,
+      automationSetStatus,
+      automationDelete,
+      ...WEB_TOOLS,
+    ],
+    delegates: [],
+    mcp: false,
+    delegation: {
+      description: "Run the automations specialist for this focused task",
+      mode: "sequential",
+    },
+  },
   [EAgentName.Calendar]: {
     purpose: EModelPurpose.SpecialistAccurate,
     maxIterations: 12,
@@ -80,7 +111,13 @@ export const AGENTS: Record<EAgentName, TAgentDefinition> = {
     maxIterations: 30,
     instructions: mainInstructions,
     tools: WEB_TOOLS,
-    delegates: [EAgentName.Calendar, EAgentName.Memory, EAgentName.Settings, EAgentName.Scheduling],
+    delegates: [
+      EAgentName.Calendar,
+      EAgentName.Memory,
+      EAgentName.Settings,
+      EAgentName.Scheduling,
+      EAgentName.Automations,
+    ],
     mcp: true,
     delegation: undefined,
   },
@@ -127,6 +164,7 @@ export const AGENTS: Record<EAgentName, TAgentDefinition> = {
       scheduleOnce,
       scheduleRecurring,
       updateCronJob,
+      previewCronJob,
       unscheduleCronJob,
       ...WEB_TOOLS,
     ],

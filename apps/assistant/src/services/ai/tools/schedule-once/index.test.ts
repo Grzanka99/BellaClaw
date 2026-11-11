@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
 import { compile } from "@earendil-works/pi-schema";
 import { formats } from "@earendil-works/pi-schema/formats";
+import { AutomationError, AutomationService } from "../../../automation";
 import { CronScheduler } from "../../../cron";
 import { ECronJobStatus, ECronJobType } from "../../../cron/types";
 import { DefaultConfigRecord } from "../../../settings/schema";
@@ -11,10 +12,14 @@ const context = {
   settings: DefaultConfigRecord,
   trace: { turnId: "test", chatId: undefined, platform: undefined },
   verifySettings: mock(async () => undefined),
+  runScheduledTask: mock(async () => {
+    throw new Error("not used");
+  }),
 };
 
 afterEach(() => {
   (CronScheduler as unknown as { _instance: unknown })._instance = undefined;
+  (AutomationService as unknown as { _instance: unknown })._instance = undefined;
 });
 
 describe("schedule-once", () => {
@@ -110,5 +115,50 @@ describe("schedule-once", () => {
         content: { kind: "text", text: "Call Mum" },
       }),
     );
+  });
+
+  test("resolves automation names to ids for an automations-only job", async () => {
+    const createOnce = mock(async (args) => ({
+      ...args,
+      id: 1,
+      type: ECronJobType.OneTime,
+      status: ECronJobStatus.Active,
+      nextRunAt: args.fireAt,
+      pattern: null,
+      lastRunAt: null,
+      createdAt: new Date(),
+      finishedAt: null,
+      finishedReason: null,
+    }));
+    const resolveNames = mock(async (_scope: string, names: string[]) => {
+      if (names.includes("missing")) {
+        throw new AutomationError("unknown-automation", "Unknown automations: missing");
+      }
+
+      return [7, 3];
+    });
+    (CronScheduler as unknown as { _instance: unknown })._instance = { createOnce };
+    (AutomationService as unknown as { _instance: unknown })._instance = { resolveNames };
+    const tool = scheduleOnce.createAgentTool(context);
+
+    await tool.execute("call", {
+      name: "bus",
+      fireAt: "2026-08-01T07:00:00",
+      automations: [" bus ", "tram", "bus", ""],
+    });
+
+    expect(resolveNames).toHaveBeenCalledWith("discord:1", ["bus", "tram"]);
+    expect(createOnce).toHaveBeenCalledWith(
+      expect.objectContaining({ content: { kind: "automations" }, automationIds: [7, 3] }),
+    );
+
+    await expect(
+      tool.execute("call", {
+        name: "bus",
+        fireAt: "2026-08-01T07:00:00",
+        automations: ["missing"],
+      }),
+    ).resolves.toMatchObject({ isError: true, details: { errorCode: "unknown-automation" } });
+    expect(createOnce).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,0 +1,20 @@
+<instructions>
+  <purpose>Delete a saved automation on the user's request.</purpose>
+  <tool>
+    <name>automation-delete</name>
+    <description>
+      Deletes the automation and its drafts and removes it from cron jobs. Returns updatedJobs
+      (jobs that kept their other content) and cancelledJobs (jobs that had nothing else to do).
+    </description>
+  </tool>
+  <usage_rules>
+    <rule>Delete only when the user asks to delete that automation.</rule>
+    <rule>Always report updatedJobs and cancelledJobs so the user knows which schedules lost it.</rule>
+  </usage_rules>
+  <examples>
+    <example>
+      <context>User says: "delete the weather automation"</context>
+      <toolCall><name>warsaw-weather</name></toolCall>
+    </example>
+  </examples>
+</instructions>

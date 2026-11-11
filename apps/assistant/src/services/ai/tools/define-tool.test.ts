@@ -60,6 +60,9 @@ describe("defineTool", () => {
     settings: DefaultConfigRecord,
     trace: { turnId: "test", chatId: undefined, platform: undefined },
     verifySettings: mock(async () => undefined),
+    runScheduledTask: mock(async () => {
+      throw new Error("not used");
+    }),
   };
 
   function failingTool(error: Error) {

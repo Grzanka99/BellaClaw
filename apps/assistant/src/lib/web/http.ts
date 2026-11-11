@@ -92,6 +92,7 @@ export async function fetchTextWithLimit(
     headers?: THttpHeaders;
     signal?: AbortSignal;
     validateResponseHeaders?: (response: Response) => void;
+    validateRedirectUrl?: (url: string) => void;
   },
   network = { lookup: lookupWithCancellation, request: fetchResolvedHttpUrl },
 ): Promise<TFetchWithLimitResult> {
@@ -128,6 +129,7 @@ export async function fetchTextWithLimit(
       }
 
       currentUrl = validatePublicHttpUrl(new URL(location, currentUrl).href);
+      args.validateRedirectUrl?.(currentUrl);
       redirects += 1;
       continue;
     }

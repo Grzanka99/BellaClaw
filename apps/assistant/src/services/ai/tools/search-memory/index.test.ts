@@ -20,6 +20,9 @@ const context = {
   settings: DefaultConfigRecord,
   trace: { turnId: "test", chatId: undefined, platform: undefined },
   verifySettings: mock(async () => undefined),
+  runScheduledTask: mock(async () => {
+    throw new Error("not used");
+  }),
 };
 let ensureFactsCurrent: Mock<FactDistiller["ensureFactsCurrent"]>;
 

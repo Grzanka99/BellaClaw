@@ -8,6 +8,7 @@ type TCronContentFields = {
   reminderFallbackText?: string;
   taskPrompt?: string;
   taskFallbackText?: string;
+  automations?: string[];
 };
 
 export function absentIfBlank(value?: string): TOption<string> {
@@ -19,10 +20,31 @@ export function absentIfBlank(value?: string): TOption<string> {
 }
 
 /**
+ * Trims names and drops blanks and duplicates. An omitted list stays omitted
+ * because an explicit empty list means "no automations" on updates.
+ */
+export function parseAutomationNames(names?: string[]): TOption<string[]> {
+  if (names === undefined) {
+    return undefined;
+  }
+
+  const parsed = new Set<string>();
+  for (const name of names) {
+    const trimmed = name.trim();
+    if (trimmed.length > 0) {
+      parsed.add(trimmed);
+    }
+  }
+
+  return [...parsed];
+}
+
+/**
  * Converts the model-facing content fields to job content.
  * Models routinely send "" or whitespace for optional content fields they mean
- * to omit, so blank values are treated as absent. Returns undefined when no
- * content mode is given and `required` is false.
+ * to omit, so blank values are treated as absent. A new job (`required`) with
+ * automations and no content mode only sends the automations' text outputs.
+ * Returns undefined when no content mode is given and `required` is false.
  */
 export function parseCronContent(args: TCronContentFields, required: true): TJobContent;
 export function parseCronContent(args: TCronContentFields, required: false): TOption<TJobContent>;
@@ -35,14 +57,15 @@ export function parseCronContent(
   const reminderFallbackText = absentIfBlank(args.reminderFallbackText);
   const taskPrompt = absentIfBlank(args.taskPrompt);
   const taskFallbackText = absentIfBlank(args.taskFallbackText);
+  const automationCount = parseAutomationNames(args.automations)?.length ?? 0;
   const contentModeCount = [reminderText, reminderPromptData, taskPrompt].filter(
     (field) => field !== undefined,
   ).length;
 
-  if (contentModeCount === 0 && required) {
+  if (contentModeCount === 0 && automationCount === 0 && required) {
     throw new ToolError(
       "missing-content",
-      "Provide reminderText, reminderPromptData, or taskPrompt",
+      "Provide reminderText, reminderPromptData, or taskPrompt, or attach automations",
     );
   }
 
@@ -82,6 +105,13 @@ export function parseCronContent(
     throw new ToolError("invalid-fallback-pairing", "taskFallbackText requires taskPrompt");
   }
 
+  if (automationCount > 0 && (reminderText !== undefined || reminderPromptData !== undefined)) {
+    throw new ToolError(
+      "automations-without-task",
+      "automations can only be combined with taskPrompt, not with reminders",
+    );
+  }
+
   if (reminderText !== undefined) {
     return { kind: "text", text: reminderText };
   }
@@ -92,6 +122,10 @@ export function parseCronContent(
 
   if (taskPrompt !== undefined && taskFallbackText !== undefined) {
     return { kind: "task", prompt: taskPrompt, fallback: taskFallbackText };
+  }
+
+  if (automationCount > 0 && required) {
+    return { kind: "automations" };
   }
 
   return undefined;
@@ -126,7 +160,7 @@ export function toCronJobResult(job: TCronJob) {
   } else if (job.content.kind === "generated") {
     reminderPromptData = job.content.promptData;
     reminderFallbackText = job.content.fallback;
-  } else {
+  } else if (job.content.kind === "task") {
     taskPrompt = job.content.prompt;
     taskFallbackText = job.content.fallback;
   }

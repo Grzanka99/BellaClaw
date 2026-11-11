@@ -1,0 +1,19 @@
+<instructions>
+  <purpose>Pause or resume a saved automation.</purpose>
+  <tool>
+    <name>automation-set-status</name>
+    <description>
+      Sets status to active or paused. Resuming resets the failure count. Returns the summary.
+    </description>
+  </tool>
+  <usage_rules>
+    <rule>Pause or resume when the user asks; no preview is needed.</rule>
+    <rule>Resuming an automation paused by failures does not fix it; suggest a fix when lastError shows a broken script.</rule>
+  </usage_rules>
+  <examples>
+    <example>
+      <context>User says: "pause the weather automation"</context>
+      <toolCall><name>warsaw-weather</name><status>paused</status></toolCall>
+    </example>
+  </examples>
+</instructions>

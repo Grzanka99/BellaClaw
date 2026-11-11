@@ -31,6 +31,11 @@
     <rule>When changing direct reminder content, provide reminderText only</rule>
     <rule>When changing autonomous task content, provide taskPrompt and taskFallbackText together</rule>
     <rule>A supplied content mode replaces and clears the previous content mode</rule>
+    <rule>automations is the full ordered list of saved automation names: a supplied list replaces the current one, an empty list removes all automations, and omitting it keeps them</rule>
+    <rule>Before giving a job a new or changed non-empty automations list, dry-run the change with preview-cron-job and update only after the user confirms; removing every automation needs no preview</rule>
+    <rule>automations can only stay with taskPrompt or with no content mode; switching a job with automations to reminderText or reminderPromptData fails unless the same call passes automations as an empty list, so pass it only when the user wants the automations removed</rule>
+    <rule>A job must keep content: removing all automations from a job without a content mode requires a new content mode in the same call</rule>
+    <rule>To turn a reminder or task into a job that only sends automation text, recreate it with schedule-once or schedule-recurring and overwrite true</rule>
     <rule>Omit fields that should stay unchanged</rule>
     <rule>Inform the user of the updated next fire time after successfully updating</rule>
   </usage_rules>
@@ -61,6 +66,15 @@
         <reminderText>Reminder: prepare notes for standup.</reminderText>
       </toolCall>
       <reasoning>The reminder schedule stays unchanged and the direct reminder content is replaced.</reasoning>
+    </example>
+
+    <example>
+      <context>User confirmed the preview of adding the weather automation to the morning-briefing task</context>
+      <toolCall>
+        <name>morning-briefing</name>
+        <automations>["news-digest", "weather"]</automations>
+      </toolCall>
+      <reasoning>The supplied list replaces the old one, so it keeps news-digest and adds weather.</reasoning>
     </example>
 
     <example>

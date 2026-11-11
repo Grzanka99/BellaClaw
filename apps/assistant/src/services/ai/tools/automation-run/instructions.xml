@@ -1,0 +1,21 @@
+<instructions>
+  <purpose>Run a saved automation now on the user's request.</purpose>
+  <tool>
+    <name>automation-run</name>
+    <description>
+      Runs the saved automation and returns outcome, text or data, error, fetches, logs, and paused.
+      Success stores the returned state; failure counts towards the automatic pause after three
+      consecutive failures. A paused automation returns outcome unavailable without running.
+    </description>
+  </tool>
+  <usage_rules>
+    <rule>Use only for saved automations; use automation-preview for unsaved or changed scripts.</rule>
+    <rule>If paused is true, report that this failure paused the automation.</rule>
+  </usage_rules>
+  <examples>
+    <example>
+      <context>User says: "check the weather automation now"</context>
+      <toolCall><name>warsaw-weather</name></toolCall>
+    </example>
+  </examples>
+</instructions>

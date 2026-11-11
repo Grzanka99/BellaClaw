@@ -10,12 +10,23 @@ import {
   startMemorySaveSpan,
   type THandlerSpan,
 } from "../app-logger/operations";
+import {
+  EAutomationRunMode,
+  runSavedAutomation,
+  type TAutomationRunReport,
+} from "../automation/runner";
 import { CronScheduler } from "../cron";
 import type { TCronJobContext } from "../cron/types";
 import { MessageHandler } from "../message-handler";
 import { MessagingAdapter } from "../messaging";
 import { parseCanonicalChatKey } from "../messaging/chat-key";
 import type { EMessagePlatform, TMessageTransport } from "../messaging/types";
+import {
+  createAutomationFailedNotices,
+  createAutomationPausedNotices,
+  runCronJobAutomations,
+  type TCronAutomationsResult,
+} from "./cron-automations";
 import {
   generateReminderText,
   generateScheduledTaskText,
@@ -75,7 +86,7 @@ export class ScheduledDelivery {
       return;
     }
 
-    if (ctx.content.kind === "task") {
+    if (ctx.content.kind === "task" || ctx.automationIds.length > 0) {
       const taskKey = JSON.stringify([canonicalChatId, ctx.name]);
 
       if (this.runningCronTaskKeys.has(taskKey)) {
@@ -110,7 +121,70 @@ export class ScheduledDelivery {
     let memoryPrefix = "CRON REMINDER";
     let toolCallCount: TOption<number>;
 
-    if (ctx.content.kind === "task") {
+    if (ctx.automationIds.length > 0) {
+      memoryPrefix = "CRON TASK";
+      let result: TOption<TCronAutomationsResult>;
+
+      try {
+        result = await runCronJobAutomations(
+          ctx,
+          parsedScope.platform,
+          this.ai,
+          (automation, options) => runSavedAutomation(automation, EAutomationRunMode.Cron, options),
+          trace,
+        );
+      } catch (error) {
+        this.logger.error(
+          `handleCronFire: automations of job "${ctx.name}" failed: ${String(error)}`,
+        );
+      }
+
+      let reports: TAutomationRunReport[] = [];
+
+      if (result !== undefined) {
+        text = result.text;
+        reports = result.reports;
+
+        if (result.taskResult !== undefined) {
+          toolCallCount = result.taskResult.toolCallCount;
+          logCronTaskCompleted(trace, result.taskResult);
+        }
+      } else if (ctx.content.kind === "task") {
+        text = ctx.content.fallback;
+        toolCallCount = 0;
+      }
+
+      const notices = createAutomationPausedNotices(reports).map((notice) => {
+        return { notice, event: "paused a failing automation" };
+      });
+
+      // A task's message covers failures; a job that sends outputs as written needs a notice.
+      if (ctx.content.kind === "automations") {
+        for (const notice of createAutomationFailedNotices(reports)) {
+          notices.push({ notice, event: "had an automation fail" });
+        }
+      }
+
+      for (const { notice, event } of notices) {
+        await this.deliverCronText(
+          ctx,
+          canonicalChatId,
+          parsedScope.chatId,
+          transport,
+          trace,
+          memoryPrefix,
+          notice,
+          (firedAt) =>
+            `Scheduler notice, not from the user: scheduled job "${ctx.name}" ran at ${firedAt} and ${event}. The next assistant message is that notice.`,
+        );
+      }
+
+      if (text === undefined) {
+        this.logger.info(`handleCronFire: job "${ctx.name}" has nothing to send`);
+        span.ok("nothing to send", 0);
+        return;
+      }
+    } else if (ctx.content.kind === "task") {
       const taskResult = await generateScheduledTaskText(ctx, parsedScope.platform, this.ai, trace);
       text = taskResult.text;
       memoryPrefix = "CRON TASK";
@@ -134,24 +208,62 @@ export class ScheduledDelivery {
       return;
     }
 
-    const sendError = await this.messaging.sendText(transport, parsedScope.chatId, text, trace);
+    const sendError = await this.deliverCronText(
+      ctx,
+      canonicalChatId,
+      parsedScope.chatId,
+      transport,
+      trace,
+      memoryPrefix,
+      text,
+      (firedAt) => {
+        if (toolCallCount !== undefined) {
+          let notice = `Scheduler notice, not from the user: scheduled task "${ctx.name}" ran at ${firedAt} as a separate agent run that made ${toolCallCount} tool calls, such as web searches, to produce the next assistant message.`;
+          if (ctx.automationIds.length > 0) {
+            notice = `${notice} It also used the outputs of the job's automations.`;
+          }
+
+          return notice;
+        }
+
+        if (ctx.content.kind === "automations") {
+          return `Scheduler notice, not from the user: scheduled job "${ctx.name}" ran at ${firedAt}. The next assistant message is the text output of its automations, sent as written.`;
+        }
+
+        return `Scheduler notice, not from the user: reminder "${ctx.name}" fired at ${firedAt}. The next assistant message is its delivery.`;
+      },
+    );
     if (sendError !== undefined) {
       span.fail("send failed", text.length, sendError);
       return;
     }
 
-    const deliveredAt = Date.now();
-    const firedAt = new Date(deliveredAt).toISOString();
-    let notice = `Scheduler notice, not from the user: reminder "${ctx.name}" fired at ${firedAt}. The next assistant message is its delivery.`;
-    if (toolCallCount !== undefined) {
-      notice = `Scheduler notice, not from the user: scheduled task "${ctx.name}" ran at ${firedAt} as a separate agent run that made ${toolCallCount} tool calls, such as web searches, to produce the next assistant message.`;
+    span.ok("completed", text.length);
+  }
+
+  /** Sends one cron message and records it in the chat history once delivered. */
+  private async deliverCronText(
+    ctx: TCronJobContext,
+    canonicalChatId: string,
+    chatId: string,
+    transport: TMessageTransport,
+    trace: TBehaviorTraceContext,
+    memoryPrefix: string,
+    text: string,
+    createNotice: (firedAt: string) => string,
+  ): Promise<TOption<string>> {
+    const sendError = await this.messaging.sendText(transport, chatId, text, trace);
+    if (sendError !== undefined) {
+      return sendError;
     }
+
+    const deliveredAt = Date.now();
     const saveSpan = startMemorySaveSpan(trace, ERole.Assistant, text.length);
 
     try {
       await MessageHandler.getInstance(canonicalChatId).saveDeliveredMessage(
         `[${memoryPrefix} ${ctx.name}]: ${text}`,
-        notice,
+        createNotice(new Date(deliveredAt).toISOString()),
         deliveredAt,
       );
       saveSpan.ok();
@@ -162,7 +274,7 @@ export class ScheduledDelivery {
       saveSpan.fail(String(error));
     }
 
-    span.ok("completed", text.length);
+    return undefined;
   }
 }
 

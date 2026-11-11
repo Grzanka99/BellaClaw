@@ -9,6 +9,7 @@ import {
   text,
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
+import type { EAutomationStatus } from "../automation/types";
 import type { ECronFinishedReason, ECronJobStatus, ECronJobType } from "../cron/types";
 
 export const EMBEDDING_DIMENSIONS = 768;
@@ -105,7 +106,9 @@ export const cronEngineJobsTable = sqliteTable(
     scope: text("scope").notNull(),
     type: text("type").$type<ECronJobType>().notNull(),
     pattern: text("pattern"),
-    contentKind: text("contentKind", { enum: ["text", "generated", "task"] }).notNull(),
+    contentKind: text("contentKind", {
+      enum: ["text", "generated", "task", "automations"],
+    }).notNull(),
     contentBody: text("contentBody").notNull(),
     contentFallback: text("contentFallback"),
     nextRunAt: integer("nextRunAt", { mode: "timestamp_ms" }).notNull(),
@@ -115,6 +118,7 @@ export const cronEngineJobsTable = sqliteTable(
     finishedAt: integer("finishedAt", { mode: "timestamp_ms" }),
     finishedReason: text("finishedReason").$type<ECronFinishedReason>(),
     timezone: text("timezone"),
+    automationIds: text("automationIds", { mode: "json" }).$type<number[]>(),
   },
   (table) => [
     uniqueIndex("cron_engine_jobs_name_scope_unique")
@@ -122,6 +126,39 @@ export const cronEngineJobsTable = sqliteTable(
       .where(sql`${table.status} = 'active'`),
   ],
 );
+
+export const automationsTable = sqliteTable(
+  "automations",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    scope: text("scope").notNull(),
+    name: text("name").notNull(),
+    instructions: text("instructions"),
+    source: text("source").notNull(),
+    config: text("config", { mode: "json" }).$type<unknown>().notNull(),
+    allowedOrigins: text("allowedOrigins", { mode: "json" }).$type<string[]>().notNull(),
+    outputCapBytes: integer("outputCapBytes").notNull().default(16384),
+    state: text("state", { mode: "json" }).$type<unknown>(),
+    status: text("status").$type<EAutomationStatus>().notNull().default(sql`'active'`),
+    failureCount: integer("failureCount").notNull().default(0),
+    lastError: text("lastError"),
+    createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [uniqueIndex("automations_scope_name_unique").on(table.scope, table.name)],
+);
+
+export const automationDraftsTable = sqliteTable("automation_drafts", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  scope: text("scope").notNull(),
+  name: text("name").notNull(),
+  instructions: text("instructions"),
+  source: text("source").notNull(),
+  config: text("config", { mode: "json" }).$type<unknown>().notNull(),
+  allowedOrigins: text("allowedOrigins", { mode: "json" }).$type<string[]>().notNull(),
+  outputCapBytes: integer("outputCapBytes").notNull(),
+  createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull(),
+});
 
 export const userConfigsTable = sqliteTable(
   "user_configs",

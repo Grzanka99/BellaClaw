@@ -519,6 +519,9 @@ export class AgentHarness {
       verifySettings: (settings, purposes) => {
         return this.llm.verifySettings(settings, purposes, args.trace);
       },
+      runScheduledTask: (runArgs) => {
+        return this.runScheduledTask(runArgs);
+      },
     };
     const agentDefinition = AGENTS[args.name];
     const tools = [
@@ -526,7 +529,7 @@ export class AgentHarness {
       ...this.createDelegationTools(args),
     ];
 
-    if (agentDefinition.mcp) {
+    if (agentDefinition.mcp && args.withoutMcp !== true) {
       tools.push(...(await this.createMcpDelegationTools(args)));
     }
 

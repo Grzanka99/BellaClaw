@@ -1,0 +1,44 @@
+<instructions>
+  <purpose>Try a new or changed automation script against real data before anything is saved.</purpose>
+  <tool>
+    <name>automation-preview</name>
+    <description>
+      Stores an immutable draft and runs it once in the sandbox with a copy of the live automation's
+      state; nothing is committed. On success returns previewId, input (allowedOrigins, config,
+      outputCapBytes, fetched URLs with status and bytes), output (outcome plus text or data), and
+      logs. On failure returns success false, the error, fetches, and logs, and no previewId.
+    </description>
+  </tool>
+  <usage_rules>
+    <rule>Pass config as a JSON object, never as a JSON string. Put every parameter (URLs, coordinates, thresholds) in config instead of hardcoding it in source.</rule>
+    <rule>allowedOrigins lists only the origins the script fetches, e.g. https://api.open-meteo.com. Use an empty list when the script fetches nothing.</rule>
+    <rule>Reuse the saved automation's exact name when editing or fixing it; a new name creates a new automation.</rule>
+    <rule>On failure, read the error, fetches, and logs, fix the script, and preview again. Never report a failed preview as ready.</rule>
+    <rule>Every change, however small, needs a new preview; only the latest successful previewId reflects it.</rule>
+    <rule>Set outputCapBytes only when the output does not fit the 16384-byte default, and report the increase so the user approves it with the preview.</rule>
+  </usage_rules>
+  <examples>
+    <example>
+      <context>User wants the Warsaw temperature every morning.</context>
+      <toolCall>
+        <name>warsaw-weather</name>
+        <source><![CDATA[export default async function run(ctx, host) {
+  const c = ctx.config;
+  const url = `${c.baseUrl}?latitude=${c.latitude}&longitude=${c.longitude}&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=${encodeURIComponent(ctx.timezone)}&forecast_days=1`;
+  const json = await host.fetchJson(url);
+  return {
+    kind: "data",
+    data: {
+      maxC: json.daily.temperature_2m_max[0],
+      minC: json.daily.temperature_2m_min[0],
+      rainChancePercent: json.daily.precipitation_probability_max[0],
+    },
+  };
+}]]></source>
+        <config>{ "baseUrl": "https://api.open-meteo.com/v1/forecast", "latitude": 52.23, "longitude": 21.01 }</config>
+        <allowedOrigins>["https://api.open-meteo.com"]</allowedOrigins>
+        <instructions>Temperatures in Celsius for today.</instructions>
+      </toolCall>
+    </example>
+  </examples>
+</instructions>

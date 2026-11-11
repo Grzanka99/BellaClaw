@@ -1,0 +1,20 @@
+<instructions>
+  <purpose>Save an automation exactly as it was previewed, after the user confirmed that preview's result.</purpose>
+  <tool>
+    <name>automation-save</name>
+    <description>
+      Saves the draft identified by previewId as an active automation, replacing a saved automation
+      with the same name and resetting its failures. Returns the saved summary.
+    </description>
+  </tool>
+  <usage_rules>
+    <rule>Call only when the delegated task says the user confirmed this specific previewId.</rule>
+    <rule>After any further change, preview again and get a new confirmation before saving.</rule>
+  </usage_rules>
+  <examples>
+    <example>
+      <context>Delegated task: "The user confirmed preview 42. Save it."</context>
+      <toolCall><previewId>42</previewId></toolCall>
+    </example>
+  </examples>
+</instructions>
