@@ -29,6 +29,16 @@ export function startSimServer(options: TSimServerOptions): TSimServer {
     hostname: options.hostname,
     port: options.port,
     async fetch(request, server) {
+      // NOTE: a web page the developer visits can reach this port. Browsers put Origin on those
+      // requests, and a DNS-rebound page arrives under its own Host.
+      const host = request.headers.get("host");
+      if (
+        request.headers.has("origin") ||
+        (host !== `127.0.0.1:${server.port}` && host !== `localhost:${server.port}`)
+      ) {
+        return new Response("forbidden\n", { status: 403 });
+      }
+
       const url = new URL(request.url);
       if (url.pathname.startsWith("/sim/")) {
         return handleControlApi(hub, request);

@@ -192,3 +192,21 @@ test("unknown paths return gin's plain 404", async () => {
   expect(response.status).toBe(404);
   expect(await response.text()).toBe("404 page not found");
 });
+
+test("requests from a web page or a rebound host are refused", async () => {
+  const body = JSON.stringify({ from: USER, text: "hi" });
+  const fromPage = await fetch(`${base}/sim/send`, {
+    method: "POST",
+    headers: { origin: "https://evil.example" },
+    body,
+  });
+  const rebound = await fetch(`${base}/sim/send`, {
+    method: "POST",
+    headers: { host: "evil.example" },
+    body,
+  });
+
+  expect(fromPage.status).toBe(403);
+  expect(rebound.status).toBe(403);
+  expect(sim.hub.store.events(USER, 10, false)).toEqual([]);
+});
