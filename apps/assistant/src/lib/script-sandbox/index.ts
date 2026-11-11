@@ -165,10 +165,6 @@ export async function runScript(args: TRunScriptArgs): Promise<TScriptRunResult>
   let finished = false;
 
   async function performFetch(url: string): Promise<TScriptFetchResult> {
-    if (fetches.length > limits.maxFetches) {
-      throw new Error(`fetch limit exceeded (max ${limits.maxFetches} per run)`);
-    }
-
     const origin = toOrigin(url);
 
     if (origin === undefined) {
@@ -194,6 +190,18 @@ export async function runScript(args: TRunScriptArgs): Promise<TScriptRunResult>
   }
 
   async function handleFetch(id: number, url: string): Promise<void> {
+    if (fetches.length >= limits.maxFetches) {
+      if (!finished) {
+        worker.postMessage({
+          type: "fetch-reply",
+          id,
+          ok: false,
+          error: `fetch limit exceeded (max ${limits.maxFetches} per run)`,
+        } satisfies TFetchReplyMessage);
+      }
+      return;
+    }
+
     const entry: TScriptFetchLog = { url, status: undefined, bytes: 0, error: undefined };
     fetches.push(entry);
     inFlight.add(entry);

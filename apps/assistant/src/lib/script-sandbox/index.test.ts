@@ -213,7 +213,21 @@ describe("runScript", () => {
     );
 
     expect(expectError(result)).toContain("fetch limit exceeded (max 3 per run)");
-    expect(result.fetches).toHaveLength(4);
+    expect(result.fetches).toHaveLength(3);
+  });
+
+  test("does not log fetches rejected by maxFetches", async () => {
+    const result = await run(
+      `export default async (ctx, host) => {
+        for (let i = 0; i < 1000; i++) {
+          host.fetchText("${ORIGIN}/" + i).catch(() => {});
+        }
+        return { kind: "silent" };
+      }`,
+      { limits: { maxFetches: 3 } },
+    );
+
+    expect(result.fetches.length).toBeLessThanOrEqual(3);
   });
 
   test("stops infinite loops at the cpu limit", async () => {
