@@ -1,0 +1,38 @@
+# Throwaway backing services for `bun run dev:sim`. Driven by apps/signal-sim; never touches compose.yaml data.
+name: bellaclaw-sim
+
+services:
+  sim-db:
+    image: ghcr.io/tursodatabase/libsql-server:v0.24.33
+    container_name: bellaclaw-sim-db
+    ports:
+      - "127.0.0.1:${SIGNAL_SIM_DB_PORT:-18081}:8080"
+    volumes:
+      - sim-db-data:/var/lib/sqld
+
+  sim-vault:
+    image: localhost/bellaclaw-sim-vault:local
+    build:
+      context: ${SIGNAL_SIM_VAULT_CONTEXT:-https://github.com/Grzanka99/vault-sync-and-mcp.git}
+      dockerfile: Containerfile
+    container_name: bellaclaw-sim-vault
+    ports:
+      - "127.0.0.1:${SIGNAL_SIM_VAULT_PORT:-18787}:8787"
+    # NOTE: the server runs as root, which rootless Podman maps to the host user, so these stay owned by you
+    volumes:
+      - ${SIGNAL_SIM_HOME:?run through bun run dev:sim or bun run sim}/vault:/vault:Z
+      - ${SIGNAL_SIM_HOME:?run through bun run dev:sim or bun run sim}/vault-data:/data:Z
+
+  sim-ollama:
+    image: docker.io/ollama/ollama:latest
+    container_name: bellaclaw-sim-ollama
+    ports:
+      - "127.0.0.1:${SIGNAL_SIM_OLLAMA_PORT:-18434}:11434"
+    volumes:
+      - sim-ollama-data:/root/.ollama
+
+volumes:
+  sim-db-data:
+    name: bellaclaw-sim-db
+  sim-ollama-data:
+    name: bellaclaw-sim-ollama
