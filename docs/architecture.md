@@ -75,5 +75,5 @@ A script returns text, data, or nothing. An automation is saved only after the u
 output of a preview run. Three consecutive failed runs pause it and send a notice to the chat.
 
 A cron job can list automations to run when it fires. Without a task prompt, their text outputs are
-sent as written. With a task prompt, the scheduled-task agent receives the outputs as untrusted
-data and writes the message.
+sent as written and a failed run sends a short notice. With a task prompt, the scheduled-task agent
+receives the outputs as untrusted data and writes the message.

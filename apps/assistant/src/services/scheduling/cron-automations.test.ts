@@ -8,6 +8,7 @@ import { EMessagePlatform } from "../messaging/types";
 import { SettingsService } from "../settings";
 import { DefaultConfigRecord } from "../settings/schema";
 import {
+  createAutomationFailedNotices,
   createAutomationOutputsBlock,
   createAutomationPausedNotices,
   runCronJobAutomations,
@@ -261,5 +262,16 @@ describe("automation outputs", () => {
         report("bus", EAutomationRunOutcome.Failed, { error: "timeout" }),
       ]),
     ).toEqual(['Automation "weather" was paused after 3 failed runs. Ask me to fix it.']);
+  });
+
+  test("creates one fixed notice per failure that did not pause the automation", () => {
+    expect(
+      createAutomationFailedNotices([
+        report("weather", EAutomationRunOutcome.Failed, { error: "HTTP 500", paused: true }),
+        report("bus", EAutomationRunOutcome.Failed, { error: "timeout" }),
+        report("news", EAutomationRunOutcome.Unavailable, { error: "automation is paused" }),
+        report("quiet", EAutomationRunOutcome.Silent),
+      ]),
+    ).toEqual(['Automation "bus" failed in this run. Ask me what went wrong.']);
   });
 });

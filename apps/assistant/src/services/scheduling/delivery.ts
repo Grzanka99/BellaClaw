@@ -22,6 +22,7 @@ import { MessagingAdapter } from "../messaging";
 import { parseCanonicalChatKey } from "../messaging/chat-key";
 import type { EMessagePlatform, TMessageTransport } from "../messaging/types";
 import {
+  createAutomationFailedNotices,
   createAutomationPausedNotices,
   runCronJobAutomations,
   type TCronAutomationsResult,
@@ -153,7 +154,18 @@ export class ScheduledDelivery {
         toolCallCount = 0;
       }
 
-      for (const notice of createAutomationPausedNotices(reports)) {
+      const notices = createAutomationPausedNotices(reports).map((notice) => {
+        return { notice, event: "paused a failing automation" };
+      });
+
+      // A task's message covers failures; a job that sends outputs as written needs a notice.
+      if (ctx.content.kind === "automations") {
+        for (const notice of createAutomationFailedNotices(reports)) {
+          notices.push({ notice, event: "had an automation fail" });
+        }
+      }
+
+      for (const { notice, event } of notices) {
         await this.deliverCronText(
           ctx,
           canonicalChatId,
@@ -163,7 +175,7 @@ export class ScheduledDelivery {
           memoryPrefix,
           notice,
           (firedAt) =>
-            `Scheduler notice, not from the user: scheduled job "${ctx.name}" ran at ${firedAt} and paused a failing automation. The next assistant message is that notice.`,
+            `Scheduler notice, not from the user: scheduled job "${ctx.name}" ran at ${firedAt} and ${event}. The next assistant message is that notice.`,
         );
       }
 

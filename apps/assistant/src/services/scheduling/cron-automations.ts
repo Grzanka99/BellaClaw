@@ -119,6 +119,15 @@ export function createAutomationPausedNotices(reports: TAutomationRunReport[]): 
     });
 }
 
+/** Notices for failures that did not pause the automation; a pause has its own notice. */
+export function createAutomationFailedNotices(reports: TAutomationRunReport[]): string[] {
+  return reports
+    .filter((report) => report.outcome === EAutomationRunOutcome.Failed && !report.paused)
+    .map((report) => {
+      return `Automation "${report.name}" failed in this run. Ask me what went wrong.`;
+    });
+}
+
 export function createAutomationOutputsBlock(reports: TAutomationRunReport[]): string {
   const outputs = reports.map((report) => {
     const output: Record<string, unknown> = { name: report.name };

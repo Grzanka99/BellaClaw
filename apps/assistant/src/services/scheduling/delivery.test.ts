@@ -497,6 +497,51 @@ describe("ScheduledDelivery", () => {
       );
     });
 
+    test("sends a fixed notice when an automation of a passthrough job fails", async () => {
+      const broken = await saveAutomation(
+        scope,
+        "broken",
+        "export default async () => { throw new Error('boom'); }",
+      );
+      const { save, sendText, internals } = setupAutomationDelivery(scope);
+
+      await internals.handleCronFire(
+        cron({ scope, content: { kind: "automations" }, automationIds: [broken.id] }),
+      );
+
+      expect(sendText).toHaveBeenCalledTimes(1);
+      expect(sendText).toHaveBeenCalledWith(
+        chatId,
+        'Automation "broken" failed in this run. Ask me what went wrong.',
+      );
+      expect(save).toHaveBeenCalledWith(
+        scope,
+        expect.stringMatching(/^\[CRON TASK daily\]: Automation "broken" failed/),
+        expect.stringContaining("had an automation fail"),
+        expect.any(Number),
+      );
+    });
+
+    test("leaves a failing automation of a task job to the task's message", async () => {
+      const broken = await saveAutomation(
+        scope,
+        "broken",
+        "export default async () => { throw new Error('boom'); }",
+      );
+      const { sendText, internals } = setupAutomationDelivery(scope);
+
+      await internals.handleCronFire(
+        cron({
+          scope,
+          content: { kind: "task", prompt: "Prepare briefing.", fallback: "Briefing unavailable." },
+          automationIds: [broken.id],
+        }),
+      );
+
+      expect(sendText).toHaveBeenCalledTimes(1);
+      expect(sendText).toHaveBeenCalledWith(chatId, "Your briefing.");
+    });
+
     test("sends one fixed notice when a run pauses an automation", async () => {
       const broken = await saveAutomation(
         scope,
