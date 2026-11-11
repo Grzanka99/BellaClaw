@@ -20,6 +20,7 @@ export const automationGet = defineTool({
   schema: SAutomationGetArgs,
   instructions,
   mode: "parallel",
+  privateErrors: true,
   logSafe: ["status", "failureCount", "outputCapBytes"],
   execute: async (context, args) => {
     const scope = requireChatId(context.chatId);

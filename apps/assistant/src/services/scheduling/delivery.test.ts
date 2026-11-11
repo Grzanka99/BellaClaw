@@ -515,7 +515,7 @@ describe("ScheduledDelivery", () => {
       expect(sendText).toHaveBeenCalledWith(
         chatId,
         expect.stringMatching(
-          /^Automation "broken" was paused after 3 failed runs: .*boom.*\. Ask me to fix it\.$/,
+          /^Automation "broken" was paused after 3 failed runs\. Ask me to fix it\.$/,
         ),
       );
       expect(save).toHaveBeenCalledTimes(1);

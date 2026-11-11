@@ -18,6 +18,7 @@ export const automationSave = defineTool({
   }),
   instructions,
   mode: "sequential",
+  privateErrors: true,
   logSafe: ["status", "failureCount", "outputCapBytes"],
   execute: async (context, args) => {
     const scope = requireChatId(context.chatId);

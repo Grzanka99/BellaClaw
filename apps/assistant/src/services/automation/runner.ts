@@ -84,6 +84,10 @@ export async function runSavedAutomation(
     return createReport(automation, result, false);
   }
 
+  if (options.signal?.aborted) {
+    return createReport(automation, result, false);
+  }
+
   const failure = await AutomationService.instance.recordFailure(automation.id, result.error);
 
   return createReport(automation, result, failure.paused);
@@ -104,7 +108,7 @@ export async function dryRunSavedAutomation(
 
   const result = await executeAutomation(
     automation,
-    structuredClone(automation.state),
+    automation.state,
     EAutomationRunMode.Preview,
     options,
   );

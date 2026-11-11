@@ -115,7 +115,7 @@ export function createAutomationPausedNotices(reports: TAutomationRunReport[]): 
   return reports
     .filter((report) => report.paused)
     .map((report) => {
-      return `Automation "${report.name}" was paused after ${MAX_CONSECUTIVE_AUTOMATION_FAILURES} failed runs: ${report.error ?? "unknown error"}. Ask me to fix it.`;
+      return `Automation "${report.name}" was paused after ${MAX_CONSECUTIVE_AUTOMATION_FAILURES} failed runs. Ask me to fix it.`;
     });
 }
 

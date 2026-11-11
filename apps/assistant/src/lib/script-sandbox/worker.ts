@@ -2,6 +2,7 @@ import type { TOption } from "@bellaclaw/shared";
 import variant from "@jitl/quickjs-wasmfile-release-sync";
 import {
   newQuickJSWASMModuleFromVariant,
+  newVariant,
   type QuickJSContext,
   type QuickJSDeferredPromise,
   type QuickJSHandle,
@@ -18,6 +19,9 @@ const MAX_ERROR_CHARS = 500;
 // Must stay below the Bun Worker's native stack, or deep recursion crashes the worker
 // before QuickJS can raise its own stack overflow error.
 const STACK_SIZE_BYTES = 256 * 1024;
+const WASM_PAGE_BYTES = 64 * 1024;
+// Emscripten's default initial memory for this build (16 MB).
+const INITIAL_WASM_PAGES = 256;
 
 // Evaluated inside QuickJS. Builds the `host` object from raw host functions
 // without exposing them as globals, runs the script's default export and
@@ -97,7 +101,17 @@ function describeError(context: QuickJSContext, handle: QuickJSHandle): string {
 }
 
 async function run(message: TRunMessage): Promise<void> {
-  const quickjs = await newQuickJSWASMModuleFromVariant(variant);
+  // setMemoryLimit alone does not count bytes in this build (no malloc_usable_size),
+  // so the WebAssembly memory itself is capped to bound the heap.
+  const maximumPages = Math.max(
+    INITIAL_WASM_PAGES,
+    Math.ceil(message.memoryBytes / WASM_PAGE_BYTES),
+  );
+  const wasmMemory = new WebAssembly.Memory({
+    initial: INITIAL_WASM_PAGES,
+    maximum: maximumPages,
+  });
+  const quickjs = await newQuickJSWASMModuleFromVariant(newVariant(variant, { wasmMemory }));
   const runtime = quickjs.newRuntime();
   const context = runtime.newContext();
   const pendingFetches = new Map<number, QuickJSDeferredPromise>();
@@ -146,6 +160,11 @@ async function run(message: TRunMessage): Promise<void> {
   function errorText(handle: QuickJSHandle): string {
     if (cpuExceeded) {
       return `cpu time limit exceeded (${message.cpuMs} ms)`;
+    }
+
+    // A full heap can leave QuickJS no room to build the error object itself.
+    if (wasmMemory.buffer.byteLength >= maximumPages * WASM_PAGE_BYTES) {
+      return "out of memory";
     }
 
     return describeError(context, handle);

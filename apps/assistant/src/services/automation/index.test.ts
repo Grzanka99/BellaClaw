@@ -11,6 +11,7 @@ import {
   EAutomationStatus,
   type TCreateAutomationDraftInput,
 } from "./index";
+import { EAutomationRunMode, EAutomationRunOutcome, runSavedAutomation } from "./runner";
 
 function draftInput(overrides: Partial<TCreateAutomationDraftInput> = {}) {
   return {
@@ -175,6 +176,23 @@ describe("AutomationService", () => {
     await expect(
       service.setStatus("discord:1", "missing", EAutomationStatus.Paused),
     ).rejects.toThrow("not found");
+  });
+
+  test("an aborted run does not count as a failure", async () => {
+    const automation = await saveAutomation({
+      source: "export default async () => { while (true) {} }",
+    });
+    const controller = new AbortController();
+    controller.abort();
+
+    const report = await runSavedAutomation(automation, EAutomationRunMode.Manual, {
+      timezone: "Europe/Warsaw",
+      trace: { turnId: "test", chatId: undefined, platform: undefined },
+      signal: controller.signal,
+    });
+
+    expect(report.outcome).toBe(EAutomationRunOutcome.Failed);
+    expect((await AutomationService.instance.get("discord:1", "weather"))?.failureCount).toBe(0);
   });
 
   test("delete removes automation, drafts, and its id from cron jobs", async () => {

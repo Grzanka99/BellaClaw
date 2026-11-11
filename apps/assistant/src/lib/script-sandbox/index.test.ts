@@ -277,6 +277,21 @@ describe("runScript", () => {
     expect(error).toContain("out of memory");
   });
 
+  test("stops large string allocations at the memory limit", async () => {
+    const result = await run(
+      `export default async () => {
+        const a = [];
+        for (let i = 0; i < 200; i++) {
+          a.push("x".repeat(1024 * 1024) + i);
+        }
+        return { kind: "silent" };
+      }`,
+      { limits: { memoryBytes: 16 * 1024 * 1024 } },
+    );
+
+    expect(expectError(result)).toContain("out of memory");
+  });
+
   test("respects abort signal", async () => {
     const controller = new AbortController();
     const pending = run("export default async () => { while (true) {} }", {

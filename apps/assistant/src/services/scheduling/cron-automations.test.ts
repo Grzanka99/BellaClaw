@@ -260,6 +260,6 @@ describe("automation outputs", () => {
         report("weather", EAutomationRunOutcome.Failed, { error: "HTTP 500", paused: true }),
         report("bus", EAutomationRunOutcome.Failed, { error: "timeout" }),
       ]),
-    ).toEqual(['Automation "weather" was paused after 3 failed runs: HTTP 500. Ask me to fix it.']);
+    ).toEqual(['Automation "weather" was paused after 3 failed runs. Ask me to fix it.']);
   });
 });
