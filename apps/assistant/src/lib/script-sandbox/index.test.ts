@@ -140,6 +140,27 @@ describe("runScript", () => {
     expect(error).toMatch(/^output too large \(\d+ bytes > cap 100 bytes\)$/);
   });
 
+  test("accepts output and state that are both exactly at their caps", async () => {
+    const result = await run(
+      `export default async () => ({
+        kind: "text",
+        text: "x".repeat(16384 - 25),
+        state: "y".repeat(16384 - 2),
+      })`,
+      { maxOutputBytes: 16_384 },
+    );
+
+    expect(result.ok).toBe(true);
+  });
+
+  test("rejects a huge return value inside the sandbox", async () => {
+    const error = expectError(
+      await run("export default async () => ({ kind: 'data', data: 'x'.repeat(5000000) })"),
+    );
+
+    expect(error).toMatch(/^return value too large \(\d+ characters > cap \d+ bytes/);
+  });
+
   test("rejects too large state", async () => {
     const error = expectError(
       await run("export default async () => ({ kind: 'silent', state: 'x'.repeat(20000) })"),

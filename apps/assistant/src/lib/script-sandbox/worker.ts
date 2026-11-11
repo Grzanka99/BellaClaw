@@ -327,6 +327,18 @@ async function run(message: TRunMessage): Promise<void> {
     let json: TOption<string>;
 
     if (context.typeof(jsonHandle) === "string") {
+      // The return value leaves the sandbox's memory limit here, so its size is bounded first.
+      // A string's length never exceeds its UTF-8 byte length.
+      const lengthHandle = context.getProp(jsonHandle, "length");
+      const length = context.getNumber(lengthHandle);
+      lengthHandle.dispose();
+
+      if (length > message.maxReturnBytes) {
+        throw new Error(
+          `return value too large (${length} characters > cap ${message.maxReturnBytes} bytes for output and state together)`,
+        );
+      }
+
       json = context.getString(jsonHandle);
     }
 
@@ -341,6 +353,9 @@ async function run(message: TRunMessage): Promise<void> {
     outcome = { type: "done", ok: false, error: text };
   }
 
+  // Sent before teardown: QuickJS can abort while freeing a runtime that held a very large string.
+  send(outcome);
+
   for (const deferred of pendingFetches.values()) {
     deferred.dispose();
   }
@@ -353,7 +368,6 @@ async function run(message: TRunMessage): Promise<void> {
 
   context.dispose();
   runtime.dispose();
-  send(outcome);
 }
 
 addEventListener("message", (event) => {

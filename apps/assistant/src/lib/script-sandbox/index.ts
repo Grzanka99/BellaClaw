@@ -38,6 +38,8 @@ export const SCRIPT_LIMITS = {
 
 export type TScriptLimits = typeof SCRIPT_LIMITS;
 
+const STATE_KEY_BYTES = ',"state":'.length;
+
 export type TRunScriptArgs = {
   /** ES module source: `export default async function run(ctx, host) { ... }` */
   source: string;
@@ -289,6 +291,9 @@ export async function runScript(args: TRunScriptArgs): Promise<TScriptRunResult>
       memoryBytes: limits.memoryBytes,
       cpuMs: limits.cpuMs,
       maxLogLines: limits.maxLogLines,
+      // The returned JSON holds the outcome and the state, joined by `,"state":`; each part
+      // has its own cap below.
+      maxReturnBytes: args.maxOutputBytes + limits.maxStateBytes + STATE_KEY_BYTES,
     };
     worker.postMessage(runMessage);
   });

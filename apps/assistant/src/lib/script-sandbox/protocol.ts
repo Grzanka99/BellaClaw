@@ -14,6 +14,7 @@ export const SRunMessage = z.object({
   memoryBytes: z.number(),
   cpuMs: z.number(),
   maxLogLines: z.number(),
+  maxReturnBytes: z.number(),
 });
 
 export const SFetchReplyMessage = z.discriminatedUnion("ok", [
