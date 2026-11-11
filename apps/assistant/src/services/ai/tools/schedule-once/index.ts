@@ -1,8 +1,11 @@
-import { bool, obj, opt, type Static, str } from "@earendil-works/pi-schema";
+import { arr, bool, obj, opt, type Static, str } from "@earendil-works/pi-schema";
+import { AutomationService } from "../../../automation";
 import { CronScheduler } from "../../../cron";
 import { EConfigKey } from "../../../settings/schema";
+import { runAutomationOperation } from "../automation-errors";
 import {
   LOCAL_FIRE_AT_PATTERN,
+  parseAutomationNames,
   parseCronContent,
   parseLocalFireAt,
   runCronJobOperation,
@@ -27,6 +30,12 @@ export const SScheduleOnceArgs = obj({
   reminderFallbackText: opt(str({ description: "Fallback text required with reminderPromptData" })),
   taskPrompt: opt(str({ description: "Autonomous objective requiring tools at firing time" })),
   taskFallbackText: opt(str({ description: "Fallback text required with taskPrompt" })),
+  automations: opt(
+    arr(str(), {
+      description:
+        "Names of saved automations run in order at firing time; alone their text outputs are sent as written, with taskPrompt they feed the task",
+    }),
+  ),
   overwrite: opt(bool({ description: "Replace an existing one-time job with the same name" })),
 });
 
@@ -34,6 +43,7 @@ export function validateScheduleOnceArgs(args: Static<typeof SScheduleOnceArgs>,
   return {
     name: args.name,
     content: parseCronContent(args, true),
+    automations: parseAutomationNames(args.automations) ?? [],
     fireAt: parseLocalFireAt(args.fireAt, timezone),
     overwrite: args.overwrite,
   };
@@ -43,7 +53,7 @@ export const scheduleOnce = defineTool({
   name: "schedule-once",
   label: "Schedule one-time job",
   description:
-    "Schedule a one-time reminder or autonomous task requiring tools. Provide exactly one content mode: reminderText; reminderPromptData with reminderFallbackText; or taskPrompt with taskFallbackText.",
+    "Schedule a one-time reminder or autonomous task requiring tools. Provide exactly one content mode: reminderText; reminderPromptData with reminderFallbackText; or taskPrompt with taskFallbackText. automations may be attached alone (their text outputs are sent as written) or with taskPrompt (their outputs feed the task).",
   schema: SScheduleOnceArgs,
   instructions,
   mode: "sequential",
@@ -59,11 +69,19 @@ export const scheduleOnce = defineTool({
   privateErrors: true,
   execute: async (context, args) => {
     const ownerTimezone = context.settings[EConfigKey.AiInstructionsTimezone];
-    const validatedArgs = validateScheduleOnceArgs(args, ownerTimezone);
+    const { automations, ...validatedArgs } = validateScheduleOnceArgs(args, ownerTimezone);
     const scope = requireChatId(context.chatId);
+    const automationIds = await runAutomationOperation(() =>
+      AutomationService.instance.resolveNames(scope, automations),
+    );
 
     return runCronJobOperation(() =>
-      CronScheduler.instance.createOnce({ ...validatedArgs, scope, timezone: ownerTimezone }),
+      CronScheduler.instance.createOnce({
+        ...validatedArgs,
+        automationIds,
+        scope,
+        timezone: ownerTimezone,
+      }),
     );
   },
 });

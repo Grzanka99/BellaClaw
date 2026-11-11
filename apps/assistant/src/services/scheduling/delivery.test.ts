@@ -7,6 +7,7 @@ import { eq } from "drizzle-orm";
 import type { AgentHarness } from "../ai/agent-harness";
 import { getAiModelConfig } from "../ai/providers/registry";
 import { EAiProvider, EModelPurpose, ERole } from "../ai/types";
+import { AutomationService } from "../automation";
 import { conversationMessages, type TConversation } from "../conversation/types";
 import { ECronJobType, type TCronJobContext } from "../cron/types";
 import { DatabaseConnector } from "../database";
@@ -50,6 +51,7 @@ function cron(overrides: Partial<TCronJobContext> = {}): TCronJobContext {
     type: ECronJobType.Recurring,
     pattern: "0 9 * * *",
     content: { kind: "text", text: "Take a break." },
+    automationIds: [],
     lastRunAt: undefined,
     nextRunAt: new Date("2026-07-24T08:00:00.000Z"),
     createdAt: new Date("2026-07-01T08:00:00.000Z"),
@@ -97,6 +99,41 @@ function setupConversationHandler(chatId: string) {
     message: { content: "Hello" },
   };
   return { handler, runMain, compactConversation, message };
+}
+
+async function saveAutomation(scope: string, name: string, source: string) {
+  const draft = await AutomationService.instance.createDraft({
+    scope,
+    name,
+    source,
+    config: {},
+    allowedOrigins: [],
+  });
+
+  return AutomationService.instance.saveDraft(scope, draft.id);
+}
+
+function setupAutomationDelivery(scope: string) {
+  (SettingsService as unknown as { _instance: unknown })._instance = {
+    getAll: mock(async () => DefaultConfigRecord),
+  };
+  const save = mock(async () => undefined);
+  Object.assign(MessageHandler.getInstance(scope), {
+    conversations: { saveDeliveredMessage: save },
+  });
+  const sendText = mock(async () => undefined);
+  MessagingAdapter.instance.registerTransport({ platform: EMessagePlatform.Signal, sendText });
+  const internals = ScheduledDelivery.instance as unknown as TDeliveryInternals;
+  const prompts: string[] = [];
+  internals.llm = { completeText: mock(async () => undefined) };
+  internals.ai = {
+    runScheduledTask: mock(async (args: { prompt: string }) => {
+      prompts.push(args.prompt);
+      return { text: "Your briefing.", stopReason: "completed", iterations: 1, toolCallCount: 0 };
+    }),
+  };
+
+  return { save, sendText, internals, prompts };
 }
 
 async function waitForCall(callback: ReturnType<typeof mock>) {
@@ -331,6 +368,164 @@ describe("ScheduledDelivery", () => {
       expect.any(Number),
     );
     expect(internals.runningCronTaskKeys.size).toBe(0);
+  });
+
+  describe("cron jobs with automations", () => {
+    // The test database is shared, so each test owns a fresh scope instead of clearing tables.
+    let chatId = "";
+    let scope = "";
+
+    beforeEach(() => {
+      chatId = `+${crypto.randomUUID()}`;
+      scope = `signal:${chatId}`;
+    });
+
+    test("sends raw automation text as written and saves it as a cron task", async () => {
+      const bus = await saveAutomation(
+        scope,
+        "bus",
+        "export default async () => ({ kind: 'text', text: 'Bus at 7:05' })",
+      );
+      const quiet = await saveAutomation(
+        scope,
+        "quiet",
+        "export default async () => ({ kind: 'silent' })",
+      );
+      const tram = await saveAutomation(
+        scope,
+        "tram",
+        "export default async () => ({ kind: 'text', text: 'Tram at 7:10' })",
+      );
+      const { save, sendText, internals } = setupAutomationDelivery(scope);
+      const job = cron({
+        scope,
+        content: { kind: "automations" },
+        automationIds: [tram.id, quiet.id, bus.id],
+      });
+
+      const first = internals.handleCronFire(job);
+      await Promise.resolve();
+      await internals.handleCronFire(job);
+      await first;
+
+      expect(sendText).toHaveBeenCalledTimes(1);
+      expect(sendText).toHaveBeenCalledWith(chatId, "Tram at 7:10\n\nBus at 7:05");
+      expect(save).toHaveBeenCalledWith(
+        scope,
+        "[CRON TASK daily]: Tram at 7:10\n\nBus at 7:05",
+        expect.stringContaining("text output of its automations, sent as written"),
+        expect.any(Number),
+      );
+      expect(internals.ai.runScheduledTask).not.toHaveBeenCalled();
+      expect(internals.runningCronTaskKeys.size).toBe(0);
+    });
+
+    test("sends nothing when no automation returns text", async () => {
+      const quiet = await saveAutomation(
+        scope,
+        "quiet",
+        "export default async () => ({ kind: 'silent' })",
+      );
+      const metrics = await saveAutomation(
+        scope,
+        "metrics",
+        "export default async () => ({ kind: 'data', data: { value: 1 } })",
+      );
+      const { save, sendText, internals } = setupAutomationDelivery(scope);
+
+      await internals.handleCronFire(
+        cron({ scope, content: { kind: "automations" }, automationIds: [quiet.id, metrics.id] }),
+      );
+
+      expect(sendText).not.toHaveBeenCalled();
+      expect(save).not.toHaveBeenCalled();
+    });
+
+    test("falls back to the task fallback text when running the automations throws", async () => {
+      const { sendText, internals } = setupAutomationDelivery(scope);
+      const getByIds = spyOn(AutomationService.instance, "getByIds").mockRejectedValue(
+        new Error("database unavailable"),
+      );
+
+      try {
+        await internals.handleCronFire(
+          cron({
+            scope,
+            content: {
+              kind: "task",
+              prompt: "Prepare briefing.",
+              fallback: "Briefing unavailable.",
+            },
+            automationIds: [1],
+          }),
+        );
+        await internals.handleCronFire(
+          cron({ scope, name: "raw", content: { kind: "automations" }, automationIds: [1] }),
+        );
+      } finally {
+        getByIds.mockRestore();
+      }
+
+      expect(sendText).toHaveBeenCalledTimes(1);
+      expect(sendText).toHaveBeenCalledWith(chatId, "Briefing unavailable.");
+    });
+
+    test("passes automation outputs to the scheduled task agent", async () => {
+      const metrics = await saveAutomation(
+        scope,
+        "metrics",
+        "export default async () => ({ kind: 'data', data: { value: 1 } })",
+      );
+      const { save, sendText, internals, prompts } = setupAutomationDelivery(scope);
+
+      await internals.handleCronFire(
+        cron({
+          scope,
+          content: { kind: "task", prompt: "Prepare briefing.", fallback: "Briefing unavailable." },
+          automationIds: [metrics.id],
+        }),
+      );
+
+      expect(prompts[0]).toContain("Prepare briefing.\n\n<automation_outputs>");
+      expect(prompts[0]).toContain('"data": {');
+      expect(sendText).toHaveBeenCalledWith(chatId, "Your briefing.");
+      expect(save).toHaveBeenCalledWith(
+        scope,
+        "[CRON TASK daily]: Your briefing.",
+        expect.stringContaining("It also used the outputs of the job's automations."),
+        expect.any(Number),
+      );
+    });
+
+    test("sends one fixed notice when a run pauses an automation", async () => {
+      const broken = await saveAutomation(
+        scope,
+        "broken",
+        "export default async () => { throw new Error('boom'); }",
+      );
+      await AutomationService.instance.recordFailure(broken.id, "boom");
+      await AutomationService.instance.recordFailure(broken.id, "boom");
+      const { save, sendText, internals } = setupAutomationDelivery(scope);
+      const job = cron({ scope, content: { kind: "automations" }, automationIds: [broken.id] });
+
+      await internals.handleCronFire(job);
+      await internals.handleCronFire(job);
+
+      expect(sendText).toHaveBeenCalledTimes(1);
+      expect(sendText).toHaveBeenCalledWith(
+        chatId,
+        expect.stringMatching(
+          /^Automation "broken" was paused after 3 failed runs: .*boom.*\. Ask me to fix it\.$/,
+        ),
+      );
+      expect(save).toHaveBeenCalledTimes(1);
+      expect(save).toHaveBeenCalledWith(
+        scope,
+        expect.stringMatching(/^\[CRON TASK daily\]: Automation "broken" was paused/),
+        expect.stringContaining("paused a failing automation"),
+        expect.any(Number),
+      );
+    });
   });
 
   test("waits for a still-connecting transport before giving up on a cron delivery", async () => {

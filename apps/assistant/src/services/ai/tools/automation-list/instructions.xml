@@ -1,0 +1,20 @@
+<instructions>
+  <purpose>List the saved automations in this chat.</purpose>
+  <tool>
+    <name>automation-list</name>
+    <description>
+      Returns each automation's name, status, failureCount, lastError, allowedOrigins,
+      instructions, and outputCapBytes. Never includes source. Takes no parameters.
+    </description>
+  </tool>
+  <usage_rules>
+    <rule>Use when the user asks which automations exist, or to find the exact name of the automation they mean.</rule>
+    <rule>Mention paused automations and their lastError so the user can ask for a fix.</rule>
+  </usage_rules>
+  <examples>
+    <example>
+      <context>User asks: "What automations do I have?"</context>
+      <toolCall />
+    </example>
+  </examples>
+</instructions>

@@ -1,0 +1,50 @@
+<instructions>
+
+  <purpose>
+    Dry-run a scheduled job that uses automations and show the exact message it would send if it
+    fired now. Use this tool before attaching automations to a job, removing them from a job, or
+    creating a job with automations, so the user can see the result and confirm before anything is saved.
+  </purpose>
+
+  <tool>
+    <name>preview-cron-job</name>
+    <description>
+      Runs the job's automations in order with real data, then builds the message the same way a
+      real firing does: with a taskPrompt the scheduled-task agent writes it from the automation
+      outputs; without a taskPrompt the automations' text outputs are joined as written.
+      Nothing is delivered, nothing is saved to history, and automation state and failure counts
+      are not changed. Returns message (absent when nothing would be sent), note explaining an
+      empty result, and automations with each automation's outcome and error.
+    </description>
+  </tool>
+
+  <usage_rules>
+    <rule>Call this before schedule-once, schedule-recurring, or update-cron-job whenever the change attaches or removes automations</rule>
+    <rule>For an existing job pass its name and only the values that would change; taskPrompt and automations override the job's current values, and automations replaces the whole list</rule>
+    <rule>For a job that does not exist yet omit name and pass the planned taskPrompt (if any) and automations</rule>
+    <rule>Pass automations as saved automation names in the order they should run</rule>
+    <rule>Return the previewed message and any failed or unavailable automations so Main can show them to the user, and say the change is not saved yet</rule>
+    <rule>Save the change only after the user confirms the preview; any clear agreement counts as confirmation</rule>
+    <rule>If an automation failed or is unavailable, report its error instead of saving</rule>
+  </usage_rules>
+
+  <examples>
+    <example>
+      <context>Delegated task: "Add the weather automation to the morning-briefing job"</context>
+      <toolCall>
+        <name>morning-briefing</name>
+        <automations>["weather"]</automations>
+      </toolCall>
+      <reasoning>Show the user how the briefing would look with the weather automation before updating the job.</reasoning>
+    </example>
+
+    <example>
+      <context>Delegated task: "Every day at 7 send me the bus-departures automation output"</context>
+      <toolCall>
+        <automations>["bus-departures"]</automations>
+      </toolCall>
+      <reasoning>A new job without a taskPrompt sends the automation's text as written; preview it before scheduling.</reasoning>
+    </example>
+  </examples>
+
+</instructions>

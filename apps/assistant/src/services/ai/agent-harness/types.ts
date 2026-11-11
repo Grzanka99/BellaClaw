@@ -20,6 +20,8 @@ export type TAgentRunArgs = {
   parentToolCallId: TOption<string>;
   signal: TOption<AbortSignal>;
   mcp?: { profile: TMcpProfile; tools: AgentTool[] };
+  /** Dry runs must not reach MCP servers, whose tools can have side effects. */
+  withoutMcp?: boolean;
 };
 
 export type TAgentRunResult = {

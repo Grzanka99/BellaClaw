@@ -78,6 +78,33 @@ export class CronScheduler extends EventEmitter {
   }
 
   private async createJob(args: TCreateRecurringArgs | TCreateOnceArgs): Promise<TCronJob> {
+    const automationIds = args.automationIds ?? [];
+
+    if (
+      automationIds.length > 0 &&
+      (args.content.kind === "text" || args.content.kind === "generated")
+    ) {
+      throw new CronSchedulerError(
+        "automations-without-task",
+        "create",
+        "Automations can only be combined with a task prompt",
+      );
+    }
+
+    if (automationIds.length === 0 && args.content.kind === "automations") {
+      throw new CronSchedulerError(
+        "missing-automations",
+        "create",
+        "A job without content needs at least one automation",
+      );
+    }
+
+    let storedAutomationIds: TOption<number[]>;
+
+    if (automationIds.length > 0) {
+      storedAutomationIds = automationIds;
+    }
+
     let type = ECronJobType.OneTime;
     if ("pattern" in args) {
       type = ECronJobType.Recurring;
@@ -126,9 +153,11 @@ export class CronScheduler extends EventEmitter {
         } else if (args.content.kind === "generated") {
           contentBody = args.content.promptData;
           contentFallback = args.content.fallback;
-        } else {
+        } else if (args.content.kind === "task") {
           contentBody = args.content.prompt;
           contentFallback = args.content.fallback;
+        } else {
+          contentBody = "";
         }
 
         const rowValues = {
@@ -146,6 +175,7 @@ export class CronScheduler extends EventEmitter {
           finishedAt: null,
           finishedReason: null,
           timezone: effectiveTimezone ?? null,
+          automationIds: storedAutomationIds ?? null,
         };
 
         if (existing && args.overwrite === true) {
@@ -254,6 +284,70 @@ export class CronScheduler extends EventEmitter {
 
     this.stopTimer(cancelled.id);
     return cancelled;
+  }
+
+  /**
+   * Removes a deleted automation from the scope's active jobs. A job left with neither
+   * automations nor content of its own is cancelled.
+   */
+  public async removeAutomation(
+    scope: string,
+    automationId: number,
+  ): Promise<{ updatedJobs: string[]; cancelledJobs: TCronJob[] }> {
+    const result = await this.database.run(async (db) => {
+      const rows = await db
+        .select()
+        .from(cronEngineJobsTable)
+        .where(
+          and(
+            eq(cronEngineJobsTable.scope, scope),
+            eq(cronEngineJobsTable.status, ECronJobStatus.Active),
+          ),
+        );
+      const updatedJobs: string[] = [];
+      const cancelledJobs: TCronJob[] = [];
+
+      for (const job of rows.map((row) => this.toJob(row))) {
+        if (!job.automationIds.includes(automationId)) {
+          continue;
+        }
+
+        const remaining = job.automationIds.filter((id) => id !== automationId);
+
+        if (remaining.length === 0 && job.content.kind === "automations") {
+          await db
+            .update(cronEngineJobsTable)
+            .set({
+              status: ECronJobStatus.Cancelled,
+              finishedAt: new Date(),
+              finishedReason: ECronFinishedReason.Unscheduled,
+            })
+            .where(eq(cronEngineJobsTable.id, job.id));
+          cancelledJobs.push(job);
+          continue;
+        }
+
+        let automationIds: TOption<number[]>;
+
+        if (remaining.length > 0) {
+          automationIds = remaining;
+        }
+
+        await db
+          .update(cronEngineJobsTable)
+          .set({ automationIds: automationIds ?? null })
+          .where(eq(cronEngineJobsTable.id, job.id));
+        updatedJobs.push(job.name);
+      }
+
+      return { updatedJobs, cancelledJobs };
+    });
+
+    for (const job of result.cancelledJobs) {
+      this.stopTimer(job.id);
+    }
+
+    return result;
   }
 
   public async list(scope: string): Promise<TCronJob[]> {
@@ -517,6 +611,7 @@ export class CronScheduler extends EventEmitter {
         type: firedJob.type,
         pattern: firedJob.pattern ?? undefined,
         content: firedJob.content,
+        automationIds: firedJob.automationIds,
         lastRunAt: firedJob.lastRunAt ?? undefined,
         nextRunAt: firedJob.nextRunAt,
         createdAt: firedJob.createdAt,
@@ -562,7 +657,12 @@ export class CronScheduler extends EventEmitter {
   }
 
   private toJob(row: typeof cronEngineJobsTable.$inferSelect): TCronJob {
-    const { contentKind, contentBody, contentFallback, ...job } = row;
+    const { contentKind, contentBody, contentFallback, automationIds: storedIds, ...rest } = row;
+    const job = { ...rest, automationIds: storedIds ?? [] };
+
+    if (contentKind === "automations") {
+      return { ...job, content: { kind: "automations" } };
+    }
 
     if (contentKind === "generated") {
       return {

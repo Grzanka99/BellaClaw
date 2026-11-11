@@ -526,7 +526,7 @@ export class AgentHarness {
       ...this.createDelegationTools(args),
     ];
 
-    if (agentDefinition.mcp) {
+    if (agentDefinition.mcp && args.withoutMcp !== true) {
       tools.push(...(await this.createMcpDelegationTools(args)));
     }
 

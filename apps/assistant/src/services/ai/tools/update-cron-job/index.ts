@@ -1,9 +1,12 @@
-import { obj, opt, type Static, str } from "@earendil-works/pi-schema";
+import { arr, obj, opt, type Static, str } from "@earendil-works/pi-schema";
+import { AutomationService } from "../../../automation";
 import { CronScheduler } from "../../../cron";
 import { ECronJobType } from "../../../cron/types";
 import { EConfigKey } from "../../../settings/schema";
+import { runAutomationOperation } from "../automation-errors";
 import {
   absentIfBlank,
+  parseAutomationNames,
   parseCronContent,
   parseLocalFireAt,
   runCronJobOperation,
@@ -30,6 +33,12 @@ export const SUpdateCronJobArgs = obj({
   reminderFallbackText: opt(str({ description: "Fallback text required with reminderPromptData" })),
   taskPrompt: opt(str({ description: "New autonomous web task objective" })),
   taskFallbackText: opt(str({ description: "Fallback text required with taskPrompt" })),
+  automations: opt(
+    arr(str(), {
+      description:
+        "New ordered list of saved automation names; replaces the current list, an empty list removes all automations; omit to keep them",
+    }),
+  ),
 });
 
 export function validateUpdateCronJobArgs(args: Static<typeof SUpdateCronJobArgs>) {
@@ -43,14 +52,20 @@ export function validateUpdateCronJobArgs(args: Static<typeof SUpdateCronJobArgs
     );
   }
 
-  return { name: args.name, pattern, fireAt, content: parseCronContent(args, false) };
+  return {
+    name: args.name,
+    pattern,
+    fireAt,
+    content: parseCronContent(args, false),
+    automations: parseAutomationNames(args.automations),
+  };
 }
 
 export const updateCronJob = defineTool({
   name: "update-cron-job",
   label: "Update cron job",
   description:
-    "Update an existing reminder or scheduled task by name. Use pattern only for recurring jobs and fireAt only for one-time jobs. A supplied content mode replaces the previous mode. Omit pattern and fireAt for content-only updates.",
+    "Update an existing reminder or scheduled task by name. Use pattern only for recurring jobs and fireAt only for one-time jobs. A supplied content mode replaces the previous mode. A supplied automations list replaces the attached automations; an empty list removes them. Omit pattern and fireAt for content-only updates.",
   schema: SUpdateCronJobArgs,
   instructions,
   mode: "sequential",
@@ -66,6 +81,28 @@ export const updateCronJob = defineTool({
     }
 
     const content = validatedArgs.content ?? existing.content;
+    const automations = validatedArgs.automations;
+    let automationIds = existing.automationIds;
+
+    if (automations !== undefined) {
+      automationIds = await runAutomationOperation(() =>
+        AutomationService.instance.resolveNames(chatId, automations),
+      );
+    }
+
+    if (automationIds.length > 0 && (content.kind === "text" || content.kind === "generated")) {
+      throw new ToolError(
+        "automations-without-task",
+        "automations can only be combined with taskPrompt, not with reminders; to turn this job into a reminder also pass automations: [] to remove its automations",
+      );
+    }
+
+    if (automationIds.length === 0 && content.kind === "automations") {
+      throw new ToolError(
+        "missing-content",
+        "Provide reminderText, reminderPromptData, or taskPrompt, or attach automations; removing all automations would leave this job without content",
+      );
+    }
 
     if (existing.type === ECronJobType.Recurring) {
       if (validatedArgs.fireAt !== undefined) {
@@ -87,6 +124,7 @@ export const updateCronJob = defineTool({
           scope: chatId,
           pattern,
           content,
+          automationIds,
           overwrite: true,
           timezone: existing.timezone ?? undefined,
         }),
@@ -115,6 +153,7 @@ export const updateCronJob = defineTool({
         scope: chatId,
         fireAt,
         content,
+        automationIds,
         overwrite: true,
         timezone: existing.timezone ?? undefined,
       }),

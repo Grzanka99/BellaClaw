@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { CronSchedulerError, ECronJobStatus, ECronJobType } from "../../cron/types";
-import { parseCronContent, runCronJobOperation } from "./cron-content";
+import { parseAutomationNames, parseCronContent, runCronJobOperation } from "./cron-content";
 
 describe("parseCronContent", () => {
   test("treats empty and whitespace-only fields as absent", () => {
@@ -40,12 +40,17 @@ describe("parseCronContent", () => {
 
   test("rejects invalid combinations with stable codes", () => {
     const cases: Array<[Parameters<typeof parseCronContent>[0], boolean, string, string]> = [
-      [{}, true, "missing-content", "Provide reminderText, reminderPromptData, or taskPrompt"],
+      [
+        {},
+        true,
+        "missing-content",
+        "Provide reminderText, reminderPromptData, or taskPrompt, or attach automations",
+      ],
       [
         { reminderFallbackText: "x" },
         true,
         "missing-content",
-        "Provide reminderText, reminderPromptData, or taskPrompt",
+        "Provide reminderText, reminderPromptData, or taskPrompt, or attach automations",
       ],
       [
         { reminderText: "a", taskPrompt: "b", taskFallbackText: "c" },
@@ -77,6 +82,24 @@ describe("parseCronContent", () => {
         "invalid-fallback-pairing",
         "taskFallbackText requires taskPrompt",
       ],
+      [
+        { reminderText: "a", automations: ["weather"] },
+        false,
+        "automations-without-task",
+        "automations can only be combined with taskPrompt, not with reminders",
+      ],
+      [
+        { reminderPromptData: "{}", reminderFallbackText: "x", automations: ["weather"] },
+        true,
+        "automations-without-task",
+        "automations can only be combined with taskPrompt, not with reminders",
+      ],
+      [
+        { automations: [" ", ""] },
+        true,
+        "missing-content",
+        "Provide reminderText, reminderPromptData, or taskPrompt, or attach automations",
+      ],
     ];
 
     for (const [args, required, code, message] of cases) {
@@ -92,6 +115,34 @@ describe("parseCronContent", () => {
       }
       expect(thrown).toMatchObject({ code, message });
     }
+  });
+});
+
+describe("automations", () => {
+  test("trims names and drops blanks and duplicates, keeping an omitted list omitted", () => {
+    expect(parseAutomationNames([" bus ", "", "weather", "bus"])).toEqual(["bus", "weather"]);
+    expect(parseAutomationNames([])).toEqual([]);
+    expect(parseAutomationNames(undefined)).toBeUndefined();
+  });
+
+  test("a new job with automations and no content mode sends only automation text", () => {
+    expect(parseCronContent({ automations: ["bus"], reminderText: " " }, true)).toEqual({
+      kind: "automations",
+    });
+    expect(parseCronContent({ automations: ["bus"] }, false)).toBeUndefined();
+  });
+
+  test("automations combine with a task", () => {
+    expect(
+      parseCronContent(
+        { automations: ["weather"], taskPrompt: "Umbrella?", taskFallbackText: "Unknown" },
+        true,
+      ),
+    ).toEqual({ kind: "task", prompt: "Umbrella?", fallback: "Unknown" });
+    expect(parseCronContent({ automations: [], reminderText: "Hi" }, false)).toEqual({
+      kind: "text",
+      text: "Hi",
+    });
   });
 });
 
@@ -113,6 +164,7 @@ describe("runCronJobOperation", () => {
       finishedAt: null,
       finishedReason: null,
       timezone: "Europe/Warsaw",
+      automationIds: [],
     }));
 
     expect(JSON.stringify(result)).toBe(
@@ -130,6 +182,32 @@ describe("runCronJobOperation", () => {
         reminderFallbackText: "Fallback",
       }),
     );
+  });
+
+  test("returns no reminder or task fields for an automations-only job", async () => {
+    const result = await runCronJobOperation(async () => ({
+      id: 2,
+      name: "bus",
+      scope: "discord:1",
+      type: ECronJobType.Recurring,
+      pattern: "0 7 * * *",
+      content: { kind: "automations" },
+      nextRunAt: new Date("2026-08-01T07:00:00.000Z"),
+      lastRunAt: null,
+      createdAt: new Date("2026-07-01T07:00:00.000Z"),
+      status: ECronJobStatus.Active,
+      finishedAt: null,
+      finishedReason: null,
+      timezone: null,
+      automationIds: [3],
+    }));
+
+    expect(result).toMatchObject({ name: "bus", pattern: "0 7 * * *" });
+    expect(result.reminderText).toBeUndefined();
+    expect(result.reminderPromptData).toBeUndefined();
+    expect(result.reminderFallbackText).toBeUndefined();
+    expect(result.taskPrompt).toBeUndefined();
+    expect(result.taskFallbackText).toBeUndefined();
   });
 
   test("turns scheduler errors into tool errors with the scheduler code", async () => {
