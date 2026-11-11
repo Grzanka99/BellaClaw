@@ -4,13 +4,12 @@
     <name>automation-save</name>
     <description>
       Saves the draft identified by previewId as an active automation, replacing a saved automation
-      with the same name and resetting its failures. Returns the saved summary without source.
+      with the same name and resetting its failures. Returns the saved summary.
     </description>
   </tool>
   <usage_rules>
     <rule>Call only when the delegated task says the user confirmed this specific previewId.</rule>
-    <rule>Never save a previewId the user has not seen, and never save after making further changes; preview the change and get a new confirmation instead.</rule>
-    <rule>Only successful previews have a previewId; a failed preview cannot be saved.</rule>
+    <rule>After any further change, preview again and get a new confirmation before saving.</rule>
   </usage_rules>
   <examples>
     <example>

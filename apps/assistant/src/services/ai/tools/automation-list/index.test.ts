@@ -13,6 +13,9 @@ function createTool(chatId: string) {
     settings: DefaultConfigRecord,
     trace,
     verifySettings: mock(async () => undefined),
+    runScheduledTask: mock(async () => {
+      throw new Error("not used");
+    }),
   });
 }
 

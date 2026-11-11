@@ -123,14 +123,15 @@ export const previewCronJob = defineTool({
       };
     }
 
-    // NOTE: a static import would cycle through agents/index.ts, which lists this tool.
-    const { AgentHarness } = await import("../../agent-harness");
-    const ai = AgentHarness.instance;
     const result = await runCronJobAutomations(
       ctx,
       parseCanonicalChatKey(chatId)?.platform,
       // Dry runs must not reach MCP servers, whose tools can have side effects.
-      { runScheduledTask: (runArgs) => ai.runScheduledTask({ ...runArgs, withoutMcp: true }) },
+      {
+        runScheduledTask: (runArgs) => {
+          return context.runScheduledTask({ ...runArgs, withoutMcp: true });
+        },
+      },
       (automation, options) => dryRunSavedAutomation(automation, { ...options, signal }),
       context.trace,
     );

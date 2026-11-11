@@ -16,7 +16,7 @@ export const automationRun = defineTool({
   }),
   instructions,
   mode: "sequential",
-  logSafe: ["outcome", "paused", "outputCapBytes"],
+  logSafe: ["outcome", "paused"],
   privateErrors: true,
   execute: async (context, args, signal) => {
     const scope = requireChatId(context.chatId);

@@ -15,7 +15,7 @@ export const automationDelete = defineTool({
   instructions,
   mode: "sequential",
   privateErrors: true,
-  logSafe: ["status", "failureCount", "outputCapBytes"],
+  logSafe: [],
   execute: async (context, args) => {
     const scope = requireChatId(context.chatId);
     const result = await runAutomationOperation(() =>

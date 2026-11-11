@@ -4,7 +4,7 @@
     <name>automation-list</name>
     <description>
       Returns each automation's name, status, failureCount, lastError, allowedOrigins,
-      instructions, and outputCapBytes. Never includes source. Takes no parameters.
+      instructions, and outputCapBytes. Takes no parameters.
     </description>
   </tool>
   <usage_rules>

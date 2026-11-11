@@ -519,6 +519,9 @@ export class AgentHarness {
       verifySettings: (settings, purposes) => {
         return this.llm.verifySettings(settings, purposes, args.trace);
       },
+      runScheduledTask: (runArgs) => {
+        return this.runScheduledTask(runArgs);
+      },
     };
     const agentDefinition = AGENTS[args.name];
     const tools = [

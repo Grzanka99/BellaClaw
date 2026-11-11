@@ -162,12 +162,17 @@ async function run(message: TRunMessage): Promise<void> {
       return `cpu time limit exceeded (${message.cpuMs} ms)`;
     }
 
+    const text = describeError(context, handle);
+
     // A full heap can leave QuickJS no room to build the error object itself.
-    if (wasmMemory.buffer.byteLength >= maximumPages * WASM_PAGE_BYTES) {
+    if (
+      text === "Uncaught null" &&
+      wasmMemory.buffer.byteLength >= maximumPages * WASM_PAGE_BYTES
+    ) {
       return "out of memory";
     }
 
-    return describeError(context, handle);
+    return text;
   }
 
   function onFetchReply(reply: TFetchReplyMessage): void {

@@ -43,7 +43,7 @@ export const automationPreview = defineTool({
   schema: SAutomationPreviewArgs,
   instructions,
   mode: "sequential",
-  logSafe: ["outcome", "paused", "outputCapBytes"],
+  logSafe: ["success", "outputCapBytes"],
   privateErrors: true,
   execute: async (context, args, signal) => {
     const scope = requireChatId(context.chatId);

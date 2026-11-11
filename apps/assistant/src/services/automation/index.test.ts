@@ -75,6 +75,21 @@ describe("AutomationService", () => {
     await expect(service.saveDraft("discord:2", draft.id)).rejects.toThrow("not found");
   });
 
+  test("createDraft drops drafts nobody saved within a day", async () => {
+    const service = AutomationService.instance;
+    const stale = await service.createDraft(draftInput({ name: "stale" }));
+    const fresh = await service.createDraft(draftInput({ name: "fresh" }));
+    await DatabaseConnector.instance.database
+      .update(automationDraftsTable)
+      .set({ createdAt: new Date(Date.now() - 25 * 60 * 60 * 1000) })
+      .where(eq(automationDraftsTable.id, stale.id));
+
+    await service.createDraft(draftInput({ name: "next" }));
+
+    expect(await service.getDraft("discord:1", stale.id)).toBeUndefined();
+    expect(await service.getDraft("discord:1", fresh.id)).toBeDefined();
+  });
+
   test("deleteDraft is scoped", async () => {
     const service = AutomationService.instance;
     const draft = await service.createDraft(draftInput());

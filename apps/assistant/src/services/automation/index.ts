@@ -1,11 +1,12 @@
 import type { TOption } from "@bellaclaw/shared";
 import { createLogger } from "@bellaclaw/shared";
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, lt } from "drizzle-orm";
 import { CronScheduler } from "../cron";
 import type { TCronJob } from "../cron/types";
 import { DatabaseConnector } from "../database";
 import { automationDraftsTable, automationsTable } from "../database/schema";
 import {
+  AUTOMATION_DRAFT_TTL_MS,
   AutomationError,
   DEFAULT_AUTOMATION_OUTPUT_CAP_BYTES,
   EAutomationStatus,
@@ -70,6 +71,12 @@ export class AutomationService {
     }
 
     return this.database.run(async (db) => {
+      const now = Date.now();
+
+      await db
+        .delete(automationDraftsTable)
+        .where(lt(automationDraftsTable.createdAt, new Date(now - AUTOMATION_DRAFT_TTL_MS)));
+
       return db
         .insert(automationDraftsTable)
         .values({
@@ -80,7 +87,7 @@ export class AutomationService {
           config: input.config,
           allowedOrigins: [...allowedOrigins],
           outputCapBytes,
-          createdAt: new Date(),
+          createdAt: new Date(now),
         })
         .returning()
         .get();

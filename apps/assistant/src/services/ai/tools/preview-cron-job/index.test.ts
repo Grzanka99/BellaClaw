@@ -6,7 +6,7 @@ import { CronScheduler } from "../../../cron";
 import { ECronJobStatus, ECronJobType, type TCronJob } from "../../../cron/types";
 import { SettingsService } from "../../../settings";
 import { DefaultConfigRecord } from "../../../settings/schema";
-import { AgentHarness } from "../../agent-harness";
+import type { AgentHarness } from "../../agent-harness";
 import { previewCronJob } from ".";
 
 const COUNTER_SOURCE = `export default async function run(ctx) {
@@ -16,6 +16,7 @@ const COUNTER_SOURCE = `export default async function run(ctx) {
 
 // The test database is shared, so each test owns a fresh scope instead of clearing tables.
 let scope = "";
+let runScheduledTask = createAi("unused");
 
 function createContext() {
   return {
@@ -23,6 +24,7 @@ function createContext() {
     settings: DefaultConfigRecord,
     trace: { turnId: "test", chatId: undefined, platform: undefined },
     verifySettings: mock(async () => undefined),
+    runScheduledTask,
   };
 }
 
@@ -66,14 +68,17 @@ function installJobs(jobs: TCronJob[]) {
   };
 }
 
-function installAi(text: string) {
-  const runScheduledTask = mock(async (_args: { prompt: string; withoutMcp?: boolean }) => ({
+function createAi(text: string) {
+  return mock<AgentHarness["runScheduledTask"]>(async () => ({
     text,
     stopReason: "completed",
     iterations: 1,
     toolCallCount: 0,
   }));
-  (AgentHarness as unknown as { _instance: unknown })._instance = { runScheduledTask };
+}
+
+function installAi(text: string) {
+  runScheduledTask = createAi(text);
 
   return runScheduledTask;
 }
@@ -92,7 +97,6 @@ beforeEach(() => {
 afterEach(() => {
   (SettingsService as unknown as { _instance: unknown })._instance = undefined;
   (CronScheduler as unknown as { _instance: unknown })._instance = undefined;
-  (AgentHarness as unknown as { _instance: unknown })._instance = undefined;
 });
 
 describe("preview-cron-job", () => {

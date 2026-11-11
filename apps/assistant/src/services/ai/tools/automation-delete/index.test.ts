@@ -10,6 +10,9 @@ const tool = automationDelete.createAgentTool({
   settings: DefaultConfigRecord,
   trace: { turnId: "test", chatId: undefined, platform: undefined },
   verifySettings: mock(async () => undefined),
+  runScheduledTask: mock(async () => {
+    throw new Error("not used");
+  }),
 });
 
 async function saveAutomation(name: string) {

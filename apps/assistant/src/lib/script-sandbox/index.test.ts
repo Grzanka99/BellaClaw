@@ -277,6 +277,14 @@ describe("runScript", () => {
     expect(error).toContain("out of memory");
   });
 
+  test("keeps the script's own error at a small memory limit", async () => {
+    const result = await run('export default async () => { throw new Error("HTTP 500"); }', {
+      limits: { memoryBytes: 16 * 1024 * 1024 },
+    });
+
+    expect(expectError(result)).toContain("HTTP 500");
+  });
+
   test("stops large string allocations at the memory limit", async () => {
     const result = await run(
       `export default async () => {

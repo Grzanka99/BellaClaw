@@ -3,8 +3,7 @@
   <tool>
     <name>automation-set-status</name>
     <description>
-      Sets status to active or paused. Resuming resets the failure count. Returns the summary
-      without source.
+      Sets status to active or paused. Resuming resets the failure count. Returns the summary.
     </description>
   </tool>
   <usage_rules>

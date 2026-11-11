@@ -4,6 +4,7 @@ import type { AgentTool, AgentToolResult, ToolExecutionMode } from "@earendil-wo
 import { compile, type Schema, type Static } from "@earendil-works/pi-schema";
 import { formats } from "@earendil-works/pi-schema/formats";
 import type { TConfigRecord } from "../../settings/schema";
+import type { AgentHarness } from "../agent-harness";
 import type { EModelPurpose } from "../types";
 
 export type TToolExecutionContext = {
@@ -11,6 +12,7 @@ export type TToolExecutionContext = {
   settings: TConfigRecord;
   trace: TBehaviorTraceContext;
   verifySettings: (settings: TConfigRecord, purposes: EModelPurpose[]) => Promise<TOption<string>>;
+  runScheduledTask: AgentHarness["runScheduledTask"];
 };
 
 /**
