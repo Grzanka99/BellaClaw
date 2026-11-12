@@ -71,6 +71,14 @@ export enum EEventType {
   SettingsChanged = "settings.changed",
   CalendarSourceAddRequested = "calendar.source.add.requested",
   CalendarSourceAdded = "calendar.source.added",
+  CalendarSourceRemoveRequested = "calendar.source.remove.requested",
+  CalendarSourceRemoved = "calendar.source.removed",
+  CalendarEventCreateRequested = "calendar.event.create.requested",
+  CalendarEventCreated = "calendar.event.created",
+  CalendarEventUpdateRequested = "calendar.event.update.requested",
+  CalendarEventUpdated = "calendar.event.updated",
+  CalendarEventDeleteRequested = "calendar.event.delete.requested",
+  CalendarEventDeleted = "calendar.event.deleted",
   CommandRejected = "command.rejected",
   EventDeadLettered = "event.dead_lettered",
   AppStarted = "app.started",
@@ -391,6 +399,55 @@ const SCalendarSourceAdded = z
   })
   .strict();
 
+const SCalendarSource = z.object({ chatId: z.string(), calendarId: z.string() }).strict();
+
+const SCalendarTransparency = z.enum(["opaque", "transparent"]);
+
+const SCalendarEventCreateRequested = z
+  .object({
+    chatId: z.string(),
+    summary: z.string(),
+    description: z.string().optional(),
+    location: z.string().optional(),
+    start: z.string(),
+    end: z.string().optional(),
+    timezone: z.string(),
+    transparency: SCalendarTransparency.optional(),
+    recurrence: z.array(z.string()).optional(),
+  })
+  .strict();
+
+const SCalendarRecurrenceScope = z.enum(["occurrence", "following", "series"]);
+
+const SCalendarEventUpdateRequested = z
+  .object({
+    chatId: z.string(),
+    eventId: z.string(),
+    scope: SCalendarRecurrenceScope,
+    patch: z
+      .object({
+        summary: z.string().optional(),
+        description: z.string().optional(),
+        location: z.string().optional(),
+        start: z.string().optional(),
+        end: z.string().optional(),
+        timezone: z.string().optional(),
+        transparency: SCalendarTransparency.optional(),
+        recurrence: z.array(z.string()).optional(),
+      })
+      .strict(),
+  })
+  .strict();
+
+const SCalendarEventTarget = z
+  .object({ chatId: z.string(), eventId: z.string(), scope: SCalendarRecurrenceScope })
+  .strict();
+
+// event: the mapped calendar event the tool returns
+const SCalendarEventChanged = z
+  .object({ chatId: z.string(), event: z.record(z.string(), z.unknown()) })
+  .strict();
+
 // errorCode: the handler's stable code for an expected failure, such as job-not-found
 const SCommandRejected = z
   .object({
@@ -474,6 +531,14 @@ export type TEventPayloads = {
   [EEventType.SettingsChanged]: z.infer<typeof SSettingsChanged>;
   [EEventType.CalendarSourceAddRequested]: z.infer<typeof SCalendarSourceAddRequested>;
   [EEventType.CalendarSourceAdded]: z.infer<typeof SCalendarSourceAdded>;
+  [EEventType.CalendarSourceRemoveRequested]: z.infer<typeof SCalendarSource>;
+  [EEventType.CalendarSourceRemoved]: z.infer<typeof SCalendarSource>;
+  [EEventType.CalendarEventCreateRequested]: z.infer<typeof SCalendarEventCreateRequested>;
+  [EEventType.CalendarEventCreated]: z.infer<typeof SCalendarEventChanged>;
+  [EEventType.CalendarEventUpdateRequested]: z.infer<typeof SCalendarEventUpdateRequested>;
+  [EEventType.CalendarEventUpdated]: z.infer<typeof SCalendarEventChanged>;
+  [EEventType.CalendarEventDeleteRequested]: z.infer<typeof SCalendarEventTarget>;
+  [EEventType.CalendarEventDeleted]: z.infer<typeof SCalendarEventTarget>;
   [EEventType.CommandRejected]: z.infer<typeof SCommandRejected>;
   [EEventType.EventDeadLettered]: z.infer<typeof SEventDeadLettered>;
   [EEventType.AppStarted]: z.infer<typeof SAppStarted>;
@@ -541,6 +606,14 @@ export const EVENT_SCHEMAS: { [K in EEventType]: z.ZodType<TEventPayloads[K]> } 
   [EEventType.SettingsChanged]: SSettingsChanged,
   [EEventType.CalendarSourceAddRequested]: SCalendarSourceAddRequested,
   [EEventType.CalendarSourceAdded]: SCalendarSourceAdded,
+  [EEventType.CalendarSourceRemoveRequested]: SCalendarSource,
+  [EEventType.CalendarSourceRemoved]: SCalendarSource,
+  [EEventType.CalendarEventCreateRequested]: SCalendarEventCreateRequested,
+  [EEventType.CalendarEventCreated]: SCalendarEventChanged,
+  [EEventType.CalendarEventUpdateRequested]: SCalendarEventUpdateRequested,
+  [EEventType.CalendarEventUpdated]: SCalendarEventChanged,
+  [EEventType.CalendarEventDeleteRequested]: SCalendarEventTarget,
+  [EEventType.CalendarEventDeleted]: SCalendarEventTarget,
   [EEventType.CommandRejected]: SCommandRejected,
   [EEventType.EventDeadLettered]: SEventDeadLettered,
   [EEventType.AppStarted]: SAppStarted,
@@ -606,6 +679,14 @@ export const EVENT_KINDS: Record<EEventType, EEventKind> = {
   [EEventType.SettingsChanged]: EEventKind.Event,
   [EEventType.CalendarSourceAddRequested]: EEventKind.Command,
   [EEventType.CalendarSourceAdded]: EEventKind.Event,
+  [EEventType.CalendarSourceRemoveRequested]: EEventKind.Command,
+  [EEventType.CalendarSourceRemoved]: EEventKind.Event,
+  [EEventType.CalendarEventCreateRequested]: EEventKind.Command,
+  [EEventType.CalendarEventCreated]: EEventKind.Event,
+  [EEventType.CalendarEventUpdateRequested]: EEventKind.Command,
+  [EEventType.CalendarEventUpdated]: EEventKind.Event,
+  [EEventType.CalendarEventDeleteRequested]: EEventKind.Command,
+  [EEventType.CalendarEventDeleted]: EEventKind.Event,
   [EEventType.CommandRejected]: EEventKind.Event,
   [EEventType.EventDeadLettered]: EEventKind.Event,
   [EEventType.AppStarted]: EEventKind.Event,

@@ -1,26 +1,25 @@
-import { afterEach, describe, expect, mock, test } from "bun:test";
+import { describe, expect, mock, test } from "bun:test";
 import { compile } from "@earendil-works/pi-schema";
 import { formats } from "@earendil-works/pi-schema/formats";
-import { CalendarService } from "../../../calendar";
+import type { TEventRequester } from "../../../events";
+import { EEventType } from "../../../events/catalog";
 import { testEventRequester } from "../../../events/test-utils";
 import { DefaultConfigRecord } from "../../../settings/schema";
 import { removeReadonlyCalendar } from "../remove-readonly-calendar";
 import { deleteCalendarEvent, SDeleteCalendarEventArgs } from ".";
 
-const context = {
-  chatId: "discord:1",
-  settings: DefaultConfigRecord,
-  trace: { turnId: "test", chatId: undefined, platform: undefined },
-  events: testEventRequester,
-  verifySettings: mock(async () => undefined),
-  runScheduledTask: mock(async () => {
-    throw new Error("not used");
-  }),
-};
-
-afterEach(() => {
-  (CalendarService as unknown as { _instance: unknown })._instance = undefined;
-});
+function contextWith(request: ReturnType<typeof mock>) {
+  return {
+    chatId: "discord:1",
+    settings: DefaultConfigRecord,
+    trace: { turnId: "test", chatId: undefined, platform: undefined },
+    events: { ...testEventRequester, request: request as unknown as TEventRequester["request"] },
+    verifySettings: mock(async () => undefined),
+    runScheduledTask: mock(async () => {
+      throw new Error("not used");
+    }),
+  };
+}
 
 describe("delete-calendar-event", () => {
   test("accepts valid args", () => {
@@ -32,13 +31,9 @@ describe("delete-calendar-event", () => {
     ).toBe(true);
   });
 
-  test("returns explicit success for void calendar mutations", async () => {
-    const removeReadonlyCalendarMock = mock(async () => undefined);
-    const deleteEvent = mock(async () => undefined);
-    (CalendarService as unknown as { _instance: unknown })._instance = {
-      removeReadonlyCalendar: removeReadonlyCalendarMock,
-      deleteEvent,
-    };
+  test("requests void calendar mutations and returns explicit success", async () => {
+    const request = mock(async () => ({ payload: {} }));
+    const context = contextWith(request);
 
     const removeResult = await removeReadonlyCalendar
       .createAgentTool(context)
@@ -47,6 +42,16 @@ describe("delete-calendar-event", () => {
       .createAgentTool(context)
       .execute("delete", { eventId: "event", scope: "series" });
 
+    expect(request).toHaveBeenCalledWith(
+      EEventType.CalendarSourceRemoveRequested,
+      { chatId: "discord:1", calendarId: "shared" },
+      expect.objectContaining({ outcome: EEventType.CalendarSourceRemoved, key: "discord:1" }),
+    );
+    expect(request).toHaveBeenCalledWith(
+      EEventType.CalendarEventDeleteRequested,
+      { chatId: "discord:1", eventId: "event", scope: "series" },
+      expect.objectContaining({ outcome: EEventType.CalendarEventDeleted, key: "discord:1" }),
+    );
     expect(removeResult.details).toEqual({ success: true });
     expect(deleteResult.details).toEqual({ success: true });
   });

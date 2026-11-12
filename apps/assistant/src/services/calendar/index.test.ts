@@ -1,9 +1,15 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdir } from "node:fs/promises";
 import { repositoryPath } from "@bellaclaw/shared";
+import { sql } from "drizzle-orm";
 import type { LibSQLDatabase } from "drizzle-orm/libsql";
 import { validateUpdateCalendarEventArgs } from "../ai/tools/update-calendar-event";
-import type { DatabaseConnector } from "../database";
+import { DatabaseConnector } from "../database";
+import { calendarsTable } from "../database/schema";
+import { resetEventTables } from "../database/test-utils";
+import { CommandRejectedError, EventBus } from "../events";
+import { EEventType } from "../events/catalog";
+import { withEventContext } from "../events/test-utils";
 import { CalendarService } from ".";
 import type { GwsCalendarClient } from "./gws";
 
@@ -88,6 +94,7 @@ describe("CalendarService mutation boundary", () => {
     await expect(
       service.createEvent({
         userId: "user-without-calendar",
+        commandId: "command-1",
         summary: "Blocked",
         description: undefined,
         location: undefined,
@@ -155,6 +162,7 @@ describe("CalendarService mutation boundary", () => {
 
     await service.createEvent({
       userId: "user-1",
+      commandId: "command-1",
       summary: "Safe",
       description: undefined,
       location: undefined,
@@ -420,6 +428,7 @@ describe("CalendarService mutation boundary", () => {
 
     const result = await service.createEvent({
       userId: "user-1",
+      commandId: "command-1",
       summary: "Read details",
       start: "2026-07-25T09:00:00Z",
       timezone: "UTC",
@@ -603,5 +612,240 @@ describe("CalendarService mutation boundary", () => {
       }),
     ).rejects.toThrow("unsupported type");
     expect(patched).toBe(false);
+  });
+});
+
+describe("CalendarService create idempotency", () => {
+  const database = writeCalendarDatabase();
+  const args = {
+    userId: "user-1",
+    commandId: "0190f0a0-0000-7000-8000-000000000001",
+    summary: "Once",
+    start: "2026-07-25T09:00:00Z",
+    timezone: "UTC",
+  };
+
+  test("derives a valid Google event id from the command id", async () => {
+    const ids: unknown[] = [];
+    const client = {
+      insertEvent: async (_calendarId: string, body: Record<string, unknown>) => {
+        ids.push(body.id);
+        return googleEvent(String(body.id));
+      },
+    } as unknown as GwsCalendarClient;
+    const service = new CalendarService(connector(database), client);
+    Object.assign(service, { status: { ready: true, error: undefined } });
+
+    await service.createEvent(args);
+    await service.createEvent(args);
+    await service.createEvent({ ...args, commandId: "another-command" });
+
+    expect(String(ids[0])).toMatch(/^[0-9a-v]{5,1024}$/);
+    expect(ids[1]).toBe(ids[0]);
+    expect(ids[2]).not.toBe(ids[0]);
+  });
+
+  test("a repeated create returns the event the first create made", async () => {
+    let insertedId = "";
+    const client = {
+      insertEvent: async (_calendarId: string, body: Record<string, unknown>) => {
+        insertedId = String(body.id);
+        throw new Error(
+          "gws exited with code 1: error[api]: The requested identifier already exists.",
+        );
+      },
+      getEvent: async (_calendarId: string, eventId: string) =>
+        googleEvent(eventId, { summary: "Once" }),
+    } as unknown as GwsCalendarClient;
+    const service = new CalendarService(connector(database), client);
+    Object.assign(service, { status: { ready: true, error: undefined } });
+
+    const result = await service.createEvent(args);
+
+    expect(result.id).toBe(insertedId);
+    expect(result.summary).toBe("Once");
+  });
+
+  test("a failed create whose event does not exist keeps the insert error", async () => {
+    const client = {
+      insertEvent: async () => {
+        throw new Error("gws exited with code 1: error[api]: Invalid recurrence rule.");
+      },
+      getEvent: async () => {
+        throw new Error("gws exited with code 1: error[api]: Not Found");
+      },
+    } as unknown as GwsCalendarClient;
+    const service = new CalendarService(connector(database), client);
+    Object.assign(service, { status: { ready: true, error: undefined } });
+
+    await expect(service.createEvent(args)).rejects.toThrow("Invalid recurrence rule.");
+  });
+});
+
+describe("calendar commands", () => {
+  const inserted: Array<Record<string, unknown>> = [];
+  const deleted: string[] = [];
+  let rows: Record<string, unknown>[] = [];
+
+  beforeEach(async () => {
+    inserted.length = 0;
+    deleted.length = 0;
+    rows = [{ userId: "chat-1", calendarId: "trusted-writer", access: "write", addedAt: 1 }];
+    await resetEventTables();
+    Object.assign(EventBus, { _instance: undefined });
+    const database = {
+      select: () => ({ from: () => ({ where: async () => rows }) }),
+    } as unknown as LibSQLDatabase;
+    const client = {
+      insertEvent: async (_calendarId: string, body: Record<string, unknown>) => {
+        inserted.push(body);
+        return googleEvent(String(body.id), { summary: body.summary });
+      },
+      getEvent: async (_calendarId: string, eventId: string) => googleEvent(eventId),
+      patchEvent: async (_calendarId: string, eventId: string, body: Record<string, unknown>) =>
+        googleEvent(eventId, body),
+      deleteEvent: async (_calendarId: string, eventId: string) => {
+        deleted.push(eventId);
+        return {};
+      },
+    } as unknown as GwsCalendarClient;
+    const service = new CalendarService(connector(database), client);
+    await service.setup();
+    Object.assign(service, { status: { ready: true, error: undefined } });
+    await EventBus.instance.start();
+  });
+
+  afterEach(async () => {
+    await EventBus.instance.stop();
+  });
+
+  function requestRemove(calendarId: string) {
+    return withEventContext((ctx) =>
+      ctx.request(
+        EEventType.CalendarSourceRemoveRequested,
+        { chatId: "chat-1", calendarId },
+        {
+          outcome: EEventType.CalendarSourceRemoved,
+          step: undefined,
+          key: "chat-1",
+          timeoutMs: undefined,
+        },
+      ),
+    );
+  }
+
+  test("create calls Google, then answers with the created event", async () => {
+    const created = await withEventContext((ctx) =>
+      ctx.request(
+        EEventType.CalendarEventCreateRequested,
+        { chatId: "chat-1", summary: "Lunch", start: "2026-07-25T09:00:00Z", timezone: "UTC" },
+        {
+          outcome: EEventType.CalendarEventCreated,
+          step: undefined,
+          key: "chat-1",
+          timeoutMs: undefined,
+        },
+      ),
+    );
+
+    expect(inserted).toHaveLength(1);
+    expect(created.payload.chatId).toBe("chat-1");
+    expect(created.payload.event).toMatchObject({
+      calendarId: "trusted-writer",
+      id: inserted[0]?.id,
+      summary: "Lunch",
+    });
+    expect(String(inserted[0]?.id)).toMatch(/^[0-9a-v]{5,1024}$/);
+  });
+
+  test("create without a writable calendar is rejected with the service message", async () => {
+    rows = [];
+
+    const rejected = await withEventContext((ctx) =>
+      ctx.request(
+        EEventType.CalendarEventCreateRequested,
+        { chatId: "chat-1", summary: "Lunch", start: "2026-07-25T09:00:00Z", timezone: "UTC" },
+        {
+          outcome: EEventType.CalendarEventCreated,
+          step: undefined,
+          key: "chat-1",
+          timeoutMs: undefined,
+        },
+      ),
+    ).catch((error: unknown) => error);
+
+    expect(rejected).toBeInstanceOf(CommandRejectedError);
+    expect(rejected).toMatchObject({ message: expect.stringContaining("No writable calendar") });
+    expect(inserted).toHaveLength(0);
+  });
+
+  test("update answers with the patched event", async () => {
+    const updated = await withEventContext((ctx) =>
+      ctx.request(
+        EEventType.CalendarEventUpdateRequested,
+        { chatId: "chat-1", eventId: "event-1", scope: "occurrence", patch: { summary: "Dinner" } },
+        {
+          outcome: EEventType.CalendarEventUpdated,
+          step: undefined,
+          key: "chat-1",
+          timeoutMs: undefined,
+        },
+      ),
+    );
+
+    expect(updated.payload.event).toMatchObject({ id: "event-1", summary: "Dinner" });
+  });
+
+  test("delete removes the event and answers with its target", async () => {
+    const result = await withEventContext((ctx) =>
+      ctx.request(
+        EEventType.CalendarEventDeleteRequested,
+        { chatId: "chat-1", eventId: "event-1", scope: "series" },
+        {
+          outcome: EEventType.CalendarEventDeleted,
+          step: undefined,
+          key: "chat-1",
+          timeoutMs: undefined,
+        },
+      ),
+    );
+
+    expect(deleted).toEqual(["event-1"]);
+    expect(result.payload).toEqual({ chatId: "chat-1", eventId: "event-1", scope: "series" });
+  });
+
+  test("removing a read-only source answers removed, and a missing one is rejected", async () => {
+    const db = DatabaseConnector.instance.database;
+    await db.delete(calendarsTable);
+    await db
+      .insert(calendarsTable)
+      .values({ userId: "chat-1", calendarId: "shared", access: "read", addedAt: 1 });
+
+    const removed = await requestRemove("shared");
+    const rejected = await requestRemove("missing").catch((error: unknown) => error);
+
+    expect(removed.payload).toEqual({ chatId: "chat-1", calendarId: "shared" });
+    expect(await db.select().from(calendarsTable)).toEqual([]);
+    expect(rejected).toBeInstanceOf(CommandRejectedError);
+    expect(rejected).toMatchObject({ message: "Read-only calendar missing is not configured" });
+  });
+
+  test("a failed source removal rolls back the delete with its outcome and ack", async () => {
+    const db = DatabaseConnector.instance.database;
+    await db.delete(calendarsTable);
+    await db
+      .insert(calendarsTable)
+      .values({ userId: "chat-1", calendarId: "shared", access: "read", addedAt: 1 });
+    await db.run(
+      sql`CREATE TRIGGER refuse_removed BEFORE INSERT ON events WHEN NEW.type = 'calendar.source.removed' BEGIN SELECT RAISE(ABORT, 'outcome refused'); END`,
+    );
+
+    try {
+      await expect(requestRemove("shared")).rejects.toBeInstanceOf(CommandRejectedError);
+    } finally {
+      await db.run(sql`DROP TRIGGER refuse_removed`);
+    }
+
+    expect(await db.select().from(calendarsTable)).toHaveLength(1);
   });
 });

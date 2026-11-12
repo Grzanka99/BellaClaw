@@ -88,6 +88,8 @@ export type TListEventsResult = {
 
 export type TCreateEventArguments = {
   userId: string;
+  // the create command's id; the Google event id is derived from it
+  commandId: string;
   summary: string;
   description?: string;
   location?: string;

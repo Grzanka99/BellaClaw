@@ -2,9 +2,9 @@ import type { TOption } from "@bellaclaw/shared";
 import { createLogger, repositoryPath } from "@bellaclaw/shared";
 import { and, eq, ne } from "drizzle-orm";
 import { z } from "zod";
-import { DatabaseConnector } from "../database";
+import { DatabaseConnector, type TDatabaseTransaction } from "../database";
 import { calendarsTable } from "../database/schema";
-import { commandFailed, ESubscriptionMode, EventBus } from "../events";
+import { commandFailed, ESubscriptionMode, EventBus, type TEventContext } from "../events";
 import { EEventType } from "../events/catalog";
 import { calculateAvailability } from "./availability";
 import { GwsCalendarClient } from "./gws";
@@ -277,6 +277,11 @@ function successorId(calendarId: string, masterId: string, occurrence: TCalendar
   return `b${digest}`;
 }
 
+// NOTE: Google event ids are base32hex (a-v, 0-9), 5-1024 characters; a hex digest qualifies
+function createdEventId(commandId: string): string {
+  return new Bun.CryptoHasher("sha256").update(commandId).digest("hex");
+}
+
 function isConfirmedNotFound(error: unknown): boolean {
   const detail = String(error).toLowerCase();
   return detail.includes("404") || detail.includes("not found");
@@ -415,14 +420,7 @@ export class CalendarService {
             calendar = await this.addReadonlyCalendar(chatId, calendarId);
           }
         } catch (error) {
-          await ctx.complete(async (_tx, emit) => {
-            emit(
-              EEventType.CommandRejected,
-              commandFailed(event.type, error),
-              undefined,
-              undefined,
-            );
-          });
+          await this.reject(event.type, error, ctx);
           return;
         }
 
@@ -433,6 +431,89 @@ export class CalendarService {
             undefined,
             undefined,
           );
+        });
+      },
+    });
+    EventBus.instance.subscribe({
+      consumer: "calendar",
+      type: EEventType.CalendarSourceRemoveRequested,
+      mode: ESubscriptionMode.Durable,
+      backoffMs: [],
+      handler: async (event, ctx) => {
+        const { chatId, calendarId } = event.payload;
+
+        // the delete runs in the ack's transaction; a missing source rolls it back and is rejected
+        try {
+          await ctx.complete(async (tx, emit) => {
+            await this.removeReadonlyCalendar(tx, chatId, calendarId);
+            emit(EEventType.CalendarSourceRemoved, { chatId, calendarId }, undefined, undefined);
+          });
+        } catch (error) {
+          await this.reject(event.type, error, ctx);
+        }
+      },
+    });
+    EventBus.instance.subscribe({
+      consumer: "calendar",
+      type: EEventType.CalendarEventCreateRequested,
+      mode: ESubscriptionMode.Durable,
+      backoffMs: [],
+      handler: async (event, ctx) => {
+        const { chatId, ...args } = event.payload;
+
+        let created: TCalendarEvent;
+
+        try {
+          created = await this.createEvent({ ...args, userId: chatId, commandId: event.id });
+        } catch (error) {
+          await this.reject(event.type, error, ctx);
+          return;
+        }
+
+        await ctx.complete(async (_tx, emit) => {
+          emit(EEventType.CalendarEventCreated, { chatId, event: created }, undefined, undefined);
+        });
+      },
+    });
+    EventBus.instance.subscribe({
+      consumer: "calendar",
+      type: EEventType.CalendarEventUpdateRequested,
+      mode: ESubscriptionMode.Durable,
+      backoffMs: [],
+      handler: async (event, ctx) => {
+        const { chatId, eventId, scope, patch } = event.payload;
+
+        let updated: TCalendarEvent;
+
+        try {
+          updated = await this.updateEvent({ userId: chatId, eventId, scope, patch });
+        } catch (error) {
+          await this.reject(event.type, error, ctx);
+          return;
+        }
+
+        await ctx.complete(async (_tx, emit) => {
+          emit(EEventType.CalendarEventUpdated, { chatId, event: updated }, undefined, undefined);
+        });
+      },
+    });
+    EventBus.instance.subscribe({
+      consumer: "calendar",
+      type: EEventType.CalendarEventDeleteRequested,
+      mode: ESubscriptionMode.Durable,
+      backoffMs: [],
+      handler: async (event, ctx) => {
+        const { chatId, eventId, scope } = event.payload;
+
+        try {
+          await this.deleteEvent({ userId: chatId, eventId, scope });
+        } catch (error) {
+          await this.reject(event.type, error, ctx);
+          return;
+        }
+
+        await ctx.complete(async (_tx, emit) => {
+          emit(EEventType.CalendarEventDeleted, { chatId, eventId, scope }, undefined, undefined);
         });
       },
     });
@@ -449,6 +530,12 @@ export class CalendarService {
       this.status = { ready: false, error: String(error) };
       this.logger.error(`Calendar service is unavailable: ${String(error)}`);
     }
+  }
+
+  private async reject(commandType: EEventType, error: unknown, ctx: TEventContext): Promise<void> {
+    await ctx.complete(async (_tx, emit) => {
+      emit(EEventType.CommandRejected, commandFailed(commandType, error), undefined, undefined);
+    });
   }
 
   public async setWriteCalendar(userId: string, calendarId: string): Promise<TCalendar> {
@@ -555,20 +642,22 @@ export class CalendarService {
     };
   }
 
-  public async removeReadonlyCalendar(userId: string, calendarId: string): Promise<void> {
+  public async removeReadonlyCalendar(
+    tx: TDatabaseTransaction,
+    userId: string,
+    calendarId: string,
+  ): Promise<void> {
     this.requireReady();
-    const removed = await this.database.run((db) =>
-      db
-        .delete(calendarsTable)
-        .where(
-          and(
-            eq(calendarsTable.userId, userId),
-            eq(calendarsTable.calendarId, calendarId),
-            eq(calendarsTable.access, "read"),
-          ),
-        )
-        .returning(),
-    );
+    const removed = await tx
+      .delete(calendarsTable)
+      .where(
+        and(
+          eq(calendarsTable.userId, userId),
+          eq(calendarsTable.calendarId, calendarId),
+          eq(calendarsTable.access, "read"),
+        ),
+      )
+      .returning();
     if (removed.length === 0) {
       throw new Error(`Read-only calendar ${calendarId} is not configured`);
     }
@@ -643,7 +732,9 @@ export class CalendarService {
   public async createEvent(args: TCreateEventArguments): Promise<TCalendarEvent> {
     const calendarId = await this.requireWriteCalendarId(args.userId);
     const times = normalizeEventTimes(args.start, args.end, args.timezone, undefined);
+    const eventId = createdEventId(args.commandId);
     const body: Record<string, unknown> = {
+      id: eventId,
       summary: args.summary,
       start: times.start,
       end: times.end,
@@ -661,7 +752,24 @@ export class CalendarService {
     if (args.recurrence !== undefined) {
       body.recurrence = args.recurrence;
     }
-    return mapEvent(calendarId, await this.client.insertEvent(calendarId, body, args.signal));
+    try {
+      return mapEvent(calendarId, await this.client.insertEvent(calendarId, body, args.signal));
+    } catch (error) {
+      // a repeated create of the same command finds the event the first one created
+      let existing: TCalendarEvent;
+      try {
+        existing = mapEvent(
+          calendarId,
+          await this.client.getEvent(calendarId, eventId, AbortSignal.timeout(5_000)),
+        );
+      } catch {
+        throw error;
+      }
+      if (existing.id !== eventId) {
+        throw error;
+      }
+      return existing;
+    }
   }
 
   private async resolveMutation(

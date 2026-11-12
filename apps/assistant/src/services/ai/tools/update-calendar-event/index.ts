@@ -1,6 +1,6 @@
 import { obj, oneOf, opt, type Static, str } from "@earendil-works/pi-schema";
-import { CalendarService } from "../../../calendar";
 import type { TUpdateEventPatch } from "../../../calendar/types";
+import { EEventType } from "../../../events/catalog";
 import { SCalendarEventFields, validateCreateCalendarEventArgs } from "../create-calendar-event";
 import { defineTool, requireChatId } from "../define-tool";
 import instructions from "./instructions.xml" with { type: "text" };
@@ -76,16 +76,20 @@ export const updateCalendarEvent = defineTool({
   instructions,
   mode: "sequential",
   logSafe: [],
-  execute: async (context, args, signal) => {
-    const userId = requireChatId(context.chatId);
+  execute: async (context, args) => {
+    const chatId = requireChatId(context.chatId);
     const patch = validateUpdateCalendarEventArgs(args);
 
-    return CalendarService.instance.updateEvent({
-      userId,
-      eventId: args.eventId,
-      scope: args.scope,
-      patch,
-      signal,
-    });
+    const updated = await context.events.request(
+      EEventType.CalendarEventUpdateRequested,
+      { chatId, eventId: args.eventId, scope: args.scope, patch },
+      {
+        outcome: EEventType.CalendarEventUpdated,
+        step: undefined,
+        key: chatId,
+        timeoutMs: undefined,
+      },
+    );
+    return updated.payload.event;
   },
 });
