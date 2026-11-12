@@ -49,8 +49,8 @@ th{color:var(--muted);font-weight:600}
 <section>
   <div class="tag">1 · Services and the bus</div>
   <h2>Services around the bus: who publishes, who consumes</h2>
-  <div class="scroll"><img src="event-architecture.svg" alt="BellaClaw services around the event bus" style="display:block;width:100%;min-width:620px"></div>
-  <p class="muted">Every message goes through the bus and is a row in the event log. No service calls another to change its state; reads from the allow-list (settings and authorization caches, read tools, drivers) are direct calls and are not drawn. Caches, Signal typing and MCP session closing are live subscriptions: in memory, never replayed.</p>
+  <div class="scroll"><img src="event-architecture.svg" alt="Every BellaClaw service talks through the event bus" style="display:block;width:100%;min-width:620px"></div>
+  <p class="muted">Requesters are conversation tools, slash commands and scheduling; command owners are cron, automations, memory, settings, calendar, mcp-auth and ai-auth. Reads from the allow-list (settings and authorization caches, read tools, drivers) are direct calls and are not drawn. Caches, Signal typing and MCP session closing are live subscriptions: in memory, never replayed.</p>
 </section>
 
 <section>

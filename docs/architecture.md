@@ -27,7 +27,9 @@ Services talk through one durable event log in SQLite; see the
 [event architecture page](event-architecture.html) for the graph and guarantees, and
 `.agents/skills/architecture/SKILL.md` for the rules when changing it.
 
-![BellaClaw event flow](event-architecture.svg)
+![Every BellaClaw service talks through the event bus](event-architecture.svg)
+
+Requesters are conversation tools, slash commands and scheduling; command owners are cron, automations, memory, settings, calendar, mcp-auth and ai-auth. Reads from the allow-list (settings and authorization caches, read tools, drivers) are direct calls and are not drawn.
 
 1. A Discord or Signal transport publishes `message.received` with a dedupe key per platform
    message.

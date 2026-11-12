@@ -1,111 +1,141 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 830 640" width="830" height="640" role="img" aria-label="BellaClaw services around the event bus">
-<style>
-text{fill:#e6e6e6;font:12px ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
-.h{font-size:13px;font-weight:700}
-.t{font-size:18px;font-weight:700}
-.m{fill:#9a9a9a;font-size:11px}
-.k{fill:#c8c8c8;font-size:11px;font-weight:600}
-.box{fill:#1b1b1b;stroke:#5a5a5a;stroke-width:1}
-.bus{fill:#2a2a2a;stroke:#9a9a9a;stroke-width:1.5}
-.ln{stroke:#8a8a8a;stroke-width:1.4;fill:none;marker-end:url(#a)}
-</style>
-<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" fill="#8a8a8a"/></marker></defs>
-<rect x="0" y="0" width="830" height="640" fill="#0f0f0f"/>
-<text class="t" x="20" y="32">BellaClaw: services around the event bus</text>
-<text class="m" x="20" y="50">left arrow of each pair: publishes to the bus · right arrow: delivered from the bus</text>
-<rect class="box" x="20" y="70" width="185" height="130"/>
-<text class="h" x="30" y="90">Discord · Signal</text>
-<text class="k" x="30" y="108">pub</text>
-<text class="m" x="58" y="108">message.received</text>
-<text class="k" x="30" y="126">sub</text>
-<text class="m" x="58" y="126">none (outbound drives them)</text>
-<path class="ln" d="M106.5,200V248"/>
-<rect class="box" x="222" y="70" width="185" height="130"/>
-<text class="h" x="232" y="90">authorization</text>
-<text class="k" x="232" y="108">pub</text>
-<text class="m" x="260" y="108">message.authorized</text>
-<text class="m" x="260" y="123">authorization.changed</text>
-<text class="m" x="260" y="138">reply.ready (activation)</text>
-<text class="k" x="232" y="156">sub</text>
-<text class="m" x="260" y="156">message.received</text>
-<path class="ln" d="M308.5,200V248"/>
-<path class="ln" d="M320.5,250V202"/>
-<rect class="box" x="424" y="70" width="185" height="130"/>
-<text class="h" x="434" y="90">commands</text>
-<text class="k" x="434" y="108">pub</text>
-<text class="m" x="462" y="108">turn.requested</text>
-<text class="m" x="462" y="123">reply.ready</text>
-<text class="m" x="462" y="138">slash *.requested</text>
-<text class="k" x="434" y="156">sub</text>
-<text class="m" x="462" y="156">message.authorized</text>
-<path class="ln" d="M510.5,200V248"/>
-<path class="ln" d="M522.5,250V202"/>
-<rect class="box" x="626" y="70" width="185" height="130"/>
-<text class="h" x="636" y="90">conversation</text>
-<text class="k" x="636" y="108">pub</text>
-<text class="m" x="664" y="108">turn.started · reply.ready</text>
-<text class="m" x="664" y="123">turn.completed</text>
-<text class="m" x="664" y="138">tool *.requested</text>
-<text class="k" x="636" y="156">sub</text>
-<text class="m" x="664" y="156">turn.requested</text>
-<text class="m" x="664" y="171">message.sent</text>
-<path class="ln" d="M712.5,200V248"/>
-<path class="ln" d="M724.5,250V202"/>
-<rect class="bus" x="20" y="250" width="791" height="70"/>
-<text class="h" x="36" y="272">EventBus · apps/assistant/src/services/events</text>
-<text class="m" x="36" y="290">SQLite tables events (outbox + history) and event_deliveries (one row per durable consumer)</text>
-<text class="m" x="36" y="306">a lane per consumer × key, in log order · retries · dead letters · replay on boot · request()/waitFor() for commands</text>
-<path class="ln" d="M106.5,370V322"/>
-<path class="ln" d="M118.5,320V368"/>
-<rect class="box" x="20" y="370" width="185" height="120"/>
-<text class="h" x="30" y="390">cron</text>
-<text class="k" x="30" y="408">pub</text>
-<text class="m" x="58" y="408">cron.fired</text>
-<text class="m" x="58" y="423">job outcomes</text>
-<text class="k" x="30" y="441">sub</text>
-<text class="m" x="58" y="441">cron.job.*.requested</text>
-<text class="m" x="58" y="456">automation.deleted</text>
-<path class="ln" d="M308.5,370V322"/>
-<path class="ln" d="M320.5,320V368"/>
-<rect class="box" x="222" y="370" width="185" height="120"/>
-<text class="h" x="232" y="390">scheduling</text>
-<text class="k" x="232" y="408">pub</text>
-<text class="m" x="260" y="408">delivery.ready</text>
-<text class="m" x="260" y="423">cron.task.started</text>
-<text class="m" x="260" y="438">automation.run.requested</text>
-<text class="k" x="232" y="456">sub</text>
-<text class="m" x="260" y="456">cron.fired</text>
-<path class="ln" d="M510.5,370V322"/>
-<path class="ln" d="M522.5,320V368"/>
-<rect class="box" x="424" y="370" width="185" height="120"/>
-<text class="h" x="434" y="390">memory</text>
-<text class="k" x="434" y="408">pub</text>
-<text class="m" x="462" y="408">memory outcomes</text>
-<text class="k" x="434" y="426">sub</text>
-<text class="m" x="462" y="426">turn.completed</text>
-<text class="m" x="462" y="441">memory.*.requested</text>
-<path class="ln" d="M712.5,370V322"/>
-<path class="ln" d="M724.5,320V368"/>
-<rect class="box" x="626" y="370" width="185" height="120"/>
-<text class="h" x="636" y="390">outbound</text>
-<text class="k" x="636" y="408">pub</text>
-<text class="m" x="664" y="408">message.sent</text>
-<text class="k" x="636" y="426">sub</text>
-<text class="m" x="664" y="426">reply.ready · notice.ready</text>
-<text class="m" x="664" y="441">delivery.ready</text>
-<path class="ln" d="M207,530V322"/><path class="ln" d="M217,320V528"/>
-<rect class="box" x="20" y="530" width="584" height="90"/>
-<text class="h" x="30" y="550">command owners: automations · settings · calendar · mcp-auth · ai-auth</text>
-<text class="k" x="30" y="568">pub</text>
-<text class="m" x="58" y="568">outcomes · command.rejected · settings.changed · mcp/ai auth events</text>
-<text class="k" x="30" y="586">sub</text>
-<text class="m" x="58" y="586">their *.requested commands</text>
-<path class="ln" d="M611,530V322"/><path class="ln" d="M621,320V528"/>
-<rect class="box" x="626" y="530" width="185" height="90"/>
-<text class="h" x="636" y="550">notices</text>
-<text class="k" x="636" y="568">pub</text>
-<text class="m" x="664" y="568">notice.ready</text>
-<text class="k" x="636" y="586">sub</text>
-<text class="m" x="664" y="586">auth events</text>
-<text class="m" x="664" y="601">event.dead_lettered</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 804" width="900" height="804" role="img" aria-label="Every BellaClaw service publishes to and is delivered from one event bus; each row shows publisher, event and consumer.">
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0L10,5L0,10z" fill="#8f8f8f"/></marker></defs>
+<rect x="0" y="0" width="900" height="804" fill="#111111"/>
+<text x="20" y="32" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Helvetica, Arial, sans-serif" font-size="17" font-weight="700" fill="#e5e5e5" text-anchor="start">BellaClaw: every service talks through the event bus</text>
+<text x="120.0" y="78" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="400" fill="#9a9a9a" text-anchor="middle">publisher</text>
+<text x="480.0" y="72" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#e5e5e5" text-anchor="middle">EventBus</text>
+<text x="480.0" y="88" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Helvetica, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#9a9a9a" text-anchor="middle">services/events</text>
+<text x="780.0" y="78" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="400" fill="#9a9a9a" text-anchor="middle">consumer</text>
+<rect x="440" y="96" width="80" height="644" fill="#262626" stroke="#a3a3a3" stroke-width="1.5"/>
+<text x="20" y="115" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Helvetica, Arial, sans-serif" font-size="10.5" font-weight="700" fill="#9a9a9a" text-anchor="start">CHAT</text>
+<line x1="90" y1="111" x2="428" y2="111" stroke="#2e2e2e"/>
+<line x1="532" y1="111" x2="880" y2="111" stroke="#2e2e2e"/>
+<rect x="20" y="128" width="200" height="28" fill="#1c1c1c" stroke="#6b6b6b"/>
+<text x="32" y="146.5" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#e5e5e5" text-anchor="start">Discord · Signal</text>
+<rect x="680" y="128" width="200" height="28" fill="#1c1c1c" stroke="#6b6b6b"/>
+<text x="692" y="146.5" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#e5e5e5" text-anchor="start">authorization</text>
+<line x1="220" y1="142" x2="439" y2="142" stroke="#8f8f8f" stroke-width="1.4" marker-end="url(#arrow)"/>
+<line x1="520" y1="142" x2="679" y2="142" stroke="#8f8f8f" stroke-width="1.4" marker-end="url(#arrow)"/>
+<text x="330.0" y="136" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#c9c9c9" text-anchor="middle">message.received</text>
+<circle cx="480.0" cy="142" r="3" fill="#a3a3a3"/>
+<line x1="440" y1="142" x2="520" y2="142" stroke="#3a3a3a"/>
+<rect x="20" y="168" width="200" height="28" fill="#1c1c1c" stroke="#6b6b6b"/>
+<text x="32" y="186.5" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#e5e5e5" text-anchor="start">authorization</text>
+<rect x="680" y="168" width="200" height="28" fill="#1c1c1c" stroke="#6b6b6b"/>
+<text x="692" y="186.5" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#e5e5e5" text-anchor="start">commands</text>
+<line x1="220" y1="182" x2="439" y2="182" stroke="#8f8f8f" stroke-width="1.4" marker-end="url(#arrow)"/>
+<line x1="520" y1="182" x2="679" y2="182" stroke="#8f8f8f" stroke-width="1.4" marker-end="url(#arrow)"/>
+<text x="330.0" y="176" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#c9c9c9" text-anchor="middle">message.authorized</text>
+<circle cx="480.0" cy="182" r="3" fill="#a3a3a3"/>
+<line x1="440" y1="182" x2="520" y2="182" stroke="#3a3a3a"/>
+<rect x="20" y="208" width="200" height="28" fill="#1c1c1c" stroke="#6b6b6b"/>
+<text x="32" y="226.5" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#e5e5e5" text-anchor="start">commands</text>
+<rect x="680" y="208" width="200" height="28" fill="#1c1c1c" stroke="#6b6b6b"/>
+<text x="692" y="226.5" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#e5e5e5" text-anchor="start">conversation</text>
+<line x1="220" y1="222" x2="439" y2="222" stroke="#8f8f8f" stroke-width="1.4" marker-end="url(#arrow)"/>
+<line x1="520" y1="222" x2="679" y2="222" stroke="#8f8f8f" stroke-width="1.4" marker-end="url(#arrow)"/>
+<text x="330.0" y="216" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#c9c9c9" text-anchor="middle">turn.requested</text>
+<circle cx="480.0" cy="222" r="3" fill="#a3a3a3"/>
+<line x1="440" y1="222" x2="520" y2="222" stroke="#3a3a3a"/>
+<rect x="20" y="248" width="200" height="28" fill="#1c1c1c" stroke="#6b6b6b"/>
+<text x="32" y="266.5" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#e5e5e5" text-anchor="start">conversation</text>
+<rect x="680" y="248" width="200" height="28" fill="#1c1c1c" stroke="#6b6b6b"/>
+<text x="692" y="266.5" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#e5e5e5" text-anchor="start">outbound</text>
+<line x1="220" y1="262" x2="439" y2="262" stroke="#8f8f8f" stroke-width="1.4" marker-end="url(#arrow)"/>
+<line x1="520" y1="262" x2="679" y2="262" stroke="#8f8f8f" stroke-width="1.4" marker-end="url(#arrow)"/>
+<text x="330.0" y="256" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#c9c9c9" text-anchor="middle">reply.ready</text>
+<circle cx="480.0" cy="262" r="3" fill="#a3a3a3"/>
+<line x1="440" y1="262" x2="520" y2="262" stroke="#3a3a3a"/>
+<rect x="20" y="288" width="200" height="28" fill="#1c1c1c" stroke="#6b6b6b"/>
+<text x="32" y="306.5" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#e5e5e5" text-anchor="start">outbound</text>
+<rect x="680" y="288" width="200" height="28" fill="#1c1c1c" stroke="#6b6b6b"/>
+<text x="692" y="306.5" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#e5e5e5" text-anchor="start">conversation</text>
+<line x1="220" y1="302" x2="439" y2="302" stroke="#8f8f8f" stroke-width="1.4" marker-end="url(#arrow)"/>
+<line x1="520" y1="302" x2="679" y2="302" stroke="#8f8f8f" stroke-width="1.4" marker-end="url(#arrow)"/>
+<text x="330.0" y="296" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#c9c9c9" text-anchor="middle">message.sent</text>
+<circle cx="480.0" cy="302" r="3" fill="#a3a3a3"/>
+<line x1="440" y1="302" x2="520" y2="302" stroke="#3a3a3a"/>
+<rect x="20" y="328" width="200" height="28" fill="#1c1c1c" stroke="#6b6b6b"/>
+<text x="32" y="346.5" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#e5e5e5" text-anchor="start">conversation</text>
+<rect x="680" y="328" width="200" height="28" fill="#1c1c1c" stroke="#6b6b6b"/>
+<text x="692" y="346.5" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#e5e5e5" text-anchor="start">memory</text>
+<line x1="220" y1="342" x2="439" y2="342" stroke="#8f8f8f" stroke-width="1.4" marker-end="url(#arrow)"/>
+<line x1="520" y1="342" x2="679" y2="342" stroke="#8f8f8f" stroke-width="1.4" marker-end="url(#arrow)"/>
+<text x="330.0" y="336" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#c9c9c9" text-anchor="middle">turn.completed</text>
+<circle cx="480.0" cy="342" r="3" fill="#a3a3a3"/>
+<line x1="440" y1="342" x2="520" y2="342" stroke="#3a3a3a"/>
+<text x="20" y="385" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Helvetica, Arial, sans-serif" font-size="10.5" font-weight="700" fill="#9a9a9a" text-anchor="start">SCHEDULE</text>
+<line x1="90" y1="381" x2="428" y2="381" stroke="#2e2e2e"/>
+<line x1="532" y1="381" x2="880" y2="381" stroke="#2e2e2e"/>
+<rect x="20" y="398" width="200" height="28" fill="#1c1c1c" stroke="#6b6b6b"/>
+<text x="32" y="416.5" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#e5e5e5" text-anchor="start">cron</text>
+<rect x="680" y="398" width="200" height="28" fill="#1c1c1c" stroke="#6b6b6b"/>
+<text x="692" y="416.5" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#e5e5e5" text-anchor="start">scheduling</text>
+<line x1="220" y1="412" x2="439" y2="412" stroke="#8f8f8f" stroke-width="1.4" marker-end="url(#arrow)"/>
+<line x1="520" y1="412" x2="679" y2="412" stroke="#8f8f8f" stroke-width="1.4" marker-end="url(#arrow)"/>
+<text x="330.0" y="406" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#c9c9c9" text-anchor="middle">cron.fired</text>
+<circle cx="480.0" cy="412" r="3" fill="#a3a3a3"/>
+<line x1="440" y1="412" x2="520" y2="412" stroke="#3a3a3a"/>
+<rect x="20" y="438" width="200" height="28" fill="#1c1c1c" stroke="#6b6b6b"/>
+<text x="32" y="456.5" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#e5e5e5" text-anchor="start">scheduling</text>
+<rect x="680" y="438" width="200" height="28" fill="#1c1c1c" stroke="#6b6b6b"/>
+<text x="692" y="456.5" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#e5e5e5" text-anchor="start">outbound</text>
+<line x1="220" y1="452" x2="439" y2="452" stroke="#8f8f8f" stroke-width="1.4" marker-end="url(#arrow)"/>
+<line x1="520" y1="452" x2="679" y2="452" stroke="#8f8f8f" stroke-width="1.4" marker-end="url(#arrow)"/>
+<text x="330.0" y="446" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#c9c9c9" text-anchor="middle">delivery.ready</text>
+<circle cx="480.0" cy="452" r="3" fill="#a3a3a3"/>
+<line x1="440" y1="452" x2="520" y2="452" stroke="#3a3a3a"/>
+<text x="20" y="495" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Helvetica, Arial, sans-serif" font-size="10.5" font-weight="700" fill="#9a9a9a" text-anchor="start">COMMANDS</text>
+<line x1="90" y1="491" x2="428" y2="491" stroke="#2e2e2e"/>
+<line x1="532" y1="491" x2="880" y2="491" stroke="#2e2e2e"/>
+<rect x="20" y="508" width="200" height="28" fill="#1c1c1c" stroke="#6b6b6b"/>
+<text x="32" y="526.5" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#e5e5e5" text-anchor="start">requesters</text>
+<rect x="680" y="508" width="200" height="28" fill="#1c1c1c" stroke="#6b6b6b"/>
+<text x="692" y="526.5" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#e5e5e5" text-anchor="start">command owner</text>
+<line x1="220" y1="522" x2="439" y2="522" stroke="#8f8f8f" stroke-width="1.4" marker-end="url(#arrow)"/>
+<line x1="520" y1="522" x2="679" y2="522" stroke="#8f8f8f" stroke-width="1.4" marker-end="url(#arrow)"/>
+<text x="330.0" y="516" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#c9c9c9" text-anchor="middle">*.requested</text>
+<circle cx="480.0" cy="522" r="3" fill="#a3a3a3"/>
+<line x1="440" y1="522" x2="520" y2="522" stroke="#3a3a3a"/>
+<rect x="20" y="548" width="200" height="28" fill="#1c1c1c" stroke="#6b6b6b"/>
+<text x="32" y="566.5" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#e5e5e5" text-anchor="start">command owner</text>
+<rect x="680" y="548" width="200" height="28" fill="#1c1c1c" stroke="#6b6b6b"/>
+<text x="692" y="566.5" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#e5e5e5" text-anchor="start">requester (waits)</text>
+<line x1="220" y1="562" x2="439" y2="562" stroke="#8f8f8f" stroke-width="1.4" marker-end="url(#arrow)"/>
+<line x1="520" y1="562" x2="679" y2="562" stroke="#8f8f8f" stroke-width="1.4" marker-end="url(#arrow)"/>
+<text x="330.0" y="556" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#c9c9c9" text-anchor="middle">outcome · command.rejected</text>
+<circle cx="480.0" cy="562" r="3" fill="#a3a3a3"/>
+<line x1="440" y1="562" x2="520" y2="562" stroke="#3a3a3a"/>
+<text x="20" y="605" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Helvetica, Arial, sans-serif" font-size="10.5" font-weight="700" fill="#9a9a9a" text-anchor="start">NOTICES</text>
+<line x1="90" y1="601" x2="428" y2="601" stroke="#2e2e2e"/>
+<line x1="532" y1="601" x2="880" y2="601" stroke="#2e2e2e"/>
+<rect x="20" y="618" width="200" height="28" fill="#1c1c1c" stroke="#6b6b6b"/>
+<text x="32" y="636.5" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#e5e5e5" text-anchor="start">mcp-auth · ai-auth</text>
+<rect x="680" y="618" width="200" height="28" fill="#1c1c1c" stroke="#6b6b6b"/>
+<text x="692" y="636.5" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#e5e5e5" text-anchor="start">notices</text>
+<line x1="220" y1="632" x2="439" y2="632" stroke="#8f8f8f" stroke-width="1.4" marker-end="url(#arrow)"/>
+<line x1="520" y1="632" x2="679" y2="632" stroke="#8f8f8f" stroke-width="1.4" marker-end="url(#arrow)"/>
+<text x="330.0" y="626" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#c9c9c9" text-anchor="middle">mcp.auth.* · ai.auth.*</text>
+<circle cx="480.0" cy="632" r="3" fill="#a3a3a3"/>
+<line x1="440" y1="632" x2="520" y2="632" stroke="#3a3a3a"/>
+<rect x="20" y="658" width="200" height="28" fill="#1c1c1c" stroke="#6b6b6b"/>
+<text x="32" y="676.5" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#e5e5e5" text-anchor="start">bus: dead delivery</text>
+<rect x="680" y="658" width="200" height="28" fill="#1c1c1c" stroke="#6b6b6b"/>
+<text x="692" y="676.5" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#e5e5e5" text-anchor="start">notices</text>
+<line x1="220" y1="672" x2="439" y2="672" stroke="#8f8f8f" stroke-width="1.4" marker-end="url(#arrow)"/>
+<line x1="520" y1="672" x2="679" y2="672" stroke="#8f8f8f" stroke-width="1.4" marker-end="url(#arrow)"/>
+<text x="330.0" y="666" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#c9c9c9" text-anchor="middle">event.dead_lettered</text>
+<circle cx="480.0" cy="672" r="3" fill="#a3a3a3"/>
+<line x1="440" y1="672" x2="520" y2="672" stroke="#3a3a3a"/>
+<rect x="20" y="698" width="200" height="28" fill="#1c1c1c" stroke="#6b6b6b"/>
+<text x="32" y="716.5" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#e5e5e5" text-anchor="start">notices</text>
+<rect x="680" y="698" width="200" height="28" fill="#1c1c1c" stroke="#6b6b6b"/>
+<text x="692" y="716.5" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#e5e5e5" text-anchor="start">outbound</text>
+<line x1="220" y1="712" x2="439" y2="712" stroke="#8f8f8f" stroke-width="1.4" marker-end="url(#arrow)"/>
+<line x1="520" y1="712" x2="679" y2="712" stroke="#8f8f8f" stroke-width="1.4" marker-end="url(#arrow)"/>
+<text x="330.0" y="706" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#c9c9c9" text-anchor="middle">notice.ready</text>
+<circle cx="480.0" cy="712" r="3" fill="#a3a3a3"/>
+<line x1="440" y1="712" x2="520" y2="712" stroke="#3a3a3a"/>
+<text x="20" y="766" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#9a9a9a" text-anchor="start">EventBus = SQLite tables events (outbox + history) and event_deliveries (one row per durable consumer).</text>
+<text x="20" y="784" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#9a9a9a" text-anchor="start">Delivery: a lane per consumer × key, in log order · retries · dead letters · replay on boot. Commands wait with request().</text>
 </svg>
