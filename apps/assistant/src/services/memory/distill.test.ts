@@ -3,6 +3,7 @@ import type { TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
 import { LlmClient, LlmResponseError } from "../ai/llm";
 import { EModelPurpose, ERole } from "../ai/types";
 import { ConversationStore } from "../conversation";
+import { DatabaseConnector } from "../database";
 import type { TSelectMemory } from "../database/schema";
 import { SettingsService } from "../settings";
 import { DefaultConfigRecord } from "../settings/schema";
@@ -411,12 +412,14 @@ describe("FactDistiller", () => {
       secondText = "The user's bicycle is blue.";
     }
     const first = await ConversationStore.instance.saveUserMessage(
+      DatabaseConnector.instance.database,
       chatId,
       ERole.User,
       firstText,
       new Date(),
     );
     const second = await ConversationStore.instance.saveUserMessage(
+      DatabaseConnector.instance.database,
       chatId,
       ERole.User,
       secondText,

@@ -58,6 +58,7 @@ describe("Memory", () => {
       const memory = Memory.instance;
       for (let index = 1; index <= 3; index += 1) {
         await ConversationStore.instance.saveUserMessage(
+          DatabaseConnector.instance.database,
           "chat-a",
           ERole.User,
           `Fact source ${index}`,
@@ -65,6 +66,7 @@ describe("Memory", () => {
         );
       }
       await ConversationStore.instance.saveUserMessage(
+        DatabaseConnector.instance.database,
         "chat-b",
         ERole.User,
         "Another chat fact source",
@@ -159,6 +161,7 @@ describe("Memory", () => {
       expect((await memory.searchFacts("chat-a", survivor.embedding, 10))[0]?.id).toBe(survivor.id);
 
       await ConversationStore.instance.saveUserMessage(
+        DatabaseConnector.instance.database,
         "chat-a",
         ERole.User,
         "The bicycle is named Comet again.",
@@ -192,6 +195,7 @@ describe("Memory", () => {
         }
 
         await ConversationStore.instance.saveUserMessage(
+          DatabaseConnector.instance.database,
           "chat-window",
           author,
           `Window message ${index}`,
@@ -199,6 +203,7 @@ describe("Memory", () => {
         );
       }
       await ConversationStore.instance.saveUserMessage(
+        DatabaseConnector.instance.database,
         "chat-other",
         ERole.User,
         "Other chat message",
@@ -237,6 +242,7 @@ describe("Memory", () => {
     test("commits supersessions atomically and rolls back failures", async () => {
       const memory = Memory.instance;
       await ConversationStore.instance.saveUserMessage(
+        DatabaseConnector.instance.database,
         "chat-atomic",
         ERole.User,
         "The bicycle used to be called Spark.",
@@ -265,6 +271,7 @@ describe("Memory", () => {
       }
 
       await ConversationStore.instance.saveUserMessage(
+        DatabaseConnector.instance.database,
         "chat-atomic",
         ERole.User,
         "The bicycle is now called Comet.",
@@ -289,6 +296,7 @@ describe("Memory", () => {
       ).toEqual(["The bicycle is now called Comet."]);
 
       await ConversationStore.instance.saveUserMessage(
+        DatabaseConnector.instance.database,
         "chat-atomic",
         ERole.User,
         "This transaction must roll back.",
@@ -318,6 +326,7 @@ describe("Memory", () => {
       const memory = Memory.instance;
       for (let index = 1; index <= 5; index += 1) {
         await ConversationStore.instance.saveUserMessage(
+          DatabaseConnector.instance.database,
           "chat-stale",
           ERole.User,
           `Stale source ${index}`,
@@ -366,6 +375,7 @@ describe("Memory", () => {
     test("rejects fact provenance outside the current same-chat user window", async () => {
       const memory = Memory.instance;
       await ConversationStore.instance.saveUserMessage(
+        DatabaseConnector.instance.database,
         "chat-provenance",
         ERole.Assistant,
         "Assistant context only",

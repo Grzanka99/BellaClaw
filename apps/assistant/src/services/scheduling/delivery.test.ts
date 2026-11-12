@@ -6,7 +6,7 @@ import { transformMessages } from "@earendil-works/pi-ai/api/transform-messages"
 import { eq } from "drizzle-orm";
 import type { AgentHarness } from "../ai/agent-harness";
 import { getAiModelConfig } from "../ai/providers/registry";
-import { EAiProvider, EModelPurpose, ERole } from "../ai/types";
+import { EAiProvider, EModelPurpose } from "../ai/types";
 import { AutomationService } from "../automation";
 import { conversationMessages, type TConversation } from "../conversation/types";
 import { ECronJobType } from "../cron/types";
@@ -17,7 +17,6 @@ import { EventBus } from "../events";
 import { EEventType, type TCronFiredPayload } from "../events/catalog";
 import { Memory } from "../memory";
 import { MessageHandler } from "../message-handler";
-import type { TIncommingMessage } from "../message-handler/types";
 import { MessagingAdapter } from "../messaging";
 import { EMessagePlatform } from "../messaging/types";
 import { SettingsService } from "../settings";
@@ -74,7 +73,7 @@ async function setupBus(start = true) {
   Object.assign(MessagingAdapter.instance, { outboundBackoffMs: [] });
   ScheduledDelivery.instance.setup();
   MessagingAdapter.instance.setup();
-  MessageHandler.setup();
+  MessageHandler.instance.setup();
 
   if (start) {
     await EventBus.instance.start();
@@ -93,14 +92,14 @@ function reset() {
   (ScheduledDelivery as unknown as { _instance: unknown })._instance = undefined;
   (Memory as unknown as { _instance: unknown })._instance = undefined;
   (SettingsService as unknown as { _instance: unknown })._instance = undefined;
-  (MessageHandler as unknown as { _instances: Map<string, MessageHandler> })._instances.clear();
+  Object.assign(MessageHandler, { _instance: undefined });
 }
 
 function setupConversationHandler(chatId: string) {
   (SettingsService as unknown as { _instance: unknown })._instance = {
     getAll: mock(async () => DefaultConfigRecord),
   };
-  const handler = MessageHandler.getInstance(chatId);
+  const handler = MessageHandler.instance;
   const runMain = mock(async (args: Parameters<AgentHarness["runMain"]>[0]) => {
     const messages: Message[] = [
       ...(args.conversation?.entries.map((entry) => entry.message) ?? []),
@@ -116,17 +115,27 @@ function setupConversationHandler(chatId: string) {
     };
   });
   const compactConversation = mock(async (_state: TConversation): Promise<unknown> => undefined);
-  Object.assign(handler, {
-    ai: { runMain, compactConversation },
-    factDistiller: { enqueueFactDrain: async () => true },
-  });
-  const message: TIncommingMessage = {
-    chatId,
-    receivedAt: new Date(),
-    author: { type: ERole.User },
-    message: { content: "Hello" },
+  Object.assign(handler, { ai: { runMain, compactConversation } });
+  const requestTurn = () =>
+    EventBus.instance.publish({
+      type: EEventType.TurnRequested,
+      source: "test",
+      key: chatId,
+      trace: { ...TEST_TRACE, chatId },
+      payload: {
+        chatId,
+        content: "Hello",
+        receivedAt: Date.now(),
+        platform: EMessagePlatform.Signal,
+      },
+      causationId: undefined,
+      dedupeKey: undefined,
+    });
+  const turn = async () => {
+    await requestTurn();
+    await EventBus.instance.idle();
   };
-  return { handler, runMain, compactConversation, message };
+  return { runMain, compactConversation, requestTurn, turn };
 }
 
 async function saveAutomation(scope: string, name: string, source: string) {
@@ -141,12 +150,12 @@ async function saveAutomation(scope: string, name: string, source: string) {
   return AutomationService.instance.saveDraft(scope, draft.id);
 }
 
-function setupAutomationDelivery(scope: string) {
+function setupAutomationDelivery() {
   (SettingsService as unknown as { _instance: unknown })._instance = {
     getAll: mock(async () => DefaultConfigRecord),
   };
   const save = mock(async () => undefined);
-  Object.assign(MessageHandler.getInstance(scope), {
+  Object.assign(MessageHandler.instance, {
     conversations: { saveDeliveredMessage: save },
   });
   const sendText = mock(async () => undefined);
@@ -191,8 +200,8 @@ describe("ScheduledDelivery", () => {
     "task",
   ])("replays a delivered %s in the next Main request", async (kind) => {
     const chatId = `signal:replay-${kind}-${crypto.randomUUID()}`;
-    const { handler, runMain, message } = setupConversationHandler(chatId);
-    await handler.handleMessage(message, TEST_TRACE, EMessagePlatform.Signal);
+    const { runMain, turn } = setupConversationHandler(chatId);
+    await turn();
     const adapter = MessagingAdapter.instance;
     const sendText = mock(async () => undefined);
     adapter.registerTransport({ platform: EMessagePlatform.Signal, sendText });
@@ -218,7 +227,7 @@ describe("ScheduledDelivery", () => {
 
     await fire(context);
     await EventBus.instance.idle();
-    await handler.handleMessage(message, TEST_TRACE, EMessagePlatform.Signal);
+    await turn();
 
     const conversation = runMain.mock.calls[1]?.[0].conversation;
     expect(JSON.stringify(conversation)).toContain(transcript);
@@ -251,7 +260,7 @@ describe("ScheduledDelivery", () => {
     "compaction",
   ])("retains delivery during an active %s after compaction", async (phase) => {
     const chatId = `signal:overlap-${phase}-${crypto.randomUUID()}`;
-    const { handler, runMain, compactConversation, message } = setupConversationHandler(chatId);
+    const { runMain, compactConversation, requestTurn, turn } = setupConversationHandler(chatId);
     const started = Promise.withResolvers<void>();
     const finish = Promise.withResolvers<void>();
     const deliveredAt = 1_800_000_000_000;
@@ -284,19 +293,21 @@ describe("ScheduledDelivery", () => {
       };
     });
     const adapter = MessagingAdapter.instance;
-    const sendText = mock(async () => undefined);
+    const sendText = mock(async (_chatId: string, _text: string) => undefined);
     adapter.registerTransport({ platform: EMessagePlatform.Signal, sendText });
 
     try {
-      const turn = handler.handleMessage(message, TEST_TRACE, EMessagePlatform.Signal);
+      await requestTurn();
       await started.promise;
       await fire(cron({ scope: chatId }));
-      await waitForCall(sendText);
+      // the turn's own reply is sent before its compaction, so wait for the reminder itself
+      while (!sendText.mock.calls.some((call) => call[1] === "Take a break.")) {
+        await Bun.sleep(1);
+      }
       clock.mockReturnValue(deliveredAt + 60_000);
       finish.resolve();
-      await turn;
       await EventBus.instance.idle();
-      await handler.handleMessage(message, TEST_TRACE, EMessagePlatform.Signal);
+      await turn();
 
       const conversation = runMain.mock.calls[1]?.[0].conversation;
       expect(conversation?.summary).toBe("The normal turn was summarized.");
@@ -342,7 +353,7 @@ describe("ScheduledDelivery", () => {
 
   test("conversation appends on message.sent only", async () => {
     const save = mock(async () => undefined);
-    Object.assign(MessageHandler.getInstance("signal:+100"), {
+    Object.assign(MessageHandler.instance, {
       conversations: { saveDeliveredMessage: save },
     });
     const sendText = mock(async () => undefined);
@@ -376,7 +387,7 @@ describe("ScheduledDelivery", () => {
       getAll: mock(async () => DefaultConfigRecord),
     };
     const save = mock(async () => undefined);
-    Object.assign(MessageHandler.getInstance("signal:+100"), {
+    Object.assign(MessageHandler.instance, {
       conversations: { saveDeliveredMessage: save },
     });
     const sendText = mock(async () => undefined);
@@ -518,7 +529,7 @@ describe("ScheduledDelivery", () => {
         "tram",
         "export default async () => ({ kind: 'text', text: 'Tram at 7:10' })",
       );
-      const { save, sendText, internals } = setupAutomationDelivery(scope);
+      const { save, sendText, internals } = setupAutomationDelivery();
       const job = cron({
         scope,
         content: { kind: "automations" },
@@ -552,7 +563,7 @@ describe("ScheduledDelivery", () => {
         "metrics",
         "export default async () => ({ kind: 'data', data: { value: 1 } })",
       );
-      const { save, sendText } = setupAutomationDelivery(scope);
+      const { save, sendText } = setupAutomationDelivery();
 
       await fire(
         cron({ scope, content: { kind: "automations" }, automationIds: [quiet.id, metrics.id] }),
@@ -564,7 +575,7 @@ describe("ScheduledDelivery", () => {
     });
 
     test("falls back to the task fallback text when running the automations throws", async () => {
-      const { sendText } = setupAutomationDelivery(scope);
+      const { sendText } = setupAutomationDelivery();
       const getByIds = spyOn(AutomationService.instance, "getByIds").mockRejectedValue(
         new Error("database unavailable"),
       );
@@ -599,7 +610,7 @@ describe("ScheduledDelivery", () => {
         "metrics",
         "export default async () => ({ kind: 'data', data: { value: 1 } })",
       );
-      const { save, sendText, prompts } = setupAutomationDelivery(scope);
+      const { save, sendText, prompts } = setupAutomationDelivery();
 
       await fire(
         cron({
@@ -628,7 +639,7 @@ describe("ScheduledDelivery", () => {
         "broken",
         "export default async () => { throw new Error('boom'); }",
       );
-      const { save, sendText } = setupAutomationDelivery(scope);
+      const { save, sendText } = setupAutomationDelivery();
 
       await fire(cron({ scope, content: { kind: "automations" }, automationIds: [broken.id] }));
       await EventBus.instance.idle();
@@ -653,7 +664,7 @@ describe("ScheduledDelivery", () => {
         "broken",
         "export default async () => { throw new Error('boom'); }",
       );
-      const { sendText } = setupAutomationDelivery(scope);
+      const { sendText } = setupAutomationDelivery();
 
       await fire(
         cron({
@@ -676,7 +687,7 @@ describe("ScheduledDelivery", () => {
       );
       await AutomationService.instance.recordFailure(broken.id, "boom");
       await AutomationService.instance.recordFailure(broken.id, "boom");
-      const { save, sendText } = setupAutomationDelivery(scope);
+      const { save, sendText } = setupAutomationDelivery();
       const job = cron({ scope, content: { kind: "automations" }, automationIds: [broken.id] });
 
       await fire(job);

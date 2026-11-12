@@ -6,7 +6,6 @@ import {
 } from "@bellaclaw/behavior-logs";
 import type { TOption } from "@bellaclaw/shared";
 import { createLogger, type TLogger } from "@bellaclaw/shared";
-import { ERole } from "../ai/types";
 import { startHandlerSpan } from "../app-logger/operations";
 import { startSpan } from "../app-logger/span";
 import {
@@ -17,8 +16,6 @@ import {
 import { runCommand } from "../commands";
 import { ESubscriptionMode, EventBus, type TEventContext } from "../events";
 import { EEventType, type TDeliveryTranscript, type TEvent } from "../events/catalog";
-import { MessageHandler } from "../message-handler";
-import type { TIncommingMessage } from "../message-handler/types";
 import { createCanonicalChatKey, parseCanonicalChatKey } from "./chat-key";
 import type { EMessagePlatform, TMessageTransport, TPlatformMessage } from "./types";
 
@@ -73,7 +70,7 @@ export class MessagingAdapter {
   }
 
   public async handleInboundMessage(message: TPlatformMessage) {
-    const receivedAt = new Date();
+    const receivedAt = Date.now();
     const canonicalChatId = createCanonicalChatKey(message.platform, message.chatId);
     const trace: TBehaviorTraceContext = {
       turnId: createMessageTurnId(),
@@ -83,13 +80,6 @@ export class MessagingAdapter {
     const span = startHandlerSpan(trace, "messaging");
 
     try {
-      const transport = this.transports.get(message.platform);
-      if (transport === undefined) {
-        this.logger.error(`handleInboundMessage: no transport for platform ${message.platform}`);
-        span.fail("missing transport", 0);
-        return;
-      }
-
       const authorizationResult = await this.authorization.authorize(
         canonicalChatId,
         message.message.content,
@@ -115,7 +105,8 @@ export class MessagingAdapter {
       }
 
       if (authorizationReply !== undefined) {
-        await this.sendText(transport, message.chatId, authorizationReply, trace);
+        await this.publishReply(canonicalChatId, authorizationReply, trace);
+        span.ok("authorization reply", authorizationReply.length);
         return;
       }
 
@@ -124,41 +115,42 @@ export class MessagingAdapter {
       const commandReply = await runCommand(canonicalChatId, message.message.content);
 
       if (typeof commandReply === "string") {
-        await this.sendText(transport, message.chatId, commandReply, trace);
+        await this.publishReply(canonicalChatId, commandReply, trace);
+        span.ok("command reply", commandReply.length);
         return;
       }
 
-      const incomingMessage: TIncommingMessage = {
-        chatId: canonicalChatId,
-        receivedAt,
-        author: {
-          type: ERole.User,
-        },
-        message: { ...message.message },
-      };
+      let content = message.message.content;
       if (commandReply !== undefined) {
-        incomingMessage.message.content = commandReply.prompt;
+        content = commandReply.prompt;
       }
 
-      const handler = MessageHandler.getInstance(canonicalChatId);
-      const reply = await handler.handleMessage(incomingMessage, trace, message.platform);
-
-      if (reply.trim().length === 0) {
-        span.ok("empty reply", 0);
-        return;
-      }
-
-      const sendError = await this.sendText(transport, message.chatId, reply, trace);
-      if (sendError !== undefined) {
-        span.fail("send failed", reply.length, sendError);
-        return;
-      }
-
-      span.ok("completed", reply.length);
+      await EventBus.instance.publish({
+        type: EEventType.TurnRequested,
+        source: "messaging",
+        key: canonicalChatId,
+        trace,
+        payload: { chatId: canonicalChatId, content, receivedAt, platform: message.platform },
+        causationId: undefined,
+        dedupeKey: undefined,
+      });
+      span.ok("turn requested", 0);
     } catch (error) {
       span.fail("failed", 0, String(error));
       throw error;
     }
+  }
+
+  private publishReply(chatId: string, text: string, trace: TBehaviorTraceContext) {
+    return EventBus.instance.publish({
+      type: EEventType.ReplyReady,
+      source: "messaging",
+      key: chatId,
+      trace,
+      payload: { chatId, text },
+      causationId: undefined,
+      dedupeKey: undefined,
+    });
   }
 
   private async send(

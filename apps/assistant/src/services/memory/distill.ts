@@ -7,6 +7,8 @@ import { EModelPurpose, ERole } from "../ai/types";
 import { ConversationStore } from "../conversation";
 import type { TSelectMemory } from "../database/schema";
 import { EmbeddingClient } from "../embedding";
+import { ESubscriptionMode, EventBus } from "../events";
+import { EEventType } from "../events/catalog";
 import { SettingsService } from "../settings";
 import type { TConfigRecord } from "../settings/schema";
 import { Memory } from ".";
@@ -44,8 +46,8 @@ export class FactDistiller {
   private embedding = EmbeddingClient.instance;
   private memory = Memory.instance;
   private conversations = ConversationStore.instance;
-  // NOTE: fact drains get their own per-chat queue so a slow distillation run never delays the
-  // transcript saves that the reply path awaits on the message handler queue
+  // NOTE: shared by the memory consumer and ensureFactsCurrent, so their drains of one chat never
+  // overlap
   private factQueues = new Map<string, AsyncQueue>();
 
   private constructor() {}
@@ -56,6 +58,34 @@ export class FactDistiller {
     }
 
     return FactDistiller._instance;
+  }
+
+  public setup(): void {
+    const bus = EventBus.instance;
+
+    bus.subscribe({
+      consumer: "memory",
+      type: EEventType.TurnCompleted,
+      mode: ESubscriptionMode.Durable,
+      backoffMs: [],
+      handler: async (event) => {
+        const chatId = event.payload.chatId;
+        const settings = await SettingsService.instance.getAll(chatId);
+
+        // NOTE: acked anyway: the checkpoint in fact_distillation_state makes the next drain
+        // cover this window
+        if (!(await this.enqueueFactDrain(chatId, settings, event.trace))) {
+          this.logger.error("turn.completed: fact drain failed");
+        }
+      },
+    });
+    bus.subscribe({
+      consumer: "memory",
+      type: EEventType.AppStarted,
+      mode: ESubscriptionMode.Live,
+      backoffMs: [],
+      handler: (event) => this.scheduleFactDrainForAllChats(event.trace.turnId),
+    });
   }
 
   // NOTE: without this, facts stay empty until the first inbound message of the process, so the

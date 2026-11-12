@@ -1,6 +1,9 @@
 import type { TOption } from "@bellaclaw/shared";
 import { createLogger, type TLogger } from "@bellaclaw/shared";
+import { ESubscriptionMode, EventBus } from "../events";
+import { EEventType, type TEvent } from "../events/catalog";
 import { MessagingAdapter } from "../messaging";
+import { parseCanonicalChatKey } from "../messaging/chat-key";
 import { EMessagePlatform, type TMessageTransport } from "../messaging/types";
 import { SignalClient, type TSignalInboundMessage } from "./client";
 
@@ -37,6 +40,24 @@ export class SignalSingleton implements TMessageTransport {
     if (Bun.env.SIGNAL_ENABLED !== "true") {
       this.logger.info("Signal disabled");
       return;
+    }
+
+    const bus = EventBus.instance;
+    const typingEvents: [EEventType, boolean][] = [
+      [EEventType.TurnRequested, true],
+      [EEventType.TurnCompleted, false],
+      [EEventType.TurnFailed, false],
+      [EEventType.EventDeadLettered, false],
+    ];
+
+    for (const [type, typing] of typingEvents) {
+      bus.subscribe({
+        consumer: "signal-typing",
+        type,
+        mode: ESubscriptionMode.Live,
+        backoffMs: [],
+        handler: (event) => this.setTyping(event, typing),
+      });
     }
 
     this.setupPromise = this.setupWithRetries().catch((error) => {
@@ -156,28 +177,37 @@ export class SignalSingleton implements TMessageTransport {
       }
     }
 
-    if (client !== undefined) {
-      void client.showTyping(message.sourceNumber).catch((error) => {
-        this.logger.error(`showTyping failed: ${String(error)}`);
-      });
+    await MessagingAdapter.instance.handleInboundMessage({
+      platform: EMessagePlatform.Signal,
+      chatId: message.sourceNumber,
+      message: {
+        content: message.message,
+      },
+    });
+  }
+
+  private async setTyping(event: TEvent, typing: boolean): Promise<void> {
+    const client = this.client;
+    const chatId = event.trace.chatId;
+
+    if (client === undefined || chatId === undefined) {
+      return;
+    }
+
+    const owner = parseCanonicalChatKey(chatId);
+
+    if (owner === undefined || owner.platform !== EMessagePlatform.Signal) {
+      return;
     }
 
     try {
-      await MessagingAdapter.instance.handleInboundMessage({
-        platform: EMessagePlatform.Signal,
-        chatId: message.sourceNumber,
-        message: {
-          content: message.message,
-        },
-      });
-    } finally {
-      if (client !== undefined) {
-        try {
-          await client.hideTyping(message.sourceNumber);
-        } catch (error) {
-          this.logger.error(`hideTyping failed: ${String(error)}`);
-        }
+      if (typing) {
+        await client.showTyping(owner.chatId);
+      } else {
+        await client.hideTyping(owner.chatId);
       }
+    } catch (error) {
+      this.logger.error(`setTyping(${typing}) failed: ${String(error)}`);
     }
   }
 }

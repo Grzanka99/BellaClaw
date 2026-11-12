@@ -1,6 +1,6 @@
 import type { TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
 import type { TOption } from "@bellaclaw/shared";
-import { AsyncQueue, createLogger, type TLogger } from "@bellaclaw/shared";
+import { createLogger } from "@bellaclaw/shared";
 import { AgentHarness } from "../ai/agent-harness";
 import { describeAiAuthProblem } from "../ai/auth";
 import { ERole } from "../ai/types";
@@ -10,194 +10,241 @@ import { ConversationStore } from "../conversation";
 import type { TConversation } from "../conversation/types";
 import type { TSelectMemory } from "../database/schema";
 import { ESubscriptionMode, EventBus, type TEventContext } from "../events";
-import { EEventType, type TDeliveryTranscript } from "../events/catalog";
-import { FactDistiller } from "../memory/distill";
+import { EEventType, type TEvent } from "../events/catalog";
 import type { EMessagePlatform } from "../messaging/types";
 import { SettingsService } from "../settings";
 import { EConfigKey, type TConfigRecord } from "../settings/schema";
-import type { TIncommingMessage } from "./types";
+
+const FAILED_REPLY = "Something went wrong.";
+const INTERRUPTED_REPLY =
+  "I was restarted while answering, so that reply is lost. Some actions may already be done. Check before asking again.";
+const INTERRUPTED_NOTICE =
+  "System notice, not from the user: the previous turn was interrupted by a restart. Its tool calls may be partly applied. The next assistant message says so.";
 
 export class MessageHandler {
-  private static _instances = new Map<string, MessageHandler>();
-  private logger: TLogger;
+  private static _instance: TOption<MessageHandler>;
+  private logger = createLogger("MESSAGE_HANDLER");
   private ai = AgentHarness.instance;
-  private turnQueue = new AsyncQueue();
   private conversations = ConversationStore.instance;
-  private factDistiller = FactDistiller.instance;
 
-  constructor(private chatId: string) {
-    this.logger = createLogger(`AbstractMessageHandler (cid: ${chatId})`);
-    this.logger.info("created abstract message handler");
-    this.logger.info("handler is up");
-  }
+  private constructor() {}
 
-  public static getInstance(chatId: string): MessageHandler {
-    const instance = MessageHandler._instances.get(chatId);
-
-    if (instance) {
-      return instance;
+  public static get instance() {
+    if (!MessageHandler._instance) {
+      MessageHandler._instance = new MessageHandler();
     }
 
-    const newInstance = new MessageHandler(chatId);
-    MessageHandler._instances.set(chatId, newInstance);
-
-    return newInstance;
+    return MessageHandler._instance;
   }
 
-  public static setup(): void {
-    EventBus.instance.subscribe({
+  // NOTE: both subscriptions share the consumer, so one lane per chat orders turns, their
+  // compaction and transcript appends
+  public setup(): void {
+    const bus = EventBus.instance;
+
+    bus.subscribe({
+      consumer: "conversation",
+      type: EEventType.TurnRequested,
+      mode: ESubscriptionMode.Durable,
+      backoffMs: [],
+      handler: (event, ctx) => this.handleTurn(event, ctx),
+    });
+    bus.subscribe({
       consumer: "conversation",
       type: EEventType.MessageSent,
       mode: ESubscriptionMode.Durable,
       backoffMs: [1_000, 5_000, 30_000],
-      handler: async (event, ctx) => {
-        if (event.payload.transcript === undefined) {
-          return;
-        }
-
-        await MessageHandler.getInstance(event.payload.chatId).saveDeliveredMessage(
-          event.payload.transcript,
-          event.payload.sentAt,
-          event.trace,
-          ctx,
-        );
-      },
+      handler: (event, ctx) => this.saveDeliveredMessage(event, ctx),
     });
   }
 
-  public async handleMessage(
-    message: TIncommingMessage,
-    trace: TBehaviorTraceContext,
-    platform?: EMessagePlatform,
-  ): Promise<string> {
-    // The turn task settles the reply first, then runs post-turn work, so the caller never waits
-    // for compaction while the next turn of this chat still starts only after it.
-    const reply = Promise.withResolvers<string>();
-    void this.turnQueue
-      .enqueue(() => this.handleTurn(message, trace, platform, reply))
-      .catch((error) => reply.reject(error));
-    return reply.promise;
-  }
-
-  private saveDeliveredMessage(
-    transcript: TDeliveryTranscript,
-    deliveredAt: number,
-    trace: TBehaviorTraceContext,
+  private async saveDeliveredMessage(
+    event: TEvent<EEventType.MessageSent>,
     ctx: TEventContext,
   ): Promise<void> {
-    // Append after the active turn and its compaction so a summary cannot skip this delivery.
-    return this.turnQueue.enqueue(async () => {
-      const span = startMemorySaveSpan(trace, ERole.Assistant, transcript.text.length);
-      let failure: TOption<string>;
-      try {
-        await ctx.complete((tx) =>
-          this.conversations.saveDeliveredMessage(
-            tx,
-            this.chatId,
-            transcript.text,
-            transcript.notice,
-            deliveredAt,
-          ),
-        );
-      } catch (error) {
-        failure = String(error);
-        throw error;
-      } finally {
-        span.end(failure === undefined, {}, failure);
-      }
-    });
+    const transcript = event.payload.transcript;
+
+    if (transcript === undefined) {
+      return;
+    }
+
+    const span = startMemorySaveSpan(event.trace, ERole.Assistant, transcript.text.length);
+    let failure: TOption<string>;
+    try {
+      await ctx.complete((tx) =>
+        this.conversations.saveDeliveredMessage(
+          tx,
+          event.payload.chatId,
+          transcript.text,
+          transcript.notice,
+          event.payload.sentAt,
+        ),
+      );
+    } catch (error) {
+      failure = String(error);
+      throw error;
+    } finally {
+      span.end(failure === undefined, {}, failure);
+    }
   }
 
   private async handleTurn(
-    message: TIncommingMessage,
-    trace: TBehaviorTraceContext,
-    platform: TOption<EMessagePlatform>,
-    reply: PromiseWithResolvers<string>,
+    event: TEvent<EEventType.TurnRequested>,
+    ctx: TEventContext,
   ): Promise<void> {
+    const { chatId, content, receivedAt, platform } = event.payload;
+    const trace = event.trace;
     const handleMessageStart = performance.now();
-    this.logger.info("handleMessage: start");
+    this.logger.info("handleTurn: start");
     logHandlerStarted(trace, "message-handler");
     const span = startHandlerSpan(trace, "message-handler");
 
+    // an earlier attempt died mid-run; the model must not answer twice
+    if ((await ctx.findCaused(EEventType.TurnStarted, undefined)) !== undefined) {
+      this.logger.warning("handleTurn: interrupted turn found, not running it again");
+      await ctx.complete(async (_tx, emit) => {
+        emit(
+          EEventType.ReplyReady,
+          {
+            chatId,
+            text: INTERRUPTED_REPLY,
+            transcript: { text: INTERRUPTED_REPLY, notice: INTERRUPTED_NOTICE },
+          },
+          undefined,
+          undefined,
+        );
+        emit(EEventType.TurnFailed, { chatId, reason: "interrupted" }, undefined, undefined);
+      });
+      span.fail("interrupted", INTERRUPTED_REPLY.length);
+      return;
+    }
+
+    const settings = await SettingsService.instance.getAll(chatId);
+    let persisted: TOption<TConversation>;
+
     try {
-      const settings = await SettingsService.instance.getAll(message.chatId);
-      let conversation = await this.conversations.load(message.chatId);
+      let conversation = await this.conversations.load(chatId);
       if (conversation !== undefined) {
-        conversation = await this.compact(conversation, settings, platform, trace);
+        conversation = await this.compact(chatId, conversation, settings, platform, trace);
       }
 
-      const savedMessage = await this.saveMessageToDatabase(message, trace);
+      const saveSpan = startMemorySaveSpan(trace, ERole.User, content.length);
+      let saveFailure: TOption<string>;
+      let savedMessage: TSelectMemory;
+      try {
+        savedMessage = await ctx.transact(async (tx, emit) => {
+          const row = await this.conversations.saveUserMessage(
+            tx,
+            chatId,
+            ERole.User,
+            content,
+            new Date(receivedAt),
+          );
+          emit(EEventType.TurnStarted, { chatId, userMessageId: row.id }, undefined, undefined);
+          return row;
+        });
+      } catch (error) {
+        saveFailure = String(error);
+        throw error;
+      } finally {
+        saveSpan.end(saveFailure === undefined, {}, saveFailure);
+      }
 
       const chatStart = performance.now();
       const aiRes = await this.ai.runMain({
-        prompt: message.message.content,
+        prompt: content,
         conversation,
         currentTimeContext: createCurrentTimeContext(settings, savedMessage.createdAt),
-        chatId: message.chatId,
+        chatId,
         settings,
         platform,
         trace,
         signal: undefined,
       });
       this.logger.info(
-        `handleMessage: AI chat completed (${(performance.now() - chatStart).toFixed(0)}ms)`,
+        `handleTurn: AI chat completed (${(performance.now() - chatStart).toFixed(0)}ms)`,
       );
 
-      if (aiRes.text === undefined) {
-        this.logger.warning("handleMessage: AI returned no final response");
-        let fallback = "Something went wrong.";
-        const authProblem = await describeAiAuthProblem(
-          message.chatId,
-          settings[EConfigKey.AiProvider],
-        );
+      const text = aiRes.text;
+
+      if (text === undefined) {
+        this.logger.warning("handleTurn: AI returned no final response");
+        let fallback = FAILED_REPLY;
+        const authProblem = await describeAiAuthProblem(chatId, settings[EConfigKey.AiProvider]);
 
         if (authProblem !== undefined) {
           fallback = authProblem;
         }
 
+        await ctx.complete(async (_tx, emit) => {
+          emit(EEventType.ReplyReady, { chatId, text: fallback }, undefined, undefined);
+          emit(
+            EEventType.TurnFailed,
+            { chatId, reason: "no_final_response" },
+            undefined,
+            undefined,
+          );
+        });
         span.fail("missing final response", fallback.length);
-        reply.resolve(fallback);
         return;
       }
 
-      const saveSpan = startMemorySaveSpan(trace, ERole.Assistant, aiRes.text.length);
-      let persisted: TConversation;
-      let saveError: TOption<string>;
+      const turnSpan = startMemorySaveSpan(trace, ERole.Assistant, text.length);
+      let turnFailure: TOption<string>;
       try {
-        persisted = await this.conversations.saveTurn(
-          message.chatId,
-          aiRes.messages,
-          savedMessage.id,
-          conversation,
-        );
+        persisted = await ctx.complete(async (tx, emit) => {
+          const state = await this.conversations.saveTurn(
+            tx,
+            chatId,
+            aiRes.messages,
+            savedMessage.id,
+            conversation,
+          );
+
+          if (text.trim().length > 0) {
+            emit(EEventType.ReplyReady, { chatId, text }, undefined, undefined);
+          }
+
+          emit(
+            EEventType.TurnCompleted,
+            { chatId, userMessageId: savedMessage.id },
+            undefined,
+            undefined,
+          );
+          return state;
+        });
       } catch (error) {
-        saveError = String(error);
+        turnFailure = String(error);
         throw error;
       } finally {
-        saveSpan.end(saveError === undefined, {}, saveError);
+        turnSpan.end(turnFailure === undefined, {}, turnFailure);
       }
 
-      const finalResponse = aiRes.text;
-
-      void this.factDistiller
-        .enqueueFactDrain(message.chatId, settings, trace)
-        .catch((error) => this.logger.error(`handleMessage: fact drain failed: ${String(error)}`));
-
       this.logger.info(
-        `handleMessage: done (${(performance.now() - handleMessageStart).toFixed(0)}ms)`,
+        `handleTurn: done (${(performance.now() - handleMessageStart).toFixed(0)}ms)`,
       );
-      span.ok("completed", finalResponse.length);
-      reply.resolve(finalResponse);
-
-      // Post-turn work runs after the reply is settled; compact() reports its own failures
-      await this.compact(persisted, settings, platform, trace);
+      span.ok("completed", text.length);
     } catch (error) {
+      this.logger.error(`handleTurn: failed: ${String(error)}`);
+      await ctx.complete(async (_tx, emit) => {
+        emit(EEventType.ReplyReady, { chatId, text: FAILED_REPLY }, "failed", undefined);
+        emit(EEventType.TurnFailed, { chatId, reason: "error" }, undefined, undefined);
+      });
       span.fail("failed", 0, String(error));
-      reply.reject(error);
+      return;
     }
+
+    if (persisted === undefined) {
+      return;
+    }
+
+    // acked; the chat lane is still held, so the next turn waits for compaction.
+    // compact() reports its own failures
+    await this.compact(chatId, persisted, settings, platform, trace);
   }
 
   private async compact(
+    chatId: string,
     state: TConversation,
     settings: TConfigRecord,
     platform: TOption<EMessagePlatform>,
@@ -205,17 +252,11 @@ export class MessageHandler {
   ): Promise<TConversation> {
     const span = startSpan(trace, "conversation.compaction.completed", "message-handler");
     try {
-      const result = await this.ai.compactConversation(
-        state,
-        settings,
-        this.chatId,
-        platform,
-        trace,
-      );
+      const result = await this.ai.compactConversation(state, settings, chatId, platform, trace);
       if (result === undefined) {
         return state;
       }
-      await this.conversations.saveSummary(this.chatId, result.state);
+      await this.conversations.saveSummary(chatId, result.state);
       span.ok({
         summary: "Conversation compacted",
         metadata: {
@@ -232,27 +273,6 @@ export class MessageHandler {
         summary: "Kept original conversation; retry next turn",
       });
       return state;
-    }
-  }
-
-  private async saveMessageToDatabase(
-    message: TIncommingMessage,
-    trace: TBehaviorTraceContext,
-  ): Promise<TSelectMemory> {
-    const span = startMemorySaveSpan(trace, message.author.type, message.message.content.length);
-    let failure: TOption<string>;
-    try {
-      return await this.conversations.saveUserMessage(
-        message.chatId,
-        message.author.type,
-        message.message.content,
-        message.receivedAt,
-      );
-    } catch (error) {
-      failure = String(error);
-      throw error;
-    } finally {
-      span.end(failure === undefined, {}, failure);
     }
   }
 }

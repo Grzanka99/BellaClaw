@@ -2,9 +2,7 @@ import { afterEach, beforeEach, describe, expect, mock, setSystemTime, test } fr
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
-import { eq } from "drizzle-orm";
-import { ERole } from "../ai/types";
+import { asc, eq } from "drizzle-orm";
 import {
   AuthorizationService,
   EAuthorizationDecision,
@@ -16,8 +14,6 @@ import { resetEventTables } from "../database/test-utils";
 import { EventBus, type TEventDraft } from "../events";
 import { EEventType } from "../events/catalog";
 import { Memory } from "../memory";
-import { MessageHandler } from "../message-handler";
-import type { TIncommingMessage } from "../message-handler/types";
 import { SettingsService } from "../settings";
 import { MessagingAdapter } from ".";
 import { EMessagePlatform, type TPlatformMessage } from "./types";
@@ -42,11 +38,21 @@ function reset() {
   (MessagingAdapter as unknown as { _instance: unknown })._instance = undefined;
   (Memory as unknown as { _instance: unknown })._instance = undefined;
   (SettingsService as unknown as { _instance: unknown })._instance = undefined;
-  (MessageHandler as unknown as { _instances: Map<string, MessageHandler> })._instances.clear();
 }
 
-beforeEach(() => {
+async function payloadsOf(type: EEventType) {
+  const rows = await DatabaseConnector.instance.database
+    .select()
+    .from(eventsTable)
+    .where(eq(eventsTable.type, type))
+    .orderBy(asc(eventsTable.seq));
+  return rows.map((row) => row.payload);
+}
+
+beforeEach(async () => {
   reset();
+  await resetEventTables();
+  Object.assign(EventBus, { _instance: undefined });
   Bun.env.BELLACLAW_ACTIVATION_TOKEN = undefined;
 });
 
@@ -58,16 +64,7 @@ afterEach(() => {
 describe("MessagingAdapter", () => {
   test("captures arrival before awaiting authorization", async () => {
     const arrival = new Date("2026-07-24T21:59:50.000Z");
-    const originalGetInstance = MessageHandler.getInstance;
-    const handleMessage = mock(async (_message: TIncommingMessage) => "Root reply");
-    MessageHandler.getInstance = mock(() => ({
-      handleMessage,
-    })) as unknown as typeof MessageHandler.getInstance;
     const adapter = MessagingAdapter.instance;
-    adapter.registerTransport({
-      platform: EMessagePlatform.Signal,
-      sendText: mock(async () => undefined),
-    });
     const internals = adapter as unknown as TAdapterInternals;
     internals.authorization.authorize = mock(async () => {
       setSystemTime(new Date("2026-07-24T22:00:10.000Z"));
@@ -82,23 +79,22 @@ describe("MessagingAdapter", () => {
         message: { content: "What is on my calendar tomorrow?" },
       });
 
-      expect(handleMessage.mock.calls[0]?.[0].receivedAt).toEqual(arrival);
+      expect(await payloadsOf(EEventType.TurnRequested)).toEqual([
+        {
+          chatId: "signal:+100",
+          content: "What is on my calendar tomorrow?",
+          receivedAt: arrival.getTime(),
+          platform: EMessagePlatform.Signal,
+        },
+      ]);
     } finally {
-      MessageHandler.getInstance = originalGetInstance;
       setSystemTime();
     }
   });
 
-  test("silently rejects failures and handles activation without invoking the AI", async () => {
-    const originalGetInstance = MessageHandler.getInstance;
-    const handleMessage = mock(async () => "Root reply");
-    MessageHandler.getInstance = mock(() => ({
-      handleMessage,
-    })) as unknown as typeof MessageHandler.getInstance;
-    const sendText = mock(async () => undefined);
+  test("silently rejects failures and replies to activation without requesting a turn", async () => {
     const adapter = MessagingAdapter.instance;
     const internals = adapter as unknown as TAdapterInternals;
-    adapter.registerTransport({ platform: EMessagePlatform.Discord, sendText });
     const authorizationResults = [
       authorizationResult(EAuthorizationDecision.FailedAttempt, 1),
       authorizationResult(EAuthorizationDecision.Activated, 0),
@@ -124,81 +120,29 @@ describe("MessagingAdapter", () => {
     };
 
     await adapter.handleInboundMessage(message);
-    expect(sendText).not.toHaveBeenCalled();
-    expect(handleMessage).not.toHaveBeenCalled();
+    expect(await payloadsOf(EEventType.ReplyReady)).toEqual([]);
+    expect(await payloadsOf(EEventType.TurnRequested)).toEqual([]);
 
     message.message.content = "token";
     await adapter.handleInboundMessage(message);
-    expect(sendText).toHaveBeenLastCalledWith("user-1", "Activated.");
-    expect(handleMessage).not.toHaveBeenCalled();
-
-    message.message.content = "token";
     await adapter.handleInboundMessage(message);
-    expect(sendText).toHaveBeenLastCalledWith("user-1", "Already activated.");
-    expect(handleMessage).not.toHaveBeenCalled();
+    expect(await payloadsOf(EEventType.ReplyReady)).toEqual([
+      { chatId: "discord:user-1", text: "Activated." },
+      { chatId: "discord:user-1", text: "Already activated." },
+    ]);
+    expect(await payloadsOf(EEventType.TurnRequested)).toEqual([]);
 
     message.message.content = "hello";
     await adapter.handleInboundMessage(message);
-    expect(handleMessage).toHaveBeenCalledTimes(1);
-    expect(sendText).toHaveBeenLastCalledWith("user-1", "Root reply");
+    expect(await payloadsOf(EEventType.TurnRequested)).toEqual([
+      expect.objectContaining({ chatId: "discord:user-1", content: "hello" }),
+    ]);
     expect(internals.authorization.authorize).toHaveBeenCalledWith("discord:user-1", "wrong");
-
-    MessageHandler.getInstance = originalGetInstance;
   });
 
-  test("delivers the sole MessageHandler result and absorbs transport failures", async () => {
-    const originalGetInstance = MessageHandler.getInstance;
-    const handleMessage = mock(async () => "Root reply");
-    MessageHandler.getInstance = mock(() => ({
-      handleMessage,
-    })) as unknown as typeof MessageHandler.getInstance;
-    const sendText = mock(async () => undefined);
-    const adapter = MessagingAdapter.instance;
-    adapter.registerTransport({ platform: EMessagePlatform.Signal, sendText });
-
-    await adapter.handleInboundMessage({
-      platform: EMessagePlatform.Signal,
-      chatId: "+100",
-      message: { content: "hello" },
-    });
-    expect(handleMessage).toHaveBeenCalledTimes(1);
-    expect(sendText).toHaveBeenCalledWith("+100", "Root reply");
-
-    sendText.mockImplementation(async () => {
-      throw new Error("offline");
-    });
-    await expect(
-      adapter.handleInboundMessage({
-        platform: EMessagePlatform.Signal,
-        chatId: "+100",
-        message: { content: "again" },
-      }),
-    ).resolves.toBeUndefined();
-    MessageHandler.getInstance = originalGetInstance;
-  });
-
-  test("runs MCP prompt commands through the normal message pipeline with identity and trace", async () => {
-    const originalGetInstance = MessageHandler.getInstance;
+  test("requests MCP prompt commands as a turn keyed by the canonical chat id with its trace", async () => {
     const originalMcpConfig = Bun.env.BELLACLAW_MCP_CONFIG;
     const directory = await mkdtemp(join(tmpdir(), "bellaclaw-messaging-mcp-"));
-    let receivedMessage: TIncommingMessage | undefined;
-    let receivedTrace: TBehaviorTraceContext | undefined;
-    let receivedPlatform: EMessagePlatform | undefined;
-    const handleMessage = mock(
-      async (
-        message: TIncommingMessage,
-        trace: TBehaviorTraceContext,
-        platform: EMessagePlatform,
-      ) => {
-        receivedMessage = message;
-        receivedTrace = trace;
-        receivedPlatform = platform;
-        return "Prompt completed.";
-      },
-    );
-    MessageHandler.getInstance = mock(() => ({
-      handleMessage,
-    })) as unknown as typeof MessageHandler.getInstance;
 
     try {
       const configPath = join(directory, "mcp.json");
@@ -218,11 +162,7 @@ describe("MessagingAdapter", () => {
       );
       Bun.env.BELLACLAW_MCP_CONFIG = configPath;
 
-      const sendText = mock(async () => undefined);
-      const adapter = MessagingAdapter.instance;
-      adapter.registerTransport({ platform: EMessagePlatform.Discord, sendText });
-
-      await adapter.handleInboundMessage({
+      await MessagingAdapter.instance.handleInboundMessage({
         platform: EMessagePlatform.Discord,
         chatId: "channel-1",
         message: {
@@ -230,26 +170,23 @@ describe("MessagingAdapter", () => {
         },
       });
 
-      expect(MessageHandler.getInstance).toHaveBeenCalledWith("discord:channel-1");
-      expect(handleMessage).toHaveBeenCalledTimes(1);
-      expect(receivedPlatform).toBe(EMessagePlatform.Discord);
-      expect(receivedMessage).toEqual({
+      const rows = await DatabaseConnector.instance.database
+        .select()
+        .from(eventsTable)
+        .where(eq(eventsTable.type, EEventType.TurnRequested));
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.key).toBe("discord:channel-1");
+      expect(rows[0]?.chatId).toBe("discord:channel-1");
+      expect(rows[0]?.platform).toBe(EMessagePlatform.Discord);
+      expect(rows[0]?.turnId).toEqual(expect.any(String));
+      expect(rows[0]?.payload).toEqual({
         chatId: "discord:channel-1",
-        receivedAt: expect.any(Date),
-        author: { type: ERole.User },
-        message: {
-          content:
-            'Use MCP profile documents to run the explicitly requested prompt template summarize with arguments {"style":"brief"}.',
-        },
-      });
-      expect(receivedTrace).toEqual({
-        turnId: expect.any(String),
-        chatId: "discord:channel-1",
+        content:
+          'Use MCP profile documents to run the explicitly requested prompt template summarize with arguments {"style":"brief"}.',
+        receivedAt: expect.any(Number),
         platform: EMessagePlatform.Discord,
       });
-      expect(sendText).toHaveBeenCalledWith("channel-1", "Prompt completed.");
     } finally {
-      MessageHandler.getInstance = originalGetInstance;
       if (originalMcpConfig === undefined) {
         delete Bun.env.BELLACLAW_MCP_CONFIG;
       } else {
@@ -260,22 +197,15 @@ describe("MessagingAdapter", () => {
   });
 
   test("replies when MCP prompt commands encounter configuration errors", async () => {
-    const originalGetInstance = MessageHandler.getInstance;
     const originalMcpConfig = Bun.env.BELLACLAW_MCP_CONFIG;
     const directory = await mkdtemp(join(tmpdir(), "bellaclaw-messaging-mcp-errors-"));
-    const handleMessage = mock(async () => "Unexpected AI reply");
-    MessageHandler.getInstance = mock(() => ({
-      handleMessage,
-    })) as unknown as typeof MessageHandler.getInstance;
 
     try {
       const configPath = join(directory, "mcp.json");
       await Bun.write(configPath, JSON.stringify({ profiles: [] }));
       Bun.env.BELLACLAW_MCP_CONFIG = configPath;
 
-      const sendText = mock(async () => undefined);
       const adapter = MessagingAdapter.instance;
-      adapter.registerTransport({ platform: EMessagePlatform.Discord, sendText });
       const message: TPlatformMessage = {
         platform: EMessagePlatform.Discord,
         chatId: "channel-1",
@@ -284,22 +214,24 @@ describe("MessagingAdapter", () => {
 
       await adapter.handleInboundMessage(message);
 
-      expect(sendText).toHaveBeenLastCalledWith(
-        "channel-1",
-        "MCP prompt request failed: Error: Unknown MCP profile: missing",
-      );
-
       await Bun.write(configPath, JSON.stringify({ profiles: [{ id: "INVALID" }] }));
       message.message.content = "!mcp-prompts";
       await adapter.handleInboundMessage(message);
 
-      expect(sendText).toHaveBeenLastCalledWith(
-        "channel-1",
-        expect.stringContaining("MCP prompt listing failed: Error: Invalid MCP configuration:"),
-      );
-      expect(handleMessage).not.toHaveBeenCalled();
+      expect(await payloadsOf(EEventType.ReplyReady)).toEqual([
+        {
+          chatId: "discord:channel-1",
+          text: "MCP prompt request failed: Error: Unknown MCP profile: missing",
+        },
+        {
+          chatId: "discord:channel-1",
+          text: expect.stringContaining(
+            "MCP prompt listing failed: Error: Invalid MCP configuration:",
+          ),
+        },
+      ]);
+      expect(await payloadsOf(EEventType.TurnRequested)).toEqual([]);
     } finally {
-      MessageHandler.getInstance = originalGetInstance;
       if (originalMcpConfig === undefined) {
         delete Bun.env.BELLACLAW_MCP_CONFIG;
       } else {
@@ -336,9 +268,7 @@ describe("MessagingAdapter outbound", () => {
       .where(eq(eventsTable.type, EEventType.MessageSent));
   }
 
-  beforeEach(async () => {
-    await resetEventTables();
-    Object.assign(EventBus, { _instance: undefined });
+  beforeEach(() => {
     bus = EventBus.instance;
   });
 
@@ -374,6 +304,29 @@ describe("MessagingAdapter outbound", () => {
         sentAt: expect.any(Number),
       },
     ]);
+  });
+
+  test("delivers reply.ready to its transport and absorbs a transport failure", async () => {
+    const sendText = mock(async () => undefined);
+    const adapter = MessagingAdapter.instance;
+    Object.assign(adapter, { outboundBackoffMs: [] });
+    adapter.registerTransport({ platform: EMessagePlatform.Signal, sendText });
+    adapter.setup();
+    await bus.start();
+    const reply = { ...notice(), type: EEventType.ReplyReady };
+
+    await bus.publish({ ...reply, payload: { chatId: "signal:+100", text: "Root reply" } });
+    await bus.idle();
+    expect(sendText).toHaveBeenCalledWith("+100", "Root reply");
+
+    sendText.mockImplementation(async () => {
+      throw new Error("offline");
+    });
+    await expect(
+      bus.publish({ ...reply, payload: { chatId: "signal:+100", text: "again" } }),
+    ).resolves.toBeUndefined();
+    await bus.idle();
+    expect((await deliveries()).map((row) => row.status)).toEqual(["done", "dead"]);
   });
 
   test("a failed send does not publish message.sent", async () => {

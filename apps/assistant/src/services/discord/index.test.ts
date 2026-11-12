@@ -50,7 +50,7 @@ function cleanupSingletons() {
   const MessagingAdapterWithInternals = MessagingAdapter as unknown as TMessagingAdapterStatic;
   MessagingAdapterWithInternals._instance = undefined;
 
-  (MessageHandler as unknown as { _instances: Map<string, MessageHandler> })._instances.clear();
+  Object.assign(MessageHandler, { _instance: undefined });
 }
 
 describe("DiscordSingleton", () => {

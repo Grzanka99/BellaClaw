@@ -5,6 +5,7 @@ import { CalendarService } from "./services/calendar";
 import { CronScheduler } from "./services/cron";
 import { DiscordSingleton } from "./services/discord";
 import { EventBus } from "./services/events";
+import { EEventType } from "./services/events/catalog";
 import { McpService } from "./services/mcp";
 import { startMcpAuthServer, stopMcpAuthServer } from "./services/mcp/auth";
 import { FactDistiller } from "./services/memory/distill";
@@ -41,7 +42,8 @@ async function init(): Promise<void> {
     MessagingAdapter.instance.setup();
     Notices.instance.setup();
     ScheduledDelivery.instance.setup();
-    MessageHandler.setup();
+    MessageHandler.instance.setup();
+    FactDistiller.instance.setup();
     if (Bun.env.BELLACLAW_MCP_PUBLIC_URL?.trim()) {
       startMcpAuthServer();
     }
@@ -53,7 +55,15 @@ async function init(): Promise<void> {
     ]);
     await EventBus.instance.start();
     await CronScheduler.instance.setup();
-    await FactDistiller.instance.scheduleFactDrainForAllChats(turnId);
+    await EventBus.instance.publish({
+      type: EEventType.AppStarted,
+      source: "app",
+      key: "global",
+      trace: { turnId, chatId: undefined, platform: undefined },
+      payload: {},
+      causationId: undefined,
+      dedupeKey: undefined,
+    });
     startAiOAuthKeepAlive();
 
     AppLogger.instance.record({

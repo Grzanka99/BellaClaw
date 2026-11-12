@@ -2,6 +2,7 @@ import type { TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
 import type { TOption } from "@bellaclaw/shared";
 import { z } from "zod";
 import { ECronJobType } from "../cron/types";
+import { EMessagePlatform } from "../messaging/types";
 
 export enum EEventKind {
   Event = "event",
@@ -9,6 +10,10 @@ export enum EEventKind {
 }
 
 export enum EEventType {
+  TurnRequested = "turn.requested",
+  TurnStarted = "turn.started",
+  TurnCompleted = "turn.completed",
+  TurnFailed = "turn.failed",
   ReplyReady = "reply.ready",
   NoticeReady = "notice.ready",
   DeliveryReady = "delivery.ready",
@@ -20,6 +25,7 @@ export enum EEventType {
   AiAuthLoginCompleted = "ai.auth.login.completed",
   AiAuthLoginFailed = "ai.auth.login.failed",
   EventDeadLettered = "event.dead_lettered",
+  AppStarted = "app.started",
   // NOTE: test types for the bus tests; real types arrive with their phase
   TestNoted = "test.noted",
   TestSecret = "test.secret",
@@ -28,6 +34,23 @@ export enum EEventType {
 const STranscript = z.object({ text: z.string(), notice: z.string() }).strict();
 
 export type TDeliveryTranscript = z.infer<typeof STranscript>;
+
+const STurnRequested = z
+  .object({
+    chatId: z.string(),
+    content: z.string(),
+    receivedAt: z.number().int(),
+    platform: z.enum(EMessagePlatform),
+  })
+  .strict();
+
+const STurnStarted = z.object({ chatId: z.string(), userMessageId: z.number().int() }).strict();
+
+const STurnCompleted = z.object({ chatId: z.string(), userMessageId: z.number().int() }).strict();
+
+const STurnFailed = z
+  .object({ chatId: z.string(), reason: z.enum(["interrupted", "no_final_response", "error"]) })
+  .strict();
 
 const SReplyReady = z
   .object({ chatId: z.string(), text: z.string(), transcript: STranscript.optional() })
@@ -96,10 +119,16 @@ const SEventDeadLettered = z
   })
   .strict();
 
+const SAppStarted = z.object({}).strict();
+
 const STestNoted = z.object({ text: z.string(), count: z.number().int() }).strict();
 const STestSecret = z.object({ secret: z.string() }).strict();
 
 export type TEventPayloads = {
+  [EEventType.TurnRequested]: z.infer<typeof STurnRequested>;
+  [EEventType.TurnStarted]: z.infer<typeof STurnStarted>;
+  [EEventType.TurnCompleted]: z.infer<typeof STurnCompleted>;
+  [EEventType.TurnFailed]: z.infer<typeof STurnFailed>;
   [EEventType.ReplyReady]: z.infer<typeof SReplyReady>;
   [EEventType.NoticeReady]: z.infer<typeof SNoticeReady>;
   [EEventType.DeliveryReady]: z.infer<typeof SDeliveryReady>;
@@ -111,6 +140,7 @@ export type TEventPayloads = {
   [EEventType.AiAuthLoginCompleted]: z.infer<typeof SAiAuthLoginCompleted>;
   [EEventType.AiAuthLoginFailed]: z.infer<typeof SAiAuthLoginFailed>;
   [EEventType.EventDeadLettered]: z.infer<typeof SEventDeadLettered>;
+  [EEventType.AppStarted]: z.infer<typeof SAppStarted>;
   [EEventType.TestNoted]: z.infer<typeof STestNoted>;
   [EEventType.TestSecret]: z.infer<typeof STestSecret>;
 };
@@ -118,6 +148,10 @@ export type TEventPayloads = {
 // The mapped type ties each schema to its payload type, so a handler gets a typed payload
 // without a cast.
 export const EVENT_SCHEMAS: { [K in EEventType]: z.ZodType<TEventPayloads[K]> } = {
+  [EEventType.TurnRequested]: STurnRequested,
+  [EEventType.TurnStarted]: STurnStarted,
+  [EEventType.TurnCompleted]: STurnCompleted,
+  [EEventType.TurnFailed]: STurnFailed,
   [EEventType.ReplyReady]: SReplyReady,
   [EEventType.NoticeReady]: SNoticeReady,
   [EEventType.DeliveryReady]: SDeliveryReady,
@@ -129,11 +163,16 @@ export const EVENT_SCHEMAS: { [K in EEventType]: z.ZodType<TEventPayloads[K]> } 
   [EEventType.AiAuthLoginCompleted]: SAiAuthLoginCompleted,
   [EEventType.AiAuthLoginFailed]: SAiAuthLoginFailed,
   [EEventType.EventDeadLettered]: SEventDeadLettered,
+  [EEventType.AppStarted]: SAppStarted,
   [EEventType.TestNoted]: STestNoted,
   [EEventType.TestSecret]: STestSecret,
 };
 
 export const EVENT_KINDS: Record<EEventType, EEventKind> = {
+  [EEventType.TurnRequested]: EEventKind.Event,
+  [EEventType.TurnStarted]: EEventKind.Event,
+  [EEventType.TurnCompleted]: EEventKind.Event,
+  [EEventType.TurnFailed]: EEventKind.Event,
   [EEventType.ReplyReady]: EEventKind.Event,
   [EEventType.NoticeReady]: EEventKind.Event,
   [EEventType.DeliveryReady]: EEventKind.Event,
@@ -145,6 +184,7 @@ export const EVENT_KINDS: Record<EEventType, EEventKind> = {
   [EEventType.AiAuthLoginCompleted]: EEventKind.Event,
   [EEventType.AiAuthLoginFailed]: EEventKind.Event,
   [EEventType.EventDeadLettered]: EEventKind.Event,
+  [EEventType.AppStarted]: EEventKind.Event,
   [EEventType.TestNoted]: EEventKind.Event,
   [EEventType.TestSecret]: EEventKind.Event,
 };
