@@ -8,6 +8,7 @@
     "check": "bunx @biomejs/biome check .",
     "db": "bun --env-file=../../.env --bun drizzle-kit",
     "dev": "bun --env-file=../../.env run --watch src/index.ts",
+    "events:redrive": "bun --env-file=../../.env run scripts/redrive-events.ts",
     "embeddings:rebuild": "bun --env-file=../../.env run scripts/rebuild-embeddings.ts",
     "start": "bun --env-file=../../.env run src/index.ts",
     "test": "bun test",

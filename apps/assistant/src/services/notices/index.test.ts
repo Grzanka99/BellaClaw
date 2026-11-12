@@ -112,4 +112,65 @@ describe("Notices", () => {
       ["+100", "Login for opencode-go failed: Error: denied"],
     ]);
   });
+
+  test("a dead event becomes a notice to its chat; loop-prone types and commands get none", async () => {
+    for (const eventType of [
+      EEventType.ReplyReady,
+      EEventType.DeliveryReady,
+      EEventType.NoticeReady,
+      EEventType.EventDeadLettered,
+      EEventType.SettingsUpdateRequested,
+      EEventType.CronFired,
+    ]) {
+      await bus.publish({
+        ...draft(EEventType.EventDeadLettered, "signal:+100|daily", {
+          eventId: `dead-${eventType}`,
+          eventType,
+          consumer: "test",
+          attempts: 3,
+          error: "Error: boom",
+        }),
+        trace: { turnId: "cron:test", chatId: "signal:+100", platform: undefined },
+      });
+    }
+    await bus.idle();
+
+    expect(sendText.mock.calls).toEqual([
+      ["+100", "Something I was doing failed and was dropped. Try again."],
+    ]);
+    // the notice runs on the chat's lane, not the dead event's
+    const notices = await DatabaseConnector.instance.database
+      .select()
+      .from(eventsTable)
+      .where(eq(eventsTable.type, EEventType.NoticeReady));
+    expect(notices.map((row) => row.key)).toEqual(["signal:+100"]);
+  });
+
+  test("a dead event of no chat notifies every authorized chat", async () => {
+    const authorized = spyOn(
+      AuthorizationService.instance,
+      "listAuthorizedChatIds",
+    ).mockResolvedValue(["signal:+100", "signal:+200"]);
+
+    try {
+      await bus.publish(
+        draft(EEventType.EventDeadLettered, "global", {
+          eventId: "dead-app-started",
+          eventType: EEventType.AppStarted,
+          consumer: "test",
+          attempts: 1,
+          error: "Error: boom",
+        }),
+      );
+      await bus.idle();
+    } finally {
+      authorized.mockRestore();
+    }
+
+    const text = "Something I was doing failed and was dropped. Try again.";
+    expect(sendText.mock.calls).toEqual([
+      ["+100", text],
+      ["+200", text],
+    ]);
+  });
 });

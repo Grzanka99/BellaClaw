@@ -22,6 +22,8 @@ export type TGwsRequest = {
 
 export type TGwsRunner = (request: TGwsRequest) => Promise<unknown>;
 
+export type TCalendarProbe = { accessRole: TOption<string>; summary: TOption<string> };
+
 export function gwsEnvironment(): Record<string, TOption<string>> {
   const env = { ...Bun.env };
   delete env.GOOGLE_WORKSPACE_CLI_TOKEN;
@@ -198,10 +200,7 @@ function readStringProperty(value: unknown, key: string): TOption<string> {
 export class GwsCalendarClient {
   public constructor(private runner: TGwsRunner = runGws) {}
 
-  public async probeCalendar(
-    calendarId: string,
-    signal?: AbortSignal,
-  ): Promise<{ accessRole: TOption<string>; summary: TOption<string> }> {
+  public async probeCalendar(calendarId: string, signal?: AbortSignal): Promise<TCalendarProbe> {
     const value = await this.runner({
       resource: "events",
       method: "list",

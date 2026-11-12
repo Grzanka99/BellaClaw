@@ -7,7 +7,7 @@ import { calendarsTable } from "../database/schema";
 import { commandFailed, ESubscriptionMode, EventBus, type TEventContext } from "../events";
 import { EEventType } from "../events/catalog";
 import { calculateAvailability } from "./availability";
-import { GwsCalendarClient } from "./gws";
+import { GwsCalendarClient, type TCalendarProbe } from "./gws";
 import {
   ALL_DAY_DATE,
   countRuleOccurrencesBefore,
@@ -411,27 +411,37 @@ export class CalendarService {
       handler: async (event, ctx) => {
         const { chatId, calendarId, access } = event.payload;
 
-        let calendar: TCalendar;
+        let live: TCalendarProbe;
 
         try {
-          if (access === "write") {
-            calendar = await this.setWriteCalendar(chatId, calendarId);
-          } else {
-            calendar = await this.addReadonlyCalendar(chatId, calendarId);
-          }
+          this.requireReady();
+          live = await this.client.probeCalendar(calendarId);
         } catch (error) {
           await this.reject(event.type, error, ctx);
           return;
         }
 
-        await ctx.complete(async (_tx, emit) => {
-          emit(
-            EEventType.CalendarSourceAdded,
-            { chatId, calendarId, access, summary: calendar.summary },
-            undefined,
-            undefined,
-          );
-        });
+        // the row is written in the ack's transaction; a refused access role rolls it back
+        try {
+          await ctx.complete(async (tx, emit) => {
+            let calendar: TCalendar;
+
+            if (access === "write") {
+              calendar = await this.setWriteCalendar(tx, chatId, calendarId, live);
+            } else {
+              calendar = await this.addReadonlyCalendar(tx, chatId, calendarId, live);
+            }
+
+            emit(
+              EEventType.CalendarSourceAdded,
+              { chatId, calendarId, access, summary: calendar.summary },
+              undefined,
+              undefined,
+            );
+          });
+        } catch (error) {
+          await this.reject(event.type, error, ctx);
+        }
       },
     });
     EventBus.instance.subscribe({
@@ -538,29 +548,28 @@ export class CalendarService {
     });
   }
 
-  public async setWriteCalendar(userId: string, calendarId: string): Promise<TCalendar> {
-    this.requireReady();
-    const live = await this.client.probeCalendar(calendarId);
+  public async setWriteCalendar(
+    tx: TDatabaseTransaction,
+    userId: string,
+    calendarId: string,
+    live: TCalendarProbe,
+  ): Promise<TCalendar> {
     if (live.accessRole !== "writer") {
       throw new Error(
         `Writable calendar requires exact writer access, received ${live.accessRole ?? "none"}`,
       );
     }
     const addedAt = Date.now();
-    await this.database.run(async (db) => {
-      await db.transaction(async (transaction) => {
-        await transaction
-          .delete(calendarsTable)
-          .where(and(eq(calendarsTable.userId, userId), eq(calendarsTable.access, "write")));
-        await transaction
-          .insert(calendarsTable)
-          .values({ userId, calendarId, access: "write", addedAt })
-          .onConflictDoUpdate({
-            target: [calendarsTable.userId, calendarsTable.calendarId],
-            set: { access: "write", addedAt },
-          });
+    await tx
+      .delete(calendarsTable)
+      .where(and(eq(calendarsTable.userId, userId), eq(calendarsTable.access, "write")));
+    await tx
+      .insert(calendarsTable)
+      .values({ userId, calendarId, access: "write", addedAt })
+      .onConflictDoUpdate({
+        target: [calendarsTable.userId, calendarsTable.calendarId],
+        set: { access: "write", addedAt },
       });
-    });
     return {
       calendarId,
       access: "write",
@@ -606,9 +615,12 @@ export class CalendarService {
     );
   }
 
-  public async addReadonlyCalendar(userId: string, calendarId: string): Promise<TCalendar> {
-    this.requireReady();
-    const live = await this.client.probeCalendar(calendarId);
+  public async addReadonlyCalendar(
+    tx: TDatabaseTransaction,
+    userId: string,
+    calendarId: string,
+    live: TCalendarProbe,
+  ): Promise<TCalendar> {
     if (
       live.accessRole !== "reader" &&
       live.accessRole !== "writer" &&
@@ -619,17 +631,15 @@ export class CalendarService {
       );
     }
     const addedAt = Date.now();
-    const inserted = await this.database.run((db) =>
-      db
-        .insert(calendarsTable)
-        .values({ userId, calendarId, access: "read", addedAt })
-        .onConflictDoUpdate({
-          target: [calendarsTable.userId, calendarsTable.calendarId],
-          set: { access: "read", addedAt },
-          setWhere: ne(calendarsTable.access, "write"),
-        })
-        .returning(),
-    );
+    const inserted = await tx
+      .insert(calendarsTable)
+      .values({ userId, calendarId, access: "read", addedAt })
+      .onConflictDoUpdate({
+        target: [calendarsTable.userId, calendarsTable.calendarId],
+        set: { access: "read", addedAt },
+        setWhere: ne(calendarsTable.access, "write"),
+      })
+      .returning();
     if (inserted.length === 0) {
       throw new Error("Writable calendar cannot be added as read-only");
     }

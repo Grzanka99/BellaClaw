@@ -4,7 +4,7 @@ import { repositoryPath } from "@bellaclaw/shared";
 import { sql } from "drizzle-orm";
 import type { LibSQLDatabase } from "drizzle-orm/libsql";
 import { validateUpdateCalendarEventArgs } from "../ai/tools/update-calendar-event";
-import { DatabaseConnector } from "../database";
+import { DatabaseConnector, type TDatabaseTransaction } from "../database";
 import { calendarsTable } from "../database/schema";
 import { resetEventTables } from "../database/test-utils";
 import { CommandRejectedError, EventBus } from "../events";
@@ -69,15 +69,14 @@ describe("CalendarService mutation boundary", () => {
   });
 
   test("setting the write calendar accepts only the exact writer role", async () => {
-    const client = {
-      probeCalendar: async () => ({ accessRole: "reader", summary: "Wrong role" }),
-    } as unknown as GwsCalendarClient;
-    const service = new CalendarService(connector(database), client);
-    Object.assign(service, { status: { ready: true, error: undefined } });
+    const service = new CalendarService(connector(database), {} as unknown as GwsCalendarClient);
 
-    await expect(service.setWriteCalendar("user-1", "other-calendar")).rejects.toThrow(
-      "requires exact writer access",
-    );
+    await expect(
+      service.setWriteCalendar(database as unknown as TDatabaseTransaction, "user-1", "other", {
+        accessRole: "reader",
+        summary: "Wrong role",
+      }),
+    ).rejects.toThrow("requires exact writer access");
   });
 
   test("write calendars are resolved per user", async () => {
@@ -110,23 +109,19 @@ describe("CalendarService mutation boundary", () => {
   });
 
   test("read-only add rejects roles below reader", async () => {
-    const client = {
-      probeCalendar: async () => ({ accessRole: "freeBusyReader", summary: "Wrong role" }),
-    } as unknown as GwsCalendarClient;
-    const service = new CalendarService(connector(selectingDatabase([])), client);
-    Object.assign(service, { status: { ready: true, error: undefined } });
+    const service = new CalendarService(connector(database), {} as unknown as GwsCalendarClient);
 
-    await expect(service.addReadonlyCalendar("user-1", "other-calendar")).rejects.toThrow(
-      "requires reader, writer, or owner access",
-    );
+    await expect(
+      service.addReadonlyCalendar(database as unknown as TDatabaseTransaction, "user-1", "other", {
+        accessRole: "freeBusyReader",
+        summary: "Wrong role",
+      }),
+    ).rejects.toThrow("requires reader, writer, or owner access");
   });
 
   test("read-only add stores another user's writable calendar as read", async () => {
     const inserted: Record<string, unknown>[] = [];
-    const client = {
-      probeCalendar: async () => ({ accessRole: "writer", summary: "Housemate" }),
-    } as unknown as GwsCalendarClient;
-    const database = {
+    const tx = {
       select: () => ({ from: () => ({ where: async () => [] }) }),
       insert: () => ({
         values: (values: Record<string, unknown>) => ({
@@ -138,11 +133,13 @@ describe("CalendarService mutation boundary", () => {
           }),
         }),
       }),
-    } as unknown as LibSQLDatabase;
-    const service = new CalendarService(connector(database), client);
-    Object.assign(service, { status: { ready: true, error: undefined } });
+    } as unknown as TDatabaseTransaction;
+    const service = new CalendarService(connector(database), {} as unknown as GwsCalendarClient);
 
-    const calendar = await service.addReadonlyCalendar("user-1", "housemate-calendar");
+    const calendar = await service.addReadonlyCalendar(tx, "user-1", "housemate-calendar", {
+      accessRole: "writer",
+      summary: "Housemate",
+    });
 
     expect(calendar.access).toBe("read");
     expect(inserted[0]?.access).toBe("read");
@@ -702,6 +699,7 @@ describe("calendar commands", () => {
         return googleEvent(String(body.id), { summary: body.summary });
       },
       getEvent: async (_calendarId: string, eventId: string) => googleEvent(eventId),
+      probeCalendar: async () => ({ accessRole: "reader", summary: "Shared" }),
       patchEvent: async (_calendarId: string, eventId: string, body: Record<string, unknown>) =>
         googleEvent(eventId, body),
       deleteEvent: async (_calendarId: string, eventId: string) => {
@@ -828,6 +826,35 @@ describe("calendar commands", () => {
     expect(await db.select().from(calendarsTable)).toEqual([]);
     expect(rejected).toBeInstanceOf(CommandRejectedError);
     expect(rejected).toMatchObject({ message: "Read-only calendar missing is not configured" });
+  });
+
+  test("a failed source add rolls back the row with its outcome and ack", async () => {
+    const db = DatabaseConnector.instance.database;
+    await db.delete(calendarsTable);
+    await db.run(
+      sql`CREATE TRIGGER refuse_added BEFORE INSERT ON events WHEN NEW.type = 'calendar.source.added' BEGIN SELECT RAISE(ABORT, 'outcome refused'); END`,
+    );
+
+    try {
+      await expect(
+        withEventContext((ctx) =>
+          ctx.request(
+            EEventType.CalendarSourceAddRequested,
+            { chatId: "chat-1", calendarId: "shared", access: "read" },
+            {
+              outcome: EEventType.CalendarSourceAdded,
+              step: undefined,
+              key: "chat-1",
+              timeoutMs: undefined,
+            },
+          ),
+        ),
+      ).rejects.toBeInstanceOf(CommandRejectedError);
+    } finally {
+      await db.run(sql`DROP TRIGGER refuse_added`);
+    }
+
+    expect(await db.select().from(calendarsTable)).toEqual([]);
   });
 
   test("a failed source removal rolls back the delete with its outcome and ack", async () => {
