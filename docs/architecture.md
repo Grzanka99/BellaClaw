@@ -27,6 +27,8 @@ Services talk through one durable event log in SQLite; see the
 [event architecture page](event-architecture.html) for the graph and guarantees, and
 `.agents/skills/architecture/SKILL.md` for the rules when changing it.
 
+![BellaClaw event flow](event-architecture.svg)
+
 1. A Discord or Signal transport publishes `message.received` with a dedupe key per platform
    message.
 2. Authorization decides activation and lockout, then publishes `message.authorized`.
