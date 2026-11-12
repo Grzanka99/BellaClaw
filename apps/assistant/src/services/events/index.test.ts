@@ -957,10 +957,10 @@ describe("EventBus", () => {
     });
 
     test("commandFailed carries the error's message", () => {
-      expect(commandFailed(EEventType.TestRequested, new Error("no access"))).toEqual({
+      expect(commandFailed(EEventType.TestRequested, new Error("calendar refused"))).toEqual({
         commandType: EEventType.TestRequested,
         code: ERejectionCode.Failed,
-        message: "no access",
+        message: "calendar refused",
       });
     });
 
