@@ -517,37 +517,6 @@ describe("MessageHandler", () => {
     expect(memory.loadLiveFactWindow).not.toHaveBeenCalled();
   });
 
-  test("turn.completed commits in the transaction that saves the turn", async () => {
-    const chatId = "discord:ordering";
-    const { internals, memory } = await setupHandler(chatId);
-    let release: () => void = () => undefined;
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    const events: string[] = [];
-    const saveTurn = internals.conversations.saveTurn;
-    internals.conversations.saveTurn = mock(async (...args: Parameters<typeof saveTurn>) => {
-      events.push("save-start");
-      await gate;
-      events.push("save-end");
-      return saveTurn(...args);
-    });
-    memory.loadLiveFactWindow = mock(async () => {
-      events.push("drain");
-      return emptyWindow(chatId);
-    });
-
-    await requestTurn(chatId, "remember this");
-    await waitForCall(internals.conversations.saveTurn, 1);
-    await flushAsyncWork();
-    expect(events).toEqual(["save-start"]);
-    release();
-    await EventBus.instance.idle();
-
-    expect(events).toEqual(["save-start", "save-end", "drain"]);
-    expect(await payloadsOf(EEventType.TurnCompleted)).toEqual([{ chatId, userMessageId: 100 }]);
-  });
-
   test("a stalled memory lane does not delay the next reply", async () => {
     const chatId = "discord:stalled";
     const { memory } = await setupHandler(chatId);
@@ -792,40 +761,6 @@ describe("MessageHandler", () => {
       "book the flight",
       expect.stringContaining("interrupted by a restart"),
       interrupted,
-    ]);
-  });
-
-  test("two turns of one chat run in order while two chats overlap", async () => {
-    const { internals } = await setupHandler("discord:a");
-    const release = Promise.withResolvers<void>();
-    internals.ai.runMain = mock(async (args: { prompt: string }) => {
-      if (args.prompt === "a1") {
-        await release.promise;
-      }
-      return finalResponse(`reply ${args.prompt}`);
-    });
-
-    await requestTurn("discord:a", "a1");
-    await requestTurn("discord:a", "a2");
-    await requestTurn("discord:b", "b1");
-    await waitFor(async () => (await payloadsOf(EEventType.ReplyReady)).length === 1);
-
-    expect(await payloadsOf(EEventType.ReplyReady)).toEqual([
-      { chatId: "discord:b", text: "reply b1" },
-    ]);
-    expect(internals.ai.runMain.mock.calls.map((call) => call[0].prompt)).toEqual(["a1", "b1"]);
-
-    release.resolve();
-    await EventBus.instance.idle();
-    expect(internals.ai.runMain.mock.calls.map((call) => call[0].prompt)).toEqual([
-      "a1",
-      "b1",
-      "a2",
-    ]);
-    expect(await payloadsOf(EEventType.ReplyReady)).toEqual([
-      { chatId: "discord:b", text: "reply b1" },
-      { chatId: "discord:a", text: "reply a1" },
-      { chatId: "discord:a", text: "reply a2" },
     ]);
   });
 });

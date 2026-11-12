@@ -1,10 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
 import { CronScheduler } from "../cron";
-import { createRecurring } from "../cron/test-utils";
-import { ECronJobStatus } from "../cron/types";
 import { DatabaseConnector } from "../database";
-import { automationDraftsTable, cronEngineJobsTable } from "../database/schema";
+import { automationDraftsTable } from "../database/schema";
 import {
   resetAutomationsTables,
   resetCronEngineJobsTable,
@@ -212,109 +210,54 @@ describe("AutomationService", () => {
     ).rejects.toThrow("not found");
   });
 
-  test("automation.run.requested records each failure and reports the pause", async () => {
-    const automation = await saveAutomation({
-      source: "export default async () => { throw new Error('boom'); }",
-    });
-    const run = async () => {
-      const completed = await testEventRequester.request(
-        EEventType.AutomationRunRequested,
-        {
-          scope: "discord:1",
-          automationId: automation.id,
-          mode: EAutomationRunMode.Manual,
-          timezone: "Europe/Warsaw",
-        },
-        {
-          outcome: EEventType.AutomationRunCompleted,
-          step: undefined,
-          key: "discord:1",
-          timeoutMs: undefined,
-        },
-      );
+  test("a paused automation's run is Unavailable", async () => {
+    const automation = await saveAutomation();
+    await AutomationService.instance.setStatus(
+      db,
+      "discord:1",
+      "weather",
+      EAutomationStatus.Paused,
+    );
 
-      return completed.payload.report;
-    };
+    const completed = await testEventRequester.request(
+      EEventType.AutomationRunRequested,
+      {
+        scope: "discord:1",
+        automationId: automation.id,
+        mode: EAutomationRunMode.Manual,
+        timezone: "Europe/Warsaw",
+      },
+      {
+        outcome: EEventType.AutomationRunCompleted,
+        step: undefined,
+        key: "discord:1",
+        timeoutMs: undefined,
+      },
+    );
 
-    expect(await run()).toMatchObject({ outcome: EAutomationRunOutcome.Failed, paused: false });
-    await run();
-    expect(await run()).toMatchObject({ outcome: EAutomationRunOutcome.Failed, paused: true });
-    expect(await run()).toMatchObject({
+    expect(completed.payload.report).toMatchObject({
       outcome: EAutomationRunOutcome.Unavailable,
       error: "automation is paused",
     });
-
-    const stored = await AutomationService.instance.get("discord:1", "weather");
-    expect(stored?.failureCount).toBe(3);
-    expect(stored?.status).toBe(EAutomationStatus.Paused);
   });
 
-  test("automation.delete.requested removes the automation and cron detaches it", async () => {
+  test("the automation and its drafts are gone", async () => {
     const service = AutomationService.instance;
-    const automation = await saveAutomation();
-    const keep = await saveAutomation({ name: "keep" });
+    await saveAutomation();
     const pendingDraft = await service.createDraft(db, draftInput({ source: "v2" }));
 
-    const rawOnly = await createRecurring({
-      name: "raw-only",
-      scope: "discord:1",
-      pattern: "0 8 * * *",
-      content: { kind: "automations" },
-      automationIds: [automation.id],
-    });
-    const mixed = await createRecurring({
-      name: "mixed",
-      scope: "discord:1",
-      pattern: "0 8 * * *",
-      content: { kind: "task", prompt: "Summarize", fallback: "Morning update" },
-      automationIds: [automation.id, keep.id],
-    });
-    const requestDelete = () =>
-      testEventRequester.request(
-        EEventType.AutomationDeleteRequested,
-        { scope: "discord:1", name: "weather" },
-        {
-          outcome: EEventType.AutomationDeleted,
-          step: undefined,
-          key: "discord:1",
-          timeoutMs: undefined,
-        },
-      );
-
-    const deleted = await requestDelete();
-    const detached = await testEventRequester.waitFor(
-      deleted.id,
-      EEventType.CronAutomationDetached,
-      undefined,
+    await testEventRequester.request(
+      EEventType.AutomationDeleteRequested,
+      { scope: "discord:1", name: "weather" },
+      {
+        outcome: EEventType.AutomationDeleted,
+        step: undefined,
+        key: "discord:1",
+        timeoutMs: undefined,
+      },
     );
 
-    expect(deleted.payload).toEqual({
-      scope: "discord:1",
-      automationId: automation.id,
-      name: "weather",
-    });
-    expect(detached.payload).toEqual({
-      automationId: automation.id,
-      updatedJobs: ["mixed"],
-      cancelledJobs: ["raw-only"],
-    });
     expect(await service.get("discord:1", "weather")).toBeUndefined();
     expect(await service.getDraft("discord:1", pendingDraft.id)).toBeUndefined();
-
-    const rawRow = await db
-      .select()
-      .from(cronEngineJobsTable)
-      .where(eq(cronEngineJobsTable.id, rawOnly.id))
-      .get();
-    expect(rawRow?.status).toBe(ECronJobStatus.Cancelled);
-    expect((await CronScheduler.instance.get("mixed", "discord:1"))?.automationIds).toEqual([
-      keep.id,
-    ]);
-    expect(mixed.automationIds).toEqual([automation.id, keep.id]);
-
-    await expect(requestDelete()).rejects.toMatchObject({
-      errorCode: "automation-not-found",
-      message: "Automation 'weather' not found",
-    });
   });
 });

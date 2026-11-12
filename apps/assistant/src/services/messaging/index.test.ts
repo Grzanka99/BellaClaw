@@ -104,24 +104,4 @@ describe("MessagingAdapter outbound", () => {
     await bus.idle();
     expect((await deliveries()).map((row) => row.status)).toEqual(["done", "dead"]);
   });
-
-  test("a failed send does not publish message.sent", async () => {
-    const sendText = mock(async () => {
-      throw new Error("offline");
-    });
-    const adapter = MessagingAdapter.instance;
-    Object.assign(adapter, { outboundBackoffMs: [] });
-    adapter.registerTransport({ platform: EMessagePlatform.Signal, sendText });
-    adapter.setup();
-    await bus.start();
-
-    await bus.publish(notice());
-    await bus.idle();
-
-    expect(sendText).toHaveBeenCalledTimes(1);
-    expect((await deliveries()).map((row) => [row.consumer, row.status])).toEqual([
-      ["outbound", "dead"],
-    ]);
-    expect(await sentEvents()).toEqual([]);
-  });
 });

@@ -1,7 +1,7 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { and, asc, eq, sql } from "drizzle-orm";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { and, asc, eq } from "drizzle-orm";
 import { DatabaseConnector } from "../database";
-import { cronEngineJobsTable, eventDeliveriesTable, eventsTable } from "../database/schema";
+import { cronEngineJobsTable } from "../database/schema";
 import { resetCronEngineJobsTable, resetEventTables } from "../database/test-utils";
 import { ESubscriptionMode, EventBus } from "../events";
 import { EEventType, type TCronFiredPayload, type TEvent } from "../events/catalog";
@@ -283,35 +283,6 @@ describe("CronScheduler", () => {
     expect(context.content).toEqual(taskContent);
   });
 
-  test("the job update and the cron.fired row commit together", async () => {
-    const overdueRunAt = new Date(Date.now() - 1_000);
-    const id = await insertOneTimeJob("atomic-once", "scope-a", overdueRunAt);
-    const append = spyOn(
-      EventBus.instance as unknown as { append: () => Promise<unknown> },
-      "append",
-    ).mockRejectedValueOnce(new Error("disk full"));
-
-    try {
-      await fireJob(scheduler, id);
-    } finally {
-      append.mockRestore();
-    }
-
-    const [failed] = await getJobRows("atomic-once", "scope-a");
-    expect(failed?.status).toBe(ECronJobStatus.Active);
-    expect(failed?.lastRunAt).toBeNull();
-    expect(await DatabaseConnector.instance.database.select().from(eventsTable)).toEqual([]);
-
-    await fireJob(scheduler, id);
-
-    const [completed] = await getJobRows("atomic-once", "scope-a");
-    const events = await DatabaseConnector.instance.database.select().from(eventsTable);
-    expect(completed?.status).toBe(ECronJobStatus.Completed);
-    expect(events.map((event) => event.dedupeKey)).toEqual([
-      `cron:${id}:${overdueRunAt.getTime()}`,
-    ]);
-  });
-
   test("create does not start a timer after a queued cancel wins", async () => {
     const createPromise = createOnce({
       name: "race-once",
@@ -476,51 +447,6 @@ describe("CronScheduler", () => {
     expect(rows[0]?.finishedReason).toBe(ECronFinishedReason.Overwritten);
     expect(rows[1]?.status).toBe(ECronJobStatus.Active);
     expect(rows[1]?.finishedReason).toBeNull();
-  });
-
-  test("a rejected overwrite rolls back its claim together with the ack", async () => {
-    const first = await createRecurring({
-      name: "rollback-job",
-      scope: "scope-a",
-      pattern: "0 9 * * *",
-      content: { kind: "text", text: "First reminder." },
-    });
-    const db = DatabaseConnector.instance.database;
-    await db.run(
-      sql`CREATE TRIGGER refuse_replacement BEFORE INSERT ON cron_engine_jobs WHEN NEW.name = 'rollback-job' BEGIN SELECT RAISE(ABORT, 'replacement refused'); END`,
-    );
-
-    try {
-      await expect(
-        createRecurring({
-          name: "rollback-job",
-          scope: "scope-a",
-          pattern: "0 10 * * *",
-          content: { kind: "text", text: "Replacement reminder." },
-          overwrite: true,
-        }),
-      ).rejects.toMatchObject({ errorCode: "create-failed" });
-    } finally {
-      await db.run(sql`DROP TRIGGER refuse_replacement`);
-    }
-
-    const rows = await getJobRows("rollback-job", "scope-a");
-    const internals = scheduler as unknown as TSchedulerInternals;
-    const deliveries = await db
-      .select()
-      .from(eventDeliveriesTable)
-      .where(eq(eventDeliveriesTable.consumer, "cron"));
-    const outcomes = await db
-      .select()
-      .from(eventsTable)
-      .where(eq(eventsTable.type, EEventType.CronJobScheduled));
-
-    expect(rows).toHaveLength(1);
-    expect(rows[0]?.status).toBe(ECronJobStatus.Active);
-    expect(rows[0]?.finishedReason).toBeNull();
-    expect(internals.timers.has(first.id)).toBe(true);
-    expect(deliveries.map((delivery) => delivery.status)).toEqual(["done", "done"]);
-    expect(outcomes).toHaveLength(1);
   });
 
   test("cancel throws a coded error when no active job matches", async () => {

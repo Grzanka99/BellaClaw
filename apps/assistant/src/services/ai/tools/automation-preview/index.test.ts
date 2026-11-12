@@ -1,12 +1,7 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { AutomationService } from "../../../automation";
 import { EAutomationRunOutcome } from "../../../automation/runner";
-import { CronScheduler } from "../../../cron";
-import {
-  resetAutomationsTables,
-  resetCronEngineJobsTable,
-  resetEventTables,
-} from "../../../database/test-utils";
+import { resetAutomationsTables, resetEventTables } from "../../../database/test-utils";
 import { EventBus } from "../../../events";
 import { testEventRequester } from "../../../events/test-utils";
 import { DefaultConfigRecord } from "../../../settings/schema";
@@ -35,16 +30,13 @@ const args = {
 describe("automation-preview", () => {
   beforeEach(async () => {
     await resetAutomationsTables();
-    await resetCronEngineJobsTable();
     await resetEventTables();
     Object.assign(EventBus, { _instance: undefined });
-    CronScheduler.instance.subscribe();
     AutomationService.instance.setup();
     await EventBus.instance.start();
   });
 
   afterEach(async () => {
-    CronScheduler.instance.destroy();
     await EventBus.instance.idle();
     await EventBus.instance.stop();
   });

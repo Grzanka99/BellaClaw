@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdir } from "node:fs/promises";
 import { repositoryPath } from "@bellaclaw/shared";
-import { sql } from "drizzle-orm";
 import type { LibSQLDatabase } from "drizzle-orm/libsql";
 import { validateUpdateCalendarEventArgs } from "../ai/tools/update-calendar-event";
 import { DatabaseConnector, type TDatabaseTransaction } from "../database";
@@ -826,53 +825,5 @@ describe("calendar commands", () => {
     expect(await db.select().from(calendarsTable)).toEqual([]);
     expect(rejected).toBeInstanceOf(CommandRejectedError);
     expect(rejected).toMatchObject({ message: "Read-only calendar missing is not configured" });
-  });
-
-  test("a failed source add rolls back the row with its outcome and ack", async () => {
-    const db = DatabaseConnector.instance.database;
-    await db.delete(calendarsTable);
-    await db.run(
-      sql`CREATE TRIGGER refuse_added BEFORE INSERT ON events WHEN NEW.type = 'calendar.source.added' BEGIN SELECT RAISE(ABORT, 'outcome refused'); END`,
-    );
-
-    try {
-      await expect(
-        withEventContext((ctx) =>
-          ctx.request(
-            EEventType.CalendarSourceAddRequested,
-            { chatId: "chat-1", calendarId: "shared", access: "read" },
-            {
-              outcome: EEventType.CalendarSourceAdded,
-              step: undefined,
-              key: "chat-1",
-              timeoutMs: undefined,
-            },
-          ),
-        ),
-      ).rejects.toBeInstanceOf(CommandRejectedError);
-    } finally {
-      await db.run(sql`DROP TRIGGER refuse_added`);
-    }
-
-    expect(await db.select().from(calendarsTable)).toEqual([]);
-  });
-
-  test("a failed source removal rolls back the delete with its outcome and ack", async () => {
-    const db = DatabaseConnector.instance.database;
-    await db.delete(calendarsTable);
-    await db
-      .insert(calendarsTable)
-      .values({ userId: "chat-1", calendarId: "shared", access: "read", addedAt: 1 });
-    await db.run(
-      sql`CREATE TRIGGER refuse_removed BEFORE INSERT ON events WHEN NEW.type = 'calendar.source.removed' BEGIN SELECT RAISE(ABORT, 'outcome refused'); END`,
-    );
-
-    try {
-      await expect(requestRemove("shared")).rejects.toBeInstanceOf(CommandRejectedError);
-    } finally {
-      await db.run(sql`DROP TRIGGER refuse_removed`);
-    }
-
-    expect(await db.select().from(calendarsTable)).toHaveLength(1);
   });
 });

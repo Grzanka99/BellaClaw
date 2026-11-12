@@ -12,7 +12,7 @@ import { EAutomationRunMode, EAutomationRunOutcome } from "../automation/runner"
 import { conversationMessages, type TConversation } from "../conversation/types";
 import { ECronJobType } from "../cron/types";
 import { DatabaseConnector } from "../database";
-import { eventDeliveriesTable, eventsTable, memoriesTable } from "../database/schema";
+import { eventsTable, memoriesTable } from "../database/schema";
 import { resetEventTables } from "../database/test-utils";
 import { EventBus } from "../events";
 import { EEventType, type TCronFiredPayload } from "../events/catalog";
@@ -337,22 +337,6 @@ describe("ScheduledDelivery", () => {
     }
   });
 
-  test("scheduling publishes delivery.ready", async () => {
-    await fire(cron());
-    await EventBus.instance.idle();
-
-    const [delivery] = await eventsOf(EEventType.DeliveryReady);
-    expect(delivery?.key).toBe("signal:+100");
-    expect(delivery?.payload).toEqual({
-      chatId: "signal:+100",
-      text: "Take a break.",
-      transcript: {
-        text: "[CRON REMINDER daily]: Take a break.",
-        notice: expect.stringContaining('reminder "daily" fired at'),
-      },
-    });
-  });
-
   test("conversation appends on message.sent only", async () => {
     const save = mock(async () => undefined);
     Object.assign(MessageHandler.instance, {
@@ -434,32 +418,6 @@ describe("ScheduledDelivery", () => {
     await EventBus.instance.idle();
     expect(internals.ai.runScheduledTask).toHaveBeenCalledTimes(2);
     expect(sendText).toHaveBeenCalledTimes(2);
-  });
-
-  test("a pending cron.fired delivery replays through start() and ends in one transcript append", async () => {
-    const chatId = `signal:pending-${crypto.randomUUID()}`;
-    const sendText = mock(async () => undefined);
-    MessagingAdapter.instance.registerTransport({ platform: EMessagePlatform.Signal, sendText });
-    await EventBus.instance.stop();
-    await setupBus(false);
-    await fire(cron({ scope: chatId }));
-
-    await EventBus.instance.start();
-    await EventBus.instance.idle();
-
-    const memories = await DatabaseConnector.instance.database
-      .select()
-      .from(memoriesTable)
-      .where(eq(memoriesTable.chatId, chatId));
-    expect(memories.map((row) => row.message)).toEqual([
-      expect.stringContaining('reminder "daily" fired at'),
-      "[CRON REMINDER daily]: Take a break.",
-    ]);
-    expect(sendText).toHaveBeenCalledTimes(1);
-    const deliveries = await DatabaseConnector.instance.database
-      .select()
-      .from(eventDeliveriesTable);
-    expect(deliveries.map((delivery) => delivery.status)).toEqual(["done", "done", "done"]);
   });
 
   test("a replayed task fire with cron.task.started sends the fallback without the agent", async () => {

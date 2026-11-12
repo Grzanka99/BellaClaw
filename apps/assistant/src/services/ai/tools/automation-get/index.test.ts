@@ -1,13 +1,7 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { beforeEach, describe, expect, mock, test } from "bun:test";
 import { AutomationService } from "../../../automation";
-import { CronScheduler } from "../../../cron";
 import { DatabaseConnector } from "../../../database";
-import {
-  resetAutomationsTables,
-  resetCronEngineJobsTable,
-  resetEventTables,
-} from "../../../database/test-utils";
-import { EventBus } from "../../../events";
+import { resetAutomationsTables } from "../../../database/test-utils";
 import { testEventRequester } from "../../../events/test-utils";
 import { DefaultConfigRecord } from "../../../settings/schema";
 import { automationGet } from ".";
@@ -27,12 +21,6 @@ const tool = automationGet.createAgentTool({
 describe("automation-get", () => {
   beforeEach(async () => {
     await resetAutomationsTables();
-    await resetCronEngineJobsTable();
-    await resetEventTables();
-    Object.assign(EventBus, { _instance: undefined });
-    CronScheduler.instance.subscribe();
-    AutomationService.instance.setup();
-    await EventBus.instance.start();
     const draft = await AutomationService.instance.createDraft(
       DatabaseConnector.instance.database,
       {
@@ -48,12 +36,6 @@ describe("automation-get", () => {
       "discord:1",
       draft.id,
     );
-  });
-
-  afterEach(async () => {
-    CronScheduler.instance.destroy();
-    await EventBus.instance.idle();
-    await EventBus.instance.stop();
   });
 
   test("returns details and includes source only on request", async () => {

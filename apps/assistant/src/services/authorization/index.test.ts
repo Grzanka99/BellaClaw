@@ -155,6 +155,7 @@ describe("authorization consumer", () => {
       { chatId: "signal:+200", text: "Activated." },
       { chatId: "signal:+200", text: "Already activated." },
     ]);
+    expect(await AuthorizationService.instance.listAuthorizedChatIds()).toContain("signal:+200");
     expect(await payloadsOf(EEventType.MessageAuthorized)).toEqual([]);
 
     await receive("signal:+200", "hello", undefined);
@@ -165,98 +166,5 @@ describe("authorization consumer", () => {
       { chatId: "signal:+200", status: EAuthorizationStatus.Pending, failedAttempts: 1 },
       { chatId: "signal:+200", status: EAuthorizationStatus.Authorized, failedAttempts: 0 },
     ]);
-  });
-
-  test("a command replayed right after activation sees the activated chat", async () => {
-    // both messages are pending before start(), as after a restart, so they share the lane
-    await bus.stop();
-    resetSingletons();
-    bus = EventBus.instance;
-    await AuthorizationService.instance.setup();
-    Commands.instance.setup();
-    for (const content of ["open-sesame", "!ai-auth status openai-codex"]) {
-      await bus.publish({
-        type: EEventType.MessageReceived,
-        source: "test",
-        key: "signal:+200",
-        trace: { turnId: "test:auth", chatId: "signal:+200", platform: EMessagePlatform.Signal },
-        payload: {
-          chatId: "signal:+200",
-          content,
-          receivedAt: 1,
-          platform: EMessagePlatform.Signal,
-        },
-        causationId: undefined,
-        dedupeKey: undefined,
-      });
-    }
-    await bus.start();
-    await bus.idle();
-
-    const replies = await payloadsOf(EEventType.ReplyReady);
-    expect(replies[0]).toEqual({ chatId: "signal:+200", text: "Activated." });
-    expect(replies[1]).not.toEqual(
-      expect.objectContaining({ text: expect.stringContaining("activated chat") }),
-    );
-  });
-
-  test("a wrong token three times locks the chat", async () => {
-    await receive("signal:+200", "one", undefined);
-    await receive("signal:+200", "two", undefined);
-    await receive("signal:+200", "three", undefined);
-    await receive("signal:+200", "open-sesame", undefined);
-
-    expect(await payloadsOf(EEventType.MessageRejected)).toEqual([
-      { chatId: "signal:+200", decision: EAuthorizationDecision.FailedAttempt, failedAttempts: 1 },
-      { chatId: "signal:+200", decision: EAuthorizationDecision.FailedAttempt, failedAttempts: 2 },
-      { chatId: "signal:+200", decision: EAuthorizationDecision.Locked, failedAttempts: 3 },
-      { chatId: "signal:+200", decision: EAuthorizationDecision.Locked, failedAttempts: 3 },
-    ]);
-    expect(await payloadsOf(EEventType.ReplyReady)).toEqual([]);
-  });
-
-  test("a redelivered message.received with a wrong token counts one failed attempt", async () => {
-    await receive("signal:+200", "wrong", "signal:+200:123");
-    await receive("signal:+200", "wrong", "signal:+200:123");
-
-    expect(await payloadsOf(EEventType.MessageReceived)).toHaveLength(1);
-    expect(await payloadsOf(EEventType.MessageRejected)).toEqual([
-      { chatId: "signal:+200", decision: EAuthorizationDecision.FailedAttempt, failedAttempts: 1 },
-    ]);
-  });
-
-  test("message.received and message.authorized lose their payloads once handled", async () => {
-    await receive("signal:+200", "open-sesame", undefined);
-    await receive("signal:+200", "hello", undefined);
-
-    expect(await payloadsOf(EEventType.MessageReceived)).toEqual([null, null]);
-    expect(await payloadsOf(EEventType.MessageAuthorized)).toEqual([null]);
-    expect(await payloadsOf(EEventType.TurnRequested)).toHaveLength(1);
-  });
-
-  test("the cache changes only through authorization.changed", async () => {
-    const service = AuthorizationService.instance;
-
-    await service.authorize(DatabaseConnector.instance.database, "signal:+300", "open-sesame");
-    expect(await service.listAuthorizedChatIds()).toEqual([]);
-
-    await bus.publish({
-      type: EEventType.AuthorizationChanged,
-      source: "test",
-      key: "signal:+400",
-      trace: { turnId: "test:auth", chatId: "signal:+400", platform: undefined },
-      payload: {
-        chatId: "signal:+400",
-        status: EAuthorizationStatus.Authorized,
-        failedAttempts: 0,
-      },
-      causationId: undefined,
-      dedupeKey: undefined,
-    });
-    await bus.idle();
-    expect(await service.listAuthorizedChatIds()).toEqual(["signal:+400"]);
-
-    await receive("signal:+200", "open-sesame", undefined);
-    expect(await service.listAuthorizedChatIds()).toEqual(["signal:+400", "signal:+200"]);
   });
 });

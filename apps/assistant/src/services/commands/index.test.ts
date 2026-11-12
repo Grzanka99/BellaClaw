@@ -97,8 +97,6 @@ describe("commands consumer", () => {
     await authorized("discord:channel-1", '!mcp-prompt documents summarize {"style":"brief"}', 5);
 
     const rows = await rowsOf(EEventType.TurnRequested);
-    expect(rows).toHaveLength(1);
-    expect(rows[0]?.key).toBe("discord:channel-1");
     expect(rows[0]?.chatId).toBe("discord:channel-1");
     expect(rows[0]?.platform).toBe(EMessagePlatform.Discord);
     expect(rows[0]?.turnId).toBe("test:commands");

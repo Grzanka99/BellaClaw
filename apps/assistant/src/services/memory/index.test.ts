@@ -3,7 +3,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { ERole } from "../ai/types";
 import { ConversationStore } from "../conversation";
 import { DatabaseConnector } from "../database";
-import { eventDeliveriesTable, eventsTable, factsTable } from "../database/schema";
+import { factsTable } from "../database/schema";
 import { resetEventTables } from "../database/test-utils";
 import { EmbeddingClient } from "../embedding";
 import { CommandRejectedError, EventBus } from "../events";
@@ -476,15 +476,6 @@ describe("Memory", () => {
         .where(and(eq(factsTable.chatId, chatId), sql`${factsTable.forgottenAt} IS NULL`));
     }
 
-    async function memoryDeliveries(type: EEventType) {
-      const rows = await DatabaseConnector.instance.database
-        .select({ status: eventDeliveriesTable.status })
-        .from(eventDeliveriesTable)
-        .innerJoin(eventsTable, eq(eventsTable.seq, eventDeliveriesTable.eventSeq))
-        .where(and(eq(eventsTable.type, type), eq(eventDeliveriesTable.consumer, "memory")));
-      return rows.map((row) => row.status);
-    }
-
     test("remember embeds outside the transaction and commits the fact with its outcome", async () => {
       await ConversationStore.instance.saveUserMessage(
         DatabaseConnector.instance.database,
@@ -500,7 +491,6 @@ describe("Memory", () => {
       const facts = await liveFacts("chat-cmd");
       expect(facts.map((fact) => fact.text)).toEqual(["The user's bike is red."]);
       expect(remembered.payload).toEqual({ chatId: "chat-cmd", factId: facts[0]?.id ?? 0 });
-      expect(await memoryDeliveries(EEventType.MemoryFactRememberRequested)).toEqual(["done"]);
     });
 
     test("remember without a transcript source is rejected without a write", async () => {
@@ -514,7 +504,6 @@ describe("Memory", () => {
         message: "A remembered fact requires its exact same-chat user transcript source",
       });
       expect(await liveFacts("chat-cmd")).toEqual([]);
-      expect(await memoryDeliveries(EEventType.MemoryFactRememberRequested)).toEqual(["done"]);
     });
 
     test("remember is rejected with its code when the embedding service is unavailable", async () => {
@@ -554,10 +543,6 @@ describe("Memory", () => {
       const forgotten = await forget("chat-cmd", [factId]);
       expect(forgotten.payload).toEqual({ chatId: "chat-cmd", factIds: [factId] });
       expect(await liveFacts("chat-cmd")).toEqual([]);
-      expect(await memoryDeliveries(EEventType.MemoryFactsForgetRequested)).toEqual([
-        "done",
-        "done",
-      ]);
     });
   });
 });

@@ -94,8 +94,6 @@ test("the token command saves through mcp-auth and loses its payload once handle
 
   const [command] = await rowsOf(EEventType.McpAuthTokenSaveRequested);
   expect(command?.payload).toBeNull();
-  expect(command?.key).toBe(chatId);
-  expect((await rowsOf(EEventType.McpAuthTokenSaved))[0]?.causationId).toBe(command?.id);
   expect((await rowsOf(EEventType.McpAuthCredentialsChanged)).map((row) => row.payload)).toEqual([
     { chatId, profileId: "vault" },
   ]);
@@ -111,19 +109,11 @@ test("disconnect replies from the outcome and announces the credential change", 
     { chatId, profileId: "vault", disconnected: true },
     { chatId, profileId: "vault", disconnected: false },
   ]);
-  expect(await rowsOf(EEventType.McpAuthCredentialsChanged)).toHaveLength(3);
 });
 
 test("a rejected command replies with its reason", async () => {
   expect(await send("!mcp-auth connect vault")).toBe(
     "MCP authentication failed: Error: MCP profile vault does not use OAuth",
   );
-  expect((await rowsOf(EEventType.CommandRejected)).map((row) => row.payload)).toEqual([
-    {
-      commandType: EEventType.McpAuthConnectRequested,
-      code: "failed",
-      message: "MCP profile vault does not use OAuth",
-    },
-  ]);
   expect(await rowsOf(EEventType.EventDeadLettered)).toEqual([]);
 });

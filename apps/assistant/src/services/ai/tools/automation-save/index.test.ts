@@ -1,12 +1,7 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { AutomationService, EAutomationStatus } from "../../../automation";
-import { CronScheduler } from "../../../cron";
 import { DatabaseConnector } from "../../../database";
-import {
-  resetAutomationsTables,
-  resetCronEngineJobsTable,
-  resetEventTables,
-} from "../../../database/test-utils";
+import { resetAutomationsTables, resetEventTables } from "../../../database/test-utils";
 import { EventBus } from "../../../events";
 import { testEventRequester } from "../../../events/test-utils";
 import { DefaultConfigRecord } from "../../../settings/schema";
@@ -28,16 +23,13 @@ function createTool(chatId: string) {
 describe("automation-save", () => {
   beforeEach(async () => {
     await resetAutomationsTables();
-    await resetCronEngineJobsTable();
     await resetEventTables();
     Object.assign(EventBus, { _instance: undefined });
-    CronScheduler.instance.subscribe();
     AutomationService.instance.setup();
     await EventBus.instance.start();
   });
 
   afterEach(async () => {
-    CronScheduler.instance.destroy();
     await EventBus.instance.idle();
     await EventBus.instance.stop();
   });

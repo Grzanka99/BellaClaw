@@ -110,20 +110,12 @@ test("publishes one combined alert for rejected and missing logins", async () =>
   await checkAiOAuth(models);
   await checkAiOAuth(models);
 
-  expect(published).toEqual([
+  expect(published.map((draft) => draft.payload)).toEqual([
     {
-      type: EEventType.AiAuthLoginNeeded,
-      source: "ai-auth",
-      key: "global",
-      trace: { turnId: expect.stringMatching(/^sys:/), chatId: undefined, platform: undefined },
-      payload: {
-        problems: [
-          "openai-codex: login expired. Run !ai-auth login openai-codex",
-          "opencode-go: not connected. Run !ai-auth login opencode-go",
-        ],
-      },
-      causationId: undefined,
-      dedupeKey: undefined,
+      problems: [
+        "openai-codex: login expired. Run !ai-auth login openai-codex",
+        "opencode-go: not connected. Run !ai-auth login opencode-go",
+      ],
     },
   ]);
 });

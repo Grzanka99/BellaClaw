@@ -111,30 +111,6 @@ describe("EventBus", () => {
     expect(live).toEqual([1]);
   });
 
-  test("a handler receives a typed payload", async () => {
-    const received: number[] = [];
-
-    bus.subscribe({
-      consumer: "typed",
-      type: EEventType.TestNoted,
-      mode: ESubscriptionMode.Durable,
-      backoffMs: [],
-      handler: async (event) => {
-        // count is a number, not unknown
-        received.push(event.payload.count + 1);
-        expect(event.payload.text).toBe("note 41");
-        expect(event.type).toBe(EEventType.TestNoted);
-        expect(event.trace).toEqual(trace);
-      },
-    });
-    await bus.start();
-
-    await bus.publish(noted("chat", 41));
-    await bus.idle();
-
-    expect(received).toEqual([42]);
-  });
-
   test("a payload that fails its schema is dead-lettered without a retry", async () => {
     let calls = 0;
 
@@ -385,41 +361,6 @@ describe("EventBus", () => {
     ]);
   });
 
-  test("ctx.complete throws and rolls back when the delivery is not pending", async () => {
-    const seen: string[] = [];
-
-    bus.subscribe({
-      consumer: "completer",
-      type: EEventType.TestNoted,
-      mode: ESubscriptionMode.Durable,
-      backoffMs: [],
-      handler: async (_event, ctx) => {
-        await ctx.complete(async () => undefined);
-        await ctx
-          .complete(async (tx, emit) => {
-            await tx
-              .insert(messageAuthorizationsTable)
-              .values({ chatId: "chat", status: "pending" });
-            emit(EEventType.TestSecret, { secret: "follow-up" }, undefined, undefined);
-          })
-          .catch((error) => {
-            seen.push(String(error));
-          });
-      },
-    });
-    await bus.start();
-
-    await bus.publish(noted("chat", 1));
-    await bus.idle();
-
-    expect(seen).toEqual(["Error: delivery is no longer pending"]);
-    expect(
-      await DatabaseConnector.instance.database.select().from(messageAuthorizationsTable),
-    ).toEqual([]);
-    expect(await events()).toHaveLength(1);
-    expect((await deliveries())[0]?.status).toBe("done");
-  });
-
   test("a scrubbed type loses its payload after its last ack, not before", async () => {
     const firstAcked = Promise.withResolvers<void>();
     const gate = Promise.withResolvers<void>();
@@ -456,129 +397,6 @@ describe("EventBus", () => {
     expect((await events())[0]?.payload).toBeNull();
   });
 
-  test("a scrubbed command abandoned at boot loses its payload", async () => {
-    const db = DatabaseConnector.instance.database;
-    const [command] = await db
-      .insert(eventsTable)
-      .values({
-        id: Bun.randomUUIDv7(),
-        type: EEventType.McpAuthTokenSaveRequested,
-        kind: "command",
-        source: "commands",
-        key: "chat",
-        turnId: trace.turnId,
-        payload: { chatId: "signal:+100", profileId: "profile", token: "bearer-token" },
-        occurredAt: new Date(),
-      })
-      .returning();
-
-    if (command === undefined) {
-      throw new Error("insert failed");
-    }
-
-    await db
-      .insert(eventDeliveriesTable)
-      .values({ eventSeq: command.seq, consumer: "mcp-auth", updatedAt: new Date() });
-    bus.subscribe({
-      consumer: "mcp-auth",
-      type: EEventType.McpAuthTokenSaveRequested,
-      mode: ESubscriptionMode.Durable,
-      backoffMs: [],
-      handler: async () => undefined,
-    });
-    await bus.start();
-    await bus.idle();
-
-    expect((await deliveries()).map((row) => [row.status, row.lastError])).toEqual([
-      ["dead", "abandoned"],
-    ]);
-    expect((await events())[0]?.payload).toBeNull();
-  });
-
-  test("a repeated request revives a scrubbed abandoned command with its payload", async () => {
-    const db = DatabaseConnector.instance.database;
-    const causeId = Bun.randomUUIDv7();
-    const [cause] = await db
-      .insert(eventsTable)
-      .values({
-        id: causeId,
-        type: EEventType.TestNoted,
-        kind: "event",
-        source: "test",
-        key: "chat",
-        turnId: trace.turnId,
-        payload: { text: "note 1", count: 1 },
-        occurredAt: new Date(),
-      })
-      .returning();
-    const [command] = await db
-      .insert(eventsTable)
-      .values({
-        id: Bun.randomUUIDv7(),
-        type: EEventType.McpAuthTokenSaveRequested,
-        kind: "command",
-        source: "requester",
-        key: "chat",
-        turnId: trace.turnId,
-        causationId: causeId,
-        dedupeKey: `${causeId}:requester:${EEventType.McpAuthTokenSaveRequested}:a`,
-        payload: { chatId: "signal:+100", profileId: "profile", token: "bearer-token" },
-        occurredAt: new Date(),
-      })
-      .returning();
-
-    if (cause === undefined || command === undefined) {
-      throw new Error("insert failed");
-    }
-
-    await db.insert(eventDeliveriesTable).values([
-      { eventSeq: command.seq, consumer: "mcp-auth", updatedAt: new Date() },
-      { eventSeq: cause.seq, consumer: "requester", updatedAt: new Date() },
-    ]);
-    const tokens: string[] = [];
-    bus.subscribe({
-      consumer: "mcp-auth",
-      type: EEventType.McpAuthTokenSaveRequested,
-      mode: ESubscriptionMode.Durable,
-      backoffMs: [],
-      handler: async (event, ctx) => {
-        tokens.push(event.payload.token);
-        await ctx.complete(async (_tx, emit) => {
-          emit(
-            EEventType.McpAuthTokenSaved,
-            { chatId: event.payload.chatId, profileId: event.payload.profileId },
-            undefined,
-            undefined,
-          );
-        });
-      },
-    });
-    bus.subscribe({
-      consumer: "requester",
-      type: EEventType.TestNoted,
-      mode: ESubscriptionMode.Durable,
-      backoffMs: [],
-      handler: async (_event, ctx) => {
-        await ctx.request(
-          EEventType.McpAuthTokenSaveRequested,
-          { chatId: "signal:+100", profileId: "profile", token: "bearer-token" },
-          {
-            outcome: EEventType.McpAuthTokenSaved,
-            step: "a",
-            key: undefined,
-            timeoutMs: undefined,
-          },
-        );
-      },
-    });
-    await bus.start();
-    await bus.idle();
-
-    expect(tokens).toEqual(["bearer-token"]);
-    const stored = (await events()).find((row) => row.seq === command.seq);
-    expect(stored?.payload).toBeNull();
-  });
-
   test("a failing command stores no registered secret in its rejection or lastError", async () => {
     registerRedactedSecret("events-secret-abc123");
     bus.subscribe({
@@ -604,7 +422,10 @@ describe("EventBus", () => {
     await bus.idle();
 
     const [rejected] = (await events()).filter((row) => row.type === EEventType.CommandRejected);
-    expect(rejected?.payload).toMatchObject({ message: "Error: token [REDACTED] refused" });
+    expect(rejected?.payload).toMatchObject({
+      code: ERejectionCode.Failed,
+      message: "Error: token [REDACTED] refused",
+    });
     expect((await deliveries())[0]?.lastError).toBe("Error: token [REDACTED] refused");
     expect(commandFailed(EEventType.TestRequested, new Error("events-secret-abc123")).message).toBe(
       "[REDACTED]",
@@ -942,31 +763,10 @@ describe("EventBus", () => {
       ]);
     });
 
-    test("start throws when a command type has two durable consumers", async () => {
-      worker(() => "outcome");
-      bus.subscribe({
-        consumer: "other",
-        type: EEventType.TestRequested,
-        mode: ESubscriptionMode.Durable,
-        backoffMs: [],
-        handler: async () => undefined,
-      });
-      await expect(bus.start()).rejects.toThrow(
-        `Command ${EEventType.TestRequested} has 2 durable consumers, expected 1`,
-      );
-    });
-
-    test("commandFailed carries the error's message", () => {
-      expect(commandFailed(EEventType.TestRequested, new Error("calendar refused"))).toEqual({
-        commandType: EEventType.TestRequested,
-        code: ERejectionCode.Failed,
-        message: "calendar refused",
-      });
-    });
-
     test("boot abandons a pending command; a repeated request revives it", async () => {
       const db = DatabaseConnector.instance.database;
       const causeId = Bun.randomUUIDv7();
+      const payload = { chatId: "signal:+100", profileId: "profile", token: "bearer-token" };
       const [cause] = await db
         .insert(eventsTable)
         .values({
@@ -984,14 +784,14 @@ describe("EventBus", () => {
         .insert(eventsTable)
         .values({
           id: Bun.randomUUIDv7(),
-          type: EEventType.TestRequested,
+          type: EEventType.McpAuthTokenSaveRequested,
           kind: "command",
           source: "requester",
           key: "chat",
           turnId: trace.turnId,
           causationId: causeId,
-          dedupeKey: `${causeId}:requester:${EEventType.TestRequested}:a`,
-          payload: { text: "note 1" },
+          dedupeKey: `${causeId}:requester:${EEventType.McpAuthTokenSaveRequested}:a`,
+          payload,
           occurredAt: new Date(),
         })
         .returning();
@@ -1002,18 +802,39 @@ describe("EventBus", () => {
 
       await db
         .insert(eventDeliveriesTable)
-        .values({ eventSeq: command.seq, consumer: "worker", updatedAt: new Date() });
+        .values({ eventSeq: command.seq, consumer: "mcp-auth", updatedAt: new Date() });
+      const tokens: string[] = [];
+      function saver() {
+        bus.subscribe({
+          consumer: "mcp-auth",
+          type: EEventType.McpAuthTokenSaveRequested,
+          mode: ESubscriptionMode.Durable,
+          backoffMs: [],
+          handler: async (event, ctx) => {
+            tokens.push(event.payload.token);
+            await ctx.complete(async (_tx, emit) => {
+              emit(
+                EEventType.McpAuthTokenSaved,
+                { chatId: event.payload.chatId, profileId: event.payload.profileId },
+                undefined,
+                undefined,
+              );
+            });
+          },
+        });
+      }
 
-      // the requester is gone: the command dies without running
-      const firstCalls = worker(() => "outcome");
+      // the requester is gone: the command dies without running and loses its payload
+      saver();
       await start();
       await bus.idle();
       await bus.stop();
 
-      expect(firstCalls).toEqual([]);
+      expect(tokens).toEqual([]);
       expect((await deliveries()).map((row) => [row.status, row.lastError])).toEqual([
         ["dead", "abandoned"],
       ]);
+      expect((await events()).find((row) => row.seq === command.seq)?.payload).toBeNull();
       expect(await deadLettered()).toEqual([]);
 
       // the cause is redelivered after a restart and asks again with the same step
@@ -1022,16 +843,28 @@ describe("EventBus", () => {
         .values({ eventSeq: cause.seq, consumer: "requester", updatedAt: new Date() });
       Object.assign(EventBus, { _instance: undefined });
       bus = EventBus.instance;
-      const calls = worker(() => "outcome");
-      const results = requester(["a"]);
+      saver();
+      bus.subscribe({
+        consumer: "requester",
+        type: EEventType.TestNoted,
+        mode: ESubscriptionMode.Durable,
+        backoffMs: [],
+        handler: async (_event, ctx) => {
+          await ctx.request(EEventType.McpAuthTokenSaveRequested, payload, {
+            outcome: EEventType.McpAuthTokenSaved,
+            step: "a",
+            key: undefined,
+            timeoutMs: undefined,
+          });
+        },
+      });
       await start();
       await bus.idle();
 
-      expect(calls).toEqual(["note 1"]);
-      expect(results).toEqual([{ secret: "answer note 1" }]);
-      expect((await events()).filter((row) => row.type === EEventType.TestRequested)).toHaveLength(
-        1,
-      );
+      expect(tokens).toEqual(["bearer-token"]);
+      expect(
+        (await events()).filter((row) => row.type === EEventType.McpAuthTokenSaveRequested),
+      ).toHaveLength(1);
     });
 
     test("a repeated request returns a stored answer without reviving its command", async () => {
