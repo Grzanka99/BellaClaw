@@ -113,6 +113,12 @@ describe("SignalSingleton", () => {
     expect(subscribeMock).toHaveBeenCalledTimes(1);
   });
 
+  test("sendText without a client rejects", async () => {
+    await expect(SignalSingleton.instance.sendText("+200", "hello")).rejects.toThrow(
+      "Signal client is not initialized",
+    );
+  });
+
   test("forwards inbound messages to messaging adapter", async () => {
     Bun.env.SIGNAL_PHONE_NUMBER = "+100";
     const signal = SignalSingleton.instance as unknown as TSignalSingletonInternals;

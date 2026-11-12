@@ -3,6 +3,7 @@ import type { TOption } from "@bellaclaw/shared";
 import type { AgentTool, AgentToolResult, ToolExecutionMode } from "@earendil-works/pi-agent-core";
 import { compile, type Schema, type Static } from "@earendil-works/pi-schema";
 import { formats } from "@earendil-works/pi-schema/formats";
+import type { TLogSafeField, TToolLogPolicy } from "../../app-logger/sanitizers";
 import type { TConfigRecord } from "../../settings/schema";
 import type { AgentHarness } from "../agent-harness";
 import type { EModelPurpose } from "../types";
@@ -13,19 +14,6 @@ export type TToolExecutionContext = {
   trace: TBehaviorTraceContext;
   verifySettings: (settings: TConfigRecord, purposes: EModelPurpose[]) => Promise<TOption<string>>;
   runScheduledTask: AgentHarness["runScheduledTask"];
-};
-
-/**
- * A field whose value may be logged as-is. A tuple logs it under another metadata key.
- */
-export type TLogSafeField = string | readonly [field: string, logKey: string];
-
-export type TToolLogPolicy = {
-  logSafe: ReadonlyArray<TLogSafeField>;
-  /** Error text can quote private values, so only ToolError codes are logged. */
-  privateErrors: boolean;
-  /** String fields also logged as a bounded, secret-redacted `<key>Preview`. */
-  previews?: ReadonlyArray<string>;
 };
 
 export type TTool = TToolLogPolicy & {

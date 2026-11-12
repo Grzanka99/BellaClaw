@@ -5,3 +5,7 @@ export function createMessageTurnId(): string {
 export function createCronTurnId(): string {
   return `cron:${crypto.randomUUID()}`;
 }
+
+export function createSystemTurnId(): string {
+  return `sys:${crypto.randomUUID()}`;
+}

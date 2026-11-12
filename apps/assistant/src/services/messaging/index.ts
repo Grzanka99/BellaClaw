@@ -15,6 +15,8 @@ import {
   type TAuthorizationResult,
 } from "../authorization";
 import { runCommand } from "../commands";
+import { ESubscriptionMode, EventBus, type TEventContext } from "../events";
+import { EEventType, type TDeliveryTranscript, type TEvent } from "../events/catalog";
 import { MessageHandler } from "../message-handler";
 import type { TIncommingMessage } from "../message-handler/types";
 import { createCanonicalChatKey, parseCanonicalChatKey } from "./chat-key";
@@ -27,6 +29,7 @@ export class MessagingAdapter {
   private authorization = AuthorizationService.instance;
   private transportWaitAttempts = 60;
   private transportWaitIntervalMs = 1000;
+  private outboundBackoffMs = [5_000, 30_000, 120_000, 600_000, 1_800_000, 3_600_000, 10_800_000];
 
   private constructor() {}
 
@@ -42,20 +45,33 @@ export class MessagingAdapter {
     this.transports.set(transport.platform, transport);
   }
 
-  public async sendMcpConnectedMessage(chatId: string, profileId: string): Promise<void> {
-    await this.sendNotice(chatId, `Connected MCP profile ${profileId}.`);
-  }
+  public setup(): void {
+    const bus = EventBus.instance;
 
-  public async sendNotice(chatId: string, text: string): Promise<void> {
-    const owner = parseCanonicalChatKey(chatId);
-    if (owner === undefined) {
-      throw new Error("Unknown chat platform for notice");
-    }
-    const transport = this.transports.get(owner.platform);
-    if (transport === undefined) {
-      throw new Error("Chat transport is unavailable for notice");
-    }
-    await transport.sendText(owner.chatId, text);
+    bus.subscribe({
+      consumer: "outbound",
+      type: EEventType.ReplyReady,
+      mode: ESubscriptionMode.Durable,
+      backoffMs: this.outboundBackoffMs,
+      handler: (event, ctx) =>
+        this.send(event.payload.chatId, event.payload.text, event.payload.transcript, event, ctx),
+    });
+    bus.subscribe({
+      consumer: "outbound",
+      type: EEventType.DeliveryReady,
+      mode: ESubscriptionMode.Durable,
+      backoffMs: this.outboundBackoffMs,
+      handler: (event, ctx) =>
+        this.send(event.payload.chatId, event.payload.text, event.payload.transcript, event, ctx),
+    });
+    bus.subscribe({
+      consumer: "outbound",
+      type: EEventType.NoticeReady,
+      mode: ESubscriptionMode.Durable,
+      backoffMs: this.outboundBackoffMs,
+      handler: (event, ctx) =>
+        this.send(event.payload.chatId, event.payload.text, undefined, event, ctx),
+    });
   }
 
   public async handleInboundMessage(message: TPlatformMessage) {
@@ -145,6 +161,38 @@ export class MessagingAdapter {
       span.fail("failed", 0, String(error));
       throw error;
     }
+  }
+
+  private async send(
+    chatId: string,
+    text: string,
+    transcript: TOption<TDeliveryTranscript>,
+    event: TEvent,
+    ctx: TEventContext,
+  ): Promise<void> {
+    const owner = parseCanonicalChatKey(chatId);
+    if (owner === undefined) {
+      throw new Error("Unknown chat platform");
+    }
+
+    const transport = this.transports.get(owner.platform);
+    if (transport === undefined) {
+      // retried with the outbound backoff until the transport registers
+      throw new Error(`No ${owner.platform} transport`);
+    }
+
+    const failure = await this.sendText(transport, owner.chatId, text, event.trace);
+    if (failure !== undefined) {
+      throw new Error(failure);
+    }
+
+    await ctx.complete(async (_tx, emit) => {
+      emit(
+        EEventType.MessageSent,
+        { chatId, sourceType: event.type, chars: text.length, sentAt: Date.now(), transcript },
+        undefined,
+      );
+    });
   }
 
   public async sendText(

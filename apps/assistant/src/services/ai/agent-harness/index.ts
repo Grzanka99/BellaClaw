@@ -27,6 +27,7 @@ import type {
   ElicitRequest,
   ElicitResult,
 } from "@modelcontextprotocol/sdk/types.js";
+import type { TToolLogPolicy } from "../../app-logger/sanitizers";
 import {
   sanitizeToolCallArguments,
   sanitizeToolResult,
@@ -46,11 +47,7 @@ import { createPlatformInstructions } from "../instructions/platform";
 import { readXmlAndInjectConfig } from "../instructions/read-xml-and-inject-config";
 import { emptyUsage, LlmClient } from "../llm";
 import { aiModels } from "../providers/registry";
-import {
-  type TToolExecutionContext,
-  type TToolLogPolicy,
-  validateToolArguments,
-} from "../tools/define-tool";
+import { type TToolExecutionContext, validateToolArguments } from "../tools/define-tool";
 import { EModelPurpose } from "../types";
 import type { TAgentRunArgs, TAgentRunResult, TMainAgentRunResult } from "./types";
 

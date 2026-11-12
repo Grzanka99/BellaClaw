@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
+import { createSystemTurnId } from "@bellaclaw/behavior-logs";
 import { AsyncQueue, logger, type TOption } from "@bellaclaw/shared";
 import { auth, type OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
 import type {
@@ -7,6 +8,8 @@ import type {
   OAuthTokens,
 } from "@modelcontextprotocol/sdk/shared/auth.js";
 import type { FetchLike } from "@modelcontextprotocol/sdk/shared/transport.js";
+import { EventBus } from "../../events";
+import { EEventType } from "../../events/catalog";
 import { getMcpProfile, type TMcpProfile } from "../config";
 import { McpAuthCredentialStore } from "./store";
 
@@ -29,7 +32,6 @@ const RESERVED_AUTHORIZATION_PARAMS = new Set([
 const credentialStore = new McpAuthCredentialStore();
 const pendingStates = new Map<string, TPendingState>();
 const disconnectListeners = new Set<TDisconnectListener>();
-const connectedListeners = new Set<TConnectedListener>();
 const runtimeProviders = new Map<string, { generation: number; provider: OAuthClientProvider }>();
 const refreshRequests = new Map<string, Promise<TCachedResponse>>();
 const authQueues = new Map<string, AsyncQueue>();
@@ -45,8 +47,6 @@ type TPendingState = {
 };
 
 type TDisconnectListener = (chatId: string, profileId: string) => void | Promise<void>;
-
-type TConnectedListener = (chatId: string, profileId: string) => void | Promise<void>;
 
 type TAuthorizationRedirect = (url: URL, state: string) => void | Promise<void>;
 
@@ -356,11 +356,6 @@ export function registerMcpAuthDisconnectListener(listener: TDisconnectListener)
   return () => disconnectListeners.delete(listener);
 }
 
-export function registerMcpAuthConnectedListener(listener: TConnectedListener): () => void {
-  connectedListeners.add(listener);
-  return () => connectedListeners.delete(listener);
-}
-
 export function createMcpAuthFetch(chatId: string, profileId: string): FetchLike {
   const key = `${encodeURIComponent(chatId)}:${profileId}`;
   return async (url, init) => {
@@ -448,12 +443,18 @@ export async function handleMcpAuthCallback(request: Request): Promise<Response>
         throw new Error("MCP OAuth callback was cancelled");
       }
     });
-    for (const listener of connectedListeners) {
-      try {
-        await listener(pending.chatId, pending.profileId);
-      } catch (_error) {
-        logger.warning("MCP OAuth connection notification could not be delivered");
-      }
+    try {
+      await EventBus.instance.publish({
+        type: EEventType.McpAuthConnected,
+        source: "mcp-auth",
+        key: pending.chatId,
+        trace: { turnId: createSystemTurnId(), chatId: pending.chatId, platform: undefined },
+        payload: { chatId: pending.chatId, profileId: pending.profileId },
+        causationId: undefined,
+        dedupeKey: undefined,
+      });
+    } catch (_error) {
+      logger.warning("MCP OAuth connection notice could not be published");
     }
     return callbackResponse(
       `Connected MCP profile ${pending.profileId}. You can close this window.`,

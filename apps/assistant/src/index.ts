@@ -1,18 +1,14 @@
 import { AppLogger, EBehaviorLogLevel } from "@bellaclaw/behavior-logs";
-import { registerAiAuthChannel } from "./services/ai/auth";
 import { startAiOAuthKeepAlive } from "./services/ai/auth/oauth-keep-alive";
 import { AuthorizationService } from "./services/authorization";
 import { CalendarService } from "./services/calendar";
 import { DiscordSingleton } from "./services/discord";
 import { EventBus } from "./services/events";
 import { McpService } from "./services/mcp";
-import {
-  registerMcpAuthConnectedListener,
-  startMcpAuthServer,
-  stopMcpAuthServer,
-} from "./services/mcp/auth";
+import { startMcpAuthServer, stopMcpAuthServer } from "./services/mcp/auth";
 import { FactDistiller } from "./services/memory/distill";
 import { MessagingAdapter } from "./services/messaging";
+import { Notices } from "./services/notices";
 import { ScheduledDelivery } from "./services/scheduling/delivery";
 import { SignalSingleton } from "./services/signal";
 
@@ -40,13 +36,8 @@ async function init(): Promise<void> {
   });
 
   try {
-    registerMcpAuthConnectedListener((chatId, profileId) =>
-      MessagingAdapter.instance.sendMcpConnectedMessage(chatId, profileId),
-    );
-    registerAiAuthChannel({
-      listChatIds: () => AuthorizationService.instance.listAuthorizedChatIds(),
-      send: (chatId, text) => MessagingAdapter.instance.sendNotice(chatId, text),
-    });
+    MessagingAdapter.instance.setup();
+    Notices.instance.setup();
     if (Bun.env.BELLACLAW_MCP_PUBLIC_URL?.trim()) {
       startMcpAuthServer();
     }

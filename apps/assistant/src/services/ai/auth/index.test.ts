@@ -1,36 +1,37 @@
-import { afterEach, beforeEach, expect, mock, test } from "bun:test";
+import { afterEach, beforeEach, expect, type Mock, mock, spyOn, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createModels, createProvider, type OAuthCredential } from "@earendil-works/pi-ai";
 import { openAICodexResponsesApi } from "@earendil-works/pi-ai/api/openai-codex-responses.lazy";
+import { AuthorizationService } from "../../authorization";
+import { EventBus, type TEventDraft } from "../../events";
+import { EEventType } from "../../events/catalog";
 import { SettingsService } from "../../settings";
 import { EConfigKey } from "../../settings/schema";
 import { FileCredentialStore } from "../providers/file-credential-store";
 import { EAiProvider } from "../types";
-import {
-  checkAiOAuth,
-  describeAiAuthProblem,
-  EAiAuthState,
-  getAiAuthState,
-  registerAiAuthChannel,
-} from ".";
+import { checkAiOAuth, describeAiAuthProblem, EAiAuthState, getAiAuthState } from ".";
 
 let directory: string;
-let sent: { chatId: string; text: string }[];
+let published: TEventDraft[];
+let authorizedChats: Mock<() => Promise<string[]>>;
+let publish: Mock<(draft: TEventDraft) => Promise<void>>;
 
 beforeEach(async () => {
   directory = await mkdtemp(join(tmpdir(), "bellaclaw-ai-auth-"));
-  sent = [];
-  registerAiAuthChannel({
-    listChatIds: async () => ["discord:auth-test"],
-    send: async (chatId, text) => {
-      sent.push({ chatId, text });
-    },
+  published = [];
+  authorizedChats = spyOn(AuthorizationService.instance, "listAuthorizedChatIds").mockResolvedValue(
+    ["discord:auth-test"],
+  );
+  publish = spyOn(EventBus.instance, "publish").mockImplementation(async (draft) => {
+    published.push(draft);
   });
 });
 
 afterEach(async () => {
+  authorizedChats.mockRestore();
+  publish.mockRestore();
   await rm(directory, { force: true, recursive: true });
 });
 
@@ -83,7 +84,7 @@ test("refreshes and persists expired OAuth credentials", async () => {
 
   expect(await store.read(EAiProvider.OpenaiCodex)).toMatchObject({ refresh: "new-refresh" });
   expect(await store.read(EAiProvider.OpencodeGo)).toMatchObject({ refresh: "new-refresh" });
-  expect(sent).toEqual([]);
+  expect(published).toEqual([]);
 });
 
 test("stays silent about an expired login while another provider is connected", async () => {
@@ -99,10 +100,10 @@ test("stays silent about an expired login while another provider is connected", 
 
   await checkAiOAuth(models);
 
-  expect(sent).toEqual([]);
+  expect(published).toEqual([]);
 });
 
-test("sends one combined alert for rejected and missing logins", async () => {
+test("publishes one combined alert for rejected and missing logins", async () => {
   const { models } = await createTestModels(() =>
     Promise.reject(new Error("token refresh failed (401): invalid_grant")),
   );
@@ -110,14 +111,20 @@ test("sends one combined alert for rejected and missing logins", async () => {
   await checkAiOAuth(models);
   await checkAiOAuth(models);
 
-  expect(sent).toEqual([
+  expect(published).toEqual([
     {
-      chatId: "discord:auth-test",
-      text: [
-        "AI login needed:",
-        "- openai-codex: login expired. Run !ai-auth login openai-codex",
-        "- opencode-go: not connected. Run !ai-auth login opencode-go",
-      ].join("\n"),
+      type: EEventType.AiAuthLoginNeeded,
+      source: "ai-auth",
+      key: "global",
+      trace: { turnId: expect.stringMatching(/^sys:/), chatId: undefined, platform: undefined },
+      payload: {
+        problems: [
+          "openai-codex: login expired. Run !ai-auth login openai-codex",
+          "opencode-go: not connected. Run !ai-auth login opencode-go",
+        ],
+      },
+      causationId: undefined,
+      dedupeKey: undefined,
     },
   ]);
 });
@@ -127,44 +134,30 @@ test("does not alert on transient refresh failures", async () => {
     Promise.reject(new Error("token refresh error: fetch failed")),
   );
   await models.logout(EAiProvider.OpencodeGo);
-  registerAiAuthChannel({
-    listChatIds: async () => [],
-    send: async (chatId, text) => {
-      sent.push({ chatId, text });
-    },
-  });
+  authorizedChats.mockResolvedValue([]);
 
   await checkAiOAuth(models);
 
-  expect(sent).toEqual([]);
+  expect(published).toEqual([]);
 });
 
-test("retries an alert that no chat received", async () => {
+test("retries an alert while no chat is authorized", async () => {
   const { models } = await createTestModels(() =>
     Promise.reject(new Error("token refresh failed (401): invalid_grant")),
   );
-  let failSend = true;
-  registerAiAuthChannel({
-    listChatIds: async () => ["discord:retry-alert"],
-    send: async (chatId, text) => {
-      if (failSend) {
-        throw new Error("transport down");
-      }
-      sent.push({ chatId, text });
-    },
-  });
+  authorizedChats.mockResolvedValue([]);
 
-  await models.logout(EAiProvider.OpenaiCodex);
-  await models.logout(EAiProvider.OpencodeGo);
   await checkAiOAuth(models);
-  failSend = false;
+  authorizedChats.mockResolvedValue(["discord:retry-alert"]);
   await checkAiOAuth(models);
   await checkAiOAuth(models);
 
-  expect(sent).toEqual([
+  expect(published.map((draft) => draft.payload)).toEqual([
     {
-      chatId: "discord:retry-alert",
-      text: "AI login needed:\n- opencode-go: not connected. Run !ai-auth login opencode-go",
+      problems: [
+        "openai-codex: login expired. Run !ai-auth login openai-codex",
+        "opencode-go: not connected. Run !ai-auth login opencode-go",
+      ],
     },
   ]);
 });

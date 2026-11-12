@@ -1,31 +1,30 @@
 import { afterEach, beforeEach, expect, type Mock, spyOn, test } from "bun:test";
 import { createProvider, type Provider } from "@earendil-works/pi-ai";
 import { openAICodexResponsesApi } from "@earendil-works/pi-ai/api/openai-codex-responses.lazy";
-import { registerAiAuthChannel } from "../ai/auth";
 import { aiCredentials, aiModels } from "../ai/providers/registry";
 import { EAiProvider } from "../ai/types";
 import { AuthorizationService } from "../authorization";
+import { EventBus, type TEventDraft } from "../events";
+import { EEventType } from "../events/catalog";
 import { aiAuthCommand } from "./ai-auth";
 
 let previousProvider: Provider | undefined;
-let sent: { chatId: string; text: string }[];
+let published: TEventDraft[];
+let publish: Mock<(draft: TEventDraft) => Promise<void>>;
 let approve: () => void;
 let delivered: Promise<void>;
 let authorizedChats: Mock<() => Promise<string[]>>;
 
 beforeEach(() => {
-  sent = [];
+  published = [];
   const delivery = Promise.withResolvers<void>();
   delivered = delivery.promise;
   authorizedChats = spyOn(AuthorizationService.instance, "listAuthorizedChatIds").mockResolvedValue(
     ["discord:1", "discord:2"],
   );
-  registerAiAuthChannel({
-    listChatIds: async () => [],
-    send: async (chatId, text) => {
-      sent.push({ chatId, text });
-      delivery.resolve();
-    },
+  publish = spyOn(EventBus.instance, "publish").mockImplementation(async (draft) => {
+    published.push(draft);
+    delivery.resolve();
   });
   previousProvider = aiModels.getProvider(EAiProvider.OpenaiCodex);
   const approved = Promise.withResolvers<void>();
@@ -73,6 +72,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   authorizedChats.mockRestore();
+  publish.mockRestore();
   await aiCredentials.delete(EAiProvider.OpenaiCodex);
   if (previousProvider !== undefined) {
     aiModels.setProvider(previousProvider);
@@ -87,8 +87,12 @@ test("logs in with a device code and confirms in the chat", async () => {
   approve();
   await delivered;
 
-  expect(sent).toEqual([
-    { chatId: "discord:1", text: "Connected openai-codex. It is now this chat's AI provider." },
+  expect(published.map((draft) => [draft.type, draft.key, draft.payload])).toEqual([
+    [
+      EEventType.AiAuthLoginCompleted,
+      "discord:1",
+      { chatId: "discord:1", providerId: "openai-codex", selected: true },
+    ],
   ]);
   expect(await aiAuthCommand.handler("discord:1", "status openai-codex")).toBe(
     "openai-codex: connected with OAuth, access token expires 2030-01-01T00:00:00.000Z.",
@@ -108,8 +112,12 @@ test("cancels a pending login when a new one starts", async () => {
   approve();
   await delivered;
 
-  expect(sent).toEqual([
-    { chatId: "discord:2", text: "Connected openai-codex. It is now this chat's AI provider." },
+  expect(published.map((draft) => [draft.type, draft.key, draft.payload])).toEqual([
+    [
+      EEventType.AiAuthLoginCompleted,
+      "discord:2",
+      { chatId: "discord:2", providerId: "openai-codex", selected: true },
+    ],
   ]);
 });
 
@@ -127,5 +135,5 @@ test("refuses chats that are not activated", async () => {
   expect(await aiAuthCommand.handler("discord:stranger", "logout openai-codex")).toBe(
     "AI authentication requires BELLACLAW_ACTIVATION_TOKEN and an activated chat.",
   );
-  expect(sent).toEqual([]);
+  expect(published).toEqual([]);
 });

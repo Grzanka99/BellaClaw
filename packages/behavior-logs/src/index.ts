@@ -1,6 +1,6 @@
 export { AppLogger } from "./app-logger";
 export { getDefaultLogDbPath } from "./config";
-export { createCronTurnId, createMessageTurnId } from "./ids";
+export { createCronTurnId, createMessageTurnId, createSystemTurnId } from "./ids";
 export { LogReader } from "./log-reader";
 export type {
   TBehaviorLogSearchQuery,

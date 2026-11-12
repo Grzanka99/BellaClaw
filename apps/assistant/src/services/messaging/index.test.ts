@@ -3,12 +3,18 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
+import { eq } from "drizzle-orm";
 import { ERole } from "../ai/types";
 import {
   AuthorizationService,
   EAuthorizationDecision,
   type TAuthorizationResult,
 } from "../authorization";
+import { DatabaseConnector } from "../database";
+import { eventDeliveriesTable, eventsTable } from "../database/schema";
+import { resetEventTables } from "../database/test-utils";
+import { EventBus, type TEventDraft } from "../events";
+import { EEventType } from "../events/catalog";
 import { Memory } from "../memory";
 import { MessageHandler } from "../message-handler";
 import type { TIncommingMessage } from "../message-handler/types";
@@ -302,14 +308,91 @@ describe("MessagingAdapter", () => {
       await rm(directory, { recursive: true, force: true });
     }
   });
+});
 
-  test("sends MCP connection notifications through the canonical chat transport", async () => {
+describe("MessagingAdapter outbound", () => {
+  let bus: EventBus;
+
+  function notice(): TEventDraft<EEventType.NoticeReady> {
+    return {
+      type: EEventType.NoticeReady,
+      source: "test",
+      key: "signal:+100",
+      trace: { turnId: "test:outbound", chatId: "signal:+100", platform: undefined },
+      payload: { chatId: "signal:+100", text: "Notice" },
+      causationId: undefined,
+      dedupeKey: undefined,
+    };
+  }
+
+  async function deliveries() {
+    return DatabaseConnector.instance.database.select().from(eventDeliveriesTable);
+  }
+
+  async function sentEvents() {
+    return DatabaseConnector.instance.database
+      .select()
+      .from(eventsTable)
+      .where(eq(eventsTable.type, EEventType.MessageSent));
+  }
+
+  beforeEach(async () => {
+    await resetEventTables();
+    Object.assign(EventBus, { _instance: undefined });
+    bus = EventBus.instance;
+  });
+
+  afterEach(async () => {
+    await bus.idle();
+    await bus.stop();
+  });
+
+  test("retries a missing transport and delivers once it registers", async () => {
     const sendText = mock(async () => undefined);
     const adapter = MessagingAdapter.instance;
+    Object.assign(adapter, { outboundBackoffMs: [20, 20, 20, 20, 20] });
+    adapter.setup();
+    await bus.start();
+
+    await bus.publish(notice());
+    while (((await deliveries())[0]?.attempts ?? 0) < 1) {
+      await Bun.sleep(1);
+    }
     adapter.registerTransport({ platform: EMessagePlatform.Signal, sendText });
+    await bus.idle();
 
-    await adapter.sendMcpConnectedMessage("signal:+15551234567", "documents");
+    expect(sendText).toHaveBeenCalledTimes(1);
+    expect(sendText).toHaveBeenCalledWith("+100", "Notice");
+    expect((await deliveries()).map((row) => [row.consumer, row.status])).toEqual([
+      ["outbound", "done"],
+    ]);
+    expect((await sentEvents()).map((row) => row.payload)).toEqual([
+      {
+        chatId: "signal:+100",
+        sourceType: EEventType.NoticeReady,
+        chars: 6,
+        sentAt: expect.any(Number),
+      },
+    ]);
+  });
 
-    expect(sendText).toHaveBeenCalledWith("+15551234567", "Connected MCP profile documents.");
+  test("a failed send does not publish message.sent", async () => {
+    const sendText = mock(async () => {
+      throw new Error("offline");
+    });
+    const adapter = MessagingAdapter.instance;
+    Object.assign(adapter, { outboundBackoffMs: [] });
+    adapter.registerTransport({ platform: EMessagePlatform.Signal, sendText });
+    adapter.setup();
+    await bus.start();
+
+    await bus.publish(notice());
+    await bus.idle();
+
+    expect(sendText).toHaveBeenCalledTimes(1);
+    expect((await deliveries()).map((row) => [row.consumer, row.status])).toEqual([
+      ["outbound", "dead"],
+    ]);
+    expect(await sentEvents()).toEqual([]);
   });
 });

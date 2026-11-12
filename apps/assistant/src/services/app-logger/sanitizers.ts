@@ -1,6 +1,18 @@
 import type { TBehaviorMetadata } from "@bellaclaw/behavior-logs";
 import type { TOption } from "@bellaclaw/shared";
-import type { TLogSafeField, TToolLogPolicy } from "../ai/tools/define-tool";
+
+/**
+ * A field whose value may be logged as-is. A tuple logs it under another metadata key.
+ */
+export type TLogSafeField = string | readonly [field: string, logKey: string];
+
+export type TToolLogPolicy = {
+  logSafe: ReadonlyArray<TLogSafeField>;
+  /** Error text can quote private values, so only ToolError codes are logged. */
+  privateErrors: boolean;
+  /** String fields also logged as a bounded, secret-redacted `<key>Preview`. */
+  previews?: ReadonlyArray<string>;
+};
 
 type TNormalizedToolResult = {
   toolCallId: string;

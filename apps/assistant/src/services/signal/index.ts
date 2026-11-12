@@ -111,8 +111,7 @@ export class SignalSingleton implements TMessageTransport {
 
   public async sendText(chatId: string, text: string): Promise<void> {
     if (this.client === undefined) {
-      this.logger.error("sendText: Signal client is not initialized");
-      return;
+      throw new Error("Signal client is not initialized");
     }
 
     await this.client.sendText(chatId, text);

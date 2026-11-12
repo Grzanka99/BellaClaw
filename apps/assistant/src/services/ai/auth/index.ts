@@ -1,6 +1,10 @@
+import { createSystemTurnId } from "@bellaclaw/behavior-logs";
 import { logger, type TOption } from "@bellaclaw/shared";
 import type { Models } from "@earendil-works/pi-ai";
 import { ModelsError } from "@earendil-works/pi-ai/utils/models-error";
+import { AuthorizationService } from "../../authorization";
+import { EventBus } from "../../events";
+import { EEventType, type TEventPayloads } from "../../events/catalog";
 import { SettingsService } from "../../settings";
 import { EConfigKey } from "../../settings/schema";
 import { aiCredentials, aiModels } from "../providers/registry";
@@ -20,18 +24,8 @@ export enum EAiAuthState {
   Unavailable = "unavailable",
 }
 
-export type TAiAuthChannel = {
-  listChatIds: () => Promise<readonly string[]>;
-  send: (chatId: string, text: string) => Promise<void>;
-};
-
-let channel: TOption<TAiAuthChannel>;
 const pendingLogins = new Map<EAiProvider, AbortController>();
 const alertedProviders = new Set<EAiProvider>();
-
-export function registerAiAuthChannel(nextChannel: TAiAuthChannel) {
-  channel = nextChannel;
-}
 
 export function findAiOAuthProvider(providerId: string): TOption<EAiProvider> {
   return AI_OAUTH_PROVIDERS.find((provider) => provider === providerId);
@@ -41,18 +35,21 @@ function loginHint(providerId: EAiProvider): string {
   return `Run !ai-auth login ${providerId}`;
 }
 
-async function send(chatId: string, text: string): Promise<boolean> {
-  if (channel === undefined) {
-    logger.warning(`AI auth: no chat channel to send notice to ${chatId}`);
-    return false;
-  }
-
+async function publishLoginOutcome<
+  T extends EEventType.AiAuthLoginCompleted | EEventType.AiAuthLoginFailed,
+>(chatId: string, type: T, payload: TEventPayloads[T]): Promise<void> {
   try {
-    await channel.send(chatId, text);
-    return true;
+    await EventBus.instance.publish({
+      type,
+      source: "ai-auth",
+      key: chatId,
+      trace: { turnId: createSystemTurnId(), chatId, platform: undefined },
+      payload,
+      causationId: undefined,
+      dedupeKey: undefined,
+    });
   } catch (error) {
-    logger.error(`AI auth: failed to send notice to ${chatId}: ${String(error)}`);
-    return false;
+    logger.error(`AI auth: failed to publish ${type} for ${chatId}: ${String(error)}`);
   }
 }
 
@@ -134,7 +131,7 @@ export async function describeAiAuthProblem(
 // Refreshes every OAuth credential and sends one alert to all chats when logins break.
 // Stays silent while any provider is connected: a chat on a broken one is switched to it.
 export async function checkAiOAuth(models: Models = aiModels): Promise<void> {
-  const chatIds = (await channel?.listChatIds()) ?? [];
+  const chatIds = await AuthorizationService.instance.listAuthorizedChatIds();
   const selectedProviders = new Set<string>();
 
   for (const chatId of chatIds) {
@@ -175,20 +172,23 @@ export async function checkAiOAuth(models: Models = aiModels): Promise<void> {
     return;
   }
 
-  const text = `AI login needed:\n${problems.map((problem) => `- ${problem}`).join("\n")}`;
-  let delivered = false;
-
-  for (const chatId of chatIds) {
-    if (await send(chatId, text)) {
-      delivered = true;
-    }
+  // Retry next check when no chat could receive the alert.
+  if (chatIds.length === 0) {
+    return;
   }
 
-  // Retry next check when no chat received the alert.
-  if (delivered) {
-    for (const providerId of newProblemProviders) {
-      alertedProviders.add(providerId);
-    }
+  await EventBus.instance.publish({
+    type: EEventType.AiAuthLoginNeeded,
+    source: "ai-auth",
+    key: "global",
+    trace: { turnId: createSystemTurnId(), chatId: undefined, platform: undefined },
+    payload: { problems },
+    causationId: undefined,
+    dedupeKey: undefined,
+  });
+
+  for (const providerId of newProblemProviders) {
+    alertedProviders.add(providerId);
   }
 }
 
@@ -228,24 +228,32 @@ export async function beginAiLogin(chatId: string, providerId: EAiProvider): Pro
     .then(
       async () => {
         alertedProviders.delete(providerId);
-        let text = `Connected ${providerId}.`;
+        let selected = false;
 
         if (!(await otherStates).includes(EAiAuthState.Connected)) {
           try {
             await SettingsService.instance.set(chatId, EConfigKey.AiProvider, providerId);
-            text = `Connected ${providerId}. It is now this chat's AI provider.`;
+            selected = true;
           } catch (error) {
             logger.error(`AI auth: failed to select ${providerId} for ${chatId}: ${String(error)}`);
           }
         }
 
-        await send(chatId, text);
+        await publishLoginOutcome(chatId, EEventType.AiAuthLoginCompleted, {
+          chatId,
+          providerId,
+          selected,
+        });
       },
       async (error) => {
         instructions.reject(error);
 
         if (instructionsSent && !controller.signal.aborted) {
-          await send(chatId, `Login for ${providerId} failed: ${String(error)}`);
+          await publishLoginOutcome(chatId, EEventType.AiAuthLoginFailed, {
+            chatId,
+            providerId,
+            error: String(error),
+          });
         }
       },
     )

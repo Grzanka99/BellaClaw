@@ -8,6 +8,7 @@ for (const [path, name] of [
   ["../services/calendar", "CalendarService"],
   ["../services/discord", "DiscordSingleton"],
   ["../services/messaging", "MessagingAdapter"],
+  ["../services/notices", "Notices"],
   ["../services/scheduling/delivery", "ScheduledDelivery"],
   ["../services/signal", "SignalSingleton"],
 ]) {
@@ -22,7 +23,6 @@ mock.module("../services/events", () => ({
   EventBus: { instance: { start: async () => undefined, stop: async () => undefined } },
 }));
 mock.module("../services/mcp/auth", () => ({
-  registerMcpAuthConnectedListener: () => undefined,
   startMcpAuthServer: () => undefined,
   stopMcpAuthServer,
 }));
