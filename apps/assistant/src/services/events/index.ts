@@ -35,10 +35,12 @@ export type TEmit = <T extends EEventType>(draft: TEventDraft<T>) => void;
 // Follow-up of the handled event: inherits trace and key, sets causationId, and gets dedupeKey
 // `${cause.id}:${consumer}:${type}:${step}`, so a redelivered handler cannot publish the same
 // follow-up twice.
+// key: the ordering key of the follow-up; undefined keeps the cause's key
 export type TDerivedEmit = <T extends EEventType>(
   type: T,
   payload: TEventPayloads[T],
   step: TOption<string>,
+  key: TOption<string>,
 ) => void;
 
 export type TEventContext = {
@@ -574,11 +576,11 @@ export class EventBus {
   }
 
   private derive(emit: TEmit, cause: TSelectEvent, consumer: string): TDerivedEmit {
-    return (type, payload, step) => {
+    return (type, payload, step, key) => {
       emit({
         type,
         source: consumer,
-        key: cause.key,
+        key: key ?? cause.key,
         trace: traceOf(cause),
         payload,
         causationId: cause.id,

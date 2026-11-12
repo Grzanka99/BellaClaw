@@ -27,8 +27,6 @@ export class MessagingAdapter {
   private logger: TLogger = createLogger("MESSAGING");
   private transports = new Map<EMessagePlatform, TMessageTransport>();
   private authorization = AuthorizationService.instance;
-  private transportWaitAttempts = 60;
-  private transportWaitIntervalMs = 1000;
   private outboundBackoffMs = [5_000, 30_000, 120_000, 600_000, 1_800_000, 3_600_000, 10_800_000];
 
   private constructor() {}
@@ -191,6 +189,7 @@ export class MessagingAdapter {
         EEventType.MessageSent,
         { chatId, sourceType: event.type, chars: text.length, sentAt: Date.now(), transcript },
         undefined,
+        undefined,
       );
     });
   }
@@ -220,20 +219,6 @@ export class MessagingAdapter {
     }
     span.ok();
     return undefined;
-  }
-
-  public async waitForTransport(platform: EMessagePlatform): Promise<TOption<TMessageTransport>> {
-    for (let attempt = 0; attempt < this.transportWaitAttempts; attempt += 1) {
-      const transport = this.transports.get(platform);
-
-      if (transport !== undefined) {
-        return transport;
-      }
-
-      await Bun.sleep(this.transportWaitIntervalMs);
-    }
-
-    return this.transports.get(platform);
   }
 }
 

@@ -1,8 +1,10 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { and, asc, eq } from "drizzle-orm";
 import { DatabaseConnector } from "../database";
-import { cronEngineJobsTable } from "../database/schema";
-import { resetCronEngineJobsTable } from "../database/test-utils";
+import { cronEngineJobsTable, eventsTable } from "../database/schema";
+import { resetCronEngineJobsTable, resetEventTables } from "../database/test-utils";
+import { ESubscriptionMode, EventBus } from "../events";
+import { EEventType, type TCronFiredPayload, type TEvent } from "../events/catalog";
 import { DefaultConfigRecord, EConfigKey } from "../settings/schema";
 import { CronScheduler } from "./index";
 import {
@@ -10,7 +12,6 @@ import {
   ECronJobStatus,
   ECronJobType,
   type TCronJob,
-  type TCronJobContext,
   type TJobContent,
 } from "./types";
 
@@ -97,14 +98,33 @@ function nextWholeSecond() {
 
 describe("CronScheduler", () => {
   let scheduler: CronScheduler;
+  let fired: TEvent<EEventType.CronFired>[];
+  let firstFire: PromiseWithResolvers<TCronFiredPayload>;
 
   beforeEach(async () => {
     await resetCronEngineJobsTable();
+    await resetEventTables();
+    Object.assign(EventBus, { _instance: undefined });
+    fired = [];
+    firstFire = Promise.withResolvers();
+    EventBus.instance.subscribe({
+      consumer: "test",
+      type: EEventType.CronFired,
+      mode: ESubscriptionMode.Live,
+      backoffMs: [],
+      handler: async (event) => {
+        fired.push(event);
+        firstFire.resolve(event.payload);
+      },
+    });
+    await EventBus.instance.start();
     scheduler = new CronScheduler({});
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     scheduler.destroy();
+    await EventBus.instance.idle();
+    await EventBus.instance.stop();
   });
 
   test("createRecurring rejects invalid cron pattern before storing", async () => {
@@ -213,32 +233,20 @@ describe("CronScheduler", () => {
     const overdueRunAt = new Date(Date.now() - 10 * 60_000);
     await forceJobNextRunAt(scheduled.id, overdueRunAt);
 
-    const fireEvent = new Promise<
-      Pick<TCronJobContext, "name" | "scope" | "type" | "lastRunAt" | "nextRunAt">
-    >((resolve) => {
-      scheduler.onFire((ctx: TCronJobContext) => {
-        resolve({
-          name: ctx.name,
-          scope: ctx.scope,
-          type: ctx.type,
-          lastRunAt: ctx.lastRunAt,
-          nextRunAt: ctx.nextRunAt,
-        });
-      });
-    });
-
     await fireJob(scheduler, scheduled.id);
 
-    const emitted = await fireEvent;
+    const emitted = await firstFire.promise;
     const updatedJob = await scheduler.get("recurring-job", "scope-a");
 
-    expect(emitted).toEqual({
+    expect(emitted).toMatchObject({
+      jobId: scheduled.id,
       name: "recurring-job",
       scope: "scope-a",
-      type: ECronJobType.Recurring,
-      lastRunAt: undefined,
-      nextRunAt: overdueRunAt,
+      jobType: ECronJobType.Recurring,
+      nextRunAt: overdueRunAt.getTime(),
     });
+    expect(fired[0]?.key).toBe("scope-a|recurring-job");
+    expect(fired[0]?.dedupeKey).toBe(`cron:${scheduled.id}:${overdueRunAt.getTime()}`);
     expect(updatedJob?.lastRunAt).toBeInstanceOf(Date);
     expect(updatedJob?.nextRunAt.getTime()).toBeGreaterThan(Date.now());
     expect(updatedJob?.content).toEqual({
@@ -262,19 +270,42 @@ describe("CronScheduler", () => {
     });
     await forceJobNextRunAt(scheduled.id, new Date(Date.now() - 1_000));
 
-    const fired = new Promise<TCronJobContext>((resolve) => {
-      scheduler.onFire((ctx: TCronJobContext) => {
-        resolve(ctx);
-      });
-    });
-
     await fireJob(scheduler, scheduled.id);
 
     const listed = await scheduler.get("daily-news", "scope-a");
-    const context = await fired;
+    const context = await firstFire.promise;
 
     expect(listed?.content).toEqual(taskContent);
     expect(context.content).toEqual(taskContent);
+  });
+
+  test("the job update and the cron.fired row commit together", async () => {
+    const overdueRunAt = new Date(Date.now() - 1_000);
+    const id = await insertOneTimeJob("atomic-once", "scope-a", overdueRunAt);
+    const append = spyOn(
+      EventBus.instance as unknown as { append: () => Promise<unknown> },
+      "append",
+    ).mockRejectedValueOnce(new Error("disk full"));
+
+    try {
+      await fireJob(scheduler, id);
+    } finally {
+      append.mockRestore();
+    }
+
+    const [failed] = await getJobRows("atomic-once", "scope-a");
+    expect(failed?.status).toBe(ECronJobStatus.Active);
+    expect(failed?.lastRunAt).toBeNull();
+    expect(await DatabaseConnector.instance.database.select().from(eventsTable)).toEqual([]);
+
+    await fireJob(scheduler, id);
+
+    const [completed] = await getJobRows("atomic-once", "scope-a");
+    const events = await DatabaseConnector.instance.database.select().from(eventsTable);
+    expect(completed?.status).toBe(ECronJobStatus.Completed);
+    expect(events.map((event) => event.dedupeKey)).toEqual([
+      `cron:${id}:${overdueRunAt.getTime()}`,
+    ]);
   });
 
   test("create does not start a timer after a queued cancel wins", async () => {
@@ -303,13 +334,13 @@ describe("CronScheduler", () => {
       new Date(Date.now() - 1_000),
     );
 
-    const fireEvents: Array<Pick<TCronJobContext, "type" | "content">> = [];
-    scheduler.onFire((ctx: TCronJobContext) => {
-      fireEvents.push({ type: ctx.type, content: ctx.content });
-    });
-
     await fireJob(scheduler, scheduledId);
     await fireJob(scheduler, scheduledId);
+    await EventBus.instance.idle();
+    const fireEvents = fired.map((event) => ({
+      type: event.payload.jobType,
+      content: event.payload.content,
+    }));
 
     const remainingJob = await scheduler.get("one-time-job", "scope-a");
     const rowsAfterFire = await getJobRows("one-time-job", "scope-a");
@@ -343,12 +374,6 @@ describe("CronScheduler", () => {
   });
 
   test("future one-time timer fires without polling", async () => {
-    const fired = new Promise<TCronJobContext>((resolve) => {
-      scheduler.onFire((ctx: TCronJobContext) => {
-        resolve(ctx);
-      });
-    });
-
     await scheduler.createOnce({
       name: "live-once",
       scope: "scope-a",
@@ -356,10 +381,10 @@ describe("CronScheduler", () => {
       content: { kind: "text", text: "Live timer." },
     });
 
-    const ctx = await fired;
+    const ctx = await firstFire.promise;
 
     expect(ctx.name).toBe("live-once");
-    expect(ctx.type).toBe(ECronJobType.OneTime);
+    expect(ctx.jobType).toBe(ECronJobType.OneTime);
     expect(await scheduler.get("live-once", "scope-a")).toBeUndefined();
   });
 
@@ -491,21 +516,16 @@ describe("CronScheduler", () => {
 
   test("setup fires overdue one-time jobs immediately", async () => {
     const overdueScheduler = new CronScheduler({});
-    const fired = new Promise<TCronJobContext>((resolve) => {
-      overdueScheduler.onFire((ctx: TCronJobContext) => {
-        resolve(ctx);
-      });
-    });
 
     try {
       await insertOneTimeJob("startup-once", "scope-a", new Date(Date.now() - 1_000));
       await overdueScheduler.setup();
 
-      const ctx = await fired;
+      const ctx = await firstFire.promise;
       const job = await overdueScheduler.get("startup-once", "scope-a");
 
       expect(ctx.name).toBe("startup-once");
-      expect(ctx.type).toBe(ECronJobType.OneTime);
+      expect(ctx.jobType).toBe(ECronJobType.OneTime);
       expect(job).toBeUndefined();
     } finally {
       overdueScheduler.destroy();
@@ -514,7 +534,6 @@ describe("CronScheduler", () => {
 
   test("setup skips overdue recurring jobs to a future run", async () => {
     const overdueScheduler = new CronScheduler({});
-    const events: string[] = [];
 
     try {
       const id = await insertRecurringJob(
@@ -522,16 +541,13 @@ describe("CronScheduler", () => {
         "scope-a",
         new Date(Date.now() - 60_000),
       );
-      overdueScheduler.onFire((ctx: TCronJobContext) => {
-        events.push(ctx.name);
-      });
-
       await overdueScheduler.setup();
+      await EventBus.instance.idle();
 
       const job = await overdueScheduler.get("startup-recurring", "scope-a");
       const internals = overdueScheduler as unknown as TSchedulerInternals;
 
-      expect(events).toEqual([]);
+      expect(fired).toEqual([]);
       expect(job?.nextRunAt.getTime()).toBeGreaterThan(Date.now());
       expect(internals.timers.has(id)).toBe(true);
     } finally {

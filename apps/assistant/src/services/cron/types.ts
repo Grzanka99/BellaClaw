@@ -1,4 +1,3 @@
-import type { TOption } from "@bellaclaw/shared";
 import type { cronEngineJobsTable } from "../database/schema";
 
 export enum ECronJobType {
@@ -34,19 +33,6 @@ export type TCronJob = Omit<
   content: TJobContent;
   /** Automations run in this order before the job's message is produced. */
   automationIds: number[];
-};
-
-export type TCronJobContext = {
-  name: string;
-  scope: string;
-  type: ECronJobType;
-  pattern: TOption<string>;
-  content: TJobContent;
-  automationIds: number[];
-  lastRunAt: TOption<Date>;
-  nextRunAt: Date;
-  createdAt: Date;
-  timezone: TOption<string>;
 };
 
 type TCreateJobArgs = {

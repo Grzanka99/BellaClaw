@@ -16,6 +16,10 @@ for (const [path, name] of [
     mock.module(path, () => ({ [name]: { instance: { setup: async () => undefined } } }));
   }
 }
+mock.module("../services/message-handler", () => ({ MessageHandler: { setup: () => undefined } }));
+mock.module("../services/cron", () => ({
+  CronScheduler: { instance: { setup: async () => undefined } },
+}));
 mock.module("../services/memory/distill", () => ({
   FactDistiller: { instance: { scheduleFactDrainForAllChats: async () => undefined } },
 }));

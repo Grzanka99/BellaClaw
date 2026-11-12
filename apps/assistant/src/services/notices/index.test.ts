@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
+import { eq } from "drizzle-orm";
 import { AuthorizationService } from "../authorization";
+import { DatabaseConnector } from "../database";
+import { eventsTable } from "../database/schema";
 import { resetEventTables } from "../database/test-utils";
 import { EventBus, type TEventDraft } from "../events";
 import { EEventType, type TEventPayloads } from "../events/catalog";
@@ -79,6 +82,12 @@ describe("Notices", () => {
       ["+100", text],
       ["+200", text],
     ]);
+    // each notice is on its chat's lane, not the cause's global one
+    const notices = await DatabaseConnector.instance.database
+      .select()
+      .from(eventsTable)
+      .where(eq(eventsTable.type, EEventType.NoticeReady));
+    expect(notices.map((row) => row.key)).toEqual(["signal:+100", "signal:+200"]);
   });
 
   test("login outcomes become chat notices", async () => {

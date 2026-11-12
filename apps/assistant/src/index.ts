@@ -2,11 +2,13 @@ import { AppLogger, EBehaviorLogLevel } from "@bellaclaw/behavior-logs";
 import { startAiOAuthKeepAlive } from "./services/ai/auth/oauth-keep-alive";
 import { AuthorizationService } from "./services/authorization";
 import { CalendarService } from "./services/calendar";
+import { CronScheduler } from "./services/cron";
 import { DiscordSingleton } from "./services/discord";
 import { EventBus } from "./services/events";
 import { McpService } from "./services/mcp";
 import { startMcpAuthServer, stopMcpAuthServer } from "./services/mcp/auth";
 import { FactDistiller } from "./services/memory/distill";
+import { MessageHandler } from "./services/message-handler";
 import { MessagingAdapter } from "./services/messaging";
 import { Notices } from "./services/notices";
 import { ScheduledDelivery } from "./services/scheduling/delivery";
@@ -38,6 +40,8 @@ async function init(): Promise<void> {
   try {
     MessagingAdapter.instance.setup();
     Notices.instance.setup();
+    ScheduledDelivery.instance.setup();
+    MessageHandler.setup();
     if (Bun.env.BELLACLAW_MCP_PUBLIC_URL?.trim()) {
       startMcpAuthServer();
     }
@@ -48,7 +52,7 @@ async function init(): Promise<void> {
       SignalSingleton.instance.setup(),
     ]);
     await EventBus.instance.start();
-    await ScheduledDelivery.instance.setup();
+    await CronScheduler.instance.setup();
     await FactDistiller.instance.scheduleFactDrainForAllChats(turnId);
     startAiOAuthKeepAlive();
 

@@ -1,4 +1,4 @@
-import { EventEmitter } from "node:events";
+import { createCronTurnId } from "@bellaclaw/behavior-logs";
 import type { TOption } from "@bellaclaw/shared";
 import { createLogger } from "@bellaclaw/shared";
 import { Cron } from "croner";
@@ -6,6 +6,8 @@ import { and, asc, eq } from "drizzle-orm";
 import type { LibSQLDatabase } from "drizzle-orm/libsql";
 import { DatabaseConnector } from "../database";
 import { cronEngineJobsTable } from "../database/schema";
+import { EventBus, type TEventDraft } from "../events";
+import { EEventType } from "../events/catalog";
 import { DefaultConfigRecord, EConfigKey } from "../settings/schema";
 import {
   CronSchedulerError,
@@ -15,13 +17,11 @@ import {
   type TCreateOnceArgs,
   type TCreateRecurringArgs,
   type TCronJob,
-  type TCronJobContext,
   type TCronSchedulerOptions,
 } from "./types";
 
-export class CronScheduler extends EventEmitter {
+export class CronScheduler {
   private static _instance: TOption<CronScheduler>;
-  private static readonly FIRE_EVENT = Symbol("cron-scheduler-fire");
   private database = DatabaseConnector.instance;
   private logger = createLogger("CRON SCHEDULER");
   private timezone: TOption<string>;
@@ -29,8 +29,6 @@ export class CronScheduler extends EventEmitter {
   private destroyed = false;
 
   public constructor(options: TCronSchedulerOptions) {
-    super();
-
     this.timezone = options.timezone;
   }
 
@@ -60,10 +58,6 @@ export class CronScheduler extends EventEmitter {
     }
 
     this.logger.info("started");
-  }
-
-  public onFire(listener: (ctx: TCronJobContext) => void) {
-    return this.on(CronScheduler.FIRE_EVENT, listener);
   }
 
   public async createRecurring(args: TCreateRecurringArgs): Promise<TCronJob> {
@@ -514,8 +508,9 @@ export class CronScheduler extends EventEmitter {
 
   private async fire(id: number) {
     try {
-      const firedJob = await this.database.run(async (db) => {
-        const current = await db
+      // NOTE: the job update and the cron.fired row commit together, so a crash cannot lose a fire
+      const firedJob = await EventBus.instance.transact(async (tx, emit) => {
+        const current = await tx
           .select()
           .from(cronEngineJobsTable)
           .where(
@@ -543,7 +538,7 @@ export class CronScheduler extends EventEmitter {
             return undefined;
           }
 
-          const row = await db
+          const row = await tx
             .update(cronEngineJobsTable)
             .set({
               nextRunAt: nextRun,
@@ -563,11 +558,12 @@ export class CronScheduler extends EventEmitter {
             return undefined;
           }
 
+          emit(this.firedDraft(job));
           return job;
         }
 
         if (job.type === ECronJobType.OneTime) {
-          const row = await db
+          const row = await tx
             .update(cronEngineJobsTable)
             .set({
               status: ECronJobStatus.Completed,
@@ -589,6 +585,7 @@ export class CronScheduler extends EventEmitter {
             return undefined;
           }
 
+          emit(this.firedDraft(job));
           return job;
         }
 
@@ -604,24 +601,31 @@ export class CronScheduler extends EventEmitter {
       }
 
       this.logger.info(`fired job '${firedJob.name}' (id: ${firedJob.id}, type: ${firedJob.type})`);
-
-      const ctx: TCronJobContext = {
-        name: firedJob.name,
-        scope: firedJob.scope,
-        type: firedJob.type,
-        pattern: firedJob.pattern ?? undefined,
-        content: firedJob.content,
-        automationIds: firedJob.automationIds,
-        lastRunAt: firedJob.lastRunAt ?? undefined,
-        nextRunAt: firedJob.nextRunAt,
-        createdAt: firedJob.createdAt,
-        timezone: firedJob.timezone ?? this.timezone,
-      };
-
-      this.emit(CronScheduler.FIRE_EVENT, ctx);
     } catch (error) {
       this.logger.error(`Failed to fire job ${id}: ${String(error)}`);
     }
+  }
+
+  private firedDraft(job: TCronJob): TEventDraft<EEventType.CronFired> {
+    return {
+      type: EEventType.CronFired,
+      source: "cron",
+      key: `${job.scope}|${job.name}`,
+      trace: { turnId: createCronTurnId(), chatId: job.scope, platform: undefined },
+      causationId: undefined,
+      dedupeKey: `cron:${job.id}:${job.nextRunAt.getTime()}`,
+      payload: {
+        jobId: job.id,
+        name: job.name,
+        scope: job.scope,
+        jobType: job.type,
+        pattern: job.pattern ?? undefined,
+        content: job.content,
+        automationIds: job.automationIds,
+        nextRunAt: job.nextRunAt.getTime(),
+        timezone: job.timezone ?? this.timezone,
+      },
+    };
   }
 
   private getNextRecurringRun(

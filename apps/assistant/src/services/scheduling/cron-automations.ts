@@ -11,7 +11,7 @@ import {
   type TAutomationRunOptions,
   type TAutomationRunReport,
 } from "../automation/runner";
-import type { TCronJobContext } from "../cron/types";
+import type { TCronFiredPayload } from "../events/catalog";
 import type { EMessagePlatform } from "../messaging/types";
 import {
   generateScheduledTaskText,
@@ -41,7 +41,7 @@ const logger = createLogger("CRON_AUTOMATIONS");
  * outputs; otherwise the text outputs are sent as written.
  */
 export async function runCronJobAutomations(
-  ctx: TCronJobContext,
+  ctx: TCronFiredPayload,
   platform: TOption<EMessagePlatform>,
   ai: TScheduledTaskAi,
   runAutomation: TRunCronAutomation,

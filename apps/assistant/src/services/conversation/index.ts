@@ -8,7 +8,7 @@ import {
 import { and, asc, eq, gt, isNotNull } from "drizzle-orm";
 import { emptyUsage } from "../ai/llm";
 import { ERole } from "../ai/types";
-import { DatabaseConnector } from "../database";
+import { DatabaseConnector, type TDatabaseHandle } from "../database";
 import { conversationSummariesTable, memoriesTable, type TSelectMemory } from "../database/schema";
 import { SConversationMessage, type TConversation } from "./types";
 
@@ -138,7 +138,8 @@ export class ConversationStore {
     );
   }
 
-  public saveDeliveredMessage(
+  public async saveDeliveredMessage(
+    db: TDatabaseHandle,
     chatId: string,
     text: string,
     notice: string,
@@ -157,26 +158,23 @@ export class ConversationStore {
     // NOTE: without a user turn before it, providers merge the delivery into the previous
     // assistant reply, and the model then disowns it as text it wrote itself.
     const noticeMessage: UserMessage = { role: "user", content: notice, timestamp: deliveredAt };
-    return this.database.run((db) =>
-      db.transaction(async (tx) => {
-        await tx.insert(memoriesTable).values({
-          chatId,
-          kind: "tool",
-          author: ERole.User,
-          message: notice,
-          modelMessage: JSON.stringify(noticeMessage),
-          createdAt: new Date(deliveredAt),
-        });
-        await tx.insert(memoriesTable).values({
-          chatId,
-          kind: "message",
-          author: ERole.Assistant,
-          message: text,
-          modelMessage: JSON.stringify(message),
-          createdAt: new Date(deliveredAt),
-        });
-      }),
-    );
+    // NOTE: the caller's transaction keeps the notice and the delivery together
+    await db.insert(memoriesTable).values({
+      chatId,
+      kind: "tool",
+      author: ERole.User,
+      message: notice,
+      modelMessage: JSON.stringify(noticeMessage),
+      createdAt: new Date(deliveredAt),
+    });
+    await db.insert(memoriesTable).values({
+      chatId,
+      kind: "message",
+      author: ERole.Assistant,
+      message: text,
+      modelMessage: JSON.stringify(message),
+      createdAt: new Date(deliveredAt),
+    });
   }
 
   public saveSummary(chatId: string, state: TConversation): Promise<void> {

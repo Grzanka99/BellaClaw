@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
 import { DatabaseConnector } from "../database";
-import { cronEngineJobsTable } from "../database/schema";
-import { resetCronEngineJobsTable } from "../database/test-utils";
+import { cronEngineJobsTable, eventsTable } from "../database/schema";
+import { resetCronEngineJobsTable, resetEventTables } from "../database/test-utils";
+import { EventBus } from "../events";
+import { EEventType } from "../events/catalog";
 import { CronScheduler } from "./index";
 
 type TSchedulerInternals = {
@@ -25,6 +27,8 @@ describe("CronScheduler runtime safety", () => {
 
   beforeEach(async () => {
     await resetCronEngineJobsTable();
+    await resetEventTables();
+    Object.assign(EventBus, { _instance: undefined });
     scheduler = new CronScheduler({});
   });
 
@@ -41,14 +45,13 @@ describe("CronScheduler runtime safety", () => {
     });
     await forceJobNextRunAt(scheduled.id, new Date(Date.now() - 1_000));
 
-    const fireEvents: string[] = [];
-    scheduler.onFire((ctx) => {
-      fireEvents.push(ctx.name);
-    });
-
     await Promise.all([fireJob(scheduler, scheduled.id), fireJob(scheduler, scheduled.id)]);
 
-    expect(fireEvents).toEqual(["error"]);
+    const fired = await DatabaseConnector.instance.database
+      .select()
+      .from(eventsTable)
+      .where(eq(eventsTable.type, EEventType.CronFired));
+    expect(fired.map((row) => row.key)).toEqual(["scope-a|error"]);
     expect(await scheduler.get("error", "scope-a")).toBeUndefined();
   });
 });

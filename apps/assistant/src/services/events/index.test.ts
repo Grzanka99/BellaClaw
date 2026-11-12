@@ -344,7 +344,7 @@ describe("EventBus", () => {
             await tx
               .insert(messageAuthorizationsTable)
               .values({ chatId: "chat", status: "pending" });
-            emit(EEventType.TestSecret, { secret: "follow-up" }, undefined);
+            emit(EEventType.TestSecret, { secret: "follow-up" }, undefined, undefined);
             throw new Error("work failed");
           })
           .catch((error) => {
@@ -388,7 +388,7 @@ describe("EventBus", () => {
             await tx
               .insert(messageAuthorizationsTable)
               .values({ chatId: "chat", status: "pending" });
-            emit(EEventType.TestSecret, { secret: "follow-up" }, undefined);
+            emit(EEventType.TestSecret, { secret: "follow-up" }, undefined, undefined);
           })
           .catch((error) => {
             seen.push(String(error));
@@ -452,7 +452,7 @@ describe("EventBus", () => {
       backoffMs: [],
       handler: async (_event, ctx) => {
         await ctx.transact(async (_tx, emit) => {
-          emit(EEventType.TestSecret, { secret: "derived" }, "step");
+          emit(EEventType.TestSecret, { secret: "derived" }, "step", "other");
         });
         await EventBus.instance.transact(async (_tx, emit) => {
           emit(secret());
@@ -473,6 +473,7 @@ describe("EventBus", () => {
       EEventType.TestSecret,
     ]);
     expect(rows[1]?.causationId).toBe(rows[0]?.id);
+    expect(rows[1]?.key).toBe("other");
     expect(rows[1]?.dedupeKey).toBe(`${rows[0]?.id}:nested:${EEventType.TestSecret}:step`);
     expect((await deliveries())[0]?.status).toBe("done");
   });

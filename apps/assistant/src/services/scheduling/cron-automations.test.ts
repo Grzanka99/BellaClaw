@@ -3,7 +3,8 @@ import type { TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
 import type { AgentHarness } from "../ai/agent-harness";
 import { AutomationService, type TAutomation } from "../automation";
 import { EAutomationRunOutcome, type TAutomationRunReport } from "../automation/runner";
-import { ECronJobType, type TCronJobContext } from "../cron/types";
+import { ECronJobType } from "../cron/types";
+import type { TCronFiredPayload } from "../events/catalog";
 import { EMessagePlatform } from "../messaging/types";
 import { SettingsService } from "../settings";
 import { DefaultConfigRecord } from "../settings/schema";
@@ -23,17 +24,16 @@ const TEST_TRACE: TBehaviorTraceContext = {
 // The test database is shared, so each test owns a fresh scope instead of clearing tables.
 let scope = "";
 
-function context(overrides: Partial<TCronJobContext> = {}): TCronJobContext {
+function context(overrides: Partial<TCronFiredPayload> = {}): TCronFiredPayload {
   return {
+    jobId: 1,
     name: "briefing",
     scope,
-    type: ECronJobType.Recurring,
+    jobType: ECronJobType.Recurring,
     pattern: "0 9 * * *",
     content: { kind: "automations" },
     automationIds: [],
-    lastRunAt: undefined,
-    nextRunAt: new Date("2026-01-05T08:00:00.000Z"),
-    createdAt: new Date("2026-01-01T08:00:00.000Z"),
+    nextRunAt: Date.parse("2026-01-05T08:00:00.000Z"),
     timezone: "Europe/Warsaw",
     ...overrides,
   };

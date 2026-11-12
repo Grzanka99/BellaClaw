@@ -39,7 +39,7 @@ export class Notices {
 
         await ctx.complete(async (_tx, emit) => {
           for (const chatId of chatIds) {
-            emit(EEventType.NoticeReady, { chatId, text }, chatId);
+            emit(EEventType.NoticeReady, { chatId, text }, chatId, chatId);
           }
         });
       },
@@ -75,7 +75,7 @@ export class Notices {
 
   private async notify(ctx: TEventContext, chatId: string, text: string): Promise<void> {
     await ctx.complete(async (_tx, emit) => {
-      emit(EEventType.NoticeReady, { chatId, text }, undefined);
+      emit(EEventType.NoticeReady, { chatId, text }, undefined, undefined);
     });
   }
 }

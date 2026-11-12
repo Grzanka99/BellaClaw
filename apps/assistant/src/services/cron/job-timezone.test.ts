@@ -1,18 +1,15 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
 import { DatabaseConnector } from "../database";
-import { cronEngineJobsTable } from "../database/schema";
-import { resetCronEngineJobsTable } from "../database/test-utils";
+import { cronEngineJobsTable, eventsTable } from "../database/schema";
+import { resetCronEngineJobsTable, resetEventTables } from "../database/test-utils";
+import { EventBus } from "../events";
+import { EEventType, type TCronFiredPayload } from "../events/catalog";
 import { CronScheduler } from "./index";
 import { ECronJobStatus, ECronJobType } from "./types";
 
 type TSchedulerInternals = {
   fire: (id: number) => Promise<void>;
-};
-
-type TFiredContext = {
-  timezone: string | undefined;
-  nextRunAt: Date;
 };
 
 function formatWall(date: Date, timezone: string) {
@@ -25,6 +22,17 @@ function formatWall(date: Date, timezone: string) {
 async function fireJob(scheduler: CronScheduler, id: number) {
   const internals = scheduler as unknown as TSchedulerInternals;
   await internals.fire(id);
+}
+
+async function firedPayload(name: string) {
+  const rows = await DatabaseConnector.instance.database
+    .select()
+    .from(eventsTable)
+    .where(eq(eventsTable.type, EEventType.CronFired));
+
+  return rows
+    .map((row) => row.payload as TCronFiredPayload)
+    .find((payload) => payload.name === name);
 }
 
 async function forceJobNextRunAt(id: number, nextRunAt: Date) {
@@ -63,6 +71,8 @@ describe("CronScheduler per-job timezone", () => {
 
   beforeEach(async () => {
     await resetCronEngineJobsTable();
+    await resetEventTables();
+    Object.assign(EventBus, { _instance: undefined });
     scheduler = new CronScheduler({});
   });
 
@@ -101,18 +111,10 @@ describe("CronScheduler per-job timezone", () => {
     const fireAt = new Date(Date.now() - 60_000);
     await forceJobNextRunAt(result.id, fireAt);
 
-    const fired = new Promise<TFiredContext>((resolve) => {
-      scheduler.onFire((ctx) => {
-        if (ctx.name === "tz-recurring-fire") {
-          resolve({ timezone: ctx.timezone, nextRunAt: ctx.nextRunAt });
-        }
-      });
-    });
-
     await fireJob(scheduler, result.id);
 
-    const ctx = await fired;
-    expect(ctx.timezone).toBe("America/New_York");
+    const ctx = await firedPayload("tz-recurring-fire");
+    expect(ctx?.timezone).toBe("America/New_York");
 
     const job = await scheduler.get("tz-recurring-fire", "scope-a");
 
@@ -122,7 +124,7 @@ describe("CronScheduler per-job timezone", () => {
 
     expect(job.timezone).toBe("America/New_York");
     expect(formatWall(job.nextRunAt, "America/New_York")).toMatch(/ 09:00:00$/);
-    expect(ctx.nextRunAt.getTime()).toBe(fireAt.getTime());
+    expect(ctx?.nextRunAt).toBe(fireAt.getTime());
   });
 
   test("rows with null timezone fire using scheduler default timezone", async () => {
@@ -131,18 +133,10 @@ describe("CronScheduler per-job timezone", () => {
     try {
       const id = await insertRecurringJobWithoutTimezone();
 
-      const fired = new Promise<TFiredContext>((resolve) => {
-        tzScheduler.onFire((ctx) => {
-          if (ctx.name === "default-tz-recurring") {
-            resolve({ timezone: ctx.timezone, nextRunAt: ctx.nextRunAt });
-          }
-        });
-      });
-
       await fireJob(tzScheduler, id);
 
-      const ctx = await fired;
-      expect(ctx.timezone).toBe("Europe/Warsaw");
+      const ctx = await firedPayload("default-tz-recurring");
+      expect(ctx?.timezone).toBe("Europe/Warsaw");
 
       const job = await tzScheduler.get("default-tz-recurring", "scope-a");
 

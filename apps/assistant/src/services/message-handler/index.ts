@@ -9,6 +9,8 @@ import { startSpan } from "../app-logger/span";
 import { ConversationStore } from "../conversation";
 import type { TConversation } from "../conversation/types";
 import type { TSelectMemory } from "../database/schema";
+import { ESubscriptionMode, EventBus, type TEventContext } from "../events";
+import { EEventType, type TDeliveryTranscript } from "../events/catalog";
 import { FactDistiller } from "../memory/distill";
 import type { EMessagePlatform } from "../messaging/types";
 import { SettingsService } from "../settings";
@@ -42,6 +44,27 @@ export class MessageHandler {
     return newInstance;
   }
 
+  public static setup(): void {
+    EventBus.instance.subscribe({
+      consumer: "conversation",
+      type: EEventType.MessageSent,
+      mode: ESubscriptionMode.Durable,
+      backoffMs: [1_000, 5_000, 30_000],
+      handler: async (event, ctx) => {
+        if (event.payload.transcript === undefined) {
+          return;
+        }
+
+        await MessageHandler.getInstance(event.payload.chatId).saveDeliveredMessage(
+          event.payload.transcript,
+          event.payload.sentAt,
+          event.trace,
+          ctx,
+        );
+      },
+    });
+  }
+
   public async handleMessage(
     message: TIncommingMessage,
     trace: TBehaviorTraceContext,
@@ -56,11 +79,33 @@ export class MessageHandler {
     return reply.promise;
   }
 
-  public saveDeliveredMessage(text: string, notice: string, deliveredAt: number): Promise<void> {
+  private saveDeliveredMessage(
+    transcript: TDeliveryTranscript,
+    deliveredAt: number,
+    trace: TBehaviorTraceContext,
+    ctx: TEventContext,
+  ): Promise<void> {
     // Append after the active turn and its compaction so a summary cannot skip this delivery.
-    return this.turnQueue.enqueue(() =>
-      this.conversations.saveDeliveredMessage(this.chatId, text, notice, deliveredAt),
-    );
+    return this.turnQueue.enqueue(async () => {
+      const span = startMemorySaveSpan(trace, ERole.Assistant, transcript.text.length);
+      let failure: TOption<string>;
+      try {
+        await ctx.complete((tx) =>
+          this.conversations.saveDeliveredMessage(
+            tx,
+            this.chatId,
+            transcript.text,
+            transcript.notice,
+            deliveredAt,
+          ),
+        );
+      } catch (error) {
+        failure = String(error);
+        throw error;
+      } finally {
+        span.end(failure === undefined, {}, failure);
+      }
+    });
   }
 
   private async handleTurn(

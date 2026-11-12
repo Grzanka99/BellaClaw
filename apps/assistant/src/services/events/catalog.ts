@@ -1,6 +1,7 @@
 import type { TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
 import type { TOption } from "@bellaclaw/shared";
 import { z } from "zod";
+import { ECronJobType } from "../cron/types";
 
 export enum EEventKind {
   Event = "event",
@@ -12,6 +13,8 @@ export enum EEventType {
   NoticeReady = "notice.ready",
   DeliveryReady = "delivery.ready",
   MessageSent = "message.sent",
+  CronFired = "cron.fired",
+  CronTaskStarted = "cron.task.started",
   McpAuthConnected = "mcp.auth.connected",
   AiAuthLoginNeeded = "ai.auth.login.needed",
   AiAuthLoginCompleted = "ai.auth.login.completed",
@@ -46,6 +49,31 @@ const SMessageSent = z
   })
   .strict();
 
+const SJobContent = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("text"), text: z.string() }).strict(),
+  z.object({ kind: z.literal("generated"), promptData: z.string(), fallback: z.string() }).strict(),
+  z.object({ kind: z.literal("task"), prompt: z.string(), fallback: z.string() }).strict(),
+  z.object({ kind: z.literal("automations") }).strict(),
+]);
+
+const SCronFired = z
+  .object({
+    jobId: z.number().int(),
+    name: z.string(),
+    scope: z.string(),
+    jobType: z.enum(ECronJobType),
+    pattern: z.string().optional(),
+    content: SJobContent,
+    automationIds: z.array(z.number().int()),
+    nextRunAt: z.number().int(),
+    timezone: z.string().optional(),
+  })
+  .strict();
+
+export type TCronFiredPayload = z.infer<typeof SCronFired>;
+
+const SCronTaskStarted = z.object({ jobId: z.number().int() }).strict();
+
 const SMcpAuthConnected = z.object({ chatId: z.string(), profileId: z.string() }).strict();
 
 const SAiAuthLoginNeeded = z.object({ problems: z.array(z.string()) }).strict();
@@ -76,6 +104,8 @@ export type TEventPayloads = {
   [EEventType.NoticeReady]: z.infer<typeof SNoticeReady>;
   [EEventType.DeliveryReady]: z.infer<typeof SDeliveryReady>;
   [EEventType.MessageSent]: z.infer<typeof SMessageSent>;
+  [EEventType.CronFired]: TCronFiredPayload;
+  [EEventType.CronTaskStarted]: z.infer<typeof SCronTaskStarted>;
   [EEventType.McpAuthConnected]: z.infer<typeof SMcpAuthConnected>;
   [EEventType.AiAuthLoginNeeded]: z.infer<typeof SAiAuthLoginNeeded>;
   [EEventType.AiAuthLoginCompleted]: z.infer<typeof SAiAuthLoginCompleted>;
@@ -92,6 +122,8 @@ export const EVENT_SCHEMAS: { [K in EEventType]: z.ZodType<TEventPayloads[K]> } 
   [EEventType.NoticeReady]: SNoticeReady,
   [EEventType.DeliveryReady]: SDeliveryReady,
   [EEventType.MessageSent]: SMessageSent,
+  [EEventType.CronFired]: SCronFired,
+  [EEventType.CronTaskStarted]: SCronTaskStarted,
   [EEventType.McpAuthConnected]: SMcpAuthConnected,
   [EEventType.AiAuthLoginNeeded]: SAiAuthLoginNeeded,
   [EEventType.AiAuthLoginCompleted]: SAiAuthLoginCompleted,
@@ -106,6 +138,8 @@ export const EVENT_KINDS: Record<EEventType, EEventKind> = {
   [EEventType.NoticeReady]: EEventKind.Event,
   [EEventType.DeliveryReady]: EEventKind.Event,
   [EEventType.MessageSent]: EEventKind.Event,
+  [EEventType.CronFired]: EEventKind.Event,
+  [EEventType.CronTaskStarted]: EEventKind.Event,
   [EEventType.McpAuthConnected]: EEventKind.Event,
   [EEventType.AiAuthLoginNeeded]: EEventKind.Event,
   [EEventType.AiAuthLoginCompleted]: EEventKind.Event,

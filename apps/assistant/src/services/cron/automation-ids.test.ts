@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
 import { DatabaseConnector } from "../database";
-import { cronEngineJobsTable } from "../database/schema";
-import { resetCronEngineJobsTable } from "../database/test-utils";
+import { cronEngineJobsTable, eventsTable } from "../database/schema";
+import { resetCronEngineJobsTable, resetEventTables } from "../database/test-utils";
+import { EventBus } from "../events";
+import { EEventType, type TCronFiredPayload } from "../events/catalog";
 import { CronScheduler } from "./index";
-import { ECronFinishedReason, ECronJobStatus, type TCronJobContext } from "./types";
+import { ECronFinishedReason, ECronJobStatus } from "./types";
 
 async function getRow(id: number) {
   return DatabaseConnector.instance.database
@@ -19,6 +21,8 @@ describe("CronScheduler automationIds", () => {
 
   beforeEach(async () => {
     await resetCronEngineJobsTable();
+    await resetEventTables();
+    Object.assign(EventBus, { _instance: undefined });
     scheduler = new CronScheduler({});
   });
 
@@ -48,12 +52,14 @@ describe("CronScheduler automationIds", () => {
       .set({ nextRunAt: new Date(Date.now() - 1_000) })
       .where(eq(cronEngineJobsTable.id, job.id));
 
-    const fired = new Promise<TCronJobContext>((resolve) => {
-      scheduler.onFire(resolve);
-    });
     await (scheduler as unknown as { fire: (id: number) => Promise<void> }).fire(job.id);
 
-    const context = await fired;
+    const fired = await DatabaseConnector.instance.database
+      .select()
+      .from(eventsTable)
+      .where(eq(eventsTable.type, EEventType.CronFired))
+      .get();
+    const context = fired?.payload as TCronFiredPayload;
     expect(context.automationIds).toEqual([3, 1]);
     expect(context.content).toEqual({ kind: "automations" });
   });
