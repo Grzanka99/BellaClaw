@@ -118,7 +118,7 @@ export class SettingsService {
       if (!parsed.success) {
         return {
           valid: false,
-          problem: `Invalid value for config key "${update.key}": ${JSON.stringify(update.value)}`,
+          problem: `Invalid value for config key "${update.key}": ${parsed.error.issues.map((issue) => issue.message).join(", ")}`,
         };
       }
 

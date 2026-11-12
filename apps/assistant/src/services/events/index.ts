@@ -1,6 +1,6 @@
 import { AppLogger, EBehaviorLogLevel, type TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
 import { AsyncQueue, createLogger, type TOption } from "@bellaclaw/shared";
-import { and, asc, eq, inArray, ne, notExists } from "drizzle-orm";
+import { and, asc, eq, inArray, lt, ne, notExists } from "drizzle-orm";
 import { sanitizeErrorMessage } from "../app-logger/sanitizers";
 import { startSpan } from "../app-logger/span";
 import { DatabaseConnector, type TDatabaseTransaction } from "../database";
@@ -99,6 +99,8 @@ type TWaiter = {
 };
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 60_000;
+// boot prunes older events whose deliveries are all done
+const EVENT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 
 class InvalidPayloadError extends Error {}
 
@@ -125,7 +127,7 @@ export function commandFailed(
     message = error.message;
   }
 
-  return { commandType, code: ERejectionCode.Failed, message };
+  return { commandType, code: ERejectionCode.Failed, message: sanitizeErrorMessage(message) ?? "" };
 }
 
 function traceOf(row: TSelectEvent): TBehaviorTraceContext {
@@ -182,7 +184,11 @@ export class EventBus {
         const parsed = schema.safeParse(row.payload);
 
         if (!parsed.success) {
-          throw new InvalidPayloadError(parsed.error.message);
+          // NOTE: zod messages can quote the stored values, so only paths and codes are kept
+          const issues = parsed.error.issues.map(
+            (issue) => `${issue.path.join(".")}:${issue.code}`,
+          );
+          throw new InvalidPayloadError(`Invalid payload: ${issues.join(", ")}`);
         }
 
         let acked = false;
@@ -288,6 +294,31 @@ export class EventBus {
       let appended: TSelectEvent[] = [];
 
       await db.transaction(async (tx) => {
+        // retention: dead and pending deliveries keep their event
+        const expired = tx
+          .select({ seq: eventsTable.seq })
+          .from(eventsTable)
+          .where(
+            and(
+              lt(eventsTable.occurredAt, new Date(Date.now() - EVENT_RETENTION_MS)),
+              notExists(
+                tx
+                  .select()
+                  .from(eventDeliveriesTable)
+                  .where(
+                    and(
+                      eq(eventDeliveriesTable.eventSeq, eventsTable.seq),
+                      ne(eventDeliveriesTable.status, "done"),
+                    ),
+                  ),
+              ),
+            ),
+          );
+        await tx
+          .delete(eventDeliveriesTable)
+          .where(inArray(eventDeliveriesTable.eventSeq, expired));
+        await tx.delete(eventsTable).where(inArray(eventsTable.seq, expired));
+
         const pending = await tx
           .select({ event: eventsTable, delivery: eventDeliveriesTable })
           .from(eventDeliveriesTable)
@@ -520,7 +551,7 @@ export class EventBus {
     await DatabaseConnector.instance.run((db) =>
       db
         .update(eventDeliveriesTable)
-        .set({ attempts, lastError: error, updatedAt: new Date() })
+        .set({ attempts, lastError: sanitizeErrorMessage(error), updatedAt: new Date() })
         .where(
           and(
             eq(eventDeliveriesTable.eventSeq, row.seq),
@@ -594,7 +625,12 @@ export class EventBus {
   ): Promise<boolean> {
     const result = await tx
       .update(eventDeliveriesTable)
-      .set({ status: "dead", attempts, lastError: error, updatedAt: new Date() })
+      .set({
+        status: "dead",
+        attempts,
+        lastError: sanitizeErrorMessage(error),
+        updatedAt: new Date(),
+      })
       .where(
         and(
           eq(eventDeliveriesTable.eventSeq, row.seq),
@@ -602,6 +638,11 @@ export class EventBus {
           eq(eventDeliveriesTable.status, "pending"),
         ),
       );
+
+    // NOTE: a scrubbed event that ends dead cannot be redriven
+    if (EVENT_SCRUBBED.has(row.type)) {
+      await this.scrubIfSettled(tx, row.seq);
+    }
 
     return result.rowsAffected === 1;
   }
@@ -649,12 +690,12 @@ export class EventBus {
     }
 
     if (EVENT_SCRUBBED.has(row.type)) {
-      await this.scrubIfHandled(tx, row.seq);
+      await this.scrubIfSettled(tx, row.seq);
     }
   }
 
-  // NOTE: a dead delivery keeps the payload for the redrive
-  private async scrubIfHandled(tx: TDatabaseTransaction, seq: number): Promise<void> {
+  // drops the payload once no delivery of the event is pending
+  private async scrubIfSettled(tx: TDatabaseTransaction, seq: number): Promise<void> {
     await tx
       .update(eventsTable)
       .set({ payload: null })
@@ -668,7 +709,7 @@ export class EventBus {
               .where(
                 and(
                   eq(eventDeliveriesTable.eventSeq, seq),
-                  ne(eventDeliveriesTable.status, "done"),
+                  eq(eventDeliveriesTable.status, "pending"),
                 ),
               ),
           ),
@@ -768,6 +809,18 @@ export class EventBus {
         )
         .returning();
 
+      if (revived.length === 0) {
+        return stored;
+      }
+
+      let restored = stored;
+
+      // a scrubbed command lost its payload when it was abandoned; the requester brings it again
+      if (EVENT_SCRUBBED.has(stored.type)) {
+        await db.update(eventsTable).set({ payload }).where(eq(eventsTable.seq, stored.seq));
+        restored = { ...stored, payload };
+      }
+
       for (const delivery of revived) {
         const subscription = this.subscriptions.find(
           (candidate) =>
@@ -777,7 +830,7 @@ export class EventBus {
         );
 
         if (subscription !== undefined) {
-          this.enqueue(subscription, stored, delivery.attempts);
+          this.enqueue(subscription, restored, delivery.attempts);
         }
       }
 

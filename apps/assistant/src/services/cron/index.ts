@@ -3,6 +3,7 @@ import type { TOption } from "@bellaclaw/shared";
 import { createLogger } from "@bellaclaw/shared";
 import { Cron } from "croner";
 import { and, asc, eq } from "drizzle-orm";
+import { sanitizeErrorMessage } from "../app-logger/sanitizers";
 import { DatabaseConnector, type TDatabaseHandle, type TDatabaseTransaction } from "../database";
 import { cronEngineJobsTable } from "../database/schema";
 import { ESubscriptionMode, EventBus, type TEventContext, type TEventDraft } from "../events";
@@ -192,7 +193,7 @@ export class CronScheduler {
         {
           commandType,
           code: ERejectionCode.Failed,
-          message: `${error.operation} failed: ${error.message}`,
+          message: sanitizeErrorMessage(`${error.operation} failed: ${error.message}`) ?? "",
           errorCode: error.code,
         },
         undefined,

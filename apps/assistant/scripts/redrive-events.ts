@@ -20,7 +20,9 @@ export function listDeadDeliveries(db: LibSQLDatabase) {
     .orderBy(asc(eventDeliveriesTable.eventSeq), asc(eventDeliveriesTable.consumer));
 }
 
-// NOTE: the next boot replays the redriven rows; a redriven command is abandoned again there
+// NOTE: the next boot replays the redriven rows; a redriven command is abandoned again there,
+// and a scrubbed event has no payload left, so it dies again as invalid; after 30 days the boot
+// prune may have removed a handled event's checkpoint facts, so a redrive can repeat its effect
 export async function redriveDeliveries(
   db: LibSQLDatabase,
   targets: { eventSeq: number; consumer: string }[],

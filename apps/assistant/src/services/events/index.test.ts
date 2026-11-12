@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import type { TOption } from "@bellaclaw/shared";
 import { asc, eq } from "drizzle-orm";
+import { registerRedactedSecret } from "../app-logger/sanitizers";
 import { DatabaseConnector } from "../database";
 import { eventDeliveriesTable, eventsTable, messageAuthorizationsTable } from "../database/schema";
 import { resetEventTables, resetMessageAuthorizationsTable } from "../database/test-utils";
@@ -157,6 +159,9 @@ describe("EventBus", () => {
     const [delivery] = await deliveries();
     expect(delivery?.status).toBe("dead");
     expect(delivery?.attempts).toBe(1);
+    expect(delivery?.lastError).toBe(
+      "Error: Invalid payload: text:invalid_type, count:invalid_type",
+    );
     expect(await deadLettered()).toHaveLength(1);
   });
 
@@ -449,6 +454,214 @@ describe("EventBus", () => {
     await bus.idle();
 
     expect((await events())[0]?.payload).toBeNull();
+  });
+
+  test("a scrubbed command abandoned at boot loses its payload", async () => {
+    const db = DatabaseConnector.instance.database;
+    const [command] = await db
+      .insert(eventsTable)
+      .values({
+        id: Bun.randomUUIDv7(),
+        type: EEventType.McpAuthTokenSaveRequested,
+        kind: "command",
+        source: "commands",
+        key: "chat",
+        turnId: trace.turnId,
+        payload: { chatId: "signal:+100", profileId: "profile", token: "bearer-token" },
+        occurredAt: new Date(),
+      })
+      .returning();
+
+    if (command === undefined) {
+      throw new Error("insert failed");
+    }
+
+    await db
+      .insert(eventDeliveriesTable)
+      .values({ eventSeq: command.seq, consumer: "mcp-auth", updatedAt: new Date() });
+    bus.subscribe({
+      consumer: "mcp-auth",
+      type: EEventType.McpAuthTokenSaveRequested,
+      mode: ESubscriptionMode.Durable,
+      backoffMs: [],
+      handler: async () => undefined,
+    });
+    await bus.start();
+    await bus.idle();
+
+    expect((await deliveries()).map((row) => [row.status, row.lastError])).toEqual([
+      ["dead", "abandoned"],
+    ]);
+    expect((await events())[0]?.payload).toBeNull();
+  });
+
+  test("a repeated request revives a scrubbed abandoned command with its payload", async () => {
+    const db = DatabaseConnector.instance.database;
+    const causeId = Bun.randomUUIDv7();
+    const [cause] = await db
+      .insert(eventsTable)
+      .values({
+        id: causeId,
+        type: EEventType.TestNoted,
+        kind: "event",
+        source: "test",
+        key: "chat",
+        turnId: trace.turnId,
+        payload: { text: "note 1", count: 1 },
+        occurredAt: new Date(),
+      })
+      .returning();
+    const [command] = await db
+      .insert(eventsTable)
+      .values({
+        id: Bun.randomUUIDv7(),
+        type: EEventType.McpAuthTokenSaveRequested,
+        kind: "command",
+        source: "requester",
+        key: "chat",
+        turnId: trace.turnId,
+        causationId: causeId,
+        dedupeKey: `${causeId}:requester:${EEventType.McpAuthTokenSaveRequested}:a`,
+        payload: { chatId: "signal:+100", profileId: "profile", token: "bearer-token" },
+        occurredAt: new Date(),
+      })
+      .returning();
+
+    if (cause === undefined || command === undefined) {
+      throw new Error("insert failed");
+    }
+
+    await db.insert(eventDeliveriesTable).values([
+      { eventSeq: command.seq, consumer: "mcp-auth", updatedAt: new Date() },
+      { eventSeq: cause.seq, consumer: "requester", updatedAt: new Date() },
+    ]);
+    const tokens: string[] = [];
+    bus.subscribe({
+      consumer: "mcp-auth",
+      type: EEventType.McpAuthTokenSaveRequested,
+      mode: ESubscriptionMode.Durable,
+      backoffMs: [],
+      handler: async (event, ctx) => {
+        tokens.push(event.payload.token);
+        await ctx.complete(async (_tx, emit) => {
+          emit(
+            EEventType.McpAuthTokenSaved,
+            { chatId: event.payload.chatId, profileId: event.payload.profileId },
+            undefined,
+            undefined,
+          );
+        });
+      },
+    });
+    bus.subscribe({
+      consumer: "requester",
+      type: EEventType.TestNoted,
+      mode: ESubscriptionMode.Durable,
+      backoffMs: [],
+      handler: async (_event, ctx) => {
+        await ctx.request(
+          EEventType.McpAuthTokenSaveRequested,
+          { chatId: "signal:+100", profileId: "profile", token: "bearer-token" },
+          {
+            outcome: EEventType.McpAuthTokenSaved,
+            step: "a",
+            key: undefined,
+            timeoutMs: undefined,
+          },
+        );
+      },
+    });
+    await bus.start();
+    await bus.idle();
+
+    expect(tokens).toEqual(["bearer-token"]);
+    const stored = (await events()).find((row) => row.seq === command.seq);
+    expect(stored?.payload).toBeNull();
+  });
+
+  test("a failing command stores no registered secret in its rejection or lastError", async () => {
+    registerRedactedSecret("events-secret-abc123");
+    bus.subscribe({
+      consumer: "worker",
+      type: EEventType.TestRequested,
+      mode: ESubscriptionMode.Durable,
+      backoffMs: [],
+      handler: async () => {
+        throw new Error("token events-secret-abc123 refused");
+      },
+    });
+    await bus.start();
+
+    await bus.publish({
+      type: EEventType.TestRequested,
+      source: "test",
+      key: "chat",
+      trace,
+      payload: { text: "go" },
+      causationId: undefined,
+      dedupeKey: undefined,
+    });
+    await bus.idle();
+
+    const [rejected] = (await events()).filter((row) => row.type === EEventType.CommandRejected);
+    expect(rejected?.payload).toMatchObject({ message: "Error: token [REDACTED] refused" });
+    expect((await deliveries())[0]?.lastError).toBe("Error: token [REDACTED] refused");
+    expect(commandFailed(EEventType.TestRequested, new Error("events-secret-abc123")).message).toBe(
+      "[REDACTED]",
+    );
+  });
+
+  test("boot prunes old events whose deliveries are all done", async () => {
+    const db = DatabaseConnector.instance.database;
+    const old = new Date(Date.now() - 31 * 24 * 60 * 60 * 1000);
+    const rows: [number, Date, TOption<"done" | "dead" | "pending">][] = [
+      [1, old, "done"],
+      [2, old, undefined],
+      [3, new Date(), "done"],
+      [4, old, "dead"],
+      [5, old, "pending"],
+    ];
+
+    for (const [count, occurredAt, status] of rows) {
+      const [row] = await db
+        .insert(eventsTable)
+        .values({
+          id: Bun.randomUUIDv7(),
+          type: EEventType.TestNoted,
+          kind: "event",
+          source: "test",
+          key: "chat",
+          turnId: trace.turnId,
+          payload: { text: "note", count },
+          occurredAt,
+        })
+        .returning();
+
+      if (row === undefined) {
+        throw new Error("insert failed");
+      }
+
+      if (status !== undefined) {
+        await db
+          .insert(eventDeliveriesTable)
+          .values({ eventSeq: row.seq, consumer: "keeper", status, updatedAt: new Date() });
+      }
+    }
+
+    bus.subscribe({
+      consumer: "keeper",
+      type: EEventType.TestNoted,
+      mode: ESubscriptionMode.Durable,
+      backoffMs: [5],
+      handler: async () => undefined,
+    });
+    await bus.start();
+    await bus.idle();
+
+    expect((await events()).map((row) => (row.payload as { count: number }).count)).toEqual([
+      3, 4, 5,
+    ]);
+    expect((await deliveries()).map((row) => row.status)).toEqual(["done", "dead", "done"]);
   });
 
   test("a handler that calls transact does not deadlock the run queue", async () => {

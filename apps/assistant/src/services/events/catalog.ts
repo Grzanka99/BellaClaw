@@ -695,7 +695,7 @@ export const EVENT_KINDS: Record<EEventType, EEventKind> = {
   [EEventType.TestRequested]: EEventKind.Command,
 };
 
-// payload set to NULL once the last delivery of the event completes
+// payload set to NULL once no delivery of the event is pending
 export const EVENT_SCRUBBED: ReadonlySet<EEventType> = new Set([
   EEventType.MessageReceived,
   EEventType.MessageAuthorized,

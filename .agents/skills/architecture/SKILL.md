@@ -21,7 +21,8 @@ only its own tables and reaches another service with a message: a **fact** it pu
 - Enum members are PascalCase (`EEventType.SettingsUpdateRequested`). A consumer name is the
   owner in kebab case (`settings`, `ai-auth`, `outbound`).
 - Payloads are strict zod schemas of JSON-safe values: dates as epoch ms.
-- `EVENT_SCRUBBED` types lose their payload once every delivery is done. Use it for secrets.
+- `EVENT_SCRUBBED` types lose their payload once no delivery is pending, so one that ends dead
+  cannot be redriven. Use it for secrets.
 
 ## Lanes and ordering
 
@@ -45,6 +46,8 @@ only its own tables and reaches another service with a message: a **fact** it pu
   Notices turns a dead fact into a chat notice, except for outbound types, dead letters and
   commands. `apps/assistant/scripts/redrive-events.ts` lists dead rows and sets chosen ones back
   to pending for the next boot.
+- Boot deletes events older than 30 days whose deliveries are all done, with their delivery rows.
+  Error text in `lastError` and `command.rejected` passes through `sanitizeErrorMessage`.
 - An effect outside the database is uncertain after a crash. Save a checkpoint fact with
   `ctx.transact` before it (`turn.started`, `cron.task.started`) and look for it with
   `ctx.findCaused` on redelivery, so a model run never repeats.
