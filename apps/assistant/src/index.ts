@@ -4,6 +4,7 @@ import { startAiOAuthKeepAlive } from "./services/ai/auth/oauth-keep-alive";
 import { AuthorizationService } from "./services/authorization";
 import { CalendarService } from "./services/calendar";
 import { DiscordSingleton } from "./services/discord";
+import { EventBus } from "./services/events";
 import { McpService } from "./services/mcp";
 import {
   registerMcpAuthConnectedListener,
@@ -55,6 +56,7 @@ async function init(): Promise<void> {
       DiscordSingleton.instance.setup(),
       SignalSingleton.instance.setup(),
     ]);
+    await EventBus.instance.start();
     await ScheduledDelivery.instance.setup();
     await FactDistiller.instance.scheduleFactDrainForAllChats(turnId);
     startAiOAuthKeepAlive();
@@ -102,7 +104,11 @@ async function init(): Promise<void> {
 
 for (const signal of ["SIGINT", "SIGTERM"]) {
   process.once(signal, () => {
-    void Promise.allSettled([McpService.instance.close(), stopMcpAuthServer()]).then(async () => {
+    void Promise.allSettled([
+      McpService.instance.close(),
+      stopMcpAuthServer(),
+      EventBus.instance.stop(),
+    ]).then(async () => {
       await AppLogger.instance.close();
       process.exit(0);
     });

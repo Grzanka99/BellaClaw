@@ -54,6 +54,15 @@ Exit code 1 from `wait` means no reply arrived in time: read the stack output be
   per-turn behavior logs, also reachable by asking the assistant about its last turn.
 - `group`, `duplicate`, `disconnect` and `noise` inject what real Signal produces besides plain
   messages. Their effect shows only in `log --events` and the assistant's logs.
+- The event log lives in the sim database (libSQL HTTP API, port 18081). Query it with:
+
+```bash
+simsql() {
+  curl -s http://127.0.0.1:18081/v2/pipeline -H 'content-type: application/json' \
+    -d "{\"requests\":[{\"type\":\"execute\",\"stmt\":{\"sql\":\"$1\"}},{\"type\":\"close\"}]}"
+}
+simsql "select e.type, d.consumer, d.status from events e left join event_deliveries d on d.eventSeq = e.seq order by e.seq desc limit 20"
+```
 
 ## 5. Hand over the transcript
 

@@ -18,6 +18,9 @@ for (const [path, name] of [
 mock.module("../services/memory/distill", () => ({
   FactDistiller: { instance: { scheduleFactDrainForAllChats: async () => undefined } },
 }));
+mock.module("../services/events", () => ({
+  EventBus: { instance: { start: async () => undefined, stop: async () => undefined } },
+}));
 mock.module("../services/mcp/auth", () => ({
   registerMcpAuthConnectedListener: () => undefined,
   startMcpAuthServer: () => undefined,
