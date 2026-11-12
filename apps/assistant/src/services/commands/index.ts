@@ -1,4 +1,6 @@
 import type { TOption } from "@bellaclaw/shared";
+import { ESubscriptionMode, EventBus, type TEventContext } from "../events";
+import { EEventType, type TEvent } from "../events/catalog";
 import { aiAuthCommand } from "./ai-auth";
 import { calendarAddReadCommand, calendarAddWriteCommand } from "./calendar-add";
 import { mcpAuthCommand } from "./mcp-auth";
@@ -49,4 +51,56 @@ export async function runCommand(
   }
 
   return command.handler(chatId, args);
+}
+
+export class Commands {
+  private static _instance: TOption<Commands>;
+
+  private constructor() {}
+
+  public static get instance() {
+    if (!Commands._instance) {
+      Commands._instance = new Commands();
+    }
+
+    return Commands._instance;
+  }
+
+  public setup(): void {
+    EventBus.instance.subscribe({
+      consumer: "commands",
+      type: EEventType.MessageAuthorized,
+      mode: ESubscriptionMode.Durable,
+      backoffMs: [1_000, 5_000],
+      handler: (event, ctx) => this.handleAuthorized(event, ctx),
+    });
+  }
+
+  private async handleAuthorized(
+    event: TEvent<EEventType.MessageAuthorized>,
+    ctx: TEventContext,
+  ): Promise<void> {
+    const { chatId, content, receivedAt, platform } = event.payload;
+    // NOTE: the handlers still call their services directly, so a retry repeats their effects
+    const result = await runCommand(chatId, content);
+
+    await ctx.complete(async (_tx, emit) => {
+      if (typeof result === "string") {
+        emit(EEventType.ReplyReady, { chatId, text: result }, undefined, undefined);
+        return;
+      }
+
+      let prompt = content;
+      if (result !== undefined) {
+        prompt = result.prompt;
+      }
+
+      emit(
+        EEventType.TurnRequested,
+        { chatId, content: prompt, receivedAt, platform },
+        undefined,
+        undefined,
+      );
+    });
+  }
 }

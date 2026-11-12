@@ -6,6 +6,7 @@ import { stopMcpAuthServer } from "../services/mcp/auth";
 for (const [path, name] of [
   ["../services/authorization", "AuthorizationService"],
   ["../services/calendar", "CalendarService"],
+  ["../services/commands", "Commands"],
   ["../services/discord", "DiscordSingleton"],
   ["../services/messaging", "MessagingAdapter"],
   ["../services/notices", "Notices"],

@@ -1,7 +1,11 @@
+import { createMessageTurnId } from "@bellaclaw/behavior-logs";
 import type { TOption } from "@bellaclaw/shared";
 import { createLogger, type TLogger } from "@bellaclaw/shared";
 import { ChannelType, Client, Events, GatewayIntentBits, type Message, Partials } from "discord.js";
+import { EventBus } from "../events";
+import { EEventType } from "../events/catalog";
 import { MessagingAdapter } from "../messaging";
+import { createCanonicalChatKey } from "../messaging/chat-key";
 import { EMessagePlatform, type TMessageTransport } from "../messaging/types";
 
 const DISCORD_MESSAGE_MAX_LENGTH = 2_000;
@@ -50,13 +54,23 @@ export class DiscordSingleton implements TMessageTransport {
       return;
     }
 
+    const receivedAt = Date.now();
+    const chatId = createCanonicalChatKey(EMessagePlatform.Discord, message.author.id);
+
     try {
-      await MessagingAdapter.instance.handleInboundMessage({
-        platform: EMessagePlatform.Discord,
-        chatId: message.author.id,
-        message: {
+      await EventBus.instance.publish({
+        type: EEventType.MessageReceived,
+        source: "discord",
+        key: chatId,
+        trace: { turnId: createMessageTurnId(), chatId, platform: EMessagePlatform.Discord },
+        payload: {
+          chatId,
           content: message.content,
+          receivedAt,
+          platform: EMessagePlatform.Discord,
         },
+        causationId: undefined,
+        dedupeKey: `discord:${message.id}`,
       });
     } catch (error) {
       this.logger.error(`handleMessage: inbound Discord message failed: ${String(error)}`);

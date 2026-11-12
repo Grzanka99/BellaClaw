@@ -1,6 +1,7 @@
 import type { TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
 import type { TOption } from "@bellaclaw/shared";
 import { z } from "zod";
+import { EAuthorizationDecision, SAuthorizationState } from "../authorization/schema";
 import { ECronJobType } from "../cron/types";
 import { EMessagePlatform } from "../messaging/types";
 
@@ -10,6 +11,10 @@ export enum EEventKind {
 }
 
 export enum EEventType {
+  MessageReceived = "message.received",
+  MessageAuthorized = "message.authorized",
+  MessageRejected = "message.rejected",
+  AuthorizationChanged = "authorization.changed",
   TurnRequested = "turn.requested",
   TurnStarted = "turn.started",
   TurnCompleted = "turn.completed",
@@ -34,6 +39,23 @@ export enum EEventType {
 const STranscript = z.object({ text: z.string(), notice: z.string() }).strict();
 
 export type TDeliveryTranscript = z.infer<typeof STranscript>;
+
+const SInboundMessage = z
+  .object({
+    chatId: z.string(),
+    content: z.string(),
+    receivedAt: z.number().int(),
+    platform: z.enum(EMessagePlatform),
+  })
+  .strict();
+
+const SMessageRejected = z
+  .object({
+    chatId: z.string(),
+    decision: z.enum([EAuthorizationDecision.FailedAttempt, EAuthorizationDecision.Locked]),
+    failedAttempts: z.number().int(),
+  })
+  .strict();
 
 const STurnRequested = z
   .object({
@@ -125,6 +147,10 @@ const STestNoted = z.object({ text: z.string(), count: z.number().int() }).stric
 const STestSecret = z.object({ secret: z.string() }).strict();
 
 export type TEventPayloads = {
+  [EEventType.MessageReceived]: z.infer<typeof SInboundMessage>;
+  [EEventType.MessageAuthorized]: z.infer<typeof SInboundMessage>;
+  [EEventType.MessageRejected]: z.infer<typeof SMessageRejected>;
+  [EEventType.AuthorizationChanged]: z.infer<typeof SAuthorizationState>;
   [EEventType.TurnRequested]: z.infer<typeof STurnRequested>;
   [EEventType.TurnStarted]: z.infer<typeof STurnStarted>;
   [EEventType.TurnCompleted]: z.infer<typeof STurnCompleted>;
@@ -148,6 +174,10 @@ export type TEventPayloads = {
 // The mapped type ties each schema to its payload type, so a handler gets a typed payload
 // without a cast.
 export const EVENT_SCHEMAS: { [K in EEventType]: z.ZodType<TEventPayloads[K]> } = {
+  [EEventType.MessageReceived]: SInboundMessage,
+  [EEventType.MessageAuthorized]: SInboundMessage,
+  [EEventType.MessageRejected]: SMessageRejected,
+  [EEventType.AuthorizationChanged]: SAuthorizationState,
   [EEventType.TurnRequested]: STurnRequested,
   [EEventType.TurnStarted]: STurnStarted,
   [EEventType.TurnCompleted]: STurnCompleted,
@@ -169,6 +199,10 @@ export const EVENT_SCHEMAS: { [K in EEventType]: z.ZodType<TEventPayloads[K]> } 
 };
 
 export const EVENT_KINDS: Record<EEventType, EEventKind> = {
+  [EEventType.MessageReceived]: EEventKind.Event,
+  [EEventType.MessageAuthorized]: EEventKind.Event,
+  [EEventType.MessageRejected]: EEventKind.Event,
+  [EEventType.AuthorizationChanged]: EEventKind.Event,
   [EEventType.TurnRequested]: EEventKind.Event,
   [EEventType.TurnStarted]: EEventKind.Event,
   [EEventType.TurnCompleted]: EEventKind.Event,
@@ -190,7 +224,11 @@ export const EVENT_KINDS: Record<EEventType, EEventKind> = {
 };
 
 // payload set to NULL once the last delivery of the event completes
-export const EVENT_SCRUBBED: ReadonlySet<EEventType> = new Set([EEventType.TestSecret]);
+export const EVENT_SCRUBBED: ReadonlySet<EEventType> = new Set([
+  EEventType.MessageReceived,
+  EEventType.MessageAuthorized,
+  EEventType.TestSecret,
+]);
 
 export type TEvent<T extends EEventType = EEventType> = {
   id: string;

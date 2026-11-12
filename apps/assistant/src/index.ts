@@ -2,6 +2,7 @@ import { AppLogger, EBehaviorLogLevel } from "@bellaclaw/behavior-logs";
 import { startAiOAuthKeepAlive } from "./services/ai/auth/oauth-keep-alive";
 import { AuthorizationService } from "./services/authorization";
 import { CalendarService } from "./services/calendar";
+import { Commands } from "./services/commands";
 import { CronScheduler } from "./services/cron";
 import { DiscordSingleton } from "./services/discord";
 import { EventBus } from "./services/events";
@@ -41,6 +42,7 @@ async function init(): Promise<void> {
   try {
     MessagingAdapter.instance.setup();
     Notices.instance.setup();
+    Commands.instance.setup();
     ScheduledDelivery.instance.setup();
     MessageHandler.instance.setup();
     FactDistiller.instance.setup();

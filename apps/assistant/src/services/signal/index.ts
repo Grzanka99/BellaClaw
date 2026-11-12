@@ -1,9 +1,10 @@
+import { createMessageTurnId } from "@bellaclaw/behavior-logs";
 import type { TOption } from "@bellaclaw/shared";
 import { createLogger, type TLogger } from "@bellaclaw/shared";
 import { ESubscriptionMode, EventBus } from "../events";
 import { EEventType, type TEvent } from "../events/catalog";
 import { MessagingAdapter } from "../messaging";
-import { parseCanonicalChatKey } from "../messaging/chat-key";
+import { createCanonicalChatKey, parseCanonicalChatKey } from "../messaging/chat-key";
 import { EMessagePlatform, type TMessageTransport } from "../messaging/types";
 import { SignalClient, type TSignalInboundMessage } from "./client";
 
@@ -14,8 +15,6 @@ export class SignalSingleton implements TMessageTransport {
   private setupPromise: TOption<Promise<void>>;
   private retryDelayMs = 2000;
   private setupBootGraceMs = 30_000;
-  private seenMessageKeys = new Set<string>();
-  private seenMessageKeysLimit = 200;
   public platform = EMessagePlatform.Signal;
 
   private constructor() {}
@@ -148,24 +147,7 @@ export class SignalSingleton implements TMessageTransport {
       return;
     }
 
-    // NOTE: a sender retrying after a network drop re-delivers the same message under the
-    // same timestamp, and signal-cli passes every copy through.
-    if (message.timestamp !== undefined) {
-      const messageKey = `${message.sourceNumber}:${message.timestamp}`;
-      if (this.seenMessageKeys.has(messageKey)) {
-        this.logger.info("handleInboundMessage: duplicate Signal message ignored");
-        return;
-      }
-
-      this.seenMessageKeys.add(messageKey);
-      if (this.seenMessageKeys.size > this.seenMessageKeysLimit) {
-        const oldestKey = this.seenMessageKeys.values().next().value;
-        if (oldestKey !== undefined) {
-          this.seenMessageKeys.delete(oldestKey);
-        }
-      }
-    }
-
+    const receivedAt = Date.now();
     const client = this.client;
     if (client !== undefined) {
       if (message.timestamp !== undefined) {
@@ -177,12 +159,22 @@ export class SignalSingleton implements TMessageTransport {
       }
     }
 
-    await MessagingAdapter.instance.handleInboundMessage({
-      platform: EMessagePlatform.Signal,
-      chatId: message.sourceNumber,
-      message: {
-        content: message.message,
-      },
+    // NOTE: a sender retrying after a network drop re-delivers the same message under the
+    // same timestamp, and signal-cli passes every copy through
+    let dedupeKey: TOption<string>;
+    if (message.timestamp !== undefined) {
+      dedupeKey = `signal:${message.sourceNumber}:${message.timestamp}`;
+    }
+
+    const chatId = createCanonicalChatKey(EMessagePlatform.Signal, message.sourceNumber);
+    await EventBus.instance.publish({
+      type: EEventType.MessageReceived,
+      source: "signal",
+      key: chatId,
+      trace: { turnId: createMessageTurnId(), chatId, platform: EMessagePlatform.Signal },
+      payload: { chatId, content: message.message, receivedAt, platform: EMessagePlatform.Signal },
+      causationId: undefined,
+      dedupeKey,
     });
   }
 

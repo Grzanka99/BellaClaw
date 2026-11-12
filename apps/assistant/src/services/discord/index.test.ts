@@ -1,7 +1,11 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { ChannelType } from "discord.js";
 import { CronScheduler } from "../cron";
-import { resetCronEngineJobsTable } from "../database/test-utils";
+import { DatabaseConnector } from "../database";
+import { eventsTable } from "../database/schema";
+import { resetCronEngineJobsTable, resetEventTables } from "../database/test-utils";
+import { EventBus } from "../events";
+import { EEventType } from "../events/catalog";
 import { MessageHandler } from "../message-handler";
 import { MessagingAdapter } from "../messaging";
 import { EMessagePlatform } from "../messaging/types";
@@ -17,6 +21,7 @@ type TDiscordSingletonInternals = {
     };
   };
   handleMessage: (message: {
+    id: string;
     author: { id: string };
     channel: { type: ChannelType };
     content: string;
@@ -51,6 +56,7 @@ function cleanupSingletons() {
   MessagingAdapterWithInternals._instance = undefined;
 
   Object.assign(MessageHandler, { _instance: undefined });
+  Object.assign(EventBus, { _instance: undefined });
 }
 
 describe("DiscordSingleton", () => {
@@ -58,6 +64,7 @@ describe("DiscordSingleton", () => {
     cleanupSingletons();
     Bun.env.DISCORD_TOKEN = originalDiscordToken;
     await resetCronEngineJobsTable();
+    await resetEventTables();
   });
 
   afterEach(() => {
@@ -94,66 +101,53 @@ describe("DiscordSingleton", () => {
     expect(setupMock).toHaveBeenCalledTimes(0);
   });
 
-  test("forwards inbound Discord messages to messaging adapter", async () => {
+  test("publishes an inbound Discord message as message.received", async () => {
     const discord = DiscordSingleton.instance as unknown as TDiscordSingletonInternals;
-    const adapter = MessagingAdapter.instance as unknown as {
-      handleInboundMessage: typeof MessagingAdapter.prototype.handleInboundMessage;
-    };
-    const handleInboundMessageMock = mock(async () => {});
-
-    adapter.handleInboundMessage = handleInboundMessageMock;
-    discord.client = {
-      user: {
-        id: "bot-1",
-      },
-      users: {
-        fetch: mock(async () => ({
-          send: mock(async () => {}),
-        })),
-      },
-    } as never;
+    discord.client = { user: { id: "bot-1" } } as never;
 
     await discord.handleMessage({
-      author: {
-        id: "user-1",
-      },
-      channel: {
-        type: ChannelType.DM,
-      },
+      id: "message-1",
+      author: { id: "user-1" },
+      channel: { type: ChannelType.DM },
       content: "hello",
     });
 
-    expect(handleInboundMessageMock).toHaveBeenCalledWith({
+    const rows = await DatabaseConnector.instance.database.select().from(eventsTable);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.type).toBe(EEventType.MessageReceived);
+    expect(rows[0]?.key).toBe("discord:user-1");
+    expect(rows[0]?.dedupeKey).toBe("discord:message-1");
+    expect(rows[0]?.chatId).toBe("discord:user-1");
+    expect(rows[0]?.platform).toBe(EMessagePlatform.Discord);
+    expect(rows[0]?.turnId).toStartWith("msg:");
+    expect(rows[0]?.payload).toEqual({
+      chatId: "discord:user-1",
+      content: "hello",
+      receivedAt: expect.any(Number),
       platform: EMessagePlatform.Discord,
-      chatId: "user-1",
-      message: {
-        content: "hello",
-      },
     });
   });
 
-  test("swallows and logs an inbound message failure instead of rejecting", async () => {
+  test("swallows and logs a publish failure instead of rejecting", async () => {
     const discord = DiscordSingleton.instance as unknown as TDiscordSingletonInternals;
-    const adapter = MessagingAdapter.instance as unknown as {
-      handleInboundMessage: typeof MessagingAdapter.prototype.handleInboundMessage;
-    };
     const errorMock = mock(() => undefined);
 
-    adapter.handleInboundMessage = mock(async () => {
-      throw new Error("Failed to save user transcript");
+    Object.assign(EventBus.instance, {
+      publish: mock(async () => {
+        throw new Error("database is gone");
+      }),
     });
     discord.logger = { error: errorMock };
     discord.client = { user: { id: "bot-1" } } as never;
 
     expect(
       await discord.handleMessage({
+        id: "message-1",
         author: { id: "user-1" },
         channel: { type: ChannelType.DM },
         content: "hello",
       }),
     ).toBeUndefined();
-    expect(errorMock).toHaveBeenCalledWith(
-      expect.stringContaining("Failed to save user transcript"),
-    );
+    expect(errorMock).toHaveBeenCalledWith(expect.stringContaining("database is gone"));
   });
 });
