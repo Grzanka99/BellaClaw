@@ -12,6 +12,7 @@ import {
 import { convertResponsesMessages } from "@earendil-works/pi-ai/api/openai-responses-shared";
 import { and, asc, eq } from "drizzle-orm";
 import { AgentHarness } from "../ai/agent-harness";
+import { setupAiAuth } from "../ai/auth";
 import { aiCredentials, aiModels } from "../ai/providers/registry";
 import { EAiProvider, ERole } from "../ai/types";
 import { ConversationStore } from "../conversation";
@@ -184,6 +185,7 @@ async function setupHandler(chatId: string, response = "Final answer") {
   };
   handler.setup();
   FactDistiller.instance.setup();
+  setupAiAuth();
   await EventBus.instance.start();
   return { handler, internals, settings, memory, distiller };
 }

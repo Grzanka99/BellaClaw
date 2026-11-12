@@ -1,12 +1,12 @@
-import { CalendarService } from "../calendar";
-import type { TCalendar } from "../calendar/types";
+import type { TCalendarAccess } from "../calendar/types";
+import { EEventType } from "../events/catalog";
 import type { TCommand } from "./types";
 
 function createCalendarAddCommand(
   name: string,
   description: string,
   reply: string,
-  add: (chatId: string, calendarId: string) => Promise<TCalendar>,
+  access: TCalendarAccess,
 ): TCommand {
   const usage = `!${name} CALENDAR_ID`;
 
@@ -14,7 +14,7 @@ function createCalendarAddCommand(
     name,
     description,
     usage,
-    handler: async (chatId, args) => {
+    handler: async (chatId, args, ctx) => {
       const calendarId = args.trim();
 
       if (calendarId.length === 0) {
@@ -22,8 +22,17 @@ function createCalendarAddCommand(
       }
 
       try {
-        const calendar = await add(chatId, calendarId);
-        return `${reply}: ${calendar.summary ?? calendar.calendarId}`;
+        const added = await ctx.request(
+          EEventType.CalendarSourceAddRequested,
+          { chatId, calendarId, access },
+          {
+            outcome: EEventType.CalendarSourceAdded,
+            step: undefined,
+            key: undefined,
+            timeoutMs: undefined,
+          },
+        );
+        return `${reply}: ${added.payload.summary ?? added.payload.calendarId}`;
       } catch (error) {
         return `Can't use that calendar: ${String(error)}`;
       }
@@ -35,12 +44,12 @@ export const calendarAddReadCommand = createCalendarAddCommand(
   "calendar_add-read",
   "Add a Google calendar the bot reads events from. The calendar must already be shared with the bot's service account. It is always stored read-only.",
   "Read-only calendar added",
-  (chatId, calendarId) => CalendarService.instance.addReadonlyCalendar(chatId, calendarId),
+  "read",
 );
 
 export const calendarAddWriteCommand = createCalendarAddCommand(
   "calendar_add-write",
   "Set the Google calendar the bot writes events to. The calendar must already be shared with the bot's service account with write access. Sending it again replaces the current one.",
   "Write calendar set",
-  (chatId, calendarId) => CalendarService.instance.setWriteCalendar(chatId, calendarId),
+  "write",
 );

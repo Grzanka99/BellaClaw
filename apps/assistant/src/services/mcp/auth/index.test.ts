@@ -197,24 +197,12 @@ describe("MCP OAuth", () => {
     if (provider === undefined) {
       throw new Error("Missing OAuth provider");
     }
-    const disconnected: string[] = [];
-    const unregister = service.registerMcpAuthDisconnectListener(
-      (disconnectedChatId, profileId) => {
-        disconnected.push(`${disconnectedChatId}/${profileId}`);
-      },
+    await expect(service.beginMcpAuth(chatId, "reserved-parameter")).rejects.toThrow(
+      "OAuth authorization parameter state is reserved",
     );
-
-    try {
-      await expect(service.beginMcpAuth(chatId, "reserved-parameter")).rejects.toThrow(
-        "OAuth authorization parameter state is reserved",
-      );
-      expect(disconnected).toEqual([`${chatId}/reserved-parameter`]);
-      await expect(provider.tokens()).rejects.toThrow(
-        "MCP authentication for profile reserved-parameter was cancelled",
-      );
-    } finally {
-      unregister();
-    }
+    await expect(provider.tokens()).rejects.toThrow(
+      "MCP authentication for profile reserved-parameter was cancelled",
+    );
   });
 
   test("persists credentials with restrictive permissions and refreshes through the SDK", async () => {
@@ -244,16 +232,9 @@ describe("MCP OAuth", () => {
   });
 
   test("disconnect removes only that chat and invalidates its runtime session", async () => {
-    const disconnected: string[] = [];
-    const unregister = service.registerMcpAuthDisconnectListener((chatId, profileId) => {
-      disconnected.push(`${chatId}/${profileId}`);
-    });
-
     expect(await service.disconnectMcpAuth("signal:first", "documents")).toBe(true);
     expect(await service.getMcpAuthStatus("signal:first", "documents")).toBe(false);
     expect(await service.getMcpAuthStatus("discord:second", "documents")).toBe(true);
-    expect(disconnected).toEqual(["signal:first/documents"]);
-    unregister();
   });
 
   test("starting a new connection invalidates the previous link", async () => {
@@ -291,21 +272,12 @@ describe("MCP OAuth", () => {
     if (provider === undefined) {
       throw new Error("Missing OAuth provider");
     }
-    const disconnected: string[] = [];
-    const unregister = service.registerMcpAuthDisconnectListener(
-      (disconnectedChatId, profileId) => {
-        disconnected.push(`${disconnectedChatId}/${profileId}`);
-      },
-    );
-
     await expect(service.beginMcpAuth(chatId, "documents")).rejects.toThrow(
       "MCP profile documents is already connected",
     );
-    expect(disconnected).toEqual([`${chatId}/documents`]);
     await expect(provider.tokens()).rejects.toThrow(
       "MCP authentication for profile documents was cancelled",
     );
-    unregister();
   });
 
   test("replaces the runtime session after a successful re-authentication", async () => {
@@ -329,9 +301,6 @@ describe("MCP OAuth", () => {
     await provider.invalidateCredentials("tokens");
 
     const notifications: string[] = [];
-    const unregisterDisconnected = service.registerMcpAuthDisconnectListener(() => {
-      notifications.push("disconnected");
-    });
     const publish = spyOn(EventBus.instance, "publish").mockImplementation(async (draft) => {
       if (draft.type === EEventType.McpAuthConnected) {
         notifications.push("connected");
@@ -340,7 +309,6 @@ describe("MCP OAuth", () => {
 
     try {
       const secondUrl = new URL(await service.beginMcpAuth(chatId, "documents"));
-      expect(notifications).toEqual(["disconnected"]);
       const secondCallback = await service.handleMcpAuthCallback(
         new Request(
           `http://localhost:3080/mcp/oauth/callback?code=re-authenticated&state=${secondUrl.searchParams.get("state")}`,
@@ -348,12 +316,11 @@ describe("MCP OAuth", () => {
       );
 
       expect(secondCallback.status).toBe(200);
-      expect(notifications).toEqual(["disconnected", "connected"]);
+      expect(notifications).toEqual(["connected"]);
       await expect(provider.tokens()).rejects.toThrow(
         "MCP authentication for profile documents was cancelled",
       );
     } finally {
-      unregisterDisconnected();
       publish.mockRestore();
     }
   });

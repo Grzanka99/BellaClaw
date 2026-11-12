@@ -9,12 +9,9 @@ import {
   ResourceUpdatedNotificationSchema,
   ToolListChangedNotificationSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import {
-  createMcpAuthFetch,
-  getMcpAuthProvider,
-  getMcpAuthToken,
-  registerMcpAuthDisconnectListener,
-} from "./auth";
+import { ESubscriptionMode, EventBus } from "../events";
+import { EEventType } from "../events/catalog";
+import { createMcpAuthFetch, getMcpAuthProvider, getMcpAuthToken } from "./auth";
 import { getMcpProfile } from "./config";
 import { discoverTools, requestOptions, type TMcpToolContext } from "./tools";
 import type { TMcpOpenArgs, TMcpSession } from "./types";
@@ -33,8 +30,15 @@ export class McpService {
     return McpService._instance;
   }
 
-  public constructor() {
-    registerMcpAuthDisconnectListener((chatId, profileId) => this.disconnect(chatId, profileId));
+  // live: closing sessions must not replay after a restart
+  public setup(): void {
+    EventBus.instance.subscribe({
+      consumer: "mcp-sessions",
+      type: EEventType.McpAuthCredentialsChanged,
+      mode: ESubscriptionMode.Live,
+      backoffMs: [],
+      handler: (event) => this.disconnect(event.payload.chatId, event.payload.profileId),
+    });
   }
 
   public async open(args: TMcpOpenArgs): Promise<TMcpSession> {

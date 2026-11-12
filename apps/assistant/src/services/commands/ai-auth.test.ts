@@ -1,31 +1,79 @@
 import { afterEach, beforeEach, expect, type Mock, spyOn, test } from "bun:test";
+import type { TOption } from "@bellaclaw/shared";
 import { createProvider, type Provider } from "@earendil-works/pi-ai";
 import { openAICodexResponsesApi } from "@earendil-works/pi-ai/api/openai-codex-responses.lazy";
+import { asc, eq } from "drizzle-orm";
+import { setupAiAuth } from "../ai/auth";
 import { aiCredentials, aiModels } from "../ai/providers/registry";
 import { EAiProvider } from "../ai/types";
 import { AuthorizationService } from "../authorization";
-import { EventBus, type TEventDraft } from "../events";
-import { EEventType } from "../events/catalog";
-import { aiAuthCommand } from "./ai-auth";
+import { DatabaseConnector } from "../database";
+import { eventsTable } from "../database/schema";
+import { resetEventTables, resetUserConfigsTable } from "../database/test-utils";
+import { ESubscriptionMode, EventBus } from "../events";
+import { EEventType, type TEvent } from "../events/catalog";
+import { EMessagePlatform } from "../messaging/types";
+import { SettingsService } from "../settings";
+import { EConfigKey } from "../settings/schema";
+import { Commands } from ".";
 
-let previousProvider: Provider | undefined;
-let published: TEventDraft[];
-let publish: Mock<(draft: TEventDraft) => Promise<void>>;
+let previousProvider: TOption<Provider>;
+let bus: EventBus;
 let approve: () => void;
-let delivered: Promise<void>;
+let completed: Promise<TEvent<EEventType.AiAuthLoginCompleted>>;
 let authorizedChats: Mock<() => Promise<string[]>>;
 
-beforeEach(() => {
-  published = [];
-  const delivery = Promise.withResolvers<void>();
-  delivered = delivery.promise;
+async function rowsOf(type: EEventType) {
+  return DatabaseConnector.instance.database
+    .select()
+    .from(eventsTable)
+    .where(eq(eventsTable.type, type))
+    .orderBy(asc(eventsTable.seq));
+}
+
+// sends a message through the commands consumer and returns the chat's replies so far
+async function send(chatId: string, content: string) {
+  await bus.publish({
+    type: EEventType.MessageAuthorized,
+    source: "test",
+    key: chatId,
+    trace: { turnId: "test:ai-auth", chatId, platform: EMessagePlatform.Discord },
+    payload: { chatId, content, receivedAt: Date.now(), platform: EMessagePlatform.Discord },
+    causationId: undefined,
+    dedupeKey: undefined,
+  });
+  await bus.idle();
+  return (await rowsOf(EEventType.ReplyReady))
+    .map((row) => row.payload as { chatId: string; text: string })
+    .filter((payload) => payload.chatId === chatId)
+    .map((payload) => payload.text);
+}
+
+beforeEach(async () => {
+  await resetEventTables();
+  await resetUserConfigsTable();
+  Object.assign(EventBus, { _instance: undefined });
+  Object.assign(Commands, { _instance: undefined });
+  Object.assign(SettingsService, { _instance: undefined });
+  bus = EventBus.instance;
+  Commands.instance.setup();
+  SettingsService.instance.setup();
+  setupAiAuth();
+  const delivery = Promise.withResolvers<TEvent<EEventType.AiAuthLoginCompleted>>();
+  completed = delivery.promise;
+  bus.subscribe({
+    consumer: "test-observer",
+    type: EEventType.AiAuthLoginCompleted,
+    mode: ESubscriptionMode.Live,
+    backoffMs: [],
+    handler: async (event) => {
+      delivery.resolve(event);
+    },
+  });
+  await bus.start();
   authorizedChats = spyOn(AuthorizationService.instance, "listAuthorizedChatIds").mockResolvedValue(
     ["discord:1", "discord:2"],
   );
-  publish = spyOn(EventBus.instance, "publish").mockImplementation(async (draft) => {
-    published.push(draft);
-    delivery.resolve();
-  });
   previousProvider = aiModels.getProvider(EAiProvider.OpenaiCodex);
   const approved = Promise.withResolvers<void>();
   approve = approved.resolve;
@@ -71,69 +119,72 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+  await bus.idle();
+  await bus.stop();
   authorizedChats.mockRestore();
-  publish.mockRestore();
   await aiCredentials.delete(EAiProvider.OpenaiCodex);
   if (previousProvider !== undefined) {
     aiModels.setProvider(previousProvider);
   }
 });
 
-test("logs in with a device code and confirms in the chat", async () => {
-  expect(await aiAuthCommand.handler("discord:1", "login openai-codex")).toBe(
+test("logs in with a device code through ai.auth.login.requested and confirms in the chat", async () => {
+  expect(await send("discord:1", "!ai-auth login openai-codex")).toEqual([
     "Open https://example.test/device and enter code ABCD-EFGH to connect openai-codex.",
-  );
+  ]);
+  expect((await rowsOf(EEventType.AiAuthLoginRequested))[0]?.key).toBe("global");
 
   approve();
-  await delivered;
+  const event = await completed;
+  await bus.idle();
 
-  expect(published.map((draft) => [draft.type, draft.key, draft.payload])).toEqual([
-    [
-      EEventType.AiAuthLoginCompleted,
-      "discord:1",
-      { chatId: "discord:1", providerId: "openai-codex", selected: true },
-    ],
+  expect([event.key, event.payload]).toEqual([
+    "discord:1",
+    { chatId: "discord:1", providerId: "openai-codex", selected: true },
   ]);
-  expect(await aiAuthCommand.handler("discord:1", "status openai-codex")).toBe(
+  expect((await SettingsService.instance.getAll("discord:1"))[EConfigKey.AiProvider]).toBe(
+    EAiProvider.OpenaiCodex,
+  );
+  expect(await send("discord:1", "!ai-auth status openai-codex")).toContain(
     "openai-codex: connected with OAuth, access token expires 2030-01-01T00:00:00.000Z.",
   );
-  expect(await aiAuthCommand.handler("discord:1", "logout openai-codex")).toBe(
+  expect(await send("discord:1", "!ai-auth logout openai-codex")).toContain(
     "Logged out of openai-codex.",
   );
-  expect(await aiAuthCommand.handler("discord:1", "status openai-codex")).toBe(
+  expect(await rowsOf(EEventType.AiAuthLoggedOut)).toHaveLength(1);
+  expect(await send("discord:1", "!ai-auth status openai-codex")).toContain(
     "openai-codex: not connected.",
   );
 });
 
 test("cancels a pending login when a new one starts", async () => {
-  await aiAuthCommand.handler("discord:1", "login openai-codex");
-  await aiAuthCommand.handler("discord:2", "login openai-codex");
+  await send("discord:1", "!ai-auth login openai-codex");
+  await send("discord:2", "!ai-auth login openai-codex");
 
   approve();
-  await delivered;
+  const event = await completed;
 
-  expect(published.map((draft) => [draft.type, draft.key, draft.payload])).toEqual([
-    [
-      EEventType.AiAuthLoginCompleted,
-      "discord:2",
-      { chatId: "discord:2", providerId: "openai-codex", selected: true },
-    ],
+  expect([event.key, event.payload]).toEqual([
+    "discord:2",
+    { chatId: "discord:2", providerId: "openai-codex", selected: true },
   ]);
 });
 
 test("rejects unknown actions and providers", async () => {
   const usage = "Usage: !ai-auth login|status|logout PROVIDER (openai-codex, opencode-go)";
 
-  expect(await aiAuthCommand.handler("discord:1", "login openrouter")).toBe(usage);
-  expect(await aiAuthCommand.handler("discord:1", "refresh openai-codex")).toBe(usage);
+  expect(await send("discord:1", "!ai-auth login openrouter")).toEqual([usage]);
+  expect(await send("discord:1", "!ai-auth refresh openai-codex")).toEqual([usage, usage]);
 });
 
 test("refuses chats that are not activated", async () => {
-  expect(await aiAuthCommand.handler("discord:stranger", "login openai-codex")).toBe(
-    "AI authentication requires BELLACLAW_ACTIVATION_TOKEN and an activated chat.",
-  );
-  expect(await aiAuthCommand.handler("discord:stranger", "logout openai-codex")).toBe(
-    "AI authentication requires BELLACLAW_ACTIVATION_TOKEN and an activated chat.",
-  );
-  expect(published).toEqual([]);
+  const refusal = "AI authentication requires BELLACLAW_ACTIVATION_TOKEN and an activated chat.";
+
+  expect(await send("discord:stranger", "!ai-auth login openai-codex")).toEqual([refusal]);
+  expect(await send("discord:stranger", "!ai-auth logout openai-codex")).toEqual([
+    refusal,
+    refusal,
+  ]);
+  expect(await rowsOf(EEventType.AiAuthLoginRequested)).toEqual([]);
+  expect(await rowsOf(EEventType.AiAuthLogoutRequested)).toEqual([]);
 });

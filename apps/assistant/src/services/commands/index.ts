@@ -25,6 +25,7 @@ export function formatCommandList(): string {
 export async function runCommand(
   chatId: string,
   content: string,
+  ctx: TEventContext,
 ): Promise<TOption<TCommandResult>> {
   const trimmed = content.trim();
 
@@ -50,7 +51,7 @@ export async function runCommand(
     return undefined;
   }
 
-  return command.handler(chatId, args);
+  return command.handler(chatId, args, ctx);
 }
 
 export class Commands {
@@ -81,8 +82,7 @@ export class Commands {
     ctx: TEventContext,
   ): Promise<void> {
     const { chatId, content, receivedAt, platform } = event.payload;
-    // NOTE: the handlers still call their services directly, so a retry repeats their effects
-    const result = await runCommand(chatId, content);
+    const result = await runCommand(chatId, content, ctx);
 
     await ctx.complete(async (_tx, emit) => {
       if (typeof result === "string") {

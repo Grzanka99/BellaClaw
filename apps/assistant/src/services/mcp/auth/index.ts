@@ -8,7 +8,7 @@ import type {
   OAuthTokens,
 } from "@modelcontextprotocol/sdk/shared/auth.js";
 import type { FetchLike } from "@modelcontextprotocol/sdk/shared/transport.js";
-import { EventBus } from "../../events";
+import { commandFailed, ESubscriptionMode, EventBus } from "../../events";
 import { EEventType } from "../../events/catalog";
 import { getMcpProfile, type TMcpProfile } from "../config";
 import { McpAuthCredentialStore } from "./store";
@@ -31,7 +31,6 @@ const RESERVED_AUTHORIZATION_PARAMS = new Set([
 ]);
 const credentialStore = new McpAuthCredentialStore();
 const pendingStates = new Map<string, TPendingState>();
-const disconnectListeners = new Set<TDisconnectListener>();
 const runtimeProviders = new Map<string, { generation: number; provider: OAuthClientProvider }>();
 const refreshRequests = new Map<string, Promise<TCachedResponse>>();
 const authQueues = new Map<string, AsyncQueue>();
@@ -45,8 +44,6 @@ type TPendingState = {
   generation: number;
   expiresAt: number;
 };
-
-type TDisconnectListener = (chatId: string, profileId: string) => void | Promise<void>;
 
 type TAuthorizationRedirect = (url: URL, state: string) => void | Promise<void>;
 
@@ -245,13 +242,6 @@ export async function beginMcpAuth(chatId: string, profileId: string): Promise<s
   const key = credentialKey(chatId, profile);
   const generation = advanceAuthGeneration(key);
   runtimeProviders.delete(key);
-  for (const listener of disconnectListeners) {
-    try {
-      await listener(chatId, profileId);
-    } catch (_error) {
-      logger.warning("MCP OAuth disconnection notification could not be delivered");
-    }
-  }
   const serverUrl = profile.transport.url;
   const authorizationUrl = await authQueue(key).enqueue(async () => {
     if (currentAuthGeneration(key) !== generation) {
@@ -307,11 +297,7 @@ export async function disconnectMcpAuth(chatId: string, profileId: string): Prom
     }
   }
 
-  const deleted = await authQueue(key).enqueue(() => credentialStore.delete(key));
-  for (const listener of disconnectListeners) {
-    await listener(chatId, profileId);
-  }
-  return deleted;
+  return authQueue(key).enqueue(() => credentialStore.delete(key));
 }
 
 export async function saveMcpAuthToken(
@@ -328,10 +314,6 @@ export async function saveMcpAuthToken(
   await authQueue(key).enqueue(() =>
     credentialStore.saveTokens(key, { access_token: token, token_type: "bearer" }),
   );
-  // Live sessions still send the previous token.
-  for (const listener of disconnectListeners) {
-    await listener(chatId, profileId);
-  }
 }
 
 export async function getMcpAuthToken(
@@ -351,9 +333,92 @@ export async function getMcpAuthToken(
   return tokens.access_token;
 }
 
-export function registerMcpAuthDisconnectListener(listener: TDisconnectListener): () => void {
-  disconnectListeners.add(listener);
-  return () => disconnectListeners.delete(listener);
+// NOTE: each change also emits mcp.auth.credentials.changed, so live sessions stop using the old
+// credentials
+export function setupMcpAuth(): void {
+  const bus = EventBus.instance;
+
+  bus.subscribe({
+    consumer: "mcp-auth",
+    type: EEventType.McpAuthConnectRequested,
+    mode: ESubscriptionMode.Durable,
+    backoffMs: [],
+    handler: async (event, ctx) => {
+      const { chatId, profileId } = event.payload;
+
+      let url: string;
+
+      // a failed start has already invalidated the runtime provider
+      try {
+        url = await beginMcpAuth(chatId, profileId);
+      } catch (error) {
+        await ctx.complete(async (_tx, emit) => {
+          emit(EEventType.McpAuthCredentialsChanged, { chatId, profileId }, undefined, undefined);
+          emit(EEventType.CommandRejected, commandFailed(event.type, error), undefined, undefined);
+        });
+        return;
+      }
+
+      await ctx.complete(async (_tx, emit) => {
+        emit(EEventType.McpAuthCredentialsChanged, { chatId, profileId }, undefined, undefined);
+        emit(EEventType.McpAuthLinkCreated, { chatId, profileId, url }, undefined, undefined);
+      });
+    },
+  });
+  bus.subscribe({
+    consumer: "mcp-auth",
+    type: EEventType.McpAuthDisconnectRequested,
+    mode: ESubscriptionMode.Durable,
+    backoffMs: [],
+    handler: async (event, ctx) => {
+      const { chatId, profileId } = event.payload;
+
+      let disconnected: boolean;
+
+      try {
+        disconnected = await disconnectMcpAuth(chatId, profileId);
+      } catch (error) {
+        await ctx.complete(async (_tx, emit) => {
+          emit(EEventType.CommandRejected, commandFailed(event.type, error), undefined, undefined);
+        });
+        return;
+      }
+
+      await ctx.complete(async (_tx, emit) => {
+        emit(EEventType.McpAuthCredentialsChanged, { chatId, profileId }, undefined, undefined);
+        emit(
+          EEventType.McpAuthDisconnected,
+          { chatId, profileId, disconnected },
+          undefined,
+          undefined,
+        );
+      });
+    },
+  });
+  bus.subscribe({
+    consumer: "mcp-auth",
+    type: EEventType.McpAuthTokenSaveRequested,
+    mode: ESubscriptionMode.Durable,
+    backoffMs: [],
+    handler: async (event, ctx) => {
+      const { chatId, profileId, token } = event.payload;
+
+      try {
+        await saveMcpAuthToken(chatId, profileId, token);
+      } catch (error) {
+        await ctx.complete(async (_tx, emit) => {
+          emit(EEventType.CommandRejected, commandFailed(event.type, error), undefined, undefined);
+        });
+        return;
+      }
+
+      await ctx.complete(async (_tx, emit) => {
+        // live sessions still send the previous token
+        emit(EEventType.McpAuthCredentialsChanged, { chatId, profileId }, undefined, undefined);
+        emit(EEventType.McpAuthTokenSaved, { chatId, profileId }, undefined, undefined);
+      });
+    },
+  });
 }
 
 export function createMcpAuthFetch(chatId: string, profileId: string): FetchLike {

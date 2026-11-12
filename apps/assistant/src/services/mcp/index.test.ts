@@ -9,6 +9,9 @@ import { formats } from "@earendil-works/pi-schema/formats";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
+import { resetEventTables } from "../database/test-utils";
+import { EventBus } from "../events";
+import { EEventType } from "../events/catalog";
 import { disconnectMcpAuth, getMcpAuthStatus, saveMcpAuthToken } from "./auth";
 import { loadMcpProfiles } from "./config";
 import { mcpResult } from "./content";
@@ -383,7 +386,24 @@ describe("MCP runtime", () => {
     }
   });
 
-  test("token profiles send each chat's own bearer token", async () => {
+  test("token profiles send each chat's own bearer token; sessions close on mcp.auth.credentials.changed", async () => {
+    await resetEventTables();
+    Object.assign(EventBus, { _instance: undefined });
+    const bus = EventBus.instance;
+    service.setup();
+    await bus.start();
+    const credentialsChanged = async (chatId: string) => {
+      await bus.publish({
+        type: EEventType.McpAuthCredentialsChanged,
+        source: "test",
+        key: chatId,
+        trace: { turnId: "test:mcp", chatId, platform: undefined },
+        payload: { chatId, profileId: "fixture" },
+        causationId: undefined,
+        dedupeKey: undefined,
+      });
+      await bus.idle();
+    };
     const previousCredentialsPath = Bun.env.BELLACLAW_MCP_CREDENTIALS_PATH;
     Bun.env.BELLACLAW_MCP_CREDENTIALS_PATH = join(directory, "credentials.json");
     const authorizations = new Set<string>();
@@ -419,6 +439,8 @@ describe("MCP runtime", () => {
       const first = await service.open({ chatId: "a", profileId: "fixture" });
       expect(authorizations).toEqual(new Set(["Bearer token-a"]));
       await saveMcpAuthToken("a", "fixture", "token-a2");
+      expect(first.signal.aborted).toBe(false);
+      await credentialsChanged("a");
       expect(first.signal.aborted).toBe(true);
 
       const second = await service.open({ chatId: "b", profileId: "fixture" });
@@ -429,6 +451,7 @@ describe("MCP runtime", () => {
       expect(await getMcpAuthStatus("b", "fixture")).toBe(false);
       expect(await getMcpAuthStatus("a", "fixture")).toBe(true);
     } finally {
+      await bus.stop();
       await service.close();
       await http.stop(true);
       if (previousCredentialsPath === undefined) {

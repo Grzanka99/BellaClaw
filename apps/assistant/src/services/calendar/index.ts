@@ -4,6 +4,8 @@ import { and, eq, ne } from "drizzle-orm";
 import { z } from "zod";
 import { DatabaseConnector } from "../database";
 import { calendarsTable } from "../database/schema";
+import { commandFailed, ESubscriptionMode, EventBus } from "../events";
+import { EEventType } from "../events/catalog";
 import { calculateAvailability } from "./availability";
 import { GwsCalendarClient } from "./gws";
 import {
@@ -396,6 +398,45 @@ export class CalendarService {
   }
 
   public async setup(): Promise<void> {
+    EventBus.instance.subscribe({
+      consumer: "calendar",
+      type: EEventType.CalendarSourceAddRequested,
+      mode: ESubscriptionMode.Durable,
+      backoffMs: [],
+      handler: async (event, ctx) => {
+        const { chatId, calendarId, access } = event.payload;
+
+        let calendar: TCalendar;
+
+        try {
+          if (access === "write") {
+            calendar = await this.setWriteCalendar(chatId, calendarId);
+          } else {
+            calendar = await this.addReadonlyCalendar(chatId, calendarId);
+          }
+        } catch (error) {
+          await ctx.complete(async (_tx, emit) => {
+            emit(
+              EEventType.CommandRejected,
+              commandFailed(event.type, error),
+              undefined,
+              undefined,
+            );
+          });
+          return;
+        }
+
+        await ctx.complete(async (_tx, emit) => {
+          emit(
+            EEventType.CalendarSourceAdded,
+            { chatId, calendarId, access, summary: calendar.summary },
+            undefined,
+            undefined,
+          );
+        });
+      },
+    });
+
     try {
       if (!(await Bun.file(GOOGLE_CREDENTIALS_FILE).exists())) {
         throw new Error(

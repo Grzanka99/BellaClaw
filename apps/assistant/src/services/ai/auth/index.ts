@@ -3,8 +3,8 @@ import { logger, type TOption } from "@bellaclaw/shared";
 import type { Models } from "@earendil-works/pi-ai";
 import { ModelsError } from "@earendil-works/pi-ai/utils/models-error";
 import { AuthorizationService } from "../../authorization";
-import { EventBus } from "../../events";
-import { EEventType, type TEventPayloads } from "../../events/catalog";
+import { commandFailed, ESubscriptionMode, EventBus, type TEventContext } from "../../events";
+import { EEventType, type TEvent, type TEventPayloads } from "../../events/catalog";
 import { SettingsService } from "../../settings";
 import { EConfigKey } from "../../settings/schema";
 import { aiCredentials, aiModels } from "../providers/registry";
@@ -33,24 +33,6 @@ export function findAiOAuthProvider(providerId: string): TOption<EAiProvider> {
 
 function loginHint(providerId: EAiProvider): string {
   return `Run !ai-auth login ${providerId}`;
-}
-
-async function publishLoginOutcome<
-  T extends EEventType.AiAuthLoginCompleted | EEventType.AiAuthLoginFailed,
->(chatId: string, type: T, payload: TEventPayloads[T]): Promise<void> {
-  try {
-    await EventBus.instance.publish({
-      type,
-      source: "ai-auth",
-      key: chatId,
-      trace: { turnId: createSystemTurnId(), chatId, platform: undefined },
-      payload,
-      causationId: undefined,
-      dedupeKey: undefined,
-    });
-  } catch (error) {
-    logger.error(`AI auth: failed to publish ${type} for ${chatId}: ${String(error)}`);
-  }
 }
 
 function isRejectedRefresh(error: unknown): boolean {
@@ -97,6 +79,7 @@ export async function getAiAuthState(
 // Returns the reply for a failed chat turn when the provider needs a new login.
 // Switches the chat to another connected OAuth provider when one exists.
 export async function describeAiAuthProblem(
+  ctx: Pick<TEventContext, "request">,
   chatId: string,
   provider: string,
   models: Models = aiModels,
@@ -120,7 +103,7 @@ export async function describeAiAuthProblem(
 
   for (const other of AI_OAUTH_PROVIDERS) {
     if (other !== providerId && (await getAiAuthState(other, models)) === EAiAuthState.Connected) {
-      await SettingsService.instance.set(chatId, EConfigKey.AiProvider, other);
+      await selectAiProvider(ctx, chatId, other);
       return `${problem} Switched this chat to ${other}. Send your message again.`;
     }
   }
@@ -192,9 +175,78 @@ export async function checkAiOAuth(models: Models = aiModels): Promise<void> {
   }
 }
 
-// Starts a device-code login and resolves with the instructions for the user.
+function selectAiProvider(
+  ctx: Pick<TEventContext, "request">,
+  chatId: string,
+  providerId: EAiProvider,
+): Promise<TEvent<EEventType.SettingsChanged>> {
+  return ctx.request(
+    EEventType.SettingsUpdateRequested,
+    { ownerKey: chatId, updates: [{ key: EConfigKey.AiProvider, value: providerId }] },
+    { outcome: EEventType.SettingsChanged, step: undefined, key: chatId, timeoutMs: undefined },
+  );
+}
+
+export function setupAiAuth(): void {
+  const bus = EventBus.instance;
+
+  bus.subscribe({
+    consumer: "ai-auth",
+    type: EEventType.AiAuthLoginRequested,
+    mode: ESubscriptionMode.Durable,
+    backoffMs: [],
+    handler: async (event, ctx) => {
+      beginAiLogin(event, ctx);
+    },
+  });
+  bus.subscribe({
+    consumer: "ai-auth",
+    type: EEventType.AiAuthLogoutRequested,
+    mode: ESubscriptionMode.Durable,
+    backoffMs: [],
+    handler: async (event, ctx) => {
+      const { providerId } = event.payload;
+
+      try {
+        pendingLogins.get(providerId)?.abort(new Error("Logged out"));
+        await aiModels.logout(providerId);
+        alertedProviders.delete(providerId);
+      } catch (error) {
+        await ctx.complete(async (_tx, emit) => {
+          emit(EEventType.CommandRejected, commandFailed(event.type, error), undefined, undefined);
+        });
+        return;
+      }
+
+      await ctx.complete(async (_tx, emit) => {
+        emit(EEventType.AiAuthLoggedOut, { providerId }, undefined, undefined);
+      });
+    },
+  });
+  bus.subscribe({
+    consumer: "ai-auth",
+    type: EEventType.AiAuthDiagnoseRequested,
+    mode: ESubscriptionMode.Durable,
+    backoffMs: [],
+    handler: async (event, ctx) => {
+      const problem = await describeAiAuthProblem(
+        ctx,
+        event.payload.chatId,
+        event.payload.providerId,
+      );
+      await ctx.complete(async (_tx, emit) => {
+        emit(EEventType.AiAuthDiagnosed, { problem }, undefined, undefined);
+      });
+    },
+  });
+}
+
+// Starts a device-code login; its instructions arrive as ai.auth.login.started.
 // When no other OAuth provider is connected, the new login becomes the chat's AI provider.
-export async function beginAiLogin(chatId: string, providerId: EAiProvider): Promise<string> {
+// NOTE: the login outlives the handler, so the delivery is acked at once: holding the global lane
+// until the user approves would block a newer login and a logout. A restart loses the login.
+function beginAiLogin(event: TEvent<EEventType.AiAuthLoginRequested>, ctx: TEventContext): void {
+  const { chatId, providerId } = event.payload;
   const otherStates = Promise.all(
     AI_OAUTH_PROVIDERS.filter((provider) => provider !== providerId).map((provider) =>
       getAiAuthState(provider),
@@ -203,8 +255,15 @@ export async function beginAiLogin(chatId: string, providerId: EAiProvider): Pro
   pendingLogins.get(providerId)?.abort(new Error("Replaced by a newer login"));
   const controller = new AbortController();
   pendingLogins.set(providerId, controller);
-  const instructions = Promise.withResolvers<string>();
   let instructionsSent = false;
+  const emitLater = <T extends EEventType>(type: T, payload: TEventPayloads[T]) =>
+    ctx
+      .transact(async (_tx, emit) => {
+        emit(type, payload, undefined, chatId);
+      })
+      .catch((error) => {
+        logger.error(`AI auth: failed to publish ${type} for ${chatId}: ${String(error)}`);
+      });
 
   aiModels
     .login(providerId, "oauth", {
@@ -216,12 +275,14 @@ export async function beginAiLogin(chatId: string, providerId: EAiProvider): Pro
 
         throw new Error(`Unsupported login prompt: ${prompt.message}`);
       },
-      notify: (event) => {
-        if (event.type === "device_code") {
+      notify: (notice) => {
+        if (notice.type === "device_code") {
           instructionsSent = true;
-          instructions.resolve(
-            `Open ${event.verificationUri} and enter code ${event.userCode} to connect ${providerId}.`,
-          );
+          void emitLater(EEventType.AiAuthLoginStarted, {
+            chatId,
+            providerId,
+            instructions: `Open ${notice.verificationUri} and enter code ${notice.userCode} to connect ${providerId}.`,
+          });
         }
       },
     })
@@ -232,24 +293,23 @@ export async function beginAiLogin(chatId: string, providerId: EAiProvider): Pro
 
         if (!(await otherStates).includes(EAiAuthState.Connected)) {
           try {
-            await SettingsService.instance.set(chatId, EConfigKey.AiProvider, providerId);
+            await selectAiProvider(ctx, chatId, providerId);
             selected = true;
           } catch (error) {
             logger.error(`AI auth: failed to select ${providerId} for ${chatId}: ${String(error)}`);
           }
         }
 
-        await publishLoginOutcome(chatId, EEventType.AiAuthLoginCompleted, {
-          chatId,
-          providerId,
-          selected,
-        });
+        await emitLater(EEventType.AiAuthLoginCompleted, { chatId, providerId, selected });
       },
       async (error) => {
-        instructions.reject(error);
+        if (!instructionsSent) {
+          await emitLater(EEventType.CommandRejected, commandFailed(event.type, error));
+          return;
+        }
 
-        if (instructionsSent && !controller.signal.aborted) {
-          await publishLoginOutcome(chatId, EEventType.AiAuthLoginFailed, {
+        if (!controller.signal.aborted) {
+          await emitLater(EEventType.AiAuthLoginFailed, {
             chatId,
             providerId,
             error: String(error),
@@ -262,8 +322,6 @@ export async function beginAiLogin(chatId: string, providerId: EAiProvider): Pro
         pendingLogins.delete(providerId);
       }
     });
-
-  return instructions.promise;
 }
 
 export async function getAiAuthStatus(providerId: EAiProvider): Promise<string> {
@@ -284,10 +342,4 @@ export async function getAiAuthStatus(providerId: EAiProvider): Promise<string> 
   }
 
   return `${providerId}: connected with OAuth, access token expires ${new Date(credential.expires).toISOString()}.`;
-}
-
-export async function logoutAi(providerId: EAiProvider): Promise<void> {
-  pendingLogins.get(providerId)?.abort(new Error("Logged out"));
-  await aiModels.logout(providerId);
-  alertedProviders.delete(providerId);
 }

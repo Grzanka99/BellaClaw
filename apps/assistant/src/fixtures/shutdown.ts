@@ -29,6 +29,7 @@ mock.module("../services/memory/distill", () => ({
 mock.module("../services/events", () => ({
   EventBus: {
     instance: {
+      subscribe: () => undefined,
       start: async () => undefined,
       publish: async () => undefined,
       stop: async () => undefined,
@@ -36,6 +37,7 @@ mock.module("../services/events", () => ({
   },
 }));
 mock.module("../services/mcp/auth", () => ({
+  setupMcpAuth: () => undefined,
   startMcpAuthServer: () => undefined,
   stopMcpAuthServer,
 }));

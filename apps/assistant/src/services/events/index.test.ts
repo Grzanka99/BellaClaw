@@ -3,8 +3,15 @@ import { asc, eq } from "drizzle-orm";
 import { DatabaseConnector } from "../database";
 import { eventDeliveriesTable, eventsTable, messageAuthorizationsTable } from "../database/schema";
 import { resetEventTables, resetMessageAuthorizationsTable } from "../database/test-utils";
-import { EEventType, type TEventPayloads } from "./catalog";
-import { ESubscriptionMode, EventBus, type TEventDraft } from "./index";
+import { EEventType, ERejectionCode, type TEventPayloads } from "./catalog";
+import {
+  CommandRejectedError,
+  CommandTimeoutError,
+  commandFailed,
+  ESubscriptionMode,
+  EventBus,
+  type TEventDraft,
+} from "./index";
 
 const trace = { turnId: "test:events", chatId: undefined, platform: undefined };
 
@@ -572,5 +579,315 @@ describe("EventBus", () => {
 
     expect(calls).toBe(1);
     expect((await deliveries())[0]?.status).toBe("done");
+  });
+
+  describe("request", () => {
+    // the command consumer: answers test.requested with test.secret, or as `answer` says
+    function worker(answer: (text: string) => "outcome" | "reject" | "throw" | "silent") {
+      const calls: string[] = [];
+
+      bus.subscribe({
+        consumer: "worker",
+        type: EEventType.TestRequested,
+        mode: ESubscriptionMode.Durable,
+        backoffMs: [],
+        handler: async (event, ctx) => {
+          calls.push(event.payload.text);
+          const kind = answer(event.payload.text);
+
+          if (kind === "throw") {
+            throw new Error("worker broke");
+          }
+
+          if (kind === "silent") {
+            return;
+          }
+
+          await ctx.complete(async (_tx, emit) => {
+            if (kind === "reject") {
+              emit(
+                EEventType.CommandRejected,
+                { commandType: event.type, code: ERejectionCode.Invalid, message: "bad text" },
+                undefined,
+                undefined,
+              );
+              return;
+            }
+
+            emit(EEventType.TestSecret, { secret: `answer ${event.payload.text}` }, undefined, "x");
+          });
+        },
+      });
+
+      return calls;
+    }
+
+    // the requesting consumer: requests once per step on test.noted
+    function requester(steps: string[], timeoutMs?: number) {
+      const results: unknown[] = [];
+
+      bus.subscribe({
+        consumer: "requester",
+        type: EEventType.TestNoted,
+        mode: ESubscriptionMode.Durable,
+        backoffMs: [],
+        handler: async (event, ctx) => {
+          for (const step of steps) {
+            try {
+              const outcome = await ctx.request(
+                EEventType.TestRequested,
+                { text: event.payload.text },
+                { outcome: EEventType.TestSecret, step, key: undefined, timeoutMs },
+              );
+              results.push(outcome.payload);
+            } catch (error) {
+              results.push(error);
+            }
+          }
+        },
+      });
+
+      return results;
+    }
+
+    async function start() {
+      await bus.start();
+    }
+
+    test("resolves with the outcome event", async () => {
+      worker(() => "outcome");
+      const results = requester(["a"]);
+      await start();
+
+      await bus.publish(noted("chat", 1));
+      await bus.idle();
+
+      expect(results).toEqual([{ secret: "answer note 1" }]);
+      const command = (await events()).find((row) => row.type === EEventType.TestRequested);
+      expect(command?.kind).toBe("command");
+      expect(command?.key).toBe("chat");
+    });
+
+    test("a rejection throws CommandRejectedError with its code", async () => {
+      worker(() => "reject");
+      const results = requester(["a"]);
+      await start();
+
+      await bus.publish(noted("chat", 1));
+      await bus.idle();
+
+      expect(results[0]).toBeInstanceOf(CommandRejectedError);
+      expect(results[0]).toMatchObject({ code: ERejectionCode.Invalid, message: "bad text" });
+    });
+
+    test("a command without an outcome times out", async () => {
+      worker(() => "silent");
+      const results = requester(["a"], 20);
+      await start();
+
+      await bus.publish(noted("chat", 1));
+      await bus.idle();
+
+      expect(results[0]).toBeInstanceOf(CommandTimeoutError);
+    });
+
+    test("a repeated request with the same cause and step returns the stored outcome", async () => {
+      const calls = worker(() => "outcome");
+      const results = requester(["a", "a", "b"]);
+      await start();
+
+      await bus.publish(noted("chat", 1));
+      await bus.idle();
+
+      expect(results).toEqual([
+        { secret: "answer note 1" },
+        { secret: "answer note 1" },
+        { secret: "answer note 1" },
+      ]);
+      // one run per step
+      expect(calls).toEqual(["note 1", "note 1"]);
+    });
+
+    test("a command handler that throws rejects its waiter through command.rejected", async () => {
+      worker(() => "throw");
+      const results = requester(["a"]);
+      await start();
+
+      await bus.publish(noted("chat", 1));
+      await bus.idle();
+
+      expect(results[0]).toBeInstanceOf(CommandRejectedError);
+      expect(results[0]).toMatchObject({ code: ERejectionCode.Failed });
+      expect(await deadLettered()).toHaveLength(1);
+      const rejected = (await events()).filter((row) => row.type === EEventType.CommandRejected);
+      expect(rejected.map((row) => row.payload)).toEqual([
+        {
+          commandType: EEventType.TestRequested,
+          code: ERejectionCode.Failed,
+          message: "Error: worker broke",
+        },
+      ]);
+    });
+
+    test("start throws when a command type has two durable consumers", async () => {
+      worker(() => "outcome");
+      bus.subscribe({
+        consumer: "other",
+        type: EEventType.TestRequested,
+        mode: ESubscriptionMode.Durable,
+        backoffMs: [],
+        handler: async () => undefined,
+      });
+      await expect(bus.start()).rejects.toThrow(
+        `Command ${EEventType.TestRequested} has 2 durable consumers, expected 1`,
+      );
+    });
+
+    test("commandFailed carries the error's message", () => {
+      expect(commandFailed(EEventType.TestRequested, new Error("no access"))).toEqual({
+        commandType: EEventType.TestRequested,
+        code: ERejectionCode.Failed,
+        message: "no access",
+      });
+    });
+
+    test("boot abandons a pending command; a repeated request revives it", async () => {
+      const db = DatabaseConnector.instance.database;
+      const causeId = Bun.randomUUIDv7();
+      const [cause] = await db
+        .insert(eventsTable)
+        .values({
+          id: causeId,
+          type: EEventType.TestNoted,
+          kind: "event",
+          source: "test",
+          key: "chat",
+          turnId: trace.turnId,
+          payload: { text: "note 1", count: 1 },
+          occurredAt: new Date(),
+        })
+        .returning();
+      const [command] = await db
+        .insert(eventsTable)
+        .values({
+          id: Bun.randomUUIDv7(),
+          type: EEventType.TestRequested,
+          kind: "command",
+          source: "requester",
+          key: "chat",
+          turnId: trace.turnId,
+          causationId: causeId,
+          dedupeKey: `${causeId}:requester:${EEventType.TestRequested}:a`,
+          payload: { text: "note 1" },
+          occurredAt: new Date(),
+        })
+        .returning();
+
+      if (cause === undefined || command === undefined) {
+        throw new Error("insert failed");
+      }
+
+      await db
+        .insert(eventDeliveriesTable)
+        .values({ eventSeq: command.seq, consumer: "worker", updatedAt: new Date() });
+
+      // the requester is gone: the command dies without running
+      const firstCalls = worker(() => "outcome");
+      await start();
+      await bus.idle();
+      await bus.stop();
+
+      expect(firstCalls).toEqual([]);
+      expect((await deliveries()).map((row) => [row.status, row.lastError])).toEqual([
+        ["dead", "abandoned"],
+      ]);
+      expect(await deadLettered()).toEqual([]);
+
+      // the cause is redelivered after a restart and asks again with the same step
+      await db
+        .insert(eventDeliveriesTable)
+        .values({ eventSeq: cause.seq, consumer: "requester", updatedAt: new Date() });
+      Object.assign(EventBus, { _instance: undefined });
+      bus = EventBus.instance;
+      const calls = worker(() => "outcome");
+      const results = requester(["a"]);
+      await start();
+      await bus.idle();
+
+      expect(calls).toEqual(["note 1"]);
+      expect(results).toEqual([{ secret: "answer note 1" }]);
+      expect((await events()).filter((row) => row.type === EEventType.TestRequested)).toHaveLength(
+        1,
+      );
+    });
+
+    test("a repeated request returns a stored answer without reviving its command", async () => {
+      const db = DatabaseConnector.instance.database;
+      const causeId = Bun.randomUUIDv7();
+      const commandId = Bun.randomUUIDv7();
+      const [cause] = await db
+        .insert(eventsTable)
+        .values({
+          id: causeId,
+          type: EEventType.TestNoted,
+          kind: "event",
+          source: "test",
+          key: "chat",
+          turnId: trace.turnId,
+          payload: { text: "note 1", count: 1 },
+          occurredAt: new Date(),
+        })
+        .returning();
+      const [command] = await db
+        .insert(eventsTable)
+        .values({
+          id: commandId,
+          type: EEventType.TestRequested,
+          kind: "command",
+          source: "requester",
+          key: "chat",
+          turnId: trace.turnId,
+          causationId: causeId,
+          dedupeKey: `${causeId}:requester:${EEventType.TestRequested}:a`,
+          payload: { text: "note 1" },
+          occurredAt: new Date(),
+        })
+        .returning();
+      // the answer committed, but the command's delivery was abandoned before its ack
+      await db.insert(eventsTable).values({
+        id: Bun.randomUUIDv7(),
+        type: EEventType.TestSecret,
+        kind: "event",
+        source: "worker",
+        key: "chat",
+        turnId: trace.turnId,
+        causationId: commandId,
+        payload: { secret: "stored answer" },
+        occurredAt: new Date(),
+      });
+
+      if (cause === undefined || command === undefined) {
+        throw new Error("insert failed");
+      }
+
+      await db.insert(eventDeliveriesTable).values([
+        {
+          eventSeq: command.seq,
+          consumer: "worker",
+          status: "dead",
+          lastError: "abandoned",
+          updatedAt: new Date(),
+        },
+        { eventSeq: cause.seq, consumer: "requester", updatedAt: new Date() },
+      ]);
+
+      const calls = worker(() => "outcome");
+      const results = requester(["a"]);
+      await start();
+      await bus.idle();
+
+      expect(calls).toEqual([]);
+      expect(results).toEqual([{ secret: "stored answer" }]);
+    });
   });
 });

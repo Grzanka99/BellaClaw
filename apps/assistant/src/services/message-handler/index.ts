@@ -2,7 +2,6 @@ import type { TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
 import type { TOption } from "@bellaclaw/shared";
 import { createLogger } from "@bellaclaw/shared";
 import { AgentHarness } from "../ai/agent-harness";
-import { describeAiAuthProblem } from "../ai/auth";
 import { ERole } from "../ai/types";
 import { logHandlerStarted, startHandlerSpan, startMemorySaveSpan } from "../app-logger/operations";
 import { startSpan } from "../app-logger/span";
@@ -20,6 +19,8 @@ const INTERRUPTED_REPLY =
   "I was restarted while answering, so that reply is lost. Some actions may already be done. Check before asking again.";
 const INTERRUPTED_NOTICE =
   "System notice, not from the user: the previous turn was interrupted by a restart. Its tool calls may be partly applied. The next assistant message says so.";
+// one auth check per OAuth provider, each up to 30 s, then the provider switch
+const DIAGNOSE_TIMEOUT_MS = 120_000;
 
 export class MessageHandler {
   private static _instance: TOption<MessageHandler>;
@@ -170,10 +171,19 @@ export class MessageHandler {
       if (text === undefined) {
         this.logger.warning("handleTurn: AI returned no final response");
         let fallback = FAILED_REPLY;
-        const authProblem = await describeAiAuthProblem(chatId, settings[EConfigKey.AiProvider]);
+        const diagnosed = await ctx.request(
+          EEventType.AiAuthDiagnoseRequested,
+          { chatId, providerId: settings[EConfigKey.AiProvider] },
+          {
+            outcome: EEventType.AiAuthDiagnosed,
+            step: undefined,
+            key: undefined,
+            timeoutMs: DIAGNOSE_TIMEOUT_MS,
+          },
+        );
 
-        if (authProblem !== undefined) {
-          fallback = authProblem;
+        if (diagnosed.payload.problem !== undefined) {
+          fallback = diagnosed.payload.problem;
         }
 
         await ctx.complete(async (_tx, emit) => {

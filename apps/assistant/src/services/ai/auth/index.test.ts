@@ -5,9 +5,8 @@ import { join } from "node:path";
 import { createModels, createProvider, type OAuthCredential } from "@earendil-works/pi-ai";
 import { openAICodexResponsesApi } from "@earendil-works/pi-ai/api/openai-codex-responses.lazy";
 import { AuthorizationService } from "../../authorization";
-import { EventBus, type TEventDraft } from "../../events";
+import { EventBus, type TEventContext, type TEventDraft } from "../../events";
 import { EEventType } from "../../events/catalog";
-import { SettingsService } from "../../settings";
 import { EConfigKey } from "../../settings/schema";
 import { FileCredentialStore } from "../providers/file-credential-store";
 import { EAiProvider } from "../types";
@@ -170,20 +169,28 @@ test("treats a rate-limited refresh as transient", async () => {
   expect(await getAiAuthState(EAiProvider.OpenaiCodex, models)).toBe(EAiAuthState.Unavailable);
 });
 
-test("switches a failed chat to a connected provider", async () => {
+test("switches a failed chat to a connected provider through settings.update.requested", async () => {
   const { models } = await createTestModels(async (credential) => ({
     ...credential,
     expires: Date.now() + 60 * 60 * 1000,
   }));
-  const set = mock(async () => ({}));
-  (SettingsService as unknown as { _instance: unknown })._instance = { set };
+  const request = mock(async () => undefined);
+  const ctx = { request } as unknown as Pick<TEventContext, "request">;
 
-  expect(await describeAiAuthProblem("discord:switch", EAiProvider.OpencodeGo, models)).toBe(
+  expect(await describeAiAuthProblem(ctx, "discord:switch", EAiProvider.OpencodeGo, models)).toBe(
     "opencode-go is not connected. Switched this chat to openai-codex. Send your message again.",
   );
-  expect(set).toHaveBeenCalledWith(
-    "discord:switch",
-    EConfigKey.AiProvider,
-    EAiProvider.OpenaiCodex,
+  expect(request).toHaveBeenCalledWith(
+    EEventType.SettingsUpdateRequested,
+    {
+      ownerKey: "discord:switch",
+      updates: [{ key: EConfigKey.AiProvider, value: EAiProvider.OpenaiCodex }],
+    },
+    {
+      outcome: EEventType.SettingsChanged,
+      step: undefined,
+      key: "discord:switch",
+      timeoutMs: undefined,
+    },
   );
 });

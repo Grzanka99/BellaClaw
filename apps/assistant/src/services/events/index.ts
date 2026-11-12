@@ -1,6 +1,6 @@
 import { AppLogger, EBehaviorLogLevel, type TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
 import { AsyncQueue, createLogger, type TOption } from "@bellaclaw/shared";
-import { and, asc, eq, ne, notExists } from "drizzle-orm";
+import { and, asc, eq, inArray, ne, notExists } from "drizzle-orm";
 import { sanitizeErrorMessage } from "../app-logger/sanitizers";
 import { startSpan } from "../app-logger/span";
 import { DatabaseConnector, type TDatabaseTransaction } from "../database";
@@ -8,6 +8,7 @@ import { eventDeliveriesTable, eventsTable, type TSelectEvent } from "../databas
 import {
   EEventKind,
   EEventType,
+  ERejectionCode,
   EVENT_KINDS,
   EVENT_SCHEMAS,
   EVENT_SCRUBBED,
@@ -43,6 +44,15 @@ export type TDerivedEmit = <T extends EEventType>(
   key: TOption<string>,
 ) => void;
 
+export type TRequestOptions<O extends EEventType> = {
+  outcome: O;
+  step: TOption<string>;
+  // ordering key of the command; undefined keeps the cause's key
+  key: TOption<string>;
+  // default 60 s
+  timeoutMs: TOption<number>;
+};
+
 export type TEventContext = {
   // rows + follow-ups in one transaction, without the ack
   transact: <R>(work: (tx: TDatabaseTransaction, emit: TDerivedEmit) => Promise<R>) => Promise<R>;
@@ -50,6 +60,18 @@ export type TEventContext = {
   complete: <R>(work: (tx: TDatabaseTransaction, emit: TDerivedEmit) => Promise<R>) => Promise<R>;
   // the follow-up of this event that was already published, if any
   findCaused: <T extends EEventType>(type: T, step: TOption<string>) => Promise<TOption<TEvent<T>>>;
+  // publishes a command and waits for its outcome event
+  request: <C extends EEventType, O extends EEventType>(
+    type: C,
+    payload: TEventPayloads[C],
+    options: TRequestOptions<O>,
+  ) => Promise<TEvent<O>>;
+  // waits for a fact caused by an event this handler already knows
+  waitFor: <O extends EEventType>(
+    causationId: string,
+    type: O,
+    timeoutMs: TOption<number>,
+  ) => Promise<TEvent<O>>;
 };
 
 export type TSubscribeArgs<T extends EEventType> = {
@@ -68,7 +90,39 @@ type TSubscription = {
   run: (row: TSelectEvent) => Promise<void>;
 };
 
+type TWaiter = {
+  type: EEventType;
+  settle: (row: TSelectEvent) => void;
+};
+
+const DEFAULT_REQUEST_TIMEOUT_MS = 60_000;
+
 class InvalidPayloadError extends Error {}
+
+export class CommandRejectedError extends Error {
+  public constructor(
+    public readonly code: ERejectionCode,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+export class CommandTimeoutError extends Error {}
+
+// the command.rejected payload of a handler that failed with error
+export function commandFailed(
+  commandType: EEventType,
+  error: unknown,
+): TEventPayloads[EEventType.CommandRejected] {
+  let message = String(error);
+
+  if (error instanceof Error) {
+    message = error.message;
+  }
+
+  return { commandType, code: ERejectionCode.Failed, message };
+}
 
 function traceOf(row: TSelectEvent): TBehaviorTraceContext {
   return {
@@ -88,6 +142,8 @@ export class EventBus {
   private subscriptions: TSubscription[] = [];
   private lanes = new Map<string, AsyncQueue>();
   private inFlight = new Set<Promise<void>>();
+  // keyed by the causationId of the awaited event
+  private waiters = new Map<string, Set<TWaiter>>();
   private started = false;
   private stopping = false;
 
@@ -148,6 +204,9 @@ export class EventBus {
               this.transact((tx, emit) => work(tx, this.derive(emit, row, subscription.consumer))),
             complete,
             findCaused: (type, step) => this.findCaused(row, subscription.consumer, type, step),
+            request: (type, payload, options) =>
+              this.request(row, subscription.consumer, type, payload, options),
+            waitFor: (causationId, type, timeoutMs) => this.waitFor(causationId, type, timeoutMs),
           });
         } catch (error) {
           // the delivery is already acked: a retry would repeat its effects
@@ -212,7 +271,9 @@ export class EventBus {
           subscription.type === type && subscription.mode === ESubscriptionMode.Durable,
       );
 
-      if (consumers.length !== 1) {
+      // zero is not checked here: test-only commands have none in the app, and a missing
+      // consumer only times out its requester
+      if (consumers.length > 1) {
         throw new Error(`Command ${type} has ${consumers.length} durable consumers, expected 1`);
       }
     }
@@ -241,6 +302,12 @@ export class EventBus {
 
           if (subscription === undefined) {
             await this.markDead(tx, delivery.consumer, event, delivery.attempts, "no consumer");
+            continue;
+          }
+
+          // its requester is gone; a repeated request revives it
+          if (EVENT_KINDS[event.type] === EEventKind.Command) {
+            await this.markDead(tx, delivery.consumer, event, delivery.attempts, "abandoned");
             continue;
           }
 
@@ -365,6 +432,18 @@ export class EventBus {
         }
       }
     }
+
+    for (const row of appended) {
+      if (row.causationId === null) {
+        continue;
+      }
+
+      for (const waiter of this.waiters.get(row.causationId) ?? []) {
+        if (waiter.type === row.type || row.type === EEventType.CommandRejected) {
+          waiter.settle(row);
+        }
+      }
+    }
   }
 
   private enqueue(subscription: TSubscription, row: TSelectEvent, startAttempts: number): void {
@@ -480,6 +559,24 @@ export class EventBus {
       // a dead dead-letter gets no dead-letter of its own, or it would loop
       if (marked && row.type !== EEventType.EventDeadLettered) {
         emit(this.deadLetterDraft(subscription.consumer, row, attempts, error));
+      }
+
+      // fails the waiter at once instead of at its timeout
+      if (marked && EVENT_KINDS[row.type] === EEventKind.Command) {
+        const type = EEventType.CommandRejected;
+        emit({
+          type,
+          source: "events",
+          key: row.key,
+          trace: traceOf(row),
+          payload: {
+            commandType: row.type,
+            code: ERejectionCode.Failed,
+            message: sanitizeErrorMessage(error) ?? "",
+          },
+          causationId: row.id,
+          dedupeKey: causedKey(row.id, subscription.consumer, type, undefined),
+        });
       }
     });
   }
@@ -613,6 +710,168 @@ export class EventBus {
     }
 
     return this.toEvent(row, type, parsed.data);
+  }
+
+  private async request<C extends EEventType, O extends EEventType>(
+    cause: TSelectEvent,
+    consumer: string,
+    type: C,
+    payload: TEventPayloads[C],
+    options: TRequestOptions<O>,
+  ): Promise<TEvent<O>> {
+    const dedupeKey = causedKey(cause.id, consumer, type, options.step);
+
+    await this.transact(async (_tx, emit) => {
+      this.derive(emit, cause, consumer)(type, payload, options.step, options.key);
+    });
+
+    // on a dedupe hit the stored command is used; one abandoned at boot is dispatched again
+    const command = await DatabaseConnector.instance.run(async (db) => {
+      const [stored] = await db
+        .select()
+        .from(eventsTable)
+        .where(eq(eventsTable.dedupeKey, dedupeKey));
+
+      if (stored === undefined) {
+        throw new Error(`Command ${type} was not stored`);
+      }
+
+      // a command whose answer is already stored needs no second run
+      const [answered] = await db
+        .select({ seq: eventsTable.seq })
+        .from(eventsTable)
+        .where(
+          and(
+            eq(eventsTable.causationId, stored.id),
+            inArray(eventsTable.type, [options.outcome, EEventType.CommandRejected]),
+          ),
+        )
+        .limit(1);
+
+      if (answered !== undefined) {
+        return stored;
+      }
+
+      const revived = await db
+        .update(eventDeliveriesTable)
+        .set({ status: "pending", lastError: null, updatedAt: new Date() })
+        .where(
+          and(
+            eq(eventDeliveriesTable.eventSeq, stored.seq),
+            eq(eventDeliveriesTable.status, "dead"),
+            eq(eventDeliveriesTable.lastError, "abandoned"),
+          ),
+        )
+        .returning();
+
+      for (const delivery of revived) {
+        const subscription = this.subscriptions.find(
+          (candidate) =>
+            candidate.consumer === delivery.consumer &&
+            candidate.type === stored.type &&
+            candidate.mode === ESubscriptionMode.Durable,
+        );
+
+        if (subscription !== undefined) {
+          this.enqueue(subscription, stored, delivery.attempts);
+        }
+      }
+
+      return stored;
+    });
+
+    return this.waitFor(command.id, options.outcome, options.timeoutMs);
+  }
+
+  // NOTE: the waiter is registered before the log is read, so an outcome committed in between
+  // is not missed
+  private async waitFor<O extends EEventType>(
+    causationId: string,
+    type: O,
+    timeoutMs: TOption<number>,
+  ): Promise<TEvent<O>> {
+    const { promise, resolve, reject } = Promise.withResolvers<TEvent<O>>();
+    let waiters = this.waiters.get(causationId);
+
+    if (waiters === undefined) {
+      waiters = new Set();
+      this.waiters.set(causationId, waiters);
+    }
+
+    const registered = waiters;
+    let settled = false;
+    const finish = () => {
+      settled = true;
+      clearTimeout(timer);
+      registered.delete(waiter);
+
+      if (registered.size === 0) {
+        this.waiters.delete(causationId);
+      }
+    };
+    const waiter: TWaiter = {
+      type,
+      settle: (row) => {
+        if (settled) {
+          return;
+        }
+
+        finish();
+
+        if (row.type === EEventType.CommandRejected) {
+          const rejected = EVENT_SCHEMAS[EEventType.CommandRejected].safeParse(row.payload);
+
+          if (!rejected.success) {
+            reject(new Error(`Stored rejection ${row.id} is invalid: ${rejected.error.message}`));
+            return;
+          }
+
+          reject(new CommandRejectedError(rejected.data.code, rejected.data.message));
+          return;
+        }
+
+        const parsed = EVENT_SCHEMAS[type].safeParse(row.payload);
+
+        if (!parsed.success) {
+          reject(
+            new Error(`Stored payload of ${type} ${row.id} is invalid: ${parsed.error.message}`),
+          );
+          return;
+        }
+
+        resolve(this.toEvent(row, type, parsed.data));
+      },
+    };
+    const limit = timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+    const timer = setTimeout(() => {
+      if (settled) {
+        return;
+      }
+
+      finish();
+      reject(new CommandTimeoutError(`No ${type} for ${causationId} within ${limit} ms`));
+    }, limit);
+    registered.add(waiter);
+
+    const [stored] = await DatabaseConnector.instance.run((db) =>
+      db
+        .select()
+        .from(eventsTable)
+        .where(
+          and(
+            eq(eventsTable.causationId, causationId),
+            inArray(eventsTable.type, [type, EEventType.CommandRejected]),
+          ),
+        )
+        .orderBy(asc(eventsTable.seq))
+        .limit(1),
+    );
+
+    if (stored !== undefined) {
+      waiter.settle(stored);
+    }
+
+    return promise;
   }
 
   private toEvent<T extends EEventType>(

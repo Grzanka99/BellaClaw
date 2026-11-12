@@ -1,4 +1,5 @@
 import { AppLogger, EBehaviorLogLevel } from "@bellaclaw/behavior-logs";
+import { setupAiAuth } from "./services/ai/auth";
 import { startAiOAuthKeepAlive } from "./services/ai/auth/oauth-keep-alive";
 import { AuthorizationService } from "./services/authorization";
 import { CalendarService } from "./services/calendar";
@@ -8,12 +9,13 @@ import { DiscordSingleton } from "./services/discord";
 import { EventBus } from "./services/events";
 import { EEventType } from "./services/events/catalog";
 import { McpService } from "./services/mcp";
-import { startMcpAuthServer, stopMcpAuthServer } from "./services/mcp/auth";
+import { setupMcpAuth, startMcpAuthServer, stopMcpAuthServer } from "./services/mcp/auth";
 import { FactDistiller } from "./services/memory/distill";
 import { MessageHandler } from "./services/message-handler";
 import { MessagingAdapter } from "./services/messaging";
 import { Notices } from "./services/notices";
 import { ScheduledDelivery } from "./services/scheduling/delivery";
+import { SettingsService } from "./services/settings";
 import { SignalSingleton } from "./services/signal";
 
 async function init(): Promise<void> {
@@ -46,6 +48,10 @@ async function init(): Promise<void> {
     ScheduledDelivery.instance.setup();
     MessageHandler.instance.setup();
     FactDistiller.instance.setup();
+    SettingsService.instance.setup();
+    setupAiAuth();
+    setupMcpAuth();
+    McpService.instance.setup();
     if (Bun.env.BELLACLAW_MCP_PUBLIC_URL?.trim()) {
       startMcpAuthServer();
     }

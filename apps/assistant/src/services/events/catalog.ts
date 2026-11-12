@@ -1,9 +1,11 @@
 import type { TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
 import type { TOption } from "@bellaclaw/shared";
 import { z } from "zod";
+import { EAiProvider } from "../ai/types";
 import { EAuthorizationDecision, SAuthorizationState } from "../authorization/schema";
 import { ECronJobType } from "../cron/types";
 import { EMessagePlatform } from "../messaging/types";
+import { EConfigKey } from "../settings/schema";
 
 export enum EEventKind {
   Event = "event",
@@ -29,11 +31,35 @@ export enum EEventType {
   AiAuthLoginNeeded = "ai.auth.login.needed",
   AiAuthLoginCompleted = "ai.auth.login.completed",
   AiAuthLoginFailed = "ai.auth.login.failed",
+  McpAuthCredentialsChanged = "mcp.auth.credentials.changed",
+  McpAuthConnectRequested = "mcp.auth.connect.requested",
+  McpAuthLinkCreated = "mcp.auth.link.created",
+  McpAuthDisconnectRequested = "mcp.auth.disconnect.requested",
+  McpAuthDisconnected = "mcp.auth.disconnected",
+  McpAuthTokenSaveRequested = "mcp.auth.token.save.requested",
+  McpAuthTokenSaved = "mcp.auth.token.saved",
+  AiAuthLoginRequested = "ai.auth.login.requested",
+  AiAuthLoginStarted = "ai.auth.login.started",
+  AiAuthLogoutRequested = "ai.auth.logout.requested",
+  AiAuthLoggedOut = "ai.auth.logged_out",
+  AiAuthDiagnoseRequested = "ai.auth.diagnose.requested",
+  AiAuthDiagnosed = "ai.auth.diagnosed",
+  SettingsUpdateRequested = "settings.update.requested",
+  SettingsChanged = "settings.changed",
+  CalendarSourceAddRequested = "calendar.source.add.requested",
+  CalendarSourceAdded = "calendar.source.added",
+  CommandRejected = "command.rejected",
   EventDeadLettered = "event.dead_lettered",
   AppStarted = "app.started",
   // NOTE: test types for the bus tests; real types arrive with their phase
   TestNoted = "test.noted",
   TestSecret = "test.secret",
+  TestRequested = "test.requested",
+}
+
+export enum ERejectionCode {
+  Invalid = "invalid",
+  Failed = "failed",
 }
 
 const STranscript = z.object({ text: z.string(), notice: z.string() }).strict();
@@ -131,6 +157,65 @@ const SAiAuthLoginFailed = z
   .object({ chatId: z.string(), providerId: z.string(), error: z.string() })
   .strict();
 
+const SMcpAuthProfile = z.object({ chatId: z.string(), profileId: z.string() }).strict();
+
+const SMcpAuthLinkCreated = z
+  .object({ chatId: z.string(), profileId: z.string(), url: z.string() })
+  .strict();
+
+const SMcpAuthDisconnected = z
+  .object({ chatId: z.string(), profileId: z.string(), disconnected: z.boolean() })
+  .strict();
+
+const SMcpAuthTokenSaveRequested = z
+  .object({ chatId: z.string(), profileId: z.string(), token: z.string() })
+  .strict();
+
+const SAiAuthLoginRequested = z
+  .object({ chatId: z.string(), providerId: z.enum(EAiProvider) })
+  .strict();
+
+const SAiAuthLoginStarted = z
+  .object({ chatId: z.string(), providerId: z.string(), instructions: z.string() })
+  .strict();
+
+const SAiAuthLogoutRequested = z.object({ providerId: z.enum(EAiProvider) }).strict();
+
+const SAiAuthDiagnoseRequested = z.object({ chatId: z.string(), providerId: z.string() }).strict();
+
+// problem: the reply for the failed turn, when the provider needs a new login
+const SAiAuthDiagnosed = z.object({ problem: z.string().optional() }).strict();
+
+const SSettingsUpdateRequested = z
+  .object({
+    ownerKey: z.string(),
+    updates: z.array(z.object({ key: z.enum(EConfigKey), value: z.string() }).strict()),
+  })
+  .strict();
+
+const SSettingsChanged = z
+  .object({ ownerKey: z.string(), record: z.record(z.enum(EConfigKey), z.string()) })
+  .strict();
+
+const SCalendarAccess = z.enum(["read", "write"]);
+
+const SCalendarSourceAddRequested = z
+  .object({ chatId: z.string(), calendarId: z.string(), access: SCalendarAccess })
+  .strict();
+
+const SCalendarSourceAdded = z
+  .object({
+    chatId: z.string(),
+    calendarId: z.string(),
+    access: SCalendarAccess,
+    summary: z.string().optional(),
+  })
+  .strict();
+
+const SCommandRejected = z
+  .object({ commandType: z.string(), code: z.enum(ERejectionCode), message: z.string() })
+  .strict();
+
 const SEventDeadLettered = z
   .object({
     eventId: z.string(),
@@ -145,6 +230,7 @@ const SAppStarted = z.object({}).strict();
 
 const STestNoted = z.object({ text: z.string(), count: z.number().int() }).strict();
 const STestSecret = z.object({ secret: z.string() }).strict();
+const STestRequested = z.object({ text: z.string() }).strict();
 
 export type TEventPayloads = {
   [EEventType.MessageReceived]: z.infer<typeof SInboundMessage>;
@@ -165,10 +251,29 @@ export type TEventPayloads = {
   [EEventType.AiAuthLoginNeeded]: z.infer<typeof SAiAuthLoginNeeded>;
   [EEventType.AiAuthLoginCompleted]: z.infer<typeof SAiAuthLoginCompleted>;
   [EEventType.AiAuthLoginFailed]: z.infer<typeof SAiAuthLoginFailed>;
+  [EEventType.McpAuthCredentialsChanged]: z.infer<typeof SMcpAuthProfile>;
+  [EEventType.McpAuthConnectRequested]: z.infer<typeof SMcpAuthProfile>;
+  [EEventType.McpAuthLinkCreated]: z.infer<typeof SMcpAuthLinkCreated>;
+  [EEventType.McpAuthDisconnectRequested]: z.infer<typeof SMcpAuthProfile>;
+  [EEventType.McpAuthDisconnected]: z.infer<typeof SMcpAuthDisconnected>;
+  [EEventType.McpAuthTokenSaveRequested]: z.infer<typeof SMcpAuthTokenSaveRequested>;
+  [EEventType.McpAuthTokenSaved]: z.infer<typeof SMcpAuthProfile>;
+  [EEventType.AiAuthLoginRequested]: z.infer<typeof SAiAuthLoginRequested>;
+  [EEventType.AiAuthLoginStarted]: z.infer<typeof SAiAuthLoginStarted>;
+  [EEventType.AiAuthLogoutRequested]: z.infer<typeof SAiAuthLogoutRequested>;
+  [EEventType.AiAuthLoggedOut]: z.infer<typeof SAiAuthLogoutRequested>;
+  [EEventType.AiAuthDiagnoseRequested]: z.infer<typeof SAiAuthDiagnoseRequested>;
+  [EEventType.AiAuthDiagnosed]: z.infer<typeof SAiAuthDiagnosed>;
+  [EEventType.SettingsUpdateRequested]: z.infer<typeof SSettingsUpdateRequested>;
+  [EEventType.SettingsChanged]: z.infer<typeof SSettingsChanged>;
+  [EEventType.CalendarSourceAddRequested]: z.infer<typeof SCalendarSourceAddRequested>;
+  [EEventType.CalendarSourceAdded]: z.infer<typeof SCalendarSourceAdded>;
+  [EEventType.CommandRejected]: z.infer<typeof SCommandRejected>;
   [EEventType.EventDeadLettered]: z.infer<typeof SEventDeadLettered>;
   [EEventType.AppStarted]: z.infer<typeof SAppStarted>;
   [EEventType.TestNoted]: z.infer<typeof STestNoted>;
   [EEventType.TestSecret]: z.infer<typeof STestSecret>;
+  [EEventType.TestRequested]: z.infer<typeof STestRequested>;
 };
 
 // The mapped type ties each schema to its payload type, so a handler gets a typed payload
@@ -192,10 +297,29 @@ export const EVENT_SCHEMAS: { [K in EEventType]: z.ZodType<TEventPayloads[K]> } 
   [EEventType.AiAuthLoginNeeded]: SAiAuthLoginNeeded,
   [EEventType.AiAuthLoginCompleted]: SAiAuthLoginCompleted,
   [EEventType.AiAuthLoginFailed]: SAiAuthLoginFailed,
+  [EEventType.McpAuthCredentialsChanged]: SMcpAuthProfile,
+  [EEventType.McpAuthConnectRequested]: SMcpAuthProfile,
+  [EEventType.McpAuthLinkCreated]: SMcpAuthLinkCreated,
+  [EEventType.McpAuthDisconnectRequested]: SMcpAuthProfile,
+  [EEventType.McpAuthDisconnected]: SMcpAuthDisconnected,
+  [EEventType.McpAuthTokenSaveRequested]: SMcpAuthTokenSaveRequested,
+  [EEventType.McpAuthTokenSaved]: SMcpAuthProfile,
+  [EEventType.AiAuthLoginRequested]: SAiAuthLoginRequested,
+  [EEventType.AiAuthLoginStarted]: SAiAuthLoginStarted,
+  [EEventType.AiAuthLogoutRequested]: SAiAuthLogoutRequested,
+  [EEventType.AiAuthLoggedOut]: SAiAuthLogoutRequested,
+  [EEventType.AiAuthDiagnoseRequested]: SAiAuthDiagnoseRequested,
+  [EEventType.AiAuthDiagnosed]: SAiAuthDiagnosed,
+  [EEventType.SettingsUpdateRequested]: SSettingsUpdateRequested,
+  [EEventType.SettingsChanged]: SSettingsChanged,
+  [EEventType.CalendarSourceAddRequested]: SCalendarSourceAddRequested,
+  [EEventType.CalendarSourceAdded]: SCalendarSourceAdded,
+  [EEventType.CommandRejected]: SCommandRejected,
   [EEventType.EventDeadLettered]: SEventDeadLettered,
   [EEventType.AppStarted]: SAppStarted,
   [EEventType.TestNoted]: STestNoted,
   [EEventType.TestSecret]: STestSecret,
+  [EEventType.TestRequested]: STestRequested,
 };
 
 export const EVENT_KINDS: Record<EEventType, EEventKind> = {
@@ -217,16 +341,36 @@ export const EVENT_KINDS: Record<EEventType, EEventKind> = {
   [EEventType.AiAuthLoginNeeded]: EEventKind.Event,
   [EEventType.AiAuthLoginCompleted]: EEventKind.Event,
   [EEventType.AiAuthLoginFailed]: EEventKind.Event,
+  [EEventType.McpAuthCredentialsChanged]: EEventKind.Event,
+  [EEventType.McpAuthConnectRequested]: EEventKind.Command,
+  [EEventType.McpAuthLinkCreated]: EEventKind.Event,
+  [EEventType.McpAuthDisconnectRequested]: EEventKind.Command,
+  [EEventType.McpAuthDisconnected]: EEventKind.Event,
+  [EEventType.McpAuthTokenSaveRequested]: EEventKind.Command,
+  [EEventType.McpAuthTokenSaved]: EEventKind.Event,
+  [EEventType.AiAuthLoginRequested]: EEventKind.Command,
+  [EEventType.AiAuthLoginStarted]: EEventKind.Event,
+  [EEventType.AiAuthLogoutRequested]: EEventKind.Command,
+  [EEventType.AiAuthLoggedOut]: EEventKind.Event,
+  [EEventType.AiAuthDiagnoseRequested]: EEventKind.Command,
+  [EEventType.AiAuthDiagnosed]: EEventKind.Event,
+  [EEventType.SettingsUpdateRequested]: EEventKind.Command,
+  [EEventType.SettingsChanged]: EEventKind.Event,
+  [EEventType.CalendarSourceAddRequested]: EEventKind.Command,
+  [EEventType.CalendarSourceAdded]: EEventKind.Event,
+  [EEventType.CommandRejected]: EEventKind.Event,
   [EEventType.EventDeadLettered]: EEventKind.Event,
   [EEventType.AppStarted]: EEventKind.Event,
   [EEventType.TestNoted]: EEventKind.Event,
   [EEventType.TestSecret]: EEventKind.Event,
+  [EEventType.TestRequested]: EEventKind.Command,
 };
 
 // payload set to NULL once the last delivery of the event completes
 export const EVENT_SCRUBBED: ReadonlySet<EEventType> = new Set([
   EEventType.MessageReceived,
   EEventType.MessageAuthorized,
+  EEventType.McpAuthTokenSaveRequested,
   EEventType.TestSecret,
 ]);
 
