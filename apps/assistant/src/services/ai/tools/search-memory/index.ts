@@ -1,7 +1,7 @@
 import { int, obj, opt, str } from "@earendil-works/pi-schema";
 import { EmbeddingClient } from "../../../embedding";
-import { Memory } from "../../../memory";
-import { FactDistiller } from "../../../memory/distill";
+import { EEventType } from "../../../events/catalog";
+import { MEMORY_REQUEST_TIMEOUT_MS, Memory } from "../../../memory";
 import type { TFactSearchResult } from "../../../memory/types";
 import { defineTool, requireChatId } from "../define-tool";
 import instructions from "./instructions.xml" with { type: "text" };
@@ -35,7 +35,16 @@ export const searchMemory = defineTool({
   logSafe: ["limit"],
   execute: async (context, args) => {
     const chatId = requireChatId(context.chatId);
-    await FactDistiller.instance.ensureFactsCurrent(chatId, context.trace);
+    await context.events.request(
+      EEventType.MemoryFactsRefreshRequested,
+      {},
+      {
+        outcome: EEventType.MemoryFactsRefreshed,
+        step: undefined,
+        key: chatId,
+        timeoutMs: MEMORY_REQUEST_TIMEOUT_MS,
+      },
+    );
 
     const embedding = await EmbeddingClient.instance.embedQuery(args.query);
     if (embedding === undefined) {

@@ -14,6 +14,7 @@ import { and, asc, eq } from "drizzle-orm";
 import { AgentHarness } from "../ai/agent-harness";
 import { setupAiAuth } from "../ai/auth";
 import { aiCredentials, aiModels } from "../ai/providers/registry";
+import { searchMemory } from "../ai/tools/search-memory";
 import { EAiProvider, ERole } from "../ai/types";
 import { ConversationStore } from "../conversation";
 import type { TConversation } from "../conversation/types";
@@ -25,8 +26,11 @@ import {
   type TSelectMemory,
 } from "../database/schema";
 import { resetEventTables } from "../database/test-utils";
+import { EmbeddingClient } from "../embedding";
 import { EventBus } from "../events";
 import { EEventType } from "../events/catalog";
+import { testEventRequester } from "../events/test-utils";
+import { Memory } from "../memory";
 import { FactDistiller } from "../memory/distill";
 import { MessagingAdapter } from "../messaging";
 import { EMessagePlatform } from "../messaging/types";
@@ -558,6 +562,62 @@ describe("MessageHandler", () => {
       "done",
       "done",
     ]);
+  });
+
+  test("a memory search waits behind a slow post-turn drain on the chat's memory lane", async () => {
+    const chatId = "discord:search";
+    const { memory } = await setupHandler(chatId);
+    const drain = Promise.withResolvers<void>();
+    const steps: string[] = [];
+    memory.loadLiveFactWindow = mock(async () => {
+      if (memory.loadLiveFactWindow.mock.calls.length === 1) {
+        await drain.promise;
+        steps.push("turn drain");
+      }
+
+      return emptyWindow(chatId);
+    });
+    const singletons = [EmbeddingClient, Memory] as unknown as { _instance: unknown }[];
+    const originals = singletons.map((singleton) => singleton._instance);
+    (EmbeddingClient as unknown as { _instance: unknown })._instance = {
+      embedQuery: mock(async () => [0.1]),
+    };
+    (Memory as unknown as { _instance: unknown })._instance = {
+      searchFacts: mock(async () => {
+        steps.push("search");
+        return [];
+      }),
+    };
+
+    try {
+      await requestTurn(chatId, "My bike is red.");
+      await waitForCall(memory.loadLiveFactWindow, 1);
+      const search = searchMemory
+        .createAgentTool({
+          chatId,
+          settings: DefaultConfigRecord,
+          trace: TEST_TRACE,
+          events: testEventRequester,
+          verifySettings: mock(async () => undefined),
+          runScheduledTask: mock(async () => {
+            throw new Error("not used");
+          }),
+        })
+        .execute("call", { query: "bike colour" });
+      await Bun.sleep(20);
+      expect(steps).toEqual([]);
+
+      drain.resolve();
+      expect((await search).details).toEqual({ facts: [] });
+      expect(steps).toEqual(["turn drain", "search"]);
+      expect(await deliveryStatus(EEventType.MemoryFactsRefreshRequested, "memory")).toEqual([
+        "done",
+      ]);
+    } finally {
+      singletons.forEach((singleton, index) => {
+        singleton._instance = originals[index];
+      });
+    }
   });
 
   test("drains contiguous live windows until caught up", async () => {

@@ -1,5 +1,6 @@
 import { arr, int, obj } from "@earendil-works/pi-schema";
-import { Memory } from "../../../memory";
+import { EEventType } from "../../../events/catalog";
+import { MEMORY_REQUEST_TIMEOUT_MS } from "../../../memory";
 import { defineTool, requireChatId } from "../define-tool";
 import instructions from "./instructions.xml" with { type: "text" };
 
@@ -22,7 +23,17 @@ export const forgetMemory = defineTool({
   execute: async (context, args) => {
     const chatId = requireChatId(context.chatId);
     try {
-      return { forgottenFactIds: await Memory.instance.forgetFacts(chatId, args.factIds) };
+      const forgotten = await context.events.request(
+        EEventType.MemoryFactsForgetRequested,
+        { chatId, factIds: args.factIds },
+        {
+          outcome: EEventType.MemoryFactsForgotten,
+          step: undefined,
+          key: chatId,
+          timeoutMs: MEMORY_REQUEST_TIMEOUT_MS,
+        },
+      );
+      return { forgottenFactIds: forgotten.payload.factIds };
     } catch (error) {
       throw new Error(`Memory forget failed: ${String(error)}`);
     }

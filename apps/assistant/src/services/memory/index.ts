@@ -1,15 +1,18 @@
-import { createLogger, type TLogger } from "@bellaclaw/shared";
+import { createLogger, type TLogger, type TOption } from "@bellaclaw/shared";
 import { and, asc, desc, eq, gt, inArray, isNull, lte, sql } from "drizzle-orm";
 import type { LibSQLDatabase } from "drizzle-orm/libsql";
 import { z } from "zod";
 import { ERole } from "../ai/types";
-import { DatabaseConnector } from "../database";
+import { DatabaseConnector, type TDatabaseTransaction } from "../database";
 import {
   EMBEDDING_DIMENSIONS,
   factDistillationStateTable,
   factsTable,
   memoriesTable,
 } from "../database/schema";
+import { EmbeddingClient } from "../embedding";
+import { commandFailed, ESubscriptionMode, EventBus, type TEventContext } from "../events";
+import { EEventType, type TEvent } from "../events/catalog";
 import {
   SPreparedFact,
   type TFact,
@@ -33,13 +36,16 @@ const MAX_FACT_COSINE_DISTANCE = 0.31;
 const MAX_SUPERSESSION_COSINE_DISTANCE = 0.24;
 const SUPERSESSION_CANDIDATE_LIMIT = 10;
 const SQueryEmbedding = z.array(z.number()).length(EMBEDDING_DIMENSIONS);
-
-type TFactTransaction = Parameters<Parameters<LibSQLDatabase["transaction"]>[0]>[0];
+// NOTE: a memory command waits behind a post-turn drain on the chat's memory lane, and a drain's
+// model calls can outlast request()'s 60 s default
+export const MEMORY_REQUEST_TIMEOUT_MS = 5 * 60_000;
+// the rejection code of a remember command whose fact could not be embedded
+export const EMBEDDING_UNAVAILABLE = "embedding-unavailable";
 
 // Runs inside the caller's queued transaction: inserts one live fact and retires the facts it
 // supersedes, failing the whole transaction when any of them is no longer a same-chat live fact.
 async function insertFact(
-  tx: TFactTransaction,
+  tx: TDatabaseTransaction,
   chatId: string,
   fact: TPreparedFact,
   createdAt: Date,
@@ -93,6 +99,36 @@ export class Memory {
     return Memory._instance;
   }
 
+  public setup(): void {
+    const bus = EventBus.instance;
+
+    bus.subscribe({
+      consumer: "memory",
+      type: EEventType.MemoryFactRememberRequested,
+      mode: ESubscriptionMode.Durable,
+      backoffMs: [],
+      handler: (event, ctx) => this.handleRememberRequested(event, ctx),
+    });
+    bus.subscribe({
+      consumer: "memory",
+      type: EEventType.MemoryFactsForgetRequested,
+      mode: ESubscriptionMode.Durable,
+      backoffMs: [],
+      handler: async (event, ctx) => {
+        const { chatId, factIds } = event.payload;
+
+        try {
+          await ctx.complete(async (tx, emit) => {
+            await this.forgetFacts(tx, chatId, factIds);
+            emit(EEventType.MemoryFactsForgotten, { chatId, factIds }, undefined, undefined);
+          });
+        } catch (error) {
+          await this.reject(event.type, error, undefined, ctx);
+        }
+      },
+    });
+  }
+
   public async loadLiveFactWindow(chatId: string): Promise<TLiveFactWindow> {
     return this.database.run(async (db) => {
       const state = await this.readLiveState(db, chatId);
@@ -124,85 +160,133 @@ export class Memory {
     return this.findFactsByDistance(chatId, embedding, limit, MAX_FACT_COSINE_DISTANCE);
   }
 
-  public async forgetFacts(chatId: string, factIds: number[]): Promise<number[]> {
-    return this.database.run(async (db) =>
-      db.transaction(async (tx) => {
-        const result = await tx
-          .update(factsTable)
-          .set({ forgottenAt: new Date() })
-          .where(
-            and(
-              eq(factsTable.chatId, chatId),
-              inArray(factsTable.id, factIds),
-              isNull(factsTable.supersededBy),
-              isNull(factsTable.forgottenAt),
-            ),
-          );
+  public async forgetFacts(
+    tx: TDatabaseTransaction,
+    chatId: string,
+    factIds: number[],
+  ): Promise<void> {
+    const result = await tx
+      .update(factsTable)
+      .set({ forgottenAt: new Date() })
+      .where(
+        and(
+          eq(factsTable.chatId, chatId),
+          inArray(factsTable.id, factIds),
+          isNull(factsTable.supersededBy),
+          isNull(factsTable.forgottenAt),
+        ),
+      );
 
-        if (result.rowsAffected !== factIds.length) {
-          throw new Error("Every fact ID must identify a same-chat live fact");
-        }
-
-        return factIds;
-      }),
-    );
+    if (result.rowsAffected !== factIds.length) {
+      throw new Error("Every fact ID must identify a same-chat live fact");
+    }
   }
 
   public async rememberFact(
+    tx: TDatabaseTransaction,
     chatId: string,
     text: string,
     sourceMessage: string,
     embedding: number[],
     supersedesFactIds: number[],
   ): Promise<TFact> {
-    return this.database.run(async (db) =>
-      db.transaction(async (tx) => {
-        const existing = await tx
-          .select()
-          .from(factsTable)
-          .where(
-            and(
-              eq(factsTable.chatId, chatId),
-              eq(factsTable.text, text),
-              isNull(factsTable.supersededBy),
-              isNull(factsTable.forgottenAt),
-            ),
-          )
-          .get();
-        if (existing !== undefined) {
-          return existing;
-        }
+    const existing = await tx
+      .select()
+      .from(factsTable)
+      .where(
+        and(
+          eq(factsTable.chatId, chatId),
+          eq(factsTable.text, text),
+          isNull(factsTable.supersededBy),
+          isNull(factsTable.forgottenAt),
+        ),
+      )
+      .get();
+    if (existing !== undefined) {
+      return existing;
+    }
 
-        const source = await tx
-          .select({ id: memoriesTable.id })
-          .from(memoriesTable)
-          .where(
-            and(
-              eq(memoriesTable.chatId, chatId),
-              eq(memoriesTable.author, ERole.User),
-              eq(memoriesTable.message, sourceMessage),
-            ),
-          )
-          .orderBy(desc(memoriesTable.id))
-          .limit(1)
-          .get();
-        if (source === undefined) {
-          throw new Error("A remembered fact requires its exact same-chat user transcript source");
-        }
+    const source = await tx
+      .select({ id: memoriesTable.id })
+      .from(memoriesTable)
+      .where(
+        and(
+          eq(memoriesTable.chatId, chatId),
+          eq(memoriesTable.author, ERole.User),
+          eq(memoriesTable.message, sourceMessage),
+        ),
+      )
+      .orderBy(desc(memoriesTable.id))
+      .limit(1)
+      .get();
+    if (source === undefined) {
+      throw new Error("A remembered fact requires its exact same-chat user transcript source");
+    }
 
-        const prepared = SPreparedFact.safeParse({
+    const prepared = SPreparedFact.safeParse({
+      text,
+      embedding,
+      sourceMessageId: source.id,
+      supersedesFactIds,
+    });
+    if (!prepared.success) {
+      throw new Error("Failed to validate remembered fact");
+    }
+
+    return insertFact(tx, chatId, prepared.data, new Date());
+  }
+
+  // NOTE: the embedding is computed before the transaction
+  private async handleRememberRequested(
+    event: TEvent<EEventType.MemoryFactRememberRequested>,
+    ctx: TEventContext,
+  ): Promise<void> {
+    const { chatId, text, sourceMessage, supersedesFactIds } = event.payload;
+    const embedding = await EmbeddingClient.instance.embed(text);
+
+    if (embedding === undefined) {
+      await this.reject(
+        event.type,
+        new Error("Embedding service unavailable"),
+        EMBEDDING_UNAVAILABLE,
+        ctx,
+      );
+      return;
+    }
+
+    try {
+      await ctx.complete(async (tx, emit) => {
+        const fact = await this.rememberFact(
+          tx,
+          chatId,
           text,
+          sourceMessage,
           embedding,
-          sourceMessageId: source.id,
           supersedesFactIds,
-        });
-        if (!prepared.success) {
-          throw new Error("Failed to validate remembered fact");
-        }
+        );
+        emit(EEventType.MemoryFactRemembered, { chatId, factId: fact.id }, undefined, undefined);
+      });
+    } catch (error) {
+      await this.reject(event.type, error, undefined, ctx);
+    }
+  }
 
-        return insertFact(tx, chatId, prepared.data, new Date());
-      }),
-    );
+  // NOTE: every failure is a rejection: the memory lane has no retries, and a requester should
+  // not wait out its timeout
+  private async reject(
+    commandType: EEventType,
+    error: unknown,
+    errorCode: TOption<string>,
+    ctx: TEventContext,
+  ): Promise<void> {
+    await ctx.complete(async (_tx, emit) => {
+      emit(
+        EEventType.CommandRejected,
+        { ...commandFailed(commandType, error), errorCode },
+        undefined,
+        undefined,
+      );
+    });
   }
 
   private async readLiveState(db: LibSQLDatabase, chatId: string): Promise<TFactDistillationState> {

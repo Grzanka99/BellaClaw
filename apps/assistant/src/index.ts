@@ -11,6 +11,7 @@ import { EventBus } from "./services/events";
 import { EEventType } from "./services/events/catalog";
 import { McpService } from "./services/mcp";
 import { setupMcpAuth, startMcpAuthServer, stopMcpAuthServer } from "./services/mcp/auth";
+import { Memory } from "./services/memory";
 import { FactDistiller } from "./services/memory/distill";
 import { MessageHandler } from "./services/message-handler";
 import { MessagingAdapter } from "./services/messaging";
@@ -50,6 +51,7 @@ async function init(): Promise<void> {
     CronScheduler.instance.subscribe();
     AutomationService.instance.setup();
     MessageHandler.instance.setup();
+    Memory.instance.setup();
     FactDistiller.instance.setup();
     SettingsService.instance.setup();
     setupAiAuth();

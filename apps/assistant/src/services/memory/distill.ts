@@ -1,13 +1,13 @@
 import type { TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
 import type { TOption } from "@bellaclaw/shared";
-import { AsyncQueue, createLogger } from "@bellaclaw/shared";
+import { createLogger } from "@bellaclaw/shared";
 import { z } from "zod";
 import { LlmClient, LlmResponseError } from "../ai/llm";
 import { EModelPurpose, ERole } from "../ai/types";
 import { ConversationStore } from "../conversation";
 import type { TSelectMemory } from "../database/schema";
 import { EmbeddingClient } from "../embedding";
-import { ESubscriptionMode, EventBus } from "../events";
+import { commandFailed, ESubscriptionMode, EventBus, type TEventContext } from "../events";
 import { EEventType } from "../events/catalog";
 import { SettingsService } from "../settings";
 import type { TConfigRecord } from "../settings/schema";
@@ -46,9 +46,6 @@ export class FactDistiller {
   private embedding = EmbeddingClient.instance;
   private memory = Memory.instance;
   private conversations = ConversationStore.instance;
-  // NOTE: shared by the memory consumer and ensureFactsCurrent, so their drains of one chat never
-  // overlap
-  private factQueues = new Map<string, AsyncQueue>();
 
   private constructor() {}
 
@@ -60,6 +57,8 @@ export class FactDistiller {
     return FactDistiller._instance;
   }
 
+  // NOTE: post-turn drains and refreshes share the memory consumer's chat lane, so the drains of
+  // one chat never overlap
   public setup(): void {
     const bus = EventBus.instance;
 
@@ -74,9 +73,40 @@ export class FactDistiller {
 
         // NOTE: acked anyway: the checkpoint in fact_distillation_state makes the next drain
         // cover this window
-        if (!(await this.enqueueFactDrain(chatId, settings, event.trace))) {
+        if (!(await this.drainLiveFactWindows(chatId, settings, event.trace))) {
           this.logger.error("turn.completed: fact drain failed");
         }
+      },
+    });
+    bus.subscribe({
+      consumer: "memory",
+      type: EEventType.MemoryFactsRefreshRequested,
+      mode: ESubscriptionMode.Durable,
+      backoffMs: [],
+      handler: async (event, ctx) => {
+        const chatId = event.key;
+
+        try {
+          const settings = await SettingsService.instance.getAll(chatId);
+
+          if (!(await this.drainLiveFactWindows(chatId, settings, event.trace))) {
+            throw new Error("Pending fact distillation failed");
+          }
+        } catch (error) {
+          await ctx.complete(async (_tx, emit) => {
+            emit(
+              EEventType.CommandRejected,
+              commandFailed(event.type, error),
+              undefined,
+              undefined,
+            );
+          });
+          return;
+        }
+
+        await ctx.complete(async (_tx, emit) => {
+          emit(EEventType.MemoryFactsRefreshed, {}, undefined, undefined);
+        });
       },
     });
     bus.subscribe({
@@ -84,53 +114,26 @@ export class FactDistiller {
       type: EEventType.AppStarted,
       mode: ESubscriptionMode.Live,
       backoffMs: [],
-      handler: (event) => this.scheduleFactDrainForAllChats(event.trace.turnId),
+      handler: (_event, ctx) => this.scheduleFactDrainForAllChats(ctx),
     });
   }
 
   // NOTE: without this, facts stay empty until the first inbound message of the process, so the
   // very first recall after a deploy answers from an unpopulated store. Catching up is best-effort
   // and must never fail boot — messaging works fine against a partially distilled store.
-  public async scheduleFactDrainForAllChats(turnId: string): Promise<void> {
+  // NOTE: one refresh command per chat puts each catch-up drain on that chat's memory lane; no one
+  // waits for their outcome
+  public async scheduleFactDrainForAllChats(ctx: TEventContext): Promise<void> {
     try {
       const chatIds = await this.conversations.findChatIds();
 
-      for (const chatId of chatIds) {
-        this.scheduleFactDrain(chatId, {
-          turnId,
-          chatId,
-          platform: undefined,
-        });
-      }
+      await ctx.transact(async (_tx, emit) => {
+        for (const chatId of chatIds) {
+          emit(EEventType.MemoryFactsRefreshRequested, {}, chatId, chatId);
+        }
+      });
     } catch (error) {
       this.logger.error(`scheduleFactDrainForAllChats: boot fact drain failed: ${String(error)}`);
-    }
-  }
-
-  public scheduleFactDrain(chatId: string, trace: TBehaviorTraceContext): void {
-    void this.factQueue(chatId)
-      .enqueue(async () => {
-        const settings = await SettingsService.instance.getAll(chatId);
-        await this.drainLiveFactWindows(chatId, settings, trace);
-      })
-      .catch((error) => {
-        this.logger.error(`scheduleFactDrain: fact drain failed: ${String(error)}`);
-      });
-  }
-
-  public enqueueFactDrain(
-    chatId: string,
-    settings: TConfigRecord,
-    trace: TBehaviorTraceContext,
-  ): Promise<boolean> {
-    return this.factQueue(chatId).enqueue(() => this.drainLiveFactWindows(chatId, settings, trace));
-  }
-
-  public async ensureFactsCurrent(chatId: string, trace: TBehaviorTraceContext): Promise<void> {
-    const settings = await SettingsService.instance.getAll(chatId);
-    const success = await this.enqueueFactDrain(chatId, settings, trace);
-    if (!success) {
-      throw new Error("Pending fact distillation failed");
     }
   }
 
@@ -331,17 +334,6 @@ export class FactDistiller {
     }
 
     return lines.join("\n");
-  }
-
-  private factQueue(chatId: string): AsyncQueue {
-    let queue = this.factQueues.get(chatId);
-
-    if (queue === undefined) {
-      queue = new AsyncQueue();
-      this.factQueues.set(chatId, queue);
-    }
-
-    return queue;
   }
 
   private async drainLiveFactWindows(

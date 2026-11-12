@@ -1,4 +1,3 @@
-import { createSystemTurnId } from "@bellaclaw/behavior-logs";
 import { and, eq } from "drizzle-orm";
 import { DatabaseConnector, type TDatabaseTransaction } from "../database";
 import { type TSelectUserConfig, userConfigsTable } from "../database/schema";
@@ -104,40 +103,6 @@ export class SettingsService {
     const record = await this.getAll(ownerKey);
 
     return record[key];
-  }
-
-  public async set(ownerKey: string, key: string, value: string): Promise<TConfigRecord> {
-    if (!isConfigKey(key)) {
-      throw new Error(`Unknown config key: "${key}"`);
-    }
-
-    return this.setMany(ownerKey, [{ key, value }]);
-  }
-
-  // NOTE: the settings tool's path until it sends settings.update.requested; the cache follows
-  // from settings.changed
-  public async setMany(ownerKey: string, updates: TConfigUpdate[]): Promise<TConfigRecord> {
-    const validation = this.validate(updates);
-
-    if (!validation.valid) {
-      throw new Error(validation.problem);
-    }
-
-    const record = await EventBus.instance.transact(async (tx, emit) => {
-      const written = await this.writeMany(tx, ownerKey, validation.updates);
-      emit({
-        type: EEventType.SettingsChanged,
-        source: "settings",
-        key: ownerKey,
-        trace: { turnId: createSystemTurnId(), chatId: ownerKey, platform: undefined },
-        payload: { ownerKey, record: written },
-        causationId: undefined,
-        dedupeKey: undefined,
-      });
-      return written;
-    });
-
-    return { ...record };
   }
 
   private validate(updates: TConfigUpdate[]): TValidation {

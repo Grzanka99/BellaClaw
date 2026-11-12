@@ -1,6 +1,7 @@
 import type { TOption } from "@bellaclaw/shared";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { bool, obj, oneOf, opt, type Static, str } from "@earendil-works/pi-schema";
+import { EEventType } from "../../../events/catalog";
 import { SettingsService, type TConfigUpdate } from "../../../settings";
 import { ConfigValidators, EConfigKey } from "../../../settings/schema";
 import {
@@ -327,7 +328,12 @@ export const updateSettings = defineTool({
     let savedSettings = settings;
 
     if (updates.length > 0) {
-      savedSettings = await SettingsService.instance.setMany(chatId, updates);
+      const changed = await context.events.request(
+        EEventType.SettingsUpdateRequested,
+        { ownerKey: chatId, updates },
+        { outcome: EEventType.SettingsChanged, step: undefined, key: chatId, timeoutMs: undefined },
+      );
+      savedSettings = changed.payload.record;
     }
 
     return {

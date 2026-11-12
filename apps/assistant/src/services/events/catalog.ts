@@ -61,6 +61,12 @@ export enum EEventType {
   AiAuthLoggedOut = "ai.auth.logged_out",
   AiAuthDiagnoseRequested = "ai.auth.diagnose.requested",
   AiAuthDiagnosed = "ai.auth.diagnosed",
+  MemoryFactsRefreshRequested = "memory.facts.refresh.requested",
+  MemoryFactsRefreshed = "memory.facts.refreshed",
+  MemoryFactRememberRequested = "memory.fact.remember.requested",
+  MemoryFactRemembered = "memory.fact.remembered",
+  MemoryFactsForgetRequested = "memory.facts.forget.requested",
+  MemoryFactsForgotten = "memory.facts.forgotten",
   SettingsUpdateRequested = "settings.update.requested",
   SettingsChanged = "settings.changed",
   CalendarSourceAddRequested = "calendar.source.add.requested",
@@ -343,6 +349,22 @@ const SAiAuthDiagnoseRequested = z.object({ chatId: z.string(), providerId: z.st
 // problem: the reply for the failed turn, when the provider needs a new login
 const SAiAuthDiagnosed = z.object({ problem: z.string().optional() }).strict();
 
+// the chat is the event key
+const SMemoryFactsRefresh = z.object({}).strict();
+
+const SMemoryFactRememberRequested = z
+  .object({
+    chatId: z.string(),
+    text: z.string(),
+    sourceMessage: z.string(),
+    supersedesFactIds: z.array(z.number().int()),
+  })
+  .strict();
+
+const SMemoryFactRemembered = z.object({ chatId: z.string(), factId: z.number().int() }).strict();
+
+const SMemoryFacts = z.object({ chatId: z.string(), factIds: z.array(z.number().int()) }).strict();
+
 const SSettingsUpdateRequested = z
   .object({
     ownerKey: z.string(),
@@ -442,6 +464,12 @@ export type TEventPayloads = {
   [EEventType.AiAuthLoggedOut]: z.infer<typeof SAiAuthLogoutRequested>;
   [EEventType.AiAuthDiagnoseRequested]: z.infer<typeof SAiAuthDiagnoseRequested>;
   [EEventType.AiAuthDiagnosed]: z.infer<typeof SAiAuthDiagnosed>;
+  [EEventType.MemoryFactsRefreshRequested]: z.infer<typeof SMemoryFactsRefresh>;
+  [EEventType.MemoryFactsRefreshed]: z.infer<typeof SMemoryFactsRefresh>;
+  [EEventType.MemoryFactRememberRequested]: z.infer<typeof SMemoryFactRememberRequested>;
+  [EEventType.MemoryFactRemembered]: z.infer<typeof SMemoryFactRemembered>;
+  [EEventType.MemoryFactsForgetRequested]: z.infer<typeof SMemoryFacts>;
+  [EEventType.MemoryFactsForgotten]: z.infer<typeof SMemoryFacts>;
   [EEventType.SettingsUpdateRequested]: z.infer<typeof SSettingsUpdateRequested>;
   [EEventType.SettingsChanged]: z.infer<typeof SSettingsChanged>;
   [EEventType.CalendarSourceAddRequested]: z.infer<typeof SCalendarSourceAddRequested>;
@@ -503,6 +531,12 @@ export const EVENT_SCHEMAS: { [K in EEventType]: z.ZodType<TEventPayloads[K]> } 
   [EEventType.AiAuthLoggedOut]: SAiAuthLogoutRequested,
   [EEventType.AiAuthDiagnoseRequested]: SAiAuthDiagnoseRequested,
   [EEventType.AiAuthDiagnosed]: SAiAuthDiagnosed,
+  [EEventType.MemoryFactsRefreshRequested]: SMemoryFactsRefresh,
+  [EEventType.MemoryFactsRefreshed]: SMemoryFactsRefresh,
+  [EEventType.MemoryFactRememberRequested]: SMemoryFactRememberRequested,
+  [EEventType.MemoryFactRemembered]: SMemoryFactRemembered,
+  [EEventType.MemoryFactsForgetRequested]: SMemoryFacts,
+  [EEventType.MemoryFactsForgotten]: SMemoryFacts,
   [EEventType.SettingsUpdateRequested]: SSettingsUpdateRequested,
   [EEventType.SettingsChanged]: SSettingsChanged,
   [EEventType.CalendarSourceAddRequested]: SCalendarSourceAddRequested,
@@ -562,6 +596,12 @@ export const EVENT_KINDS: Record<EEventType, EEventKind> = {
   [EEventType.AiAuthLoggedOut]: EEventKind.Event,
   [EEventType.AiAuthDiagnoseRequested]: EEventKind.Command,
   [EEventType.AiAuthDiagnosed]: EEventKind.Event,
+  [EEventType.MemoryFactsRefreshRequested]: EEventKind.Command,
+  [EEventType.MemoryFactsRefreshed]: EEventKind.Event,
+  [EEventType.MemoryFactRememberRequested]: EEventKind.Command,
+  [EEventType.MemoryFactRemembered]: EEventKind.Event,
+  [EEventType.MemoryFactsForgetRequested]: EEventKind.Command,
+  [EEventType.MemoryFactsForgotten]: EEventKind.Event,
   [EEventType.SettingsUpdateRequested]: EEventKind.Command,
   [EEventType.SettingsChanged]: EEventKind.Event,
   [EEventType.CalendarSourceAddRequested]: EEventKind.Command,
