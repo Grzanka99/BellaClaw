@@ -30,6 +30,20 @@ bunx turbo run dev --filter=@bellaclaw/assistant
 bunx turbo run dev --filter=@bellaclaw/log-viewer
 ```
 
+## Signal Simulator
+
+Hold real conversations with the assistant from the shell, with no Signal account:
+
+```bash
+bun run dev:sim          # containers, migrations, sim + log viewer + assistant
+bun run sim              # lists the commands
+```
+
+It needs Podman. Models, MCP and embeddings are real; the database, notes vault and behavior logs
+are throwaway and live in `~/.config/bellaclaw-sim`, never in `.env` or your production data. The
+first conversation asks you to log in to a model provider once. Steps and commands:
+[`.agents/skills/signal-sim/SKILL.md`](../.agents/skills/signal-sim/SKILL.md).
+
 ## Test
 
 Run everything:
