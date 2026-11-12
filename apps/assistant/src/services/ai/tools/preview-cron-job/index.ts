@@ -126,6 +126,7 @@ export const previewCronJob = defineTool({
           return context.runScheduledTask({ ...runArgs, withoutMcp: true });
         },
       },
+      context.events,
       (automation, options) => dryRunSavedAutomation(automation, { ...options, signal }),
       context.trace,
     );

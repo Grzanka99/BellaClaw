@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, type Mock, mock, spyOn, test } from "bun:test";
 import { opencodeGoProvider } from "@earendil-works/pi-ai/providers/opencode-go";
+import { testEventRequester } from "../../../events/test-utils";
 import { SettingsService, type TConfigUpdate } from "../../../settings";
 import { DefaultConfigRecord, EConfigKey, type TConfigRecord } from "../../../settings/schema";
 import { decodeAiModelPreferences, getAiModelPreference } from "../../model-preferences";
@@ -13,6 +14,7 @@ const context = {
   chatId: "discord:1",
   settings: DefaultConfigRecord,
   trace: { turnId: "test", chatId: undefined, platform: undefined },
+  events: testEventRequester,
   verifySettings: mock(async () => undefined),
   runScheduledTask: mock(async () => {
     throw new Error("not used");

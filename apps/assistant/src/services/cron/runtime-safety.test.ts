@@ -6,6 +6,7 @@ import { resetCronEngineJobsTable, resetEventTables } from "../database/test-uti
 import { EventBus } from "../events";
 import { EEventType } from "../events/catalog";
 import { CronScheduler } from "./index";
+import { createOnce } from "./test-utils";
 
 type TSchedulerInternals = {
   fire: (id: number) => Promise<void>;
@@ -30,14 +31,18 @@ describe("CronScheduler runtime safety", () => {
     await resetEventTables();
     Object.assign(EventBus, { _instance: undefined });
     scheduler = new CronScheduler({});
+    scheduler.subscribe();
+    await EventBus.instance.start();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     scheduler.destroy();
+    await EventBus.instance.idle();
+    await EventBus.instance.stop();
   });
 
   test("overlapping fires complete a one-time job named error once", async () => {
-    const scheduled = await scheduler.createOnce({
+    const scheduled = await createOnce({
       name: "error",
       scope: "scope-a",
       fireAt: new Date(Date.now() + 60_000),

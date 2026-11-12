@@ -5,6 +5,7 @@ import { join } from "node:path";
 import type { TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
 import type { TOption } from "@bellaclaw/shared";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
+import { testEventRequester } from "../../events/test-utils";
 import { DefaultConfigRecord } from "../../settings/schema";
 import { AgentHarness } from "../agent-harness";
 import type { TAgentRunArgs } from "../agent-harness/types";
@@ -99,6 +100,7 @@ describe("agent permissions", () => {
           currentTimeContext: undefined,
           platform: undefined,
           trace: TEST_TRACE,
+          events: testEventRequester,
           parentToolCallId: undefined,
           signal: undefined,
           delegationCount,
@@ -157,6 +159,7 @@ describe("agent permissions", () => {
         currentTimeContext: undefined,
         platform: undefined,
         trace: TEST_TRACE,
+        events: testEventRequester,
         parentToolCallId: undefined,
         signal: undefined,
         delegationCount: () => undefined,

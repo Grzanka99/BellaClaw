@@ -1,6 +1,7 @@
 import { arr, int, map, obj, opt, str, unknown } from "@earendil-works/pi-schema";
-import { AutomationService, MAX_AUTOMATION_OUTPUT_CAP_BYTES } from "../../../automation";
-import { EAutomationRunOutcome, previewAutomationDraft } from "../../../automation/runner";
+import { MAX_AUTOMATION_OUTPUT_CAP_BYTES } from "../../../automation";
+import { AUTOMATION_RUN_TIMEOUT_MS } from "../../../automation/runner";
+import { EEventType } from "../../../events/catalog";
 import { EConfigKey } from "../../../settings/schema";
 import { runAutomationOperation } from "../automation-errors";
 import { defineTool, requireChatId } from "../define-tool";
@@ -45,29 +46,33 @@ export const automationPreview = defineTool({
   mode: "sequential",
   logSafe: ["success", "outputCapBytes"],
   privateErrors: true,
-  execute: async (context, args, signal) => {
+  execute: async (context, args) => {
     const scope = requireChatId(context.chatId);
-    const draft = await runAutomationOperation(() =>
-      AutomationService.instance.createDraft({
-        scope,
-        name: args.name,
-        instructions: args.instructions,
-        source: args.source,
-        config: args.config,
-        allowedOrigins: args.allowedOrigins,
-        outputCapBytes: args.outputCapBytes,
-      }),
+    const previewed = await runAutomationOperation(() =>
+      context.events.request(
+        EEventType.AutomationPreviewRequested,
+        {
+          scope,
+          name: args.name,
+          instructions: args.instructions,
+          source: args.source,
+          config: args.config,
+          allowedOrigins: args.allowedOrigins,
+          outputCapBytes: args.outputCapBytes,
+          timezone: context.settings[EConfigKey.AiInstructionsTimezone],
+        },
+        {
+          outcome: EEventType.AutomationPreviewed,
+          step: undefined,
+          key: scope,
+          timeoutMs: AUTOMATION_RUN_TIMEOUT_MS,
+        },
+      ),
     );
-    const report = await previewAutomationDraft(draft, {
-      timezone: context.settings[EConfigKey.AiInstructionsTimezone],
-      trace: context.trace,
-      signal,
-    });
+    const { previewId, report } = previewed.payload;
 
-    if (report.outcome === EAutomationRunOutcome.Failed) {
-      // Only a successful preview may leave a draft that automation-save can make live.
-      await AutomationService.instance.deleteDraft(scope, draft.id);
-
+    // only a successful preview leaves a draft
+    if (previewId === undefined) {
       return {
         success: false,
         error: report.error,
@@ -78,12 +83,12 @@ export const automationPreview = defineTool({
 
     return {
       success: true,
-      previewId: draft.id,
-      name: draft.name,
+      previewId,
+      name: previewed.payload.name,
       input: {
-        allowedOrigins: draft.allowedOrigins,
-        config: draft.config,
-        outputCapBytes: draft.outputCapBytes,
+        allowedOrigins: previewed.payload.allowedOrigins,
+        config: previewed.payload.config,
+        outputCapBytes: previewed.payload.outputCapBytes,
         fetched: report.fetches.map((fetch) => ({
           url: fetch.url,
           status: fetch.status,

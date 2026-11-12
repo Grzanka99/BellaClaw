@@ -1,7 +1,7 @@
 import { obj, oneOf, str } from "@earendil-works/pi-schema";
-import { AutomationService, EAutomationStatus } from "../../../automation";
+import { EAutomationStatus } from "../../../automation";
+import { EEventType } from "../../../events/catalog";
 import { runAutomationOperation } from "../automation-errors";
-import { summarizeAutomation } from "../automation-summary";
 import { defineTool, requireChatId } from "../define-tool";
 import instructions from "./instructions.xml" with { type: "text" };
 
@@ -21,10 +21,19 @@ export const automationSetStatus = defineTool({
   logSafe: ["status", "failureCount", "outputCapBytes"],
   execute: async (context, args) => {
     const scope = requireChatId(context.chatId);
-    const automation = await runAutomationOperation(() =>
-      AutomationService.instance.setStatus(scope, args.name, args.status),
+    const changed = await runAutomationOperation(() =>
+      context.events.request(
+        EEventType.AutomationStatusSetRequested,
+        { scope, name: args.name, status: args.status },
+        {
+          outcome: EEventType.AutomationStatusChanged,
+          step: undefined,
+          key: scope,
+          timeoutMs: undefined,
+        },
+      ),
     );
 
-    return summarizeAutomation(automation);
+    return changed.payload.automation;
   },
 });

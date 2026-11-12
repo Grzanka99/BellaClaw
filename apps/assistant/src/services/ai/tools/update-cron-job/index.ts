@@ -1,7 +1,8 @@
 import { arr, obj, opt, type Static, str } from "@earendil-works/pi-schema";
 import { AutomationService } from "../../../automation";
 import { CronScheduler } from "../../../cron";
-import { ECronJobType } from "../../../cron/types";
+import { ECronJobType, fromCronJobRecord } from "../../../cron/types";
+import { EEventType } from "../../../events/catalog";
 import { EConfigKey } from "../../../settings/schema";
 import { runAutomationOperation } from "../automation-errors";
 import {
@@ -118,17 +119,28 @@ export const updateCronJob = defineTool({
         throw new Error("Existing recurring reminder has no pattern");
       }
 
-      return runCronJobOperation(() =>
-        CronScheduler.instance.createRecurring({
-          name: existing.name,
-          scope: chatId,
-          pattern,
-          content,
-          automationIds,
-          overwrite: true,
-          timezone: existing.timezone ?? undefined,
-        }),
-      );
+      return runCronJobOperation(async () => {
+        const scheduled = await context.events.request(
+          EEventType.CronJobScheduleRequested,
+          {
+            name: existing.name,
+            scope: chatId,
+            pattern,
+            content,
+            automationIds,
+            overwrite: true,
+            timezone: existing.timezone ?? undefined,
+          },
+          {
+            outcome: EEventType.CronJobScheduled,
+            step: undefined,
+            key: chatId,
+            timeoutMs: undefined,
+          },
+        );
+
+        return fromCronJobRecord(scheduled.payload.job);
+      });
     }
 
     if (validatedArgs.pattern !== undefined) {
@@ -147,16 +159,27 @@ export const updateCronJob = defineTool({
       );
     }
 
-    return runCronJobOperation(() =>
-      CronScheduler.instance.createOnce({
-        name: existing.name,
-        scope: chatId,
-        fireAt,
-        content,
-        automationIds,
-        overwrite: true,
-        timezone: existing.timezone ?? undefined,
-      }),
-    );
+    return runCronJobOperation(async () => {
+      const scheduled = await context.events.request(
+        EEventType.CronJobScheduleRequested,
+        {
+          name: existing.name,
+          scope: chatId,
+          fireAt: fireAt.getTime(),
+          content,
+          automationIds,
+          overwrite: true,
+          timezone: existing.timezone ?? undefined,
+        },
+        {
+          outcome: EEventType.CronJobScheduled,
+          step: undefined,
+          key: chatId,
+          timeoutMs: undefined,
+        },
+      );
+
+      return fromCronJobRecord(scheduled.payload.job);
+    });
   },
 });

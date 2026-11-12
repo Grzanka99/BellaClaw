@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, type Mock, mock, spyOn, test }
 import { compile } from "@earendil-works/pi-schema";
 import { formats } from "@earendil-works/pi-schema/formats";
 import { EmbeddingClient } from "../../../embedding";
+import { testEventRequester } from "../../../events/test-utils";
 import { Memory } from "../../../memory";
 import { FactDistiller } from "../../../memory/distill";
 import { DefaultConfigRecord } from "../../../settings/schema";
@@ -19,6 +20,7 @@ const context = {
   chatId: "discord:1",
   settings: DefaultConfigRecord,
   trace: { turnId: "test", chatId: undefined, platform: undefined },
+  events: testEventRequester,
   verifySettings: mock(async () => undefined),
   runScheduledTask: mock(async () => {
     throw new Error("not used");

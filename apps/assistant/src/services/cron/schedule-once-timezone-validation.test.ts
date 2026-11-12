@@ -1,22 +1,30 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { resetCronEngineJobsTable } from "../database/test-utils";
+import { resetCronEngineJobsTable, resetEventTables } from "../database/test-utils";
+import { EventBus } from "../events";
 import { CronScheduler } from "./index";
+import { createOnce } from "./test-utils";
 
 describe("CronScheduler scheduleOnce timezone validation", () => {
   let engine: CronScheduler;
 
   beforeEach(async () => {
     await resetCronEngineJobsTable();
+    await resetEventTables();
+    Object.assign(EventBus, { _instance: undefined });
     engine = new CronScheduler({});
+    engine.subscribe();
+    await EventBus.instance.start();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     engine.destroy();
+    await EventBus.instance.idle();
+    await EventBus.instance.stop();
   });
 
   test("rejects invalid one-time job timezones before storing", async () => {
     await expect(
-      engine.createOnce({
+      createOnce({
         name: "invalid-onetime-timezone",
         scope: "scope-a",
         fireAt: new Date(Date.now() + 60_000),
@@ -24,8 +32,8 @@ describe("CronScheduler scheduleOnce timezone validation", () => {
         content: { kind: "text", text: "Hi." },
       }),
     ).rejects.toMatchObject({
-      code: "create-failed",
-      message: "Error: Invalid timezone: Not/A_Timezone",
+      errorCode: "create-failed",
+      message: "create failed: Error: Invalid timezone: Not/A_Timezone",
     });
 
     const job = await engine.get("invalid-onetime-timezone", "scope-a");

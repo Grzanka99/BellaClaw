@@ -2,6 +2,7 @@ import { AppLogger, EBehaviorLogLevel } from "@bellaclaw/behavior-logs";
 import { setupAiAuth } from "./services/ai/auth";
 import { startAiOAuthKeepAlive } from "./services/ai/auth/oauth-keep-alive";
 import { AuthorizationService } from "./services/authorization";
+import { AutomationService } from "./services/automation";
 import { CalendarService } from "./services/calendar";
 import { Commands } from "./services/commands";
 import { CronScheduler } from "./services/cron";
@@ -46,6 +47,8 @@ async function init(): Promise<void> {
     Notices.instance.setup();
     Commands.instance.setup();
     ScheduledDelivery.instance.setup();
+    CronScheduler.instance.subscribe();
+    AutomationService.instance.setup();
     MessageHandler.instance.setup();
     FactDistiller.instance.setup();
     SettingsService.instance.setup();

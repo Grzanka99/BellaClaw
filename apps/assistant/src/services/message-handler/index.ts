@@ -8,7 +8,7 @@ import { startSpan } from "../app-logger/span";
 import { ConversationStore } from "../conversation";
 import type { TConversation } from "../conversation/types";
 import type { TSelectMemory } from "../database/schema";
-import { ESubscriptionMode, EventBus, type TEventContext } from "../events";
+import { ESubscriptionMode, EventBus, type TEventContext, type TEventRequester } from "../events";
 import { EEventType, type TEvent } from "../events/catalog";
 import type { EMessagePlatform } from "../messaging/types";
 import { SettingsService } from "../settings";
@@ -126,7 +126,7 @@ export class MessageHandler {
     try {
       let conversation = await this.conversations.load(chatId);
       if (conversation !== undefined) {
-        conversation = await this.compact(chatId, conversation, settings, platform, trace);
+        conversation = await this.compact(chatId, conversation, settings, platform, trace, ctx);
       }
 
       const saveSpan = startMemorySaveSpan(trace, ERole.User, content.length);
@@ -160,6 +160,7 @@ export class MessageHandler {
         settings,
         platform,
         trace,
+        events: ctx,
         signal: undefined,
       });
       this.logger.info(
@@ -250,7 +251,7 @@ export class MessageHandler {
 
     // acked; the chat lane is still held, so the next turn waits for compaction.
     // compact() reports its own failures
-    await this.compact(chatId, persisted, settings, platform, trace);
+    await this.compact(chatId, persisted, settings, platform, trace, ctx);
   }
 
   private async compact(
@@ -259,10 +260,18 @@ export class MessageHandler {
     settings: TConfigRecord,
     platform: TOption<EMessagePlatform>,
     trace: TBehaviorTraceContext,
+    events: TEventRequester,
   ): Promise<TConversation> {
     const span = startSpan(trace, "conversation.compaction.completed", "message-handler");
     try {
-      const result = await this.ai.compactConversation(state, settings, chatId, platform, trace);
+      const result = await this.ai.compactConversation(
+        state,
+        settings,
+        chatId,
+        platform,
+        trace,
+        events,
+      );
       if (result === undefined) {
         return state;
       }

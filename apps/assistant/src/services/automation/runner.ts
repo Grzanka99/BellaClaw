@@ -1,13 +1,12 @@
 import type { TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
-import type { TOption } from "@bellaclaw/shared";
 import {
   runScript,
+  SCRIPT_LIMITS,
   type TScriptFetcher,
-  type TScriptFetchLog,
   type TScriptRunResult,
 } from "../../lib/script-sandbox";
 import { startSpan } from "../app-logger/span";
-import { AutomationService } from "./index";
+import type { TAutomationRunReport } from "../events/catalog";
 import { EAutomationStatus, type TAutomation, type TAutomationDraft } from "./types";
 
 export enum EAutomationRunMode {
@@ -24,20 +23,6 @@ export enum EAutomationRunOutcome {
   Unavailable = "unavailable",
 }
 
-export type TAutomationRunReport = {
-  name: string;
-  instructions: TOption<string>;
-  outcome: EAutomationRunOutcome;
-  text: TOption<string>;
-  data: unknown;
-  error: TOption<string>;
-  fetches: TScriptFetchLog[];
-  logs: string[];
-  durationMs: number;
-  /** True only when this run's failure paused the automation. */
-  paused: boolean;
-};
-
 export type TAutomationRunOptions = {
   timezone: string;
   trace: TBehaviorTraceContext;
@@ -50,47 +35,21 @@ type TRunnableAutomation = Pick<
   "scope" | "name" | "instructions" | "source" | "config" | "allowedOrigins" | "outputCapBytes"
 >;
 
+/** A scheduled or manual run waits this long: the sandbox wall limit plus a margin. */
+export const AUTOMATION_RUN_TIMEOUT_MS = SCRIPT_LIMITS.wallMs + 30_000;
+
 /**
  * Runs a draft against real data with a copy of the live automation's state.
  * Nothing is persisted: preview never commits state or failure counts.
  */
 export async function previewAutomationDraft(
   draft: TAutomationDraft,
+  liveState: unknown,
   options: TAutomationRunOptions,
 ): Promise<TAutomationRunReport> {
-  const live = await AutomationService.instance.get(draft.scope, draft.name);
-  const result = await executeAutomation(draft, live?.state, EAutomationRunMode.Preview, options);
+  const result = await executeAutomation(draft, liveState, EAutomationRunMode.Preview, options);
 
   return createReport(draft, result, false);
-}
-
-/**
- * Runs a saved automation and records the result: success stores the returned
- * state and resets failures; failure counts towards the automatic pause.
- */
-export async function runSavedAutomation(
-  automation: TAutomation,
-  mode: EAutomationRunMode.Manual | EAutomationRunMode.Cron,
-  options: TAutomationRunOptions,
-): Promise<TAutomationRunReport> {
-  if (automation.status === EAutomationStatus.Paused) {
-    return createPausedReport(automation);
-  }
-
-  const result = await executeAutomation(automation, automation.state, mode, options);
-
-  if (result.ok) {
-    await AutomationService.instance.recordSuccess(automation.id, result.state);
-    return createReport(automation, result, false);
-  }
-
-  if (options.signal?.aborted) {
-    return createReport(automation, result, false);
-  }
-
-  const failure = await AutomationService.instance.recordFailure(automation.id, result.error);
-
-  return createReport(automation, result, failure.paused);
 }
 
 /**
@@ -116,7 +75,7 @@ export async function dryRunSavedAutomation(
   return createReport(automation, result, false);
 }
 
-function createPausedReport(automation: TAutomation): TAutomationRunReport {
+export function createPausedReport(automation: TAutomation): TAutomationRunReport {
   return {
     name: automation.name,
     instructions: automation.instructions ?? undefined,
@@ -131,7 +90,7 @@ function createPausedReport(automation: TAutomation): TAutomationRunReport {
   };
 }
 
-async function executeAutomation(
+export async function executeAutomation(
   automation: TRunnableAutomation,
   state: unknown,
   mode: EAutomationRunMode,
@@ -176,7 +135,7 @@ async function executeAutomation(
   return result;
 }
 
-function createReport(
+export function createReport(
   automation: TRunnableAutomation,
   result: TScriptRunResult,
   paused: boolean,

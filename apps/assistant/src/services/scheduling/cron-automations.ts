@@ -6,12 +6,9 @@ import {
   MAX_CONSECUTIVE_AUTOMATION_FAILURES,
   type TAutomation,
 } from "../automation";
-import {
-  EAutomationRunOutcome,
-  type TAutomationRunOptions,
-  type TAutomationRunReport,
-} from "../automation/runner";
-import type { TCronFiredPayload } from "../events/catalog";
+import { EAutomationRunOutcome, type TAutomationRunOptions } from "../automation/runner";
+import type { TEventRequester } from "../events";
+import type { TAutomationRunReport, TCronFiredPayload } from "../events/catalog";
 import type { EMessagePlatform } from "../messaging/types";
 import {
   generateScheduledTaskText,
@@ -44,6 +41,7 @@ export async function runCronJobAutomations(
   ctx: TCronFiredPayload,
   platform: TOption<EMessagePlatform>,
   ai: TScheduledTaskAi,
+  events: TEventRequester,
   runAutomation: TRunCronAutomation,
   trace: TBehaviorTraceContext,
 ): Promise<TCronAutomationsResult> {
@@ -80,7 +78,14 @@ export async function runCronJobAutomations(
       automationOutputs = createAutomationOutputsBlock(reports);
     }
 
-    const taskResult = await generateScheduledTaskText(ctx, platform, ai, trace, automationOutputs);
+    const taskResult = await generateScheduledTaskText(
+      ctx,
+      platform,
+      ai,
+      events,
+      trace,
+      automationOutputs,
+    );
 
     return { text: taskResult.text, reports, taskResult };
   }

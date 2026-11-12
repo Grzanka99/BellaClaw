@@ -2,8 +2,10 @@ import { afterEach, describe, expect, mock, test } from "bun:test";
 import { compile } from "@earendil-works/pi-schema";
 import { formats } from "@earendil-works/pi-schema/formats";
 import { AutomationError, AutomationService } from "../../../automation";
-import { CronScheduler } from "../../../cron";
 import { ECronJobStatus, ECronJobType } from "../../../cron/types";
+import type { TEventRequester } from "../../../events";
+import { EEventType } from "../../../events/catalog";
+import { testEventRequester } from "../../../events/test-utils";
 import { DefaultConfigRecord } from "../../../settings/schema";
 import { SScheduleOnceArgs, scheduleOnce, validateScheduleOnceArgs } from ".";
 
@@ -11,14 +13,36 @@ const context = {
   chatId: "discord:1",
   settings: DefaultConfigRecord,
   trace: { turnId: "test", chatId: undefined, platform: undefined },
+  events: testEventRequester,
   verifySettings: mock(async () => undefined),
   runScheduledTask: mock(async () => {
     throw new Error("not used");
   }),
 };
 
+// answers cron.job.schedule.requested with the scheduled job
+function createRequester() {
+  const request = mock(async (_type: EEventType, payload: Record<string, unknown>) => ({
+    payload: {
+      job: {
+        ...payload,
+        id: 1,
+        type: ECronJobType.OneTime,
+        status: ECronJobStatus.Active,
+        nextRunAt: payload.fireAt,
+        createdAt: Date.now(),
+      },
+    },
+  }));
+  const events = {
+    ...testEventRequester,
+    request: request as unknown as TEventRequester["request"],
+  };
+
+  return { request, context: { ...context, events } };
+}
+
 afterEach(() => {
-  (CronScheduler as unknown as { _instance: unknown })._instance = undefined;
   (AutomationService as unknown as { _instance: unknown })._instance = undefined;
 });
 
@@ -70,20 +94,8 @@ describe("schedule-once", () => {
     expect(once.content).toEqual({ kind: "text", text: "Reminder" });
   });
 
-  test("uses the schedule-once handler validation and date conversion", async () => {
-    const createOnce = mock(async (args) => ({
-      ...args,
-      id: 1,
-      type: ECronJobType.OneTime,
-      status: ECronJobStatus.Active,
-      nextRunAt: args.fireAt,
-      pattern: null,
-      lastRunAt: null,
-      createdAt: new Date(),
-      finishedAt: null,
-      finishedReason: null,
-    }));
-    (CronScheduler as unknown as { _instance: unknown })._instance = { createOnce };
+  test("requests the schedule with validated content and the fire time in ms", async () => {
+    const { request, context } = createRequester();
     const tool = scheduleOnce.createAgentTool(context);
 
     await expect(
@@ -101,35 +113,34 @@ describe("schedule-once", () => {
       ],
     });
 
-    await tool.execute("call", {
+    const result = await tool.execute("call-2", {
       name: "direct",
       fireAt: "2026-08-01T10:00:00",
       reminderText: "Call Mum",
       reminderFallbackText: "Reminder unavailable",
     });
 
-    expect(createOnce).toHaveBeenCalledWith(
+    expect(request).toHaveBeenCalledWith(
+      EEventType.CronJobScheduleRequested,
       expect.objectContaining({
         scope: "discord:1",
-        fireAt: new Date("2026-08-01T08:00:00.000Z"),
+        fireAt: Date.parse("2026-08-01T08:00:00.000Z"),
         content: { kind: "text", text: "Call Mum" },
       }),
+      expect.objectContaining({
+        outcome: EEventType.CronJobScheduled,
+        step: expect.stringMatching(/^call-2:/),
+      }),
     );
+    expect(result.details).toMatchObject({
+      name: "direct",
+      nextRunAt: new Date("2026-08-01T08:00:00.000Z"),
+      reminderText: "Call Mum",
+    });
   });
 
   test("resolves automation names to ids for an automations-only job", async () => {
-    const createOnce = mock(async (args) => ({
-      ...args,
-      id: 1,
-      type: ECronJobType.OneTime,
-      status: ECronJobStatus.Active,
-      nextRunAt: args.fireAt,
-      pattern: null,
-      lastRunAt: null,
-      createdAt: new Date(),
-      finishedAt: null,
-      finishedReason: null,
-    }));
+    const { request, context } = createRequester();
     const resolveNames = mock(async (_scope: string, names: string[]) => {
       if (names.includes("missing")) {
         throw new AutomationError("unknown-automation", "Unknown automations: missing");
@@ -137,7 +148,6 @@ describe("schedule-once", () => {
 
       return [7, 3];
     });
-    (CronScheduler as unknown as { _instance: unknown })._instance = { createOnce };
     (AutomationService as unknown as { _instance: unknown })._instance = { resolveNames };
     const tool = scheduleOnce.createAgentTool(context);
 
@@ -148,8 +158,10 @@ describe("schedule-once", () => {
     });
 
     expect(resolveNames).toHaveBeenCalledWith("discord:1", ["bus", "tram"]);
-    expect(createOnce).toHaveBeenCalledWith(
+    expect(request).toHaveBeenCalledWith(
+      EEventType.CronJobScheduleRequested,
       expect.objectContaining({ content: { kind: "automations" }, automationIds: [7, 3] }),
+      expect.anything(),
     );
 
     await expect(
@@ -159,6 +171,6 @@ describe("schedule-once", () => {
         automations: ["missing"],
       }),
     ).resolves.toMatchObject({ isError: true, details: { errorCode: "unknown-automation" } });
-    expect(createOnce).toHaveBeenCalledTimes(1);
+    expect(request).toHaveBeenCalledTimes(1);
   });
 });

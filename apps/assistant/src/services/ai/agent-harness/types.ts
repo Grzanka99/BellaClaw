@@ -3,6 +3,7 @@ import type { TOption } from "@bellaclaw/shared";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { Message } from "@earendil-works/pi-ai";
 import type { TConversation } from "../../conversation/types";
+import type { TEventRequester } from "../../events";
 import type { TMcpProfile } from "../../mcp/config";
 import type { EMessagePlatform } from "../../messaging/types";
 import type { TConfigRecord } from "../../settings/schema";
@@ -16,6 +17,8 @@ export type TAgentRunArgs = {
   currentTimeContext: TOption<string>;
   platform: TOption<EMessagePlatform>;
   trace: TBehaviorTraceContext;
+  // the requests of the event handler this run belongs to; tools send commands with it
+  events: TEventRequester;
   conversation?: TConversation;
   parentToolCallId: TOption<string>;
   signal: TOption<AbortSignal>;

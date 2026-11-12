@@ -102,6 +102,7 @@ export class AgentHarness {
     chatId: string,
     platform: TAgentRunArgs["platform"],
     trace: TBehaviorTraceContext,
+    events: TAgentRunArgs["events"],
   ) {
     const config = await this.llm.resolveModel(settings, AGENTS[EAgentName.Main].purpose);
     const args = {
@@ -112,6 +113,7 @@ export class AgentHarness {
       prompt: "",
       currentTimeContext: undefined,
       trace,
+      events,
       signal: undefined,
       parentToolCallId: undefined,
       delegationCount: undefined,
@@ -519,6 +521,7 @@ export class AgentHarness {
       runScheduledTask: (runArgs) => {
         return this.runScheduledTask(runArgs);
       },
+      events: args.events,
     };
     const agentDefinition = AGENTS[args.name];
     const tools = [

@@ -21,7 +21,7 @@ mock.module("../services/message-handler", () => ({
   MessageHandler: { instance: { setup: () => undefined } },
 }));
 mock.module("../services/cron", () => ({
-  CronScheduler: { instance: { setup: async () => undefined } },
+  CronScheduler: { instance: { subscribe: () => undefined, setup: async () => undefined } },
 }));
 mock.module("../services/memory/distill", () => ({
   FactDistiller: { instance: { setup: () => undefined } },

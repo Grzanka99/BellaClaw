@@ -3,7 +3,9 @@ import type { TOption } from "@bellaclaw/shared";
 import { z } from "zod";
 import { EAiProvider } from "../ai/types";
 import { EAuthorizationDecision, SAuthorizationState } from "../authorization/schema";
-import { ECronJobType } from "../cron/types";
+import { EAutomationRunMode, EAutomationRunOutcome } from "../automation/runner";
+import { EAutomationStatus } from "../automation/types";
+import { ECronFinishedReason, ECronJobStatus, ECronJobType } from "../cron/types";
 import { EMessagePlatform } from "../messaging/types";
 import { EConfigKey } from "../settings/schema";
 
@@ -27,6 +29,21 @@ export enum EEventType {
   MessageSent = "message.sent",
   CronFired = "cron.fired",
   CronTaskStarted = "cron.task.started",
+  CronJobScheduleRequested = "cron.job.schedule.requested",
+  CronJobScheduled = "cron.job.scheduled",
+  CronJobCancelRequested = "cron.job.cancel.requested",
+  CronJobCancelled = "cron.job.cancelled",
+  CronAutomationDetached = "cron.automation.detached",
+  AutomationDeleteRequested = "automation.delete.requested",
+  AutomationDeleted = "automation.deleted",
+  AutomationRunRequested = "automation.run.requested",
+  AutomationRunCompleted = "automation.run.completed",
+  AutomationPreviewRequested = "automation.preview.requested",
+  AutomationPreviewed = "automation.previewed",
+  AutomationSaveRequested = "automation.save.requested",
+  AutomationSaved = "automation.saved",
+  AutomationStatusSetRequested = "automation.status.set.requested",
+  AutomationStatusChanged = "automation.status.changed",
   McpAuthConnected = "mcp.auth.connected",
   AiAuthLoginNeeded = "ai.auth.login.needed",
   AiAuthLoginCompleted = "ai.auth.login.completed",
@@ -145,6 +162,146 @@ export type TCronFiredPayload = z.infer<typeof SCronFired>;
 
 const SCronTaskStarted = z.object({ jobId: z.number().int() }).strict();
 
+// a cron job with dates as epoch ms
+const SCronJobRecord = z
+  .object({
+    id: z.number().int(),
+    name: z.string(),
+    scope: z.string(),
+    type: z.enum(ECronJobType),
+    pattern: z.string().optional(),
+    content: SJobContent,
+    automationIds: z.array(z.number().int()),
+    nextRunAt: z.number().int(),
+    lastRunAt: z.number().int().optional(),
+    createdAt: z.number().int(),
+    status: z.enum(ECronJobStatus),
+    finishedAt: z.number().int().optional(),
+    finishedReason: z.enum(ECronFinishedReason).optional(),
+    timezone: z.string().optional(),
+  })
+  .strict();
+
+export type TCronJobRecord = z.infer<typeof SCronJobRecord>;
+
+const SCronJobFields = {
+  name: z.string(),
+  scope: z.string(),
+  content: SJobContent,
+  automationIds: z.array(z.number().int()),
+  overwrite: z.boolean().optional(),
+  timezone: z.string().optional(),
+};
+
+const SCronJobScheduleRequested = z.union([
+  z.object({ ...SCronJobFields, pattern: z.string() }).strict(),
+  z.object({ ...SCronJobFields, fireAt: z.number().int() }).strict(),
+]);
+
+const SCronJobChanged = z.object({ job: SCronJobRecord }).strict();
+
+const SCronJobCancelRequested = z.object({ name: z.string(), scope: z.string() }).strict();
+
+const SCronAutomationDetached = z
+  .object({
+    automationId: z.number().int(),
+    updatedJobs: z.array(z.string()),
+    cancelledJobs: z.array(z.string()),
+  })
+  .strict();
+
+const SAutomationDeleteRequested = z.object({ scope: z.string(), name: z.string() }).strict();
+
+const SAutomationDeleted = z
+  .object({ scope: z.string(), automationId: z.number().int(), name: z.string() })
+  .strict();
+
+const SAutomationRunReport = z
+  .object({
+    name: z.string(),
+    instructions: z.string().optional(),
+    outcome: z.enum(EAutomationRunOutcome),
+    text: z.string().optional(),
+    data: z.unknown(),
+    error: z.string().optional(),
+    fetches: z.array(
+      z
+        .object({
+          url: z.string(),
+          status: z.number().int().optional(),
+          bytes: z.number().int(),
+          error: z.string().optional(),
+        })
+        .strict(),
+    ),
+    logs: z.array(z.string()),
+    durationMs: z.number(),
+    /** True only when this run's failure paused the automation. */
+    paused: z.boolean(),
+  })
+  .strict();
+
+export type TAutomationRunReport = z.infer<typeof SAutomationRunReport>;
+
+const SAutomationRunRequested = z
+  .object({
+    scope: z.string(),
+    automationId: z.number().int(),
+    mode: z.enum([EAutomationRunMode.Manual, EAutomationRunMode.Cron]),
+    timezone: z.string(),
+  })
+  .strict();
+
+const SAutomationRunCompleted = z.object({ report: SAutomationRunReport }).strict();
+
+const SAutomationPreviewRequested = z
+  .object({
+    scope: z.string(),
+    name: z.string(),
+    instructions: z.string().optional(),
+    source: z.string(),
+    config: z.record(z.string(), z.unknown()),
+    allowedOrigins: z.array(z.string()),
+    outputCapBytes: z.number().int().optional(),
+    timezone: z.string(),
+  })
+  .strict();
+
+// previewId: only a successful preview leaves a draft that can be saved
+const SAutomationPreviewed = z
+  .object({
+    previewId: z.number().int().optional(),
+    name: z.string(),
+    allowedOrigins: z.array(z.string()),
+    config: z.unknown(),
+    outputCapBytes: z.number().int(),
+    report: SAutomationRunReport,
+  })
+  .strict();
+
+const SAutomationSaveRequested = z
+  .object({ scope: z.string(), previewId: z.number().int() })
+  .strict();
+
+// the saved-automation fields the agents may see, without the script source
+const SAutomationSummary = z
+  .object({
+    name: z.string(),
+    status: z.enum(EAutomationStatus),
+    failureCount: z.number().int(),
+    lastError: z.string().optional(),
+    allowedOrigins: z.array(z.string()),
+    instructions: z.string().optional(),
+    outputCapBytes: z.number().int(),
+  })
+  .strict();
+
+const SAutomationChanged = z.object({ automation: SAutomationSummary }).strict();
+
+const SAutomationStatusSetRequested = z
+  .object({ scope: z.string(), name: z.string(), status: z.enum(EAutomationStatus) })
+  .strict();
+
 const SMcpAuthConnected = z.object({ chatId: z.string(), profileId: z.string() }).strict();
 
 const SAiAuthLoginNeeded = z.object({ problems: z.array(z.string()) }).strict();
@@ -212,8 +369,14 @@ const SCalendarSourceAdded = z
   })
   .strict();
 
+// errorCode: the handler's stable code for an expected failure, such as job-not-found
 const SCommandRejected = z
-  .object({ commandType: z.string(), code: z.enum(ERejectionCode), message: z.string() })
+  .object({
+    commandType: z.string(),
+    code: z.enum(ERejectionCode),
+    message: z.string(),
+    errorCode: z.string().optional(),
+  })
   .strict();
 
 const SEventDeadLettered = z
@@ -247,6 +410,21 @@ export type TEventPayloads = {
   [EEventType.MessageSent]: z.infer<typeof SMessageSent>;
   [EEventType.CronFired]: TCronFiredPayload;
   [EEventType.CronTaskStarted]: z.infer<typeof SCronTaskStarted>;
+  [EEventType.CronJobScheduleRequested]: z.infer<typeof SCronJobScheduleRequested>;
+  [EEventType.CronJobScheduled]: z.infer<typeof SCronJobChanged>;
+  [EEventType.CronJobCancelRequested]: z.infer<typeof SCronJobCancelRequested>;
+  [EEventType.CronJobCancelled]: z.infer<typeof SCronJobChanged>;
+  [EEventType.CronAutomationDetached]: z.infer<typeof SCronAutomationDetached>;
+  [EEventType.AutomationDeleteRequested]: z.infer<typeof SAutomationDeleteRequested>;
+  [EEventType.AutomationDeleted]: z.infer<typeof SAutomationDeleted>;
+  [EEventType.AutomationRunRequested]: z.infer<typeof SAutomationRunRequested>;
+  [EEventType.AutomationRunCompleted]: z.infer<typeof SAutomationRunCompleted>;
+  [EEventType.AutomationPreviewRequested]: z.infer<typeof SAutomationPreviewRequested>;
+  [EEventType.AutomationPreviewed]: z.infer<typeof SAutomationPreviewed>;
+  [EEventType.AutomationSaveRequested]: z.infer<typeof SAutomationSaveRequested>;
+  [EEventType.AutomationSaved]: z.infer<typeof SAutomationChanged>;
+  [EEventType.AutomationStatusSetRequested]: z.infer<typeof SAutomationStatusSetRequested>;
+  [EEventType.AutomationStatusChanged]: z.infer<typeof SAutomationChanged>;
   [EEventType.McpAuthConnected]: z.infer<typeof SMcpAuthConnected>;
   [EEventType.AiAuthLoginNeeded]: z.infer<typeof SAiAuthLoginNeeded>;
   [EEventType.AiAuthLoginCompleted]: z.infer<typeof SAiAuthLoginCompleted>;
@@ -293,6 +471,21 @@ export const EVENT_SCHEMAS: { [K in EEventType]: z.ZodType<TEventPayloads[K]> } 
   [EEventType.MessageSent]: SMessageSent,
   [EEventType.CronFired]: SCronFired,
   [EEventType.CronTaskStarted]: SCronTaskStarted,
+  [EEventType.CronJobScheduleRequested]: SCronJobScheduleRequested,
+  [EEventType.CronJobScheduled]: SCronJobChanged,
+  [EEventType.CronJobCancelRequested]: SCronJobCancelRequested,
+  [EEventType.CronJobCancelled]: SCronJobChanged,
+  [EEventType.CronAutomationDetached]: SCronAutomationDetached,
+  [EEventType.AutomationDeleteRequested]: SAutomationDeleteRequested,
+  [EEventType.AutomationDeleted]: SAutomationDeleted,
+  [EEventType.AutomationRunRequested]: SAutomationRunRequested,
+  [EEventType.AutomationRunCompleted]: SAutomationRunCompleted,
+  [EEventType.AutomationPreviewRequested]: SAutomationPreviewRequested,
+  [EEventType.AutomationPreviewed]: SAutomationPreviewed,
+  [EEventType.AutomationSaveRequested]: SAutomationSaveRequested,
+  [EEventType.AutomationSaved]: SAutomationChanged,
+  [EEventType.AutomationStatusSetRequested]: SAutomationStatusSetRequested,
+  [EEventType.AutomationStatusChanged]: SAutomationChanged,
   [EEventType.McpAuthConnected]: SMcpAuthConnected,
   [EEventType.AiAuthLoginNeeded]: SAiAuthLoginNeeded,
   [EEventType.AiAuthLoginCompleted]: SAiAuthLoginCompleted,
@@ -337,6 +530,21 @@ export const EVENT_KINDS: Record<EEventType, EEventKind> = {
   [EEventType.MessageSent]: EEventKind.Event,
   [EEventType.CronFired]: EEventKind.Event,
   [EEventType.CronTaskStarted]: EEventKind.Event,
+  [EEventType.CronJobScheduleRequested]: EEventKind.Command,
+  [EEventType.CronJobScheduled]: EEventKind.Event,
+  [EEventType.CronJobCancelRequested]: EEventKind.Command,
+  [EEventType.CronJobCancelled]: EEventKind.Event,
+  [EEventType.CronAutomationDetached]: EEventKind.Event,
+  [EEventType.AutomationDeleteRequested]: EEventKind.Command,
+  [EEventType.AutomationDeleted]: EEventKind.Event,
+  [EEventType.AutomationRunRequested]: EEventKind.Command,
+  [EEventType.AutomationRunCompleted]: EEventKind.Event,
+  [EEventType.AutomationPreviewRequested]: EEventKind.Command,
+  [EEventType.AutomationPreviewed]: EEventKind.Event,
+  [EEventType.AutomationSaveRequested]: EEventKind.Command,
+  [EEventType.AutomationSaved]: EEventKind.Event,
+  [EEventType.AutomationStatusSetRequested]: EEventKind.Command,
+  [EEventType.AutomationStatusChanged]: EEventKind.Event,
   [EEventType.McpAuthConnected]: EEventKind.Event,
   [EEventType.AiAuthLoginNeeded]: EEventKind.Event,
   [EEventType.AiAuthLoginCompleted]: EEventKind.Event,

@@ -74,6 +74,9 @@ export type TEventContext = {
   ) => Promise<TEvent<O>>;
 };
 
+// the part of a handler's context that tools and agent runs get
+export type TEventRequester = Pick<TEventContext, "request" | "waitFor">;
+
 export type TSubscribeArgs<T extends EEventType> = {
   consumer: string;
   type: T;
@@ -103,6 +106,7 @@ export class CommandRejectedError extends Error {
   public constructor(
     public readonly code: ERejectionCode,
     message: string,
+    public readonly errorCode: TOption<string>,
   ) {
     super(message);
   }
@@ -826,7 +830,13 @@ export class EventBus {
             return;
           }
 
-          reject(new CommandRejectedError(rejected.data.code, rejected.data.message));
+          reject(
+            new CommandRejectedError(
+              rejected.data.code,
+              rejected.data.message,
+              rejected.data.errorCode,
+            ),
+          );
           return;
         }
 

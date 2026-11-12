@@ -4,14 +4,11 @@ import { createLogger, type TLogger } from "@bellaclaw/shared";
 import { AgentHarness } from "../ai/agent-harness";
 import { LlmClient } from "../ai/llm";
 import { logHandlerStarted, startHandlerSpan, type THandlerSpan } from "../app-logger/operations";
-import {
-  EAutomationRunMode,
-  runSavedAutomation,
-  type TAutomationRunReport,
-} from "../automation/runner";
+import { AUTOMATION_RUN_TIMEOUT_MS, EAutomationRunMode } from "../automation/runner";
 import { ESubscriptionMode, EventBus, type TEventContext } from "../events";
 import {
   EEventType,
+  type TAutomationRunReport,
   type TCronFiredPayload,
   type TDeliveryTranscript,
   type TEvent,
@@ -88,14 +85,18 @@ export class ScheduledDelivery {
         return;
       }
 
-      // an earlier attempt died mid-run: the agent never runs twice
-      const interrupted =
-        (await ctx.findCaused(EEventType.CronTaskStarted, undefined)) !== undefined;
+      let interrupted = false;
 
-      if (!interrupted) {
-        await ctx.transact(async (_tx, emit) => {
-          emit(EEventType.CronTaskStarted, { jobId: job.jobId }, undefined, undefined);
-        });
+      // an earlier attempt died mid-run: the agent never runs twice. A replayed fire of
+      // automations alone runs again and reuses the stored reports of finished runs
+      if (job.content.kind === "task") {
+        interrupted = (await ctx.findCaused(EEventType.CronTaskStarted, undefined)) !== undefined;
+
+        if (!interrupted) {
+          await ctx.transact(async (_tx, emit) => {
+            emit(EEventType.CronTaskStarted, { jobId: job.jobId }, undefined, undefined);
+          });
+        }
       }
 
       try {
@@ -105,12 +106,13 @@ export class ScheduledDelivery {
           trace,
           span,
           interrupted,
+          ctx,
         );
       } finally {
         this.lastRunEndedAt.set(event.key, Date.now());
       }
     } else {
-      messages = await this.createCronMessages(job, parsedScope.platform, trace, span, false);
+      messages = await this.createCronMessages(job, parsedScope.platform, trace, span, false, ctx);
     }
 
     if (messages.length === 0) {
@@ -136,6 +138,7 @@ export class ScheduledDelivery {
     trace: TBehaviorTraceContext,
     span: THandlerSpan,
     interrupted: boolean,
+    ctx: TEventContext,
   ): Promise<TCronMessage[]> {
     const messages: TCronMessage[] = [];
     let text: TOption<string>;
@@ -159,7 +162,27 @@ export class ScheduledDelivery {
           job,
           platform,
           this.ai,
-          (automation, options) => runSavedAutomation(automation, EAutomationRunMode.Cron, options),
+          ctx,
+          async (automation, options) => {
+            const completed = await ctx.request(
+              EEventType.AutomationRunRequested,
+              {
+                scope: job.scope,
+                automationId: automation.id,
+                mode: EAutomationRunMode.Cron,
+                timezone: options.timezone,
+              },
+              {
+                outcome: EEventType.AutomationRunCompleted,
+                // a replayed fire gets the stored report of a finished run
+                step: String(automation.id),
+                key: job.scope,
+                timeoutMs: AUTOMATION_RUN_TIMEOUT_MS,
+              },
+            );
+
+            return completed.payload.report;
+          },
           trace,
         );
       } catch (error) {
@@ -211,7 +234,7 @@ export class ScheduledDelivery {
         return messages;
       }
     } else if (job.content.kind === "task") {
-      const taskResult = await generateScheduledTaskText(job, platform, this.ai, trace);
+      const taskResult = await generateScheduledTaskText(job, platform, this.ai, ctx, trace);
       text = taskResult.text;
       memoryPrefix = "CRON TASK";
       toolCallCount = taskResult.toolCallCount;

@@ -7,6 +7,7 @@ import { createPlatformInstructions } from "../ai/instructions/platform";
 import { readXmlAndInjectConfig } from "../ai/instructions/read-xml-and-inject-config";
 import type { LlmClient } from "../ai/llm";
 import { EModelPurpose } from "../ai/types";
+import type { TEventRequester } from "../events";
 import type { TCronFiredPayload } from "../events/catalog";
 import type { EMessagePlatform } from "../messaging/types";
 import { SettingsService } from "../settings";
@@ -108,6 +109,7 @@ export async function generateScheduledTaskText(
   ctx: TCronFiredPayload,
   platform: TOption<EMessagePlatform>,
   ai: TScheduledTaskAi,
+  events: TEventRequester,
   trace: TBehaviorTraceContext,
   automationOutputs?: string,
 ): Promise<TScheduledTaskResult> {
@@ -146,6 +148,7 @@ export async function generateScheduledTaskText(
       settings,
       platform,
       trace,
+      events,
       signal: undefined,
     });
 

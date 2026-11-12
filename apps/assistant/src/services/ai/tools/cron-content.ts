@@ -1,5 +1,6 @@
 import type { TOption } from "@bellaclaw/shared";
-import { CronSchedulerError, type TCronJob, type TJobContent } from "../../cron/types";
+import type { TCronJob, TJobContent } from "../../cron/types";
+import { CommandRejectedError } from "../../events";
 import { ToolError } from "./define-tool";
 
 type TCronContentFields = {
@@ -132,15 +133,15 @@ export function parseCronContent(
 }
 
 /**
- * Runs a scheduler call and returns the job in the flat shape the model has
- * always seen; scheduler failures become tool errors with their stable code.
+ * Runs a cron command and returns the job in the flat shape the model has
+ * always seen; rejections become tool errors with their stable code.
  */
 export async function runCronJobOperation(operation: () => Promise<TCronJob>) {
   try {
     return toCronJobResult(await operation());
   } catch (error) {
-    if (error instanceof CronSchedulerError) {
-      throw new ToolError(error.code, `${error.operation} failed: ${error.message}`);
+    if (error instanceof CommandRejectedError) {
+      throw new ToolError(error.errorCode ?? error.code, error.message);
     }
 
     throw error;

@@ -6,6 +6,7 @@ import { resetCronEngineJobsTable, resetEventTables } from "../database/test-uti
 import { EventBus } from "../events";
 import { EEventType, type TCronFiredPayload } from "../events/catalog";
 import { CronScheduler } from "./index";
+import { createOnce, createRecurring } from "./test-utils";
 import { ECronFinishedReason, ECronJobStatus } from "./types";
 
 async function getRow(id: number) {
@@ -24,14 +25,18 @@ describe("CronScheduler automationIds", () => {
     await resetEventTables();
     Object.assign(EventBus, { _instance: undefined });
     scheduler = new CronScheduler({});
+    scheduler.subscribe();
+    await EventBus.instance.start();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     scheduler.destroy();
+    await EventBus.instance.idle();
+    await EventBus.instance.stop();
   });
 
   test("persists an automations-only job and emits its automationIds on fire", async () => {
-    const job = await scheduler.createRecurring({
+    const job = await createRecurring({
       name: "raw",
       scope: "scope-a",
       pattern: "0 8 * * *",
@@ -65,7 +70,7 @@ describe("CronScheduler automationIds", () => {
   });
 
   test("allows automationIds with a task and stores an empty list as null", async () => {
-    const withTask = await scheduler.createOnce({
+    const withTask = await createOnce({
       name: "task",
       scope: "scope-a",
       fireAt: new Date(Date.now() + 60_000),
@@ -74,7 +79,7 @@ describe("CronScheduler automationIds", () => {
     });
     expect(withTask.automationIds).toEqual([1]);
 
-    const plain = await scheduler.createRecurring({
+    const plain = await createRecurring({
       name: "plain",
       scope: "scope-a",
       pattern: "0 8 * * *",
@@ -87,58 +92,58 @@ describe("CronScheduler automationIds", () => {
 
   test("rejects automationIds with reminders and automations content without ids", async () => {
     await expect(
-      scheduler.createRecurring({
+      createRecurring({
         name: "invalid",
         scope: "scope-a",
         pattern: "0 8 * * *",
         content: { kind: "text", text: "Hi" },
         automationIds: [1],
       }),
-    ).rejects.toMatchObject({ code: "automations-without-task" });
+    ).rejects.toMatchObject({ errorCode: "automations-without-task" });
     await expect(
-      scheduler.createRecurring({
+      createRecurring({
         name: "invalid",
         scope: "scope-a",
         pattern: "0 8 * * *",
         content: { kind: "generated", promptData: "{}", fallback: "Hi" },
         automationIds: [1],
       }),
-    ).rejects.toMatchObject({ code: "automations-without-task" });
+    ).rejects.toMatchObject({ errorCode: "automations-without-task" });
     await expect(
-      scheduler.createRecurring({
+      createRecurring({
         name: "invalid",
         scope: "scope-a",
         pattern: "0 8 * * *",
         content: { kind: "automations" },
       }),
-    ).rejects.toMatchObject({ code: "missing-automations" });
+    ).rejects.toMatchObject({ errorCode: "missing-automations" });
 
     expect(await scheduler.get("invalid", "scope-a")).toBeUndefined();
   });
 
-  test("removeAutomation updates jobs and cancels emptied ones within scope", async () => {
-    const rawOnly = await scheduler.createRecurring({
+  test("automation.deleted updates jobs and cancels emptied ones within scope", async () => {
+    const rawOnly = await createRecurring({
       name: "raw-only",
       scope: "scope-a",
       pattern: "0 8 * * *",
       content: { kind: "automations" },
       automationIds: [7],
     });
-    const rawMulti = await scheduler.createRecurring({
+    const rawMulti = await createRecurring({
       name: "raw-multi",
       scope: "scope-a",
       pattern: "0 8 * * *",
       content: { kind: "automations" },
       automationIds: [7, 8],
     });
-    const withTask = await scheduler.createRecurring({
+    const withTask = await createRecurring({
       name: "with-task",
       scope: "scope-a",
       pattern: "0 8 * * *",
       content: { kind: "task", prompt: "Summarize.", fallback: "Nothing." },
       automationIds: [7],
     });
-    const otherScope = await scheduler.createRecurring({
+    const otherScope = await createRecurring({
       name: "other-scope",
       scope: "scope-b",
       pattern: "0 8 * * *",
@@ -146,10 +151,25 @@ describe("CronScheduler automationIds", () => {
       automationIds: [7],
     });
 
-    const result = await scheduler.removeAutomation("scope-a", 7);
+    await EventBus.instance.publish({
+      type: EEventType.AutomationDeleted,
+      source: "automations",
+      key: "scope-a",
+      trace: { turnId: "test:automation-deleted", chatId: undefined, platform: undefined },
+      payload: { scope: "scope-a", automationId: 7, name: "seven" },
+      causationId: undefined,
+      dedupeKey: undefined,
+    });
+    await EventBus.instance.idle();
+    const [detached] = await DatabaseConnector.instance.database
+      .select()
+      .from(eventsTable)
+      .where(eq(eventsTable.type, EEventType.CronAutomationDetached));
 
-    expect(result.cancelledJobs.map((job) => job.name)).toEqual(["raw-only"]);
-    expect(result.updatedJobs.sort()).toEqual(["raw-multi", "with-task"]);
+    expect(detached?.payload).toMatchObject({ automationId: 7, cancelledJobs: ["raw-only"] });
+    expect(
+      (detached?.payload as { updatedJobs: string[] } | undefined)?.updatedJobs.sort(),
+    ).toEqual(["raw-multi", "with-task"]);
 
     const cancelledRow = await getRow(rawOnly.id);
     expect(cancelledRow?.status).toBe(ECronJobStatus.Cancelled);

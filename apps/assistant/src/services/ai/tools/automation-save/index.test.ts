@@ -1,7 +1,14 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { AutomationService, EAutomationStatus } from "../../../automation";
 import { CronScheduler } from "../../../cron";
-import { resetAutomationsTables, resetCronEngineJobsTable } from "../../../database/test-utils";
+import { DatabaseConnector } from "../../../database";
+import {
+  resetAutomationsTables,
+  resetCronEngineJobsTable,
+  resetEventTables,
+} from "../../../database/test-utils";
+import { EventBus } from "../../../events";
+import { testEventRequester } from "../../../events/test-utils";
 import { DefaultConfigRecord } from "../../../settings/schema";
 import { automationSave } from ".";
 
@@ -10,6 +17,7 @@ function createTool(chatId: string) {
     chatId,
     settings: DefaultConfigRecord,
     trace: { turnId: "test", chatId: undefined, platform: undefined },
+    events: testEventRequester,
     verifySettings: mock(async () => undefined),
     runScheduledTask: mock(async () => {
       throw new Error("not used");
@@ -21,21 +29,31 @@ describe("automation-save", () => {
   beforeEach(async () => {
     await resetAutomationsTables();
     await resetCronEngineJobsTable();
+    await resetEventTables();
+    Object.assign(EventBus, { _instance: undefined });
+    CronScheduler.instance.subscribe();
+    AutomationService.instance.setup();
+    await EventBus.instance.start();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     CronScheduler.instance.destroy();
+    await EventBus.instance.idle();
+    await EventBus.instance.stop();
   });
 
   test("saves the previewed draft and returns a summary without source", async () => {
-    const draft = await AutomationService.instance.createDraft({
-      scope: "discord:1",
-      name: "weather",
-      instructions: "Celsius",
-      source: "export default async () => ({ kind: 'silent' })",
-      config: { city: "Warsaw" },
-      allowedOrigins: ["https://api.example.com"],
-    });
+    const draft = await AutomationService.instance.createDraft(
+      DatabaseConnector.instance.database,
+      {
+        scope: "discord:1",
+        name: "weather",
+        instructions: "Celsius",
+        source: "export default async () => ({ kind: 'silent' })",
+        config: { city: "Warsaw" },
+        allowedOrigins: ["https://api.example.com"],
+      },
+    );
 
     const result = await createTool("discord:1").execute("call", { previewId: draft.id });
 

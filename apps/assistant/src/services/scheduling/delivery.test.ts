@@ -8,6 +8,7 @@ import type { AgentHarness } from "../ai/agent-harness";
 import { getAiModelConfig } from "../ai/providers/registry";
 import { EAiProvider, EModelPurpose } from "../ai/types";
 import { AutomationService } from "../automation";
+import { EAutomationRunMode, EAutomationRunOutcome } from "../automation/runner";
 import { conversationMessages, type TConversation } from "../conversation/types";
 import { ECronJobType } from "../cron/types";
 import { DatabaseConnector } from "../database";
@@ -72,6 +73,7 @@ async function setupBus(start = true) {
   // a failed send is dead at once instead of waiting for the outbound backoff
   Object.assign(MessagingAdapter.instance, { outboundBackoffMs: [] });
   ScheduledDelivery.instance.setup();
+  AutomationService.instance.setup();
   MessagingAdapter.instance.setup();
   MessageHandler.instance.setup();
 
@@ -139,7 +141,7 @@ function setupConversationHandler(chatId: string) {
 }
 
 async function saveAutomation(scope: string, name: string, source: string) {
-  const draft = await AutomationService.instance.createDraft({
+  const draft = await AutomationService.instance.createDraft(DatabaseConnector.instance.database, {
     scope,
     name,
     source,
@@ -147,7 +149,7 @@ async function saveAutomation(scope: string, name: string, source: string) {
     allowedOrigins: [],
   });
 
-  return AutomationService.instance.saveDraft(scope, draft.id);
+  return AutomationService.instance.saveDraft(DatabaseConnector.instance.database, scope, draft.id);
 }
 
 function setupAutomationDelivery() {
@@ -552,6 +554,72 @@ describe("ScheduledDelivery", () => {
       expect(internals.ai.runScheduledTask).not.toHaveBeenCalled();
     });
 
+    test("a replayed fire reuses the stored report of a finished automation run", async () => {
+      const counter = await saveAutomation(
+        scope,
+        "counter",
+        "export default async (ctx) => ({ kind: 'text', text: 'live run', state: { ran: true } })",
+      );
+      const { sendText } = setupAutomationDelivery();
+      await EventBus.instance.stop();
+      await setupBus(false);
+      await fire(cron({ scope, content: { kind: "automations" }, automationIds: [counter.id] }));
+      const [fired] = await eventsOf(EEventType.CronFired);
+      if (fired === undefined) {
+        throw new Error("Expected cron.fired");
+      }
+      const commandId = Bun.randomUUIDv7();
+      // the run an earlier attempt requested and finished before the process died
+      await EventBus.instance.transact(async (_tx, emit) => {
+        emit({
+          type: EEventType.AutomationRunRequested,
+          source: "scheduling",
+          key: scope,
+          trace: TEST_TRACE,
+          causationId: fired.id,
+          dedupeKey: `${fired.id}:scheduling:${EEventType.AutomationRunRequested}:${counter.id}`,
+          payload: {
+            scope,
+            automationId: counter.id,
+            mode: EAutomationRunMode.Cron,
+            timezone: "Europe/Warsaw",
+          },
+        });
+      });
+      const [command] = await eventsOf(EEventType.AutomationRunRequested);
+      if (command === undefined) {
+        throw new Error("Expected automation.run.requested");
+      }
+      await EventBus.instance.publish({
+        type: EEventType.AutomationRunCompleted,
+        source: "automations",
+        key: scope,
+        trace: TEST_TRACE,
+        causationId: command.id,
+        dedupeKey: `${commandId}:stored`,
+        payload: {
+          report: {
+            name: "counter",
+            outcome: EAutomationRunOutcome.Text,
+            text: "stored run",
+            fetches: [],
+            logs: [],
+            durationMs: 1,
+            paused: false,
+            data: undefined,
+          },
+        },
+      });
+
+      await EventBus.instance.start();
+      await EventBus.instance.idle();
+
+      expect(sendText).toHaveBeenCalledTimes(1);
+      expect(sendText).toHaveBeenCalledWith(chatId, "stored run");
+      expect((await AutomationService.instance.get(scope, "counter"))?.state).toBeNull();
+      expect(await eventsOf(EEventType.AutomationRunCompleted)).toHaveLength(1);
+    });
+
     test("sends nothing when no automation returns text", async () => {
       const quiet = await saveAutomation(
         scope,
@@ -685,8 +753,16 @@ describe("ScheduledDelivery", () => {
         "broken",
         "export default async () => { throw new Error('boom'); }",
       );
-      await AutomationService.instance.recordFailure(broken.id, "boom");
-      await AutomationService.instance.recordFailure(broken.id, "boom");
+      await AutomationService.instance.recordFailure(
+        DatabaseConnector.instance.database,
+        broken.id,
+        "boom",
+      );
+      await AutomationService.instance.recordFailure(
+        DatabaseConnector.instance.database,
+        broken.id,
+        "boom",
+      );
       const { save, sendText } = setupAutomationDelivery();
       const job = cron({ scope, content: { kind: "automations" }, automationIds: [broken.id] });
 

@@ -5,6 +5,7 @@ import type { LlmClient } from "../ai/llm";
 import { EModelPurpose } from "../ai/types";
 import { ECronJobType } from "../cron/types";
 import type { TCronFiredPayload } from "../events/catalog";
+import { testEventRequester } from "../events/test-utils";
 import { EMessagePlatform } from "../messaging/types";
 import { SettingsService } from "../settings";
 import { DefaultConfigRecord, EConfigKey } from "../settings/schema";
@@ -142,6 +143,7 @@ describe("generateScheduledTaskText", () => {
       }),
       EMessagePlatform.Signal,
       { runScheduledTask },
+      testEventRequester,
       TEST_TRACE,
     );
     const args = captured[0];
@@ -157,6 +159,7 @@ describe("generateScheduledTaskText", () => {
     expect(args?.chatId).toBe("signal:+100");
     expect(args?.platform).toBe(EMessagePlatform.Signal);
     expect(args?.settings).toBe(ownerSettings);
+    expect(args?.events).toBe(testEventRequester);
     expect(args?.currentTimeContext).toContain('"fireTimestamp":"2026-01-05T08:00:00.000Z"');
   });
 
@@ -179,6 +182,7 @@ describe("generateScheduledTaskText", () => {
               toolCallCount: 29,
             })),
           },
+          testEventRequester,
           TEST_TRACE,
         )
       ).text,
@@ -193,6 +197,7 @@ describe("generateScheduledTaskText", () => {
               throw new Error("provider failed");
             }),
           },
+          testEventRequester,
           TEST_TRACE,
         )
       ).text,

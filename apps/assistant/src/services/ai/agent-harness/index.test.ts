@@ -24,6 +24,8 @@ import type {
   ElicitRequest,
 } from "@modelcontextprotocol/sdk/types.js";
 import type { TConversation } from "../../conversation/types";
+import type { TEventRequester } from "../../events";
+import { testEventRequester } from "../../events/test-utils";
 import { McpRunRegistry } from "../../mcp/runs";
 import { EMessagePlatform } from "../../messaging/types";
 import { DefaultConfigRecord, EConfigKey } from "../../settings/schema";
@@ -108,6 +110,7 @@ describe("AgentHarness", () => {
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
       trace: TEST_TRACE,
+      events: testEventRequester,
       signal: undefined,
     };
 
@@ -167,6 +170,7 @@ describe("AgentHarness", () => {
       currentTimeContext: "time one",
       platform: EMessagePlatform.Discord,
       trace: TEST_TRACE,
+      events: testEventRequester,
       signal: undefined,
     });
     settings[EConfigKey.AiInstructionsTimezone] = "Asia/Tokyo";
@@ -182,6 +186,7 @@ describe("AgentHarness", () => {
       currentTimeContext: "time two",
       platform: EMessagePlatform.Discord,
       trace: TEST_TRACE,
+      events: testEventRequester,
       signal: undefined,
     });
 
@@ -259,6 +264,7 @@ describe("AgentHarness", () => {
         currentTimeContext: undefined,
         platform: EMessagePlatform.Discord,
         trace: TEST_TRACE,
+        events: testEventRequester,
         signal: undefined,
       });
 
@@ -321,6 +327,7 @@ describe("AgentHarness", () => {
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
       trace: TEST_TRACE,
+      events: testEventRequester,
       parentToolCallId: "delegate-call",
       signal: undefined,
       delegationCount: undefined,
@@ -716,6 +723,7 @@ describe("AgentHarness", () => {
       platform: EMessagePlatform.Discord,
       currentTimeContext: "Message received at: 2026-09-10",
       trace: TEST_TRACE,
+      events: testEventRequester,
       signal: undefined,
     };
     const first = await AgentHarness.instance.runMain(args);
@@ -810,6 +818,7 @@ describe("AgentHarness", () => {
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
       trace: TEST_TRACE,
+      events: testEventRequester,
       signal: undefined,
     });
     const sameConversation = await AgentHarness.instance.runMain({
@@ -819,6 +828,7 @@ describe("AgentHarness", () => {
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
       trace: TEST_TRACE,
+      events: testEventRequester,
       signal: undefined,
     });
     const otherConversation = await AgentHarness.instance.runMain({
@@ -828,6 +838,7 @@ describe("AgentHarness", () => {
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
       trace: TEST_TRACE,
+      events: testEventRequester,
       signal: undefined,
     });
     const direct = await LlmClient.instance.completeText({
@@ -889,6 +900,7 @@ describe("AgentHarness", () => {
       "discord:1",
       EMessagePlatform.Discord,
       TEST_TRACE,
+      testEventRequester,
     );
 
     expect(result?.state.summary).toBe("Earlier context summarized.");
@@ -932,6 +944,7 @@ describe("AgentHarness", () => {
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
       trace: TEST_TRACE,
+      events: testEventRequester,
       signal: undefined,
     };
     try {
@@ -1020,6 +1033,7 @@ describe("AgentHarness", () => {
         currentTimeContext: undefined,
         platform: EMessagePlatform.Discord,
         trace: TEST_TRACE,
+        events: testEventRequester,
         signal: undefined,
       });
       expect(toolResult).toContain("Specialist answer");
@@ -1066,6 +1080,7 @@ describe("AgentHarness", () => {
         currentTimeContext: undefined,
         platform: EMessagePlatform.Discord,
         trace: TEST_TRACE,
+        events: testEventRequester,
         signal: undefined,
       });
       expect(schedulingPrompt).toContain(
@@ -1099,6 +1114,7 @@ describe("AgentHarness", () => {
       currentTimeContext: "Message received at:\nUTC: 2026-09-10T10:00:00.000Z",
       platform: EMessagePlatform.Discord,
       trace: TEST_TRACE,
+      events: testEventRequester,
       signal: undefined,
     };
     await AgentHarness.instance.runMain(args);
@@ -1151,6 +1167,7 @@ describe("AgentHarness", () => {
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
       trace: TEST_TRACE,
+      events: testEventRequester,
       signal: undefined,
     };
 
@@ -1178,6 +1195,7 @@ describe("AgentHarness", () => {
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
       trace: TEST_TRACE,
+      events: testEventRequester,
       signal: controller.signal,
     });
 
@@ -1202,6 +1220,7 @@ describe("AgentHarness", () => {
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
       trace: TEST_TRACE,
+      events: testEventRequester,
       signal: undefined,
     });
 
@@ -1222,6 +1241,7 @@ describe("AgentHarness", () => {
         currentTimeContext: undefined;
         platform: EMessagePlatform;
         trace: TBehaviorTraceContext;
+        events: TEventRequester;
         parentToolCallId: undefined;
         signal: undefined;
         delegationCount: undefined;
@@ -1238,6 +1258,7 @@ describe("AgentHarness", () => {
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
       trace: TEST_TRACE,
+      events: testEventRequester,
       parentToolCallId: undefined,
       signal: undefined,
       delegationCount: undefined,
@@ -1264,6 +1285,7 @@ describe("AgentHarness", () => {
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
       trace: TEST_TRACE,
+      events: testEventRequester,
       signal: undefined,
     });
 
@@ -1292,6 +1314,7 @@ describe("AgentHarness", () => {
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
       trace: TEST_TRACE,
+      events: testEventRequester,
       signal: undefined,
     });
 
@@ -1325,6 +1348,7 @@ describe("AgentHarness", () => {
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
       trace: TEST_TRACE,
+      events: testEventRequester,
       signal: controller.signal,
     });
     await providerStarted;
@@ -1358,6 +1382,7 @@ describe("AgentHarness", () => {
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
       trace: TEST_TRACE,
+      events: testEventRequester,
       signal: undefined,
     });
 
@@ -1394,6 +1419,7 @@ describe("AgentHarness", () => {
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
       trace: TEST_TRACE,
+      events: testEventRequester,
       signal: undefined,
     });
 
@@ -1440,6 +1466,7 @@ describe("AgentHarness", () => {
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
       trace: TEST_TRACE,
+      events: testEventRequester,
       signal: undefined,
     });
 
@@ -1479,6 +1506,7 @@ describe("AgentHarness", () => {
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
       trace: TEST_TRACE,
+      events: testEventRequester,
       signal: undefined,
     });
 
@@ -1511,6 +1539,7 @@ describe("AgentHarness", () => {
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
       trace: { turnId: "turn", chatId: "discord:1", platform: EMessagePlatform.Discord },
+      events: testEventRequester,
       parentToolCallId: undefined,
       signal: undefined,
       delegationCount: () => {
@@ -1619,6 +1648,7 @@ describe("AgentHarness", () => {
         currentTimeContext: undefined,
         platform: EMessagePlatform.Discord,
         trace,
+        events: testEventRequester,
         signal: undefined,
       });
       await LlmClient.instance.completeText({
@@ -1719,6 +1749,7 @@ describe("AgentHarness", () => {
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
       trace,
+      events: testEventRequester,
       signal: undefined,
     });
     await LlmClient.instance.completeText({
@@ -1802,6 +1833,7 @@ describe("AgentHarness", () => {
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
       trace,
+      events: testEventRequester,
       signal: undefined,
     });
     const direct = await LlmClient.instance.completeText({

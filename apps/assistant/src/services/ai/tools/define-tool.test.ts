@@ -1,5 +1,6 @@
 import { describe, expect, mock, test } from "bun:test";
 import { obj, type Schema } from "@earendil-works/pi-schema";
+import { testEventRequester } from "../../events/test-utils";
 import { DefaultConfigRecord } from "../../settings/schema";
 import { defineTool, ToolError, validateToolArguments } from "./define-tool";
 import { SScheduleOnceArgs } from "./schedule-once";
@@ -59,6 +60,7 @@ describe("defineTool", () => {
     chatId: "discord:1",
     settings: DefaultConfigRecord,
     trace: { turnId: "test", chatId: undefined, platform: undefined },
+    events: testEventRequester,
     verifySettings: mock(async () => undefined),
     runScheduledTask: mock(async () => {
       throw new Error("not used");

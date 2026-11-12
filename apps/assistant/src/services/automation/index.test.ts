@@ -1,17 +1,27 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
 import { CronScheduler } from "../cron";
+import { createRecurring } from "../cron/test-utils";
 import { ECronJobStatus } from "../cron/types";
 import { DatabaseConnector } from "../database";
 import { automationDraftsTable, cronEngineJobsTable } from "../database/schema";
-import { resetAutomationsTables, resetCronEngineJobsTable } from "../database/test-utils";
+import {
+  resetAutomationsTables,
+  resetCronEngineJobsTable,
+  resetEventTables,
+} from "../database/test-utils";
+import { EventBus } from "../events";
+import { EEventType } from "../events/catalog";
+import { testEventRequester } from "../events/test-utils";
 import {
   AutomationService,
   DEFAULT_AUTOMATION_OUTPUT_CAP_BYTES,
   EAutomationStatus,
   type TCreateAutomationDraftInput,
 } from "./index";
-import { EAutomationRunMode, EAutomationRunOutcome, runSavedAutomation } from "./runner";
+import { EAutomationRunMode, EAutomationRunOutcome } from "./runner";
+
+const db = DatabaseConnector.instance.database;
 
 function draftInput(overrides: Partial<TCreateAutomationDraftInput> = {}) {
   return {
@@ -25,23 +35,31 @@ function draftInput(overrides: Partial<TCreateAutomationDraftInput> = {}) {
 }
 
 async function saveAutomation(overrides: Partial<TCreateAutomationDraftInput> = {}) {
-  const draft = await AutomationService.instance.createDraft(draftInput(overrides));
-  return AutomationService.instance.saveDraft(draft.scope, draft.id);
+  const draft = await AutomationService.instance.createDraft(db, draftInput(overrides));
+  return AutomationService.instance.saveDraft(db, draft.scope, draft.id);
 }
 
 describe("AutomationService", () => {
   beforeEach(async () => {
     await resetAutomationsTables();
     await resetCronEngineJobsTable();
+    await resetEventTables();
+    Object.assign(EventBus, { _instance: undefined });
+    CronScheduler.instance.subscribe();
+    AutomationService.instance.setup();
+    await EventBus.instance.start();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     CronScheduler.instance.destroy();
+    await EventBus.instance.idle();
+    await EventBus.instance.stop();
   });
 
   test("createDraft validates and normalizes input", async () => {
     const service = AutomationService.instance;
     const draft = await service.createDraft(
+      db,
       draftInput({ name: "  weather  ", allowedOrigins: ["https://API.example.com/v1/path"] }),
     );
 
@@ -51,40 +69,40 @@ describe("AutomationService", () => {
     expect(draft.config).toEqual({ city: "Warsaw" });
     expect(draft.instructions).toBeNull();
 
-    await expect(service.createDraft(draftInput({ name: "  " }))).rejects.toThrow("name");
+    await expect(service.createDraft(db, draftInput({ name: "  " }))).rejects.toThrow("name");
     await expect(
-      service.createDraft(draftInput({ allowedOrigins: ["ftp://example.com"] })),
+      service.createDraft(db, draftInput({ allowedOrigins: ["ftp://example.com"] })),
     ).rejects.toThrow("ftp://example.com");
     await expect(
-      service.createDraft(draftInput({ allowedOrigins: ["not a url"] })),
+      service.createDraft(db, draftInput({ allowedOrigins: ["not a url"] })),
     ).rejects.toThrow("not a url");
-    await expect(service.createDraft(draftInput({ outputCapBytes: 0 }))).rejects.toThrow(
+    await expect(service.createDraft(db, draftInput({ outputCapBytes: 0 }))).rejects.toThrow(
       "outputCapBytes",
     );
-    await expect(service.createDraft(draftInput({ outputCapBytes: 262_145 }))).rejects.toThrow(
+    await expect(service.createDraft(db, draftInput({ outputCapBytes: 262_145 }))).rejects.toThrow(
       "outputCapBytes",
     );
   });
 
   test("getDraft and saveDraft are scoped", async () => {
     const service = AutomationService.instance;
-    const draft = await service.createDraft(draftInput());
+    const draft = await service.createDraft(db, draftInput());
 
     expect(await service.getDraft("discord:2", draft.id)).toBeUndefined();
     expect((await service.getDraft("discord:1", draft.id))?.id).toBe(draft.id);
-    await expect(service.saveDraft("discord:2", draft.id)).rejects.toThrow("not found");
+    await expect(service.saveDraft(db, "discord:2", draft.id)).rejects.toThrow("not found");
   });
 
   test("createDraft drops drafts nobody saved within a day", async () => {
     const service = AutomationService.instance;
-    const stale = await service.createDraft(draftInput({ name: "stale" }));
-    const fresh = await service.createDraft(draftInput({ name: "fresh" }));
+    const stale = await service.createDraft(db, draftInput({ name: "stale" }));
+    const fresh = await service.createDraft(db, draftInput({ name: "fresh" }));
     await DatabaseConnector.instance.database
       .update(automationDraftsTable)
       .set({ createdAt: new Date(Date.now() - 25 * 60 * 60 * 1000) })
       .where(eq(automationDraftsTable.id, stale.id));
 
-    await service.createDraft(draftInput({ name: "next" }));
+    await service.createDraft(db, draftInput({ name: "next" }));
 
     expect(await service.getDraft("discord:1", stale.id)).toBeUndefined();
     expect(await service.getDraft("discord:1", fresh.id)).toBeDefined();
@@ -92,12 +110,12 @@ describe("AutomationService", () => {
 
   test("deleteDraft is scoped", async () => {
     const service = AutomationService.instance;
-    const draft = await service.createDraft(draftInput());
+    const draft = await service.createDraft(db, draftInput());
 
-    await service.deleteDraft("discord:2", draft.id);
+    await service.deleteDraft(db, "discord:2", draft.id);
     expect((await service.getDraft("discord:1", draft.id))?.id).toBe(draft.id);
 
-    await service.deleteDraft("discord:1", draft.id);
+    await service.deleteDraft(db, "discord:1", draft.id);
     expect(await service.getDraft("discord:1", draft.id)).toBeUndefined();
   });
 
@@ -109,14 +127,15 @@ describe("AutomationService", () => {
     expect(first.instructions).toBe("Read temp.");
     expect(first.state).toBeNull();
 
-    await service.recordSuccess(first.id, { lastSeen: 5 });
-    await service.recordFailure(first.id, "boom");
+    await service.recordSuccess(db, first.id, { lastSeen: 5 });
+    await service.recordFailure(db, first.id, "boom");
 
     const pending = await service.createDraft(
+      db,
       draftInput({ source: "v2", config: { city: "Oslo" } }),
     );
-    const otherDraft = await service.createDraft(draftInput({ source: "v3" }));
-    const updated = await service.saveDraft("discord:1", pending.id);
+    const otherDraft = await service.createDraft(db, draftInput({ source: "v3" }));
+    const updated = await service.saveDraft(db, "discord:1", pending.id);
 
     expect(updated.id).toBe(first.id);
     expect(updated.source).toBe("v2");
@@ -162,20 +181,20 @@ describe("AutomationService", () => {
     const service = AutomationService.instance;
     const automation = await saveAutomation();
 
-    expect(await service.recordFailure(automation.id, "e1")).toEqual({
+    expect(await service.recordFailure(db, automation.id, "e1")).toEqual({
       failureCount: 1,
       paused: false,
     });
-    await service.recordSuccess(automation.id, undefined);
+    await service.recordSuccess(db, automation.id, undefined);
     expect((await service.get("discord:1", "weather"))?.failureCount).toBe(0);
 
-    await service.recordFailure(automation.id, "e1");
-    await service.recordFailure(automation.id, "e2");
-    expect(await service.recordFailure(automation.id, "e3")).toEqual({
+    await service.recordFailure(db, automation.id, "e1");
+    await service.recordFailure(db, automation.id, "e2");
+    expect(await service.recordFailure(db, automation.id, "e3")).toEqual({
       failureCount: 3,
       paused: true,
     });
-    expect(await service.recordFailure(automation.id, "e4")).toEqual({
+    expect(await service.recordFailure(db, automation.id, "e4")).toEqual({
       failureCount: 4,
       paused: false,
     });
@@ -184,62 +203,104 @@ describe("AutomationService", () => {
     expect(paused?.status).toBe(EAutomationStatus.Paused);
     expect(paused?.lastError).toBe("e4");
 
-    const resumed = await service.setStatus("discord:1", "weather", EAutomationStatus.Active);
+    const resumed = await service.setStatus(db, "discord:1", "weather", EAutomationStatus.Active);
     expect(resumed.status).toBe(EAutomationStatus.Active);
     expect(resumed.failureCount).toBe(0);
 
     await expect(
-      service.setStatus("discord:1", "missing", EAutomationStatus.Paused),
+      service.setStatus(db, "discord:1", "missing", EAutomationStatus.Paused),
     ).rejects.toThrow("not found");
   });
 
-  test("an aborted run does not count as a failure", async () => {
+  test("automation.run.requested records each failure and reports the pause", async () => {
     const automation = await saveAutomation({
-      source: "export default async () => { while (true) {} }",
+      source: "export default async () => { throw new Error('boom'); }",
     });
-    const controller = new AbortController();
-    controller.abort();
+    const run = async () => {
+      const completed = await testEventRequester.request(
+        EEventType.AutomationRunRequested,
+        {
+          scope: "discord:1",
+          automationId: automation.id,
+          mode: EAutomationRunMode.Manual,
+          timezone: "Europe/Warsaw",
+        },
+        {
+          outcome: EEventType.AutomationRunCompleted,
+          step: undefined,
+          key: "discord:1",
+          timeoutMs: undefined,
+        },
+      );
 
-    const report = await runSavedAutomation(automation, EAutomationRunMode.Manual, {
-      timezone: "Europe/Warsaw",
-      trace: { turnId: "test", chatId: undefined, platform: undefined },
-      signal: controller.signal,
+      return completed.payload.report;
+    };
+
+    expect(await run()).toMatchObject({ outcome: EAutomationRunOutcome.Failed, paused: false });
+    await run();
+    expect(await run()).toMatchObject({ outcome: EAutomationRunOutcome.Failed, paused: true });
+    expect(await run()).toMatchObject({
+      outcome: EAutomationRunOutcome.Unavailable,
+      error: "automation is paused",
     });
 
-    expect(report.outcome).toBe(EAutomationRunOutcome.Failed);
-    expect((await AutomationService.instance.get("discord:1", "weather"))?.failureCount).toBe(0);
+    const stored = await AutomationService.instance.get("discord:1", "weather");
+    expect(stored?.failureCount).toBe(3);
+    expect(stored?.status).toBe(EAutomationStatus.Paused);
   });
 
-  test("delete removes automation, drafts, and its id from cron jobs", async () => {
+  test("automation.delete.requested removes the automation and cron detaches it", async () => {
     const service = AutomationService.instance;
     const automation = await saveAutomation();
     const keep = await saveAutomation({ name: "keep" });
-    const pendingDraft = await service.createDraft(draftInput({ source: "v2" }));
+    const pendingDraft = await service.createDraft(db, draftInput({ source: "v2" }));
 
-    const rawOnly = await CronScheduler.instance.createRecurring({
+    const rawOnly = await createRecurring({
       name: "raw-only",
       scope: "discord:1",
       pattern: "0 8 * * *",
       content: { kind: "automations" },
       automationIds: [automation.id],
     });
-    const mixed = await CronScheduler.instance.createRecurring({
+    const mixed = await createRecurring({
       name: "mixed",
       scope: "discord:1",
       pattern: "0 8 * * *",
       content: { kind: "task", prompt: "Summarize", fallback: "Morning update" },
       automationIds: [automation.id, keep.id],
     });
+    const requestDelete = () =>
+      testEventRequester.request(
+        EEventType.AutomationDeleteRequested,
+        { scope: "discord:1", name: "weather" },
+        {
+          outcome: EEventType.AutomationDeleted,
+          step: undefined,
+          key: "discord:1",
+          timeoutMs: undefined,
+        },
+      );
 
-    const result = await service.delete("discord:1", "weather");
+    const deleted = await requestDelete();
+    const detached = await testEventRequester.waitFor(
+      deleted.id,
+      EEventType.CronAutomationDetached,
+      undefined,
+    );
 
-    expect(result.automation.id).toBe(automation.id);
-    expect(result.cancelledJobs.map((job) => job.name)).toEqual(["raw-only"]);
-    expect(result.updatedJobs).toEqual(["mixed"]);
+    expect(deleted.payload).toEqual({
+      scope: "discord:1",
+      automationId: automation.id,
+      name: "weather",
+    });
+    expect(detached.payload).toEqual({
+      automationId: automation.id,
+      updatedJobs: ["mixed"],
+      cancelledJobs: ["raw-only"],
+    });
     expect(await service.get("discord:1", "weather")).toBeUndefined();
     expect(await service.getDraft("discord:1", pendingDraft.id)).toBeUndefined();
 
-    const db = DatabaseConnector.instance.database;
     const rawRow = await db
       .select()
       .from(cronEngineJobsTable)
@@ -251,6 +312,9 @@ describe("AutomationService", () => {
     ]);
     expect(mixed.automationIds).toEqual([automation.id, keep.id]);
 
-    await expect(service.delete("discord:1", "weather")).rejects.toThrow("not found");
+    await expect(requestDelete()).rejects.toMatchObject({
+      errorCode: "automation-not-found",
+      message: "Automation 'weather' not found",
+    });
   });
 });
