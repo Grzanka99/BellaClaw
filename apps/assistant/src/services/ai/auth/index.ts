@@ -2,6 +2,7 @@ import { createSystemTurnId } from "@bellaclaw/behavior-logs";
 import { logger, type TOption } from "@bellaclaw/shared";
 import type { Models } from "@earendil-works/pi-ai";
 import { ModelsError } from "@earendil-works/pi-ai/utils/models-error";
+import { sanitizeErrorMessage } from "../../app-logger/sanitizers";
 import { AuthorizationService } from "../../authorization";
 import { commandFailed, ESubscriptionMode, EventBus, type TEventContext } from "../../events";
 import { EEventType, type TEvent, type TEventPayloads } from "../../events/catalog";
@@ -312,7 +313,7 @@ function beginAiLogin(event: TEvent<EEventType.AiAuthLoginRequested>, ctx: TEven
           await emitLater(EEventType.AiAuthLoginFailed, {
             chatId,
             providerId,
-            error: String(error),
+            error: sanitizeErrorMessage(String(error)) ?? "",
           });
         }
       },
