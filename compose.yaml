@@ -14,12 +14,14 @@ services:
       - BELLACLAW_EMBEDDING_BASE_URL=http://ollama:11434
       - BELLACLAW_LOGS_MCP_URL=http://log-viewer:8989/mcp
       - SIGNAL_CLI_RPC_URL=http://signal-cli:8080
+      - BELLACLAW_RELEASES_DIR=/srv
     depends_on:
       - ollama
       - log-viewer
-    command: ["bun", "run", "--cwd", "apps/assistant", "start"]
+    command: ["bun", "apps/assistant/scripts/supervisor.ts", "assistant"]
     volumes:
       - bellaclaw-data:/app-data
+      - bellaclaw-src:/srv
       - ./.secrets:/app/.secrets
     ports:
       - "127.0.0.1:3080:3080"
@@ -41,11 +43,13 @@ services:
       - BELLACLAW_LOG_DB_ROOT=/app-data
       - BELLACLAW_LOG_VIEWER_HOSTNAME=0.0.0.0
       - LOG_CHATID_HMAC_KEY=${LOG_CHATID_HMAC_KEY:-}
-    command: ["bun", "run", "--cwd", "apps/log-viewer", "start"]
+      - BELLACLAW_RELEASES_DIR=/srv
+    command: ["bun", "apps/assistant/scripts/supervisor.ts", "log-viewer"]
     ports:
       - "0.0.0.0:8989:8989"
     volumes:
       - bellaclaw-data:/app-data:ro
+      - bellaclaw-src:/srv:ro
 
   signal-cli:
     image: docker.io/bbernhard/signal-cli-rest-api:0.100-rootless
@@ -62,5 +66,6 @@ services:
 
 volumes:
   bellaclaw-data:
+  bellaclaw-src:
   ollama-data:
   signal-cli-data:

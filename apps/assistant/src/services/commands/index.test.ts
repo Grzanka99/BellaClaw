@@ -1,8 +1,9 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { asc, eq } from "drizzle-orm";
+import { AuthorizationService } from "../authorization";
 import { DatabaseConnector } from "../database";
 import { eventsTable } from "../database/schema";
 import { resetEventTables } from "../database/test-utils";
@@ -78,6 +79,37 @@ describe("commands consumer", () => {
         attachments: [],
         receivedAt: 1_234,
         platform: EMessagePlatform.Discord,
+      },
+    ]);
+  });
+
+  test("!update asks the supervisor for an update, and says so when there is none", async () => {
+    const send = mock((_message: unknown) => true);
+    const activated = spyOn(
+      AuthorizationService.instance,
+      "listAuthorizedChatIds",
+    ).mockResolvedValue(["signal:+100"]);
+
+    await authorized("signal:+100", "!update", 1);
+    process.send = send;
+    try {
+      await authorized("signal:+100", "!update", 2);
+      await authorized("signal:+999", "!update", 3);
+    } finally {
+      process.send = undefined;
+      activated.mockRestore();
+    }
+
+    expect(send.mock.calls).toEqual([[{ type: "update" }]]);
+    expect(await payloadsOf(EEventType.ReplyReady)).toEqual([
+      {
+        chatId: "signal:+100",
+        text: "Self-update is unavailable: the bot is not running under its supervisor.",
+      },
+      { chatId: "signal:+100", text: "Checking for an update." },
+      {
+        chatId: "signal:+999",
+        text: "Updating requires BELLACLAW_ACTIVATION_TOKEN and an activated chat.",
       },
     ]);
   });

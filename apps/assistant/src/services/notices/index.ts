@@ -13,6 +13,7 @@ const NO_DEAD_LETTER_NOTICE: ReadonlySet<string> = new Set([
   EEventType.EventDeadLettered,
 ]);
 const SEventType = z.enum(EEventType);
+const SSupervisorNotice = z.object({ type: z.literal("notice"), text: z.string() });
 
 export class Notices {
   private static _instance: TOption<Notices>;
@@ -107,6 +108,31 @@ export class Notices {
           emit(EEventType.NoticeReady, { chatId, text: DEAD_LETTER_NOTICE }, undefined, chatId);
         });
       },
+    });
+  }
+
+  // message: what the supervisor sent the app over its IPC channel
+  public async handleSupervisorMessage(message: unknown): Promise<void> {
+    const notice = SSupervisorNotice.safeParse(message);
+
+    if (!notice.success) {
+      return;
+    }
+
+    const chatIds = await AuthorizationService.instance.listAuthorizedChatIds();
+
+    await EventBus.instance.transact(async (_tx, emit) => {
+      for (const chatId of chatIds) {
+        emit({
+          type: EEventType.NoticeReady,
+          source: "notices",
+          key: chatId,
+          trace: { turnId: `update:${crypto.randomUUID()}`, chatId, platform: undefined },
+          payload: { chatId, text: notice.data.text },
+          causationId: undefined,
+          dedupeKey: undefined,
+        });
+      }
     });
   }
 

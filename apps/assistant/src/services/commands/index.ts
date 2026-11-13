@@ -6,6 +6,7 @@ import { calendarAddReadCommand, calendarAddWriteCommand } from "./calendar-add"
 import { mcpAuthCommand } from "./mcp-auth";
 import { mcpPromptCommand, mcpPromptsCommand } from "./mcp-prompts";
 import { COMMAND_PREFIX, type TCommand, type TCommandResult } from "./types";
+import { updateCommand } from "./update";
 
 const REGISTERED_COMMANDS: TCommand[] = [
   calendarAddWriteCommand,
@@ -14,6 +15,7 @@ const REGISTERED_COMMANDS: TCommand[] = [
   mcpPromptsCommand,
   mcpPromptCommand,
   aiAuthCommand,
+  updateCommand,
 ];
 
 export function formatCommandList(): string {

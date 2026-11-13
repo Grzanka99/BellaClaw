@@ -95,6 +95,28 @@ describe("Notices", () => {
     expect(notices.map((row) => row.key)).toEqual(["signal:+100", "signal:+200"]);
   });
 
+  test("a supervisor notice fans out to every authorized chat", async () => {
+    const authorized = spyOn(
+      AuthorizationService.instance,
+      "listAuthorizedChatIds",
+    ).mockResolvedValue(["signal:+100", "signal:+200"]);
+
+    try {
+      await Notices.instance.handleSupervisorMessage({
+        type: "notice",
+        text: "Updated to abc1234",
+      });
+      await bus.idle();
+    } finally {
+      authorized.mockRestore();
+    }
+
+    expect(sendText.mock.calls).toEqual([
+      ["+100", "Updated to abc1234"],
+      ["+200", "Updated to abc1234"],
+    ]);
+  });
+
   test("login outcomes become chat notices", async () => {
     await bus.publish(
       draft(EEventType.AiAuthLoginCompleted, "signal:+100", {
