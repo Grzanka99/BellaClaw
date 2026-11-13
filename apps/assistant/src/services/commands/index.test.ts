@@ -29,13 +29,18 @@ describe("commands consumer", () => {
   let bus: EventBus;
   let directory: string;
 
-  async function authorized(chatId: string, content: string, receivedAt: number) {
+  async function authorized(
+    chatId: string,
+    content: string,
+    receivedAt: number,
+    attachments: { id: string; mimeType: string }[] = [],
+  ) {
     await bus.publish({
       type: EEventType.MessageAuthorized,
       source: "test",
       key: chatId,
       trace: { turnId: "test:commands", chatId, platform: EMessagePlatform.Discord },
-      payload: { chatId, content, receivedAt, platform: EMessagePlatform.Discord },
+      payload: { chatId, content, attachments, receivedAt, platform: EMessagePlatform.Discord },
       causationId: undefined,
       dedupeKey: undefined,
     });
@@ -70,6 +75,7 @@ describe("commands consumer", () => {
       {
         chatId: "signal:+100",
         content: "What is on my calendar tomorrow?",
+        attachments: [],
         receivedAt: 1_234,
         platform: EMessagePlatform.Discord,
       },
@@ -94,7 +100,10 @@ describe("commands consumer", () => {
     );
     Bun.env.BELLACLAW_MCP_CONFIG = configPath;
 
-    await authorized("discord:channel-1", '!mcp-prompt documents summarize {"style":"brief"}', 5);
+    // the image sent with a command is ignored
+    await authorized("discord:channel-1", '!mcp-prompt documents summarize {"style":"brief"}', 5, [
+      { id: "m:a", mimeType: "image/png" },
+    ]);
 
     const rows = await rowsOf(EEventType.TurnRequested);
     expect(rows[0]?.chatId).toBe("discord:channel-1");
@@ -104,6 +113,7 @@ describe("commands consumer", () => {
       chatId: "discord:channel-1",
       content:
         'Use MCP profile documents to run the explicitly requested prompt template summarize with arguments {"style":"brief"}.',
+      attachments: [],
       receivedAt: 5,
       platform: EMessagePlatform.Discord,
     });

@@ -21,6 +21,7 @@ type TSignalSingletonInternals = {
   handleInboundMessage: (message: {
     sourceNumber: string;
     message: string;
+    attachments: { id: string; mimeType: string }[];
     timestamp: number | undefined;
   }) => Promise<void>;
 };
@@ -149,6 +150,7 @@ describe("SignalSingleton", () => {
     await signal.handleInboundMessage({
       sourceNumber: "+200",
       message: "hello",
+      attachments: [],
       timestamp: 123,
     });
 
@@ -163,6 +165,7 @@ describe("SignalSingleton", () => {
     expect(rows[0]?.payload).toEqual({
       chatId: "signal:+200",
       content: "hello",
+      attachments: [],
       receivedAt: expect.any(Number),
       platform: EMessagePlatform.Signal,
     });
@@ -173,18 +176,40 @@ describe("SignalSingleton", () => {
     await resetEventTables();
     const signal = SignalSingleton.instance as unknown as TSignalSingletonInternals;
 
-    await signal.handleInboundMessage({ sourceNumber: "+200", message: "hello", timestamp: 123 });
-    await signal.handleInboundMessage({ sourceNumber: "+200", message: "hello", timestamp: 123 });
-    await signal.handleInboundMessage({ sourceNumber: "+200", message: "hello", timestamp: 124 });
-    await signal.handleInboundMessage({ sourceNumber: "+300", message: "hello", timestamp: 123 });
+    await signal.handleInboundMessage({
+      sourceNumber: "+200",
+      message: "hello",
+      attachments: [],
+      timestamp: 123,
+    });
+    await signal.handleInboundMessage({
+      sourceNumber: "+200",
+      message: "hello",
+      attachments: [],
+      timestamp: 123,
+    });
+    await signal.handleInboundMessage({
+      sourceNumber: "+200",
+      message: "hello",
+      attachments: [],
+      timestamp: 124,
+    });
+    await signal.handleInboundMessage({
+      sourceNumber: "+300",
+      message: "hello",
+      attachments: [],
+      timestamp: 123,
+    });
     await signal.handleInboundMessage({
       sourceNumber: "+200",
       message: "hi",
+      attachments: [],
       timestamp: undefined,
     });
     await signal.handleInboundMessage({
       sourceNumber: "+200",
       message: "hi",
+      attachments: [],
       timestamp: undefined,
     });
 
@@ -226,12 +251,14 @@ describe("SignalSingleton", () => {
       await publish(EEventType.TurnRequested, "signal:+200", {
         chatId: "signal:+200",
         content: "hello",
+        attachments: [],
         receivedAt: 1,
         platform: EMessagePlatform.Signal,
       });
       await publish(EEventType.TurnRequested, "discord:+200", {
         chatId: "discord:+200",
         content: "hello",
+        attachments: [],
         receivedAt: 1,
         platform: EMessagePlatform.Discord,
       });

@@ -64,7 +64,12 @@ describe("MessagingAdapter outbound", () => {
     while (((await deliveries())[0]?.attempts ?? 0) < 1) {
       await Bun.sleep(1);
     }
-    adapter.registerTransport({ platform: EMessagePlatform.Signal, sendText });
+    adapter.registerTransport({
+      platform: EMessagePlatform.Signal,
+      sendText,
+      fetchAttachment: async () => new Uint8Array(),
+      deleteAttachment: async () => undefined,
+    });
     await bus.idle();
 
     expect(sendText).toHaveBeenCalledTimes(1);
@@ -86,7 +91,12 @@ describe("MessagingAdapter outbound", () => {
     const sendText = mock(async () => undefined);
     const adapter = MessagingAdapter.instance;
     Object.assign(adapter, { outboundBackoffMs: [] });
-    adapter.registerTransport({ platform: EMessagePlatform.Signal, sendText });
+    adapter.registerTransport({
+      platform: EMessagePlatform.Signal,
+      sendText,
+      fetchAttachment: async () => new Uint8Array(),
+      deleteAttachment: async () => undefined,
+    });
     adapter.setup();
     await bus.start();
     const reply = { ...notice(), type: EEventType.ReplyReady };

@@ -31,6 +31,7 @@ describe("parseSignalReceiveMessage", () => {
           sourceNumber: "+111",
           dataMessage: {
             message: "hello",
+            attachments: [],
             timestamp: 123,
           },
         },
@@ -40,6 +41,7 @@ describe("parseSignalReceiveMessage", () => {
     expect(result).toEqual({
       sourceNumber: "+111",
       message: "hello",
+      attachments: [],
       timestamp: 123,
     });
   });
@@ -60,6 +62,7 @@ describe("parseSignalReceiveMessage", () => {
     expect(result).toEqual({
       sourceNumber: "+111",
       message: "hello",
+      attachments: [],
       timestamp: undefined,
     });
   });
@@ -81,8 +84,62 @@ describe("parseSignalReceiveMessage", () => {
     expect(result).toEqual({
       sourceNumber: "+222",
       message: "hello",
+      attachments: [],
       timestamp: 456,
     });
+  });
+
+  test("keeps supported image attachments and drops other files", () => {
+    const result = parseSignalReceiveMessage(
+      JSON.stringify({
+        envelope: {
+          sourceNumber: "+111",
+          dataMessage: {
+            message: "look",
+            timestamp: 123,
+            attachments: [
+              { id: "photo.jpg", contentType: "image/jpeg", filename: null, size: 10 },
+              { id: "voice.aac", contentType: "audio/aac", filename: null, size: 10 },
+              { id: "sticker.png", contentType: "image/png", filename: "a.png", size: 10 },
+            ],
+          },
+        },
+      }),
+    );
+
+    expect(result).toEqual({
+      sourceNumber: "+111",
+      message: "look",
+      attachments: [
+        { id: "photo.jpg", mimeType: "image/jpeg" },
+        { id: "sticker.png", mimeType: "image/png" },
+      ],
+      timestamp: 123,
+    });
+  });
+
+  test("parses an image without text and drops a message with only other files", () => {
+    const parse = (contentType: string) =>
+      parseSignalReceiveMessage(
+        JSON.stringify({
+          envelope: {
+            sourceNumber: "+111",
+            dataMessage: {
+              message: null,
+              timestamp: 123,
+              attachments: [{ id: "file-1", contentType, filename: null, size: 10 }],
+            },
+          },
+        }),
+      );
+
+    expect(parse("image/webp")).toEqual({
+      sourceNumber: "+111",
+      message: "",
+      attachments: [{ id: "file-1", mimeType: "image/webp" }],
+      timestamp: 123,
+    });
+    expect(parse("video/mp4")).toBeUndefined();
   });
 
   test("ignores unsupported events", () => {
@@ -337,6 +394,7 @@ describe("SignalClient", () => {
             sourceNumber: "+200",
             dataMessage: {
               message: "hello",
+              attachments: [],
               timestamp: 123,
             },
           },
@@ -373,6 +431,7 @@ describe("SignalClient", () => {
               sourceNumber: "+200",
               dataMessage: {
                 message: "hello",
+                attachments: [],
                 timestamp: 123,
               },
             },
@@ -384,6 +443,7 @@ describe("SignalClient", () => {
     expect(onMessage).toHaveBeenCalledWith({
       sourceNumber: "+200",
       message: "hello",
+      attachments: [],
       timestamp: 123,
     });
     unsubscribe?.();

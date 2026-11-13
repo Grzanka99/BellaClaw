@@ -154,7 +154,7 @@ function mockConversationStore() {
     ),
     saveSummary: mock(async (_chatId: string, next: TConversation) => {
       state = structuredClone(next);
-      return state;
+      return [];
     }),
   };
 }
@@ -200,7 +200,7 @@ function requestTurn(chatId: string, content: string, receivedAt = Date.now()) {
     source: "test",
     key: chatId,
     trace: { ...TEST_TRACE, chatId },
-    payload: { chatId, content, receivedAt, platform: EMessagePlatform.Discord },
+    payload: { chatId, content, attachments: [], receivedAt, platform: EMessagePlatform.Discord },
     causationId: undefined,
     dedupeKey: undefined,
   });
@@ -396,6 +396,92 @@ describe("MessageHandler", () => {
       expect(JSON.stringify(firstInput)).toContain("Local: 2026-09-10 12:00:00");
       expect(saved[0]?.message).toBe("What day is tomorrow?");
       expect(saved[1]?.message).toBe("And today?");
+    } finally {
+      if (previousProvider !== undefined) {
+        aiModels.setProvider(previousProvider);
+      }
+      if (previousApiKey === undefined) {
+        delete Bun.env.OPENROUTER_API_KEY;
+      } else {
+        Bun.env.OPENROUTER_API_KEY = previousApiKey;
+      }
+    }
+  });
+
+  test("gives the model the image and stores only its reference", async () => {
+    const chatId = "discord:image-turn";
+    const { internals, settings } = await setupHandler(chatId);
+    settings[EConfigKey.AiProvider] = EAiProvider.Openrouter;
+    const previousApiKey = Bun.env.OPENROUTER_API_KEY;
+    const previousProvider = aiModels.getProvider(EAiProvider.Openrouter);
+    Bun.env.OPENROUTER_API_KEY = "image-test-key";
+    const faux = fauxProvider({
+      provider: EAiProvider.Openrouter,
+      models: [{ id: "google/gemini-3.1-pro-preview", reasoning: true }],
+    });
+    const requests: TranscriptContext[] = [];
+    faux.setResponses([
+      (context) => {
+        requests.push(structuredClone(context));
+        return fauxAssistantMessage("A cat");
+      },
+      (context) => {
+        requests.push(structuredClone(context));
+        return fauxAssistantMessage("Grey");
+      },
+    ]);
+    aiModels.setProvider(faux.provider);
+    const fetchAttachment = mock(async () => new Uint8Array([1, 2, 3]));
+    MessagingAdapter.instance.registerTransport({
+      platform: EMessagePlatform.Discord,
+      sendText: async () => undefined,
+      fetchAttachment,
+      deleteAttachment: async () => undefined,
+    });
+    internals.conversations = ConversationStore.instance as never;
+    internals.ai.runMain = mock((args) => AgentHarness.instance.runMain(args));
+    const ref = { id: "message-1:attachment-1", mimeType: "image/png" };
+    const image = { type: "image", data: "AQID", mimeType: "image/png" };
+
+    try {
+      await EventBus.instance.publish({
+        type: EEventType.TurnRequested,
+        source: "test",
+        key: chatId,
+        trace: { ...TEST_TRACE, chatId },
+        payload: {
+          chatId,
+          content: "What is this?",
+          attachments: [ref],
+          receivedAt: Date.now(),
+          platform: EMessagePlatform.Discord,
+        },
+        causationId: undefined,
+        dedupeKey: undefined,
+      });
+      await EventBus.instance.idle();
+      await turn(chatId, "What colour is it?");
+
+      expect(JSON.stringify(requests[0]?.messages)).toContain(JSON.stringify(image));
+      // the next turn fetches the image in the history again
+      expect(JSON.stringify(requests[1]?.messages)).toContain(JSON.stringify(image));
+      expect(fetchAttachment).toHaveBeenCalledTimes(2);
+      expect(fetchAttachment).toHaveBeenCalledWith("image-turn", ref);
+
+      const rows = await DatabaseConnector.instance.database
+        .select()
+        .from(memoriesTable)
+        .where(eq(memoriesTable.chatId, chatId))
+        .orderBy(asc(memoriesTable.id));
+      expect(rows[0]?.message).toBe("What is this? [Image]");
+      expect(rows[0]?.modelMessage).not.toContain("AQID");
+      expect(JSON.parse(rows[0]?.modelMessage ?? "null").content.at(-1)).toEqual({
+        type: "text",
+        text: "[Image]",
+        attachment: ref,
+      });
+      const events = await DatabaseConnector.instance.database.select().from(eventsTable);
+      expect(JSON.stringify(events.map((event) => event.payload))).not.toContain("AQID");
     } finally {
       if (previousProvider !== undefined) {
         aiModels.setProvider(previousProvider);
@@ -741,7 +827,12 @@ describe("MessageHandler", () => {
     const sendText = mock(async (_chatId: string, _text: string) => undefined);
     const adapter = MessagingAdapter.instance;
     Object.assign(adapter, { outboundBackoffMs: [] });
-    adapter.registerTransport({ platform: EMessagePlatform.Discord, sendText });
+    adapter.registerTransport({
+      platform: EMessagePlatform.Discord,
+      sendText,
+      fetchAttachment: async () => new Uint8Array(),
+      deleteAttachment: async () => undefined,
+    });
     MessageHandler.instance.setup();
     adapter.setup();
     await EventBus.instance.start();

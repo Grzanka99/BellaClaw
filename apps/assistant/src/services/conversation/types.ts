@@ -1,5 +1,23 @@
-import type { Message } from "@earendil-works/pi-ai";
+import type { Message, TextContent } from "@earendil-works/pi-ai";
 import { z } from "zod";
+import { SAttachmentRef, type TAttachmentRef } from "../messaging/types";
+
+export const IMAGE_MARKER = "[Image]";
+
+// NOTE: a stored user message keeps this block where the image was; each turn fetches the image
+// again, and anything that does not know the block reads it as the marker text
+export const SAttachmentBlock = z.object({
+  type: z.literal("text"),
+  text: z.string(),
+  attachment: SAttachmentRef,
+});
+
+export function attachmentBlock(ref: TAttachmentRef): TextContent {
+  const block = { type: "text", text: IMAGE_MARKER, attachment: ref } satisfies TextContent & {
+    attachment: TAttachmentRef;
+  };
+  return block;
+}
 
 const SText = z.looseObject({ type: z.literal("text"), text: z.string() });
 const SImage = z.looseObject({ type: z.literal("image"), data: z.string(), mimeType: z.string() });

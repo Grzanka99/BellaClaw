@@ -6,7 +6,10 @@ import {
   type Api,
   contentText,
   createAssistantMessageEventStream,
+  type ImageContent,
+  type Message,
   type Model,
+  type TextContent,
 } from "@earendil-works/pi-ai";
 import {
   arr,
@@ -35,11 +38,17 @@ import {
 } from "../../app-logger/sanitizers";
 import { startSpan, type TBehaviorSpan } from "../../app-logger/span";
 import { compactConversation } from "../../conversation/compaction";
-import { conversationMessages, type TConversation } from "../../conversation/types";
+import {
+  attachmentBlock,
+  conversationMessages,
+  SAttachmentBlock,
+  type TConversation,
+} from "../../conversation/types";
 import { McpService } from "../../mcp";
 import { loadMcpProfiles } from "../../mcp/config";
 import { McpRunRegistry, type TMcpRunStatus } from "../../mcp/runs";
 import { createMcpSamplingRequest, createMcpSamplingResult } from "../../mcp/sampling";
+import type { TAttachmentRef } from "../../messaging/types";
 import type { TConfigRecord } from "../../settings/schema";
 import { AGENTS, EAgentName } from "../agents";
 import baseInstructions from "../instructions/base-system.xml" with { type: "text" };
@@ -52,6 +61,10 @@ import { EModelPurpose } from "../types";
 import type { TAgentRunArgs, TAgentRunResult, TMainAgentRunResult } from "./types";
 
 const SEQUENTIAL: "sequential" = "sequential";
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const NO_VISION_NOTE = "[User sent an image; the current model cannot view images]";
+const TOO_LARGE_NOTE = "[User sent an image; it is larger than 5 MB and was not loaded]";
+const FETCH_FAILED_NOTE = "[User sent an image; it could not be loaded from the chat platform]";
 
 export class AgentHarness {
   private static _instance: TOption<AgentHarness>;
@@ -182,8 +195,12 @@ export class AgentHarness {
 
     let messages: AgentMessage[] = [];
     if (args.conversation !== undefined) {
-      messages = structuredClone(conversationMessages(args.conversation));
+      const conversation = await this.withImages(args.conversation, modelConfig.model, args);
+      messages = structuredClone(conversationMessages(conversation));
     }
+    const promptImages = await Promise.all(
+      (args.images?.refs ?? []).map((ref) => this.resolveImage(ref, modelConfig.model, args)),
+    );
     const agent = new Agent({
       initialState: {
         systemPrompt,
@@ -381,7 +398,11 @@ export class AgentHarness {
             prompt += `\n\nPending MCP runs awaiting this user's response:\n${JSON.stringify(pendingRuns)}`;
           }
         }
-        await agent.prompt(prompt);
+        await agent.prompt({
+          role: "user",
+          content: [{ type: "text", text: prompt }, ...promptImages],
+          timestamp: Date.now(),
+        });
 
         const firstTerminalAssistant = agent.state.messages.toReversed().find((message) => {
           return message.role === "assistant";
@@ -463,13 +484,105 @@ export class AgentHarness {
       },
       undefined,
     );
-    let transcript = (await agent.convertToLlm(agent.state.messages)).filter(
+    let transcript: Message[] = (await agent.convertToLlm(agent.state.messages)).filter(
       (message) => message.role !== "system",
     );
     if (args.conversation !== undefined && args.conversation.summary.length > 0) {
       transcript = transcript.slice(1);
     }
+    // NOTE: the caller stores the transcript; image bytes go back to references
+    let promptIndex = 0;
+    if (args.conversation !== undefined) {
+      promptIndex = args.conversation.entries.length;
+      transcript = [
+        ...args.conversation.entries.map((entry) => entry.message),
+        ...transcript.slice(promptIndex),
+      ];
+    }
+    const refs = args.images?.refs ?? [];
+    const promptMessage = transcript[promptIndex];
+    if (refs.length > 0 && promptMessage?.role === "user" && Array.isArray(promptMessage.content)) {
+      transcript[promptIndex] = {
+        ...promptMessage,
+        content: [
+          ...promptMessage.content.slice(0, promptMessage.content.length - refs.length),
+          ...refs.map(attachmentBlock),
+        ],
+      };
+    }
     return { text: finalText, iterations, toolCallCount, stopReason, messages: transcript };
+  }
+
+  // NOTE: images in the uncompacted history are fetched again on every turn
+  private async withImages(
+    conversation: TConversation,
+    model: Model<Api>,
+    args: TAgentRunArgs,
+  ): Promise<TConversation> {
+    const entries = await Promise.all(
+      conversation.entries.map(async (entry) => {
+        const message = entry.message;
+        if (message.role !== "user" || typeof message.content === "string") {
+          return entry;
+        }
+
+        const content = await Promise.all(
+          message.content.map((block) => {
+            const parsed = SAttachmentBlock.safeParse(block);
+            if (!parsed.success) {
+              return block;
+            }
+
+            return this.resolveImage(parsed.data.attachment, model, args);
+          }),
+        );
+        return { ...entry, message: { ...message, content } };
+      }),
+    );
+    return { ...conversation, entries };
+  }
+
+  private async resolveImage(
+    ref: TAttachmentRef,
+    model: Model<Api>,
+    args: TAgentRunArgs,
+  ): Promise<ImageContent | TextContent> {
+    let block: ImageContent | TextContent = { type: "text", text: FETCH_FAILED_NOTE };
+    if (!model.input.includes("image")) {
+      block = { type: "text", text: NO_VISION_NOTE };
+    } else if (args.images !== undefined) {
+      try {
+        const data = await args.images.fetch(ref);
+        if (data.byteLength > MAX_IMAGE_BYTES) {
+          block = { type: "text", text: TOO_LARGE_NOTE };
+        } else {
+          block = {
+            type: "image",
+            data: Buffer.from(data).toString("base64"),
+            mimeType: ref.mimeType,
+          };
+        }
+      } catch (error) {
+        this.logger.warning(`resolveImage: fetch failed: ${String(error)}`);
+      }
+    }
+
+    let level = EBehaviorLogLevel.Info;
+    let outcome = "attached";
+    if (block.type === "text") {
+      level = EBehaviorLogLevel.Warning;
+      outcome = `replaced by note ${block.text}`;
+    }
+    AppLogger.instance.record({
+      trace: args.trace,
+      event: "agent.image.resolved",
+      component: "agent-harness",
+      level,
+      model: model.id,
+      summary: `[Image ${ref.mimeType}] ${outcome}`,
+      metadata: { agentName: args.name, mimeType: ref.mimeType },
+    });
+    return block;
   }
 
   private async createSystemPrompt(args: TAgentRunArgs): Promise<string> {
@@ -572,9 +685,16 @@ export class AgentHarness {
             delegationSignal = signal;
           }
 
+          // only the accurate specialists see the user's images
+          let images: TAgentRunArgs["images"];
+          if (AGENTS[target].purpose === EModelPurpose.SpecialistAccurate) {
+            images = args.images;
+          }
+
           const result = await this.run({
             ...args,
             name: target,
+            images,
             prompt: `Original user message:\n${args.prompt}\n\nDelegated task:\n${parsedParameters.task}`,
             conversation: undefined,
             parentToolCallId: toolCallId,
@@ -696,9 +816,14 @@ export class AgentHarness {
               close: () => session.close(),
               run: async (runSignal, elicit) => {
                 forwardElicitation = elicit;
+                let images: TAgentRunArgs["images"];
+                if (AGENTS[EAgentName.Mcp].purpose === EModelPurpose.SpecialistAccurate) {
+                  images = args.images;
+                }
                 const result = await this.run({
                   ...args,
                   name: EAgentName.Mcp,
+                  images,
                   prompt: this.createMcpPrompt(args.prompt, parsed.task, parsed.context),
                   conversation: undefined,
                   parentToolCallId: toolCallId,

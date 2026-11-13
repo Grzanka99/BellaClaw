@@ -127,6 +127,7 @@ function setupConversationHandler(chatId: string) {
       payload: {
         chatId,
         content: "Hello",
+        attachments: [],
         receivedAt: Date.now(),
         platform: EMessagePlatform.Signal,
       },
@@ -161,7 +162,12 @@ function setupAutomationDelivery() {
     conversations: { saveDeliveredMessage: save },
   });
   const sendText = mock(async () => undefined);
-  MessagingAdapter.instance.registerTransport({ platform: EMessagePlatform.Signal, sendText });
+  MessagingAdapter.instance.registerTransport({
+    platform: EMessagePlatform.Signal,
+    sendText,
+    fetchAttachment: async () => new Uint8Array(),
+    deleteAttachment: async () => undefined,
+  });
   const internals = ScheduledDelivery.instance as unknown as TDeliveryInternals;
   const prompts: string[] = [];
   internals.llm = { completeText: mock(async () => undefined) };
@@ -206,7 +212,12 @@ describe("ScheduledDelivery", () => {
     await turn();
     const adapter = MessagingAdapter.instance;
     const sendText = mock(async () => undefined);
-    adapter.registerTransport({ platform: EMessagePlatform.Signal, sendText });
+    adapter.registerTransport({
+      platform: EMessagePlatform.Signal,
+      sendText,
+      fetchAttachment: async () => new Uint8Array(),
+      deleteAttachment: async () => undefined,
+    });
     const internals = ScheduledDelivery.instance as unknown as TDeliveryInternals;
     internals.llm = { completeText: mock(async () => undefined) };
     internals.ai = {
@@ -296,7 +307,12 @@ describe("ScheduledDelivery", () => {
     });
     const adapter = MessagingAdapter.instance;
     const sendText = mock(async (_chatId: string, _text: string) => undefined);
-    adapter.registerTransport({ platform: EMessagePlatform.Signal, sendText });
+    adapter.registerTransport({
+      platform: EMessagePlatform.Signal,
+      sendText,
+      fetchAttachment: async () => new Uint8Array(),
+      deleteAttachment: async () => undefined,
+    });
 
     try {
       await requestTurn();
@@ -344,7 +360,12 @@ describe("ScheduledDelivery", () => {
     });
     const sendText = mock(async () => undefined);
     const adapter = MessagingAdapter.instance;
-    adapter.registerTransport({ platform: EMessagePlatform.Signal, sendText });
+    adapter.registerTransport({
+      platform: EMessagePlatform.Signal,
+      sendText,
+      fetchAttachment: async () => new Uint8Array(),
+      deleteAttachment: async () => undefined,
+    });
 
     await fire(cron());
     await EventBus.instance.idle();
@@ -379,7 +400,12 @@ describe("ScheduledDelivery", () => {
     const sendText = mock(async () => undefined);
     const release = Promise.withResolvers<void>();
     const adapter = MessagingAdapter.instance;
-    adapter.registerTransport({ platform: EMessagePlatform.Signal, sendText });
+    adapter.registerTransport({
+      platform: EMessagePlatform.Signal,
+      sendText,
+      fetchAttachment: async () => new Uint8Array(),
+      deleteAttachment: async () => undefined,
+    });
     const internals = ScheduledDelivery.instance as unknown as TDeliveryInternals;
     internals.llm = { completeText: mock(async () => undefined) };
     internals.ai = {
@@ -423,7 +449,12 @@ describe("ScheduledDelivery", () => {
   test("a replayed task fire with cron.task.started sends the fallback without the agent", async () => {
     const chatId = `signal:interrupted-${crypto.randomUUID()}`;
     const sendText = mock(async () => undefined);
-    MessagingAdapter.instance.registerTransport({ platform: EMessagePlatform.Signal, sendText });
+    MessagingAdapter.instance.registerTransport({
+      platform: EMessagePlatform.Signal,
+      sendText,
+      fetchAttachment: async () => new Uint8Array(),
+      deleteAttachment: async () => undefined,
+    });
     const internals = ScheduledDelivery.instance as unknown as TDeliveryInternals;
     internals.ai = { runScheduledTask: mock(async () => undefined) };
     await EventBus.instance.stop();

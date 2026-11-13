@@ -114,7 +114,13 @@ describe("authorization consumer", () => {
       source: "test",
       key: chatId,
       trace: { turnId: "test:auth", chatId, platform: EMessagePlatform.Signal },
-      payload: { chatId, content, receivedAt: 1, platform: EMessagePlatform.Signal },
+      payload: {
+        chatId,
+        content,
+        attachments: [],
+        receivedAt: 1,
+        platform: EMessagePlatform.Signal,
+      },
       causationId: undefined,
       dedupeKey,
     });

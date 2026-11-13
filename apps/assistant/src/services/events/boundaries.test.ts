@@ -60,6 +60,8 @@ const ALLOWED: Record<string, string> = {
   "memory -> embedding": "driver",
   "message-handler -> ai/agent-harness": "runMain and compactConversation, the stateless engine",
   "message-handler -> conversation": "the same component: Conversation's handler and its store",
+  "message-handler -> messaging":
+    "fetchAttachment and deleteAttachment: driver calls, no stored state",
   "notices -> authorization": "listAuthorizedChatIds, a cached read model",
   "scheduling -> ai/agent-harness": "runScheduledTask, the stateless engine",
   "scheduling -> ai/instructions/base-system.xml": "prompt text",

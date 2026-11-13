@@ -81,7 +81,7 @@ export class Commands {
     event: TEvent<EEventType.MessageAuthorized>,
     ctx: TEventContext,
   ): Promise<void> {
-    const { chatId, content, receivedAt, platform } = event.payload;
+    const { chatId, content, attachments, receivedAt, platform } = event.payload;
     const result = await runCommand(chatId, content, ctx);
 
     await ctx.complete(async (_tx, emit) => {
@@ -91,13 +91,16 @@ export class Commands {
       }
 
       let prompt = content;
+      let images = attachments;
+      // a command ignores the images sent with it
       if (result !== undefined) {
         prompt = result.prompt;
+        images = [];
       }
 
       emit(
         EEventType.TurnRequested,
-        { chatId, content: prompt, receivedAt, platform },
+        { chatId, content: prompt, attachments: images, receivedAt, platform },
         undefined,
         undefined,
       );

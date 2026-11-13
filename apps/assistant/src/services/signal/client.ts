@@ -1,6 +1,7 @@
 import type { TOption } from "@bellaclaw/shared";
 import { createLogger, type TLogger } from "@bellaclaw/shared";
 import { z } from "zod";
+import { SUPPORTED_IMAGE_TYPES, type TAttachmentRef } from "../messaging/types";
 
 const RECONNECT_DELAY_MS = 5000;
 
@@ -10,7 +11,11 @@ const SSignalReceiveEnvelope = z.object({
   timestamp: z.number().optional(),
   dataMessage: z
     .object({
-      message: z.string().optional(),
+      message: z.string().nullable().optional(),
+      attachments: z
+        .array(z.looseObject({ id: z.string(), contentType: z.string().nullable().optional() }))
+        .nullable()
+        .optional(),
       groupInfo: z.unknown().optional(),
       timestamp: z.number().optional(),
     })
@@ -24,6 +29,7 @@ const SSignalReceivePayload = z.object({
 export type TSignalInboundMessage = {
   sourceNumber: string;
   message: string;
+  attachments: TAttachmentRef[];
   timestamp: TOption<number>;
 };
 
@@ -65,8 +71,18 @@ export function parseSignalReceiveMessage(raw: string): TOption<TSignalInboundMe
     return undefined;
   }
 
-  const message = dataMessage.message;
-  if (message === undefined || message.trim().length === 0) {
+  const attachments: TAttachmentRef[] = [];
+  for (const attachment of dataMessage.attachments ?? []) {
+    const mimeType = attachment.contentType;
+    if (mimeType === null || mimeType === undefined || !SUPPORTED_IMAGE_TYPES.includes(mimeType)) {
+      continue;
+    }
+
+    attachments.push({ id: attachment.id, mimeType });
+  }
+
+  const message = dataMessage.message ?? "";
+  if (message.trim().length === 0 && attachments.length === 0) {
     return undefined;
   }
 
@@ -82,6 +98,7 @@ export function parseSignalReceiveMessage(raw: string): TOption<TSignalInboundMe
   return {
     sourceNumber,
     message,
+    attachments,
     timestamp: dataMessage.timestamp ?? envelope.timestamp,
   };
 }
@@ -135,6 +152,26 @@ export class SignalClient {
       this.logger.error(`sendText: /v2/send returned ${response.status}`);
       throw new Error(`Signal send failed with status ${response.status}`);
     }
+  }
+
+  public async fetchAttachment(id: string): Promise<Uint8Array> {
+    const response = await fetch(this.attachmentUrl(id));
+    if (!response.ok) {
+      throw new Error(`Signal attachment fetch failed with status ${response.status}`);
+    }
+
+    return new Uint8Array(await response.arrayBuffer());
+  }
+
+  public async deleteAttachment(id: string): Promise<void> {
+    const response = await fetch(this.attachmentUrl(id), { method: "DELETE" });
+    if (!response.ok) {
+      throw new Error(`Signal attachment delete failed with status ${response.status}`);
+    }
+  }
+
+  private attachmentUrl(id: string): URL {
+    return new URL(`/v1/attachments/${encodeURIComponent(id)}`, this.baseUrl);
   }
 
   public async showTyping(recipient: string): Promise<void> {

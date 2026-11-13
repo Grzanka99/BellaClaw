@@ -6,7 +6,12 @@ import { EventBus } from "../events";
 import { EEventType } from "../events/catalog";
 import { MessagingAdapter } from "../messaging";
 import { createCanonicalChatKey } from "../messaging/chat-key";
-import { EMessagePlatform, type TMessageTransport } from "../messaging/types";
+import {
+  EMessagePlatform,
+  SUPPORTED_IMAGE_TYPES,
+  type TAttachmentRef,
+  type TMessageTransport,
+} from "../messaging/types";
 
 const DISCORD_MESSAGE_MAX_LENGTH = 2_000;
 
@@ -50,7 +55,18 @@ export class DiscordSingleton implements TMessageTransport {
       return;
     }
 
-    if (message.content.trim().length === 0) {
+    // NOTE: the reference names the message, not the CDN URL, which expires
+    const attachments: TAttachmentRef[] = [];
+    for (const attachment of message.attachments.values()) {
+      const mimeType = attachment.contentType?.split(";")[0]?.trim();
+      if (mimeType === undefined || !SUPPORTED_IMAGE_TYPES.includes(mimeType)) {
+        continue;
+      }
+
+      attachments.push({ id: `${message.id}:${attachment.id}`, mimeType });
+    }
+
+    if (message.content.trim().length === 0 && attachments.length === 0) {
       return;
     }
 
@@ -66,6 +82,7 @@ export class DiscordSingleton implements TMessageTransport {
         payload: {
           chatId,
           content: message.content,
+          attachments,
           receivedAt,
           platform: EMessagePlatform.Discord,
         },
@@ -98,6 +115,34 @@ export class DiscordSingleton implements TMessageTransport {
     }
 
     await user.send(remainingText);
+  }
+
+  public async fetchAttachment(chatId: string, ref: TAttachmentRef): Promise<Uint8Array> {
+    const [messageId, attachmentId] = ref.id.split(":");
+    if (messageId === undefined || attachmentId === undefined) {
+      throw new Error("Invalid Discord attachment reference");
+    }
+
+    const user = await this.client.users.fetch(chatId);
+    const channel = await user.createDM();
+    // NOTE: a cached message still carries the URL it arrived with, which expires
+    const message = await channel.messages.fetch({ message: messageId, force: true });
+    const attachment = message.attachments.get(attachmentId);
+    if (attachment === undefined) {
+      throw new Error("Discord attachment is missing");
+    }
+
+    const response = await fetch(attachment.url);
+    if (!response.ok) {
+      throw new Error(`Discord attachment fetch failed with status ${response.status}`);
+    }
+
+    return new Uint8Array(await response.arrayBuffer());
+  }
+
+  // NOTE: Discord keeps the file with the message; there is nothing to delete
+  public async deleteAttachment(): Promise<void> {
+    return;
   }
 
   public setup(): Promise<void> {

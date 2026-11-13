@@ -5,7 +5,7 @@ import { startSpan } from "../app-logger/span";
 import { ESubscriptionMode, EventBus, type TEventContext } from "../events";
 import { EEventType, type TDeliveryTranscript, type TEvent } from "../events/catalog";
 import { parseCanonicalChatKey } from "./chat-key";
-import type { EMessagePlatform, TMessageTransport } from "./types";
+import type { EMessagePlatform, TAttachmentRef, TMessageTransport } from "./types";
 
 export class MessagingAdapter {
   private static _instance: TOption<MessagingAdapter>;
@@ -25,6 +25,30 @@ export class MessagingAdapter {
 
   public registerTransport(transport: TMessageTransport) {
     this.transports.set(transport.platform, transport);
+  }
+
+  public fetchAttachment(chatId: string, ref: TAttachmentRef): Promise<Uint8Array> {
+    const owner = this.resolve(chatId);
+    return owner.transport.fetchAttachment(owner.chatId, ref);
+  }
+
+  public deleteAttachment(chatId: string, ref: TAttachmentRef): Promise<void> {
+    const owner = this.resolve(chatId);
+    return owner.transport.deleteAttachment(owner.chatId, ref);
+  }
+
+  private resolve(chatId: string): { transport: TMessageTransport; chatId: string } {
+    const owner = parseCanonicalChatKey(chatId);
+    if (owner === undefined) {
+      throw new Error("Unknown chat platform");
+    }
+
+    const transport = this.transports.get(owner.platform);
+    if (transport === undefined) {
+      throw new Error(`No ${owner.platform} transport`);
+    }
+
+    return { transport, chatId: owner.chatId };
   }
 
   public setup(): void {

@@ -58,6 +58,8 @@ MessagingAdapter.instance.registerTransport({
 
     record("sends.log", [chatId, text]);
   },
+  fetchAttachment: async () => new Uint8Array(),
+  deleteAttachment: async () => undefined,
 });
 
 let compactions = 0;
@@ -177,6 +179,7 @@ for (const content of messages) {
     payload: {
       chatId: CRASH_CHAT_ID,
       content,
+      attachments: [],
       receivedAt: Date.now(),
       platform: EMessagePlatform.Signal,
     },
