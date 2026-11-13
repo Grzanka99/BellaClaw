@@ -1,7 +1,7 @@
+import { EEventType } from "@bellaclaw/database";
 import { obj, str } from "@earendil-works/pi-schema";
 import { AutomationService } from "../../../automation";
 import { AUTOMATION_RUN_TIMEOUT_MS, EAutomationRunMode } from "../../../automation/runner";
-import { EEventType } from "../../../events/catalog";
 import { EConfigKey } from "../../../settings/schema";
 import { runAutomationOperation } from "../automation-errors";
 import { defineTool, requireChatId, ToolError } from "../define-tool";

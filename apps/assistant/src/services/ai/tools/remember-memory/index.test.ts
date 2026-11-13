@@ -1,8 +1,9 @@
 import { describe, expect, mock, test } from "bun:test";
+import { EEventType } from "@bellaclaw/database";
 import { compile } from "@earendil-works/pi-schema";
 import { formats } from "@earendil-works/pi-schema/formats";
 import { CommandRejectedError, type TEventRequester } from "../../../events";
-import { EEventType, ERejectionCode } from "../../../events/catalog";
+import { ERejectionCode } from "../../../events/catalog";
 import { testEventRequester } from "../../../events/test-utils";
 import { EMBEDDING_UNAVAILABLE, MEMORY_REQUEST_TIMEOUT_MS } from "../../../memory";
 import { DefaultConfigRecord } from "../../../settings/schema";

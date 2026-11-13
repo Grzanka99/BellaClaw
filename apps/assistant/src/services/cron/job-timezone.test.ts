@@ -1,13 +1,18 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import {
+  cronEngineJobsTable,
+  ECronJobStatus,
+  ECronJobType,
+  EEventType,
+  eventsTable,
+} from "@bellaclaw/database";
 import { eq } from "drizzle-orm";
 import { DatabaseConnector } from "../database";
-import { cronEngineJobsTable, eventsTable } from "../database/schema";
 import { resetCronEngineJobsTable, resetEventTables } from "../database/test-utils";
 import { EventBus } from "../events";
-import { EEventType, type TCronFiredPayload } from "../events/catalog";
+import type { TCronFiredPayload } from "../events/catalog";
 import { CronScheduler } from "./index";
 import { createOnce, createRecurring } from "./test-utils";
-import { ECronJobStatus, ECronJobType } from "./types";
 
 type TSchedulerInternals = {
   fire: (id: number) => Promise<void>;

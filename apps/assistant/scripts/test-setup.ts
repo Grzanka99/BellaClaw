@@ -1,6 +1,7 @@
 import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DRIZZLE_TEST_CONFIG_PATH } from "@bellaclaw/database";
 
 Bun.env.BELLACLAW_DATABASE_MODE = "test";
 Bun.env.BELLACLAW_AI_CREDENTIALS_PATH = join(
@@ -11,7 +12,7 @@ Bun.env.BELLACLAW_AI_CREDENTIALS_PATH = join(
 await rm("./test.db", { force: true });
 
 const schemaPush = Bun.spawn(
-  ["bun", "--bun", "drizzle-kit", "push", "--config", "drizzle.test.config.ts"],
+  ["bun", "--bun", "drizzle-kit", "push", "--config", DRIZZLE_TEST_CONFIG_PATH],
   {
     env: Bun.env,
     stderr: "inherit",

@@ -1,5 +1,12 @@
 import { afterEach, beforeEach, describe, expect, mock, setSystemTime, test } from "bun:test";
 import type { TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
+import {
+  EEventType,
+  eventDeliveriesTable,
+  eventsTable,
+  memoriesTable,
+  type TSelectMemory,
+} from "@bellaclaw/database";
 import type { Message } from "@earendil-works/pi-ai";
 import {
   fauxAssistantMessage,
@@ -19,16 +26,9 @@ import { EAiProvider, ERole } from "../ai/types";
 import { ConversationStore } from "../conversation";
 import type { TConversation } from "../conversation/types";
 import { DatabaseConnector, type TDatabaseHandle } from "../database";
-import {
-  eventDeliveriesTable,
-  eventsTable,
-  memoriesTable,
-  type TSelectMemory,
-} from "../database/schema";
 import { resetEventTables } from "../database/test-utils";
 import { EmbeddingClient } from "../embedding";
 import { EventBus } from "../events";
-import { EEventType } from "../events/catalog";
 import { testEventRequester } from "../events/test-utils";
 import { Memory } from "../memory";
 import { FactDistiller } from "../memory/distill";

@@ -1,4 +1,5 @@
 import type { TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
+import { EAutomationStatus } from "@bellaclaw/database";
 import {
   runScript,
   SCRIPT_LIMITS,
@@ -7,7 +8,7 @@ import {
 } from "../../lib/script-sandbox";
 import { startSpan } from "../app-logger/span";
 import type { TAutomationRunReport } from "../events/catalog";
-import { EAutomationStatus, type TAutomation, type TAutomationDraft } from "./types";
+import type { TAutomation, TAutomationDraft } from "./types";
 
 export enum EAutomationRunMode {
   Preview = "preview",

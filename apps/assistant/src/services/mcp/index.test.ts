@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { EEventType } from "@bellaclaw/database";
 import type { TOption } from "@bellaclaw/shared";
 import { validateToolArguments } from "@earendil-works/pi-ai";
 import { compile } from "@earendil-works/pi-schema";
@@ -11,7 +12,6 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import { resetEventTables } from "../database/test-utils";
 import { EventBus } from "../events";
-import { EEventType } from "../events/catalog";
 import { disconnectMcpAuth, getMcpAuthStatus, saveMcpAuthToken } from "./auth";
 import { loadMcpProfiles } from "./config";
 import { mcpResult } from "./content";

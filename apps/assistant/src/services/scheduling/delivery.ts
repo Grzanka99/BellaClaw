@@ -1,4 +1,5 @@
 import { AppLogger, type TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
+import { EEventType } from "@bellaclaw/database";
 import type { TOption } from "@bellaclaw/shared";
 import { createLogger, type TLogger } from "@bellaclaw/shared";
 import { AgentHarness } from "../ai/agent-harness";
@@ -6,12 +7,11 @@ import { LlmClient } from "../ai/llm";
 import { logHandlerStarted, startHandlerSpan, type THandlerSpan } from "../app-logger/operations";
 import { AUTOMATION_RUN_TIMEOUT_MS, EAutomationRunMode } from "../automation/runner";
 import { ESubscriptionMode, EventBus, type TEventContext } from "../events";
-import {
-  EEventType,
-  type TAutomationRunReport,
-  type TCronFiredPayload,
-  type TDeliveryTranscript,
-  type TEvent,
+import type {
+  TAutomationRunReport,
+  TCronFiredPayload,
+  TDeliveryTranscript,
+  TEvent,
 } from "../events/catalog";
 import { parseCanonicalChatKey } from "../messaging/chat-key";
 import type { EMessagePlatform } from "../messaging/types";

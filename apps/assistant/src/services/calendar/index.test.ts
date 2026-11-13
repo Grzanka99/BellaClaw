@@ -1,13 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdir } from "node:fs/promises";
+import { calendarsTable, EEventType } from "@bellaclaw/database";
 import { repositoryPath } from "@bellaclaw/shared";
 import type { LibSQLDatabase } from "drizzle-orm/libsql";
 import { validateUpdateCalendarEventArgs } from "../ai/tools/update-calendar-event";
 import { DatabaseConnector, type TDatabaseTransaction } from "../database";
-import { calendarsTable } from "../database/schema";
 import { resetEventTables } from "../database/test-utils";
 import { CommandRejectedError, EventBus } from "../events";
-import { EEventType } from "../events/catalog";
 import { withEventContext } from "../events/test-utils";
 import { CalendarService } from ".";
 import type { GwsCalendarClient } from "./gws";

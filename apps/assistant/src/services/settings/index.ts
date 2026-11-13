@@ -1,8 +1,8 @@
+import { EEventType, type TSelectUserConfig, userConfigsTable } from "@bellaclaw/database";
 import { and, eq } from "drizzle-orm";
 import { DatabaseConnector, type TDatabaseTransaction } from "../database";
-import { type TSelectUserConfig, userConfigsTable } from "../database/schema";
 import { ESubscriptionMode, EventBus } from "../events";
-import { EEventType, ERejectionCode } from "../events/catalog";
+import { ERejectionCode } from "../events/catalog";
 import {
   ConfigValidators,
   DefaultConfigRecord,

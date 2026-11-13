@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
+import { EEventType, eventsTable } from "@bellaclaw/database";
 import { eq } from "drizzle-orm";
 import { AuthorizationService } from "../authorization";
 import { DatabaseConnector } from "../database";
-import { eventsTable } from "../database/schema";
 import { resetEventTables } from "../database/test-utils";
 import { EventBus, type TEventDraft } from "../events";
-import { EEventType, type TEventPayloads } from "../events/catalog";
+import type { TEventPayloads } from "../events/catalog";
 import { MessagingAdapter } from "../messaging";
 import { EMessagePlatform } from "../messaging/types";
 import { Notices } from ".";

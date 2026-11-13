@@ -1,0 +1,19 @@
+{
+  "name": "@bellaclaw/database",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "check": "bunx @biomejs/biome check .",
+    "db": "bun --env-file=../../.env --bun drizzle-kit",
+    "typecheck": "bunx tsc --noEmit"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.45.2"
+  },
+  "devDependencies": {
+    "drizzle-kit": "^0.31.10"
+  }
+}

@@ -1,11 +1,10 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { EEventType, eventsTable } from "@bellaclaw/database";
 import { ChannelType } from "discord.js";
 import { CronScheduler } from "../cron";
 import { DatabaseConnector } from "../database";
-import { eventsTable } from "../database/schema";
 import { resetCronEngineJobsTable, resetEventTables } from "../database/test-utils";
 import { EventBus } from "../events";
-import { EEventType } from "../events/catalog";
 import { MessageHandler } from "../message-handler";
 import { MessagingAdapter } from "../messaging";
 import { EMessagePlatform } from "../messaging/types";

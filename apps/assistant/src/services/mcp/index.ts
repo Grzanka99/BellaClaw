@@ -1,3 +1,4 @@
+import { EEventType } from "@bellaclaw/database";
 import { createLogger, type TOption } from "@bellaclaw/shared";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
@@ -10,7 +11,6 @@ import {
   ToolListChangedNotificationSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { ESubscriptionMode, EventBus } from "../events";
-import { EEventType } from "../events/catalog";
 import { createMcpAuthFetch, getMcpAuthProvider, getMcpAuthToken } from "./auth";
 import { getMcpProfile } from "./config";
 import { discoverTools, requestOptions, type TMcpToolContext } from "./tools";

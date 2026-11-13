@@ -1,8 +1,8 @@
 import { describe, expect, mock, test } from "bun:test";
+import { EEventType } from "@bellaclaw/database";
 import { compile } from "@earendil-works/pi-schema";
 import { formats } from "@earendil-works/pi-schema/formats";
 import type { TEventRequester } from "../../../events";
-import { EEventType } from "../../../events/catalog";
 import { testEventRequester } from "../../../events/test-utils";
 import { DefaultConfigRecord } from "../../../settings/schema";
 import { createCalendarEvent, SCreateCalendarEventArgs, validateCreateCalendarEventArgs } from ".";

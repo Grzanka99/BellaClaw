@@ -1,4 +1,4 @@
-import { EEventType } from "./catalog";
+import { EEventType } from "@bellaclaw/database";
 import { ESubscriptionMode, EventBus, type TEventContext, type TEventRequester } from "./index";
 
 let requesters = 0;

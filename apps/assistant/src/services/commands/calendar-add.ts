@@ -1,5 +1,5 @@
+import { EEventType } from "@bellaclaw/database";
 import type { TCalendarAccess } from "../calendar/types";
-import { EEventType } from "../events/catalog";
 import type { TCommand } from "./types";
 
 function createCalendarAddCommand(

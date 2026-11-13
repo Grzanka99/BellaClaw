@@ -1,11 +1,16 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import {
+  EEventType,
+  eventDeliveriesTable,
+  eventsTable,
+  messageAuthorizationsTable,
+} from "@bellaclaw/database";
 import type { TOption } from "@bellaclaw/shared";
 import { asc, eq } from "drizzle-orm";
 import { registerRedactedSecret } from "../app-logger/sanitizers";
 import { DatabaseConnector } from "../database";
-import { eventDeliveriesTable, eventsTable, messageAuthorizationsTable } from "../database/schema";
 import { resetEventTables, resetMessageAuthorizationsTable } from "../database/test-utils";
-import { EEventType, ERejectionCode, type TEventPayloads } from "./catalog";
+import { ERejectionCode, type TEventPayloads } from "./catalog";
 import {
   CommandRejectedError,
   CommandTimeoutError,

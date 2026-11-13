@@ -1,8 +1,9 @@
 import { createMessageTurnId } from "@bellaclaw/behavior-logs";
+import { EEventType } from "@bellaclaw/database";
 import type { TOption } from "@bellaclaw/shared";
 import { createLogger, type TLogger } from "@bellaclaw/shared";
 import { ESubscriptionMode, EventBus } from "../events";
-import { EEventType, type TEvent } from "../events/catalog";
+import type { TEvent } from "../events/catalog";
 import { MessagingAdapter } from "../messaging";
 import { createCanonicalChatKey, parseCanonicalChatKey } from "../messaging/chat-key";
 import { EMessagePlatform, type TAttachmentRef, type TMessageTransport } from "../messaging/types";

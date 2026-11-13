@@ -58,9 +58,10 @@ Open the returned link, approve the code, and wait for the confirmation. Open
 
 ## Repository Layout
 
-- `apps/assistant` — messaging, AI runtime, scheduling, and the Turso/Drizzle database
+- `apps/assistant` — messaging, AI runtime, scheduling, and the Turso database connection
 - `apps/log-viewer` — read-only behavior-log web interface
 - `packages/behavior-logs` — shared behavior-log SQLite contract and access APIs
+- `packages/database` — Drizzle schema, migrations, and drizzle-kit configs
 - `packages/shared` — cross-workspace primitives: `TOption`, `AsyncQueue`, the logger, and
   `REPOSITORY_ROOT`
 

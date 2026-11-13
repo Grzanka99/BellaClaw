@@ -1,11 +1,11 @@
-import type { TOption } from "@bellaclaw/shared";
-import { z } from "zod";
 import {
   EMBEDDING_DIMENSIONS,
   type factDistillationStateTable,
   type factsTable,
   type TSelectMemory,
-} from "../database/schema";
+} from "@bellaclaw/database";
+import type { TOption } from "@bellaclaw/shared";
+import { z } from "zod";
 
 export const SPreparedFact = z.object({
   text: z.string(),

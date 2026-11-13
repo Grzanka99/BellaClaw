@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
-import { AutomationService, EAutomationStatus } from "../../../automation";
+import { EAutomationStatus } from "@bellaclaw/database";
+import { AutomationService } from "../../../automation";
 import { DatabaseConnector } from "../../../database";
 import { resetAutomationsTables, resetEventTables } from "../../../database/test-utils";
 import { EventBus } from "../../../events";

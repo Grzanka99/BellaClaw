@@ -2,11 +2,11 @@ import { afterEach, beforeEach, expect, type Mock, mock, spyOn, test } from "bun
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { EEventType } from "@bellaclaw/database";
 import { createModels, createProvider, type OAuthCredential } from "@earendil-works/pi-ai";
 import { openAICodexResponsesApi } from "@earendil-works/pi-ai/api/openai-codex-responses.lazy";
 import { AuthorizationService } from "../../authorization";
 import { EventBus, type TEventContext, type TEventDraft } from "../../events";
-import { EEventType } from "../../events/catalog";
 import { EConfigKey } from "../../settings/schema";
 import { FileCredentialStore } from "../providers/file-credential-store";
 import { EAiProvider } from "../types";
