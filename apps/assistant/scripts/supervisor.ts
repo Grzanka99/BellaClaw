@@ -241,7 +241,7 @@ async function runUpdate(manual: boolean): Promise<void> {
   const sha = (await run(["git", "ls-remote", repo, "refs/heads/main"], IMAGE_DIR)).split(/\s/)[0];
 
   if (!sha) {
-    throw new Error(`${repo} has no main branch`);
+    throw new Error("the origin remote has no main branch");
   }
 
   const short = sha.slice(0, 7);
