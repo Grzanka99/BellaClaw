@@ -14,6 +14,7 @@ services:
       - BELLACLAW_EMBEDDING_BASE_URL=http://ollama:11434
       - BELLACLAW_LOGS_MCP_URL=http://log-viewer:8989/mcp
       - SIGNAL_CLI_RPC_URL=http://signal-cli:8080
+      - BELLACLAW_INTERNAL_API_HOSTNAME=0.0.0.0
     depends_on:
       - ollama
       - log-viewer
@@ -47,6 +48,27 @@ services:
     volumes:
       - bellaclaw-data:/app-data:ro
 
+  dashboard:
+    image: bellaclaw:local
+    pull_policy: never
+    container_name: bellaclaw-dashboard
+    restart: on-failure
+    environment:
+      - TURSO_CONNECTION_URL=${TURSO_CONNECTION_URL:-}
+      - TURSO_AUTH_TOKEN=${TURSO_AUTH_TOKEN:-}
+      - BELLACLAW_DASHBOARD_PUBLIC_URL=${BELLACLAW_DASHBOARD_PUBLIC_URL:-}
+      - BELLACLAW_DASHBOARD_SECRET=${BELLACLAW_DASHBOARD_SECRET:-}
+      - BELLACLAW_INTERNAL_API_URL=http://bellaclaw:3081
+      - BELLACLAW_DASHBOARD_HOSTNAME=0.0.0.0
+      - BELLACLAW_DASHBOARD_DB_PATH=/dashboard-data/dashboard.db
+    depends_on:
+      - bellaclaw
+    command: ["bun", "run", "--cwd", "apps/dashboard", "start"]
+    ports:
+      - "127.0.0.1:8988:8988"
+    volumes:
+      - dashboard-data:/dashboard-data
+
   signal-cli:
     image: docker.io/bbernhard/signal-cli-rest-api:0.100-rootless
     container_name: bellaclaw-signal-cli
@@ -62,5 +84,6 @@ services:
 
 volumes:
   bellaclaw-data:
+  dashboard-data:
   ollama-data:
   signal-cli-data:

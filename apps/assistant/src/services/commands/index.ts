@@ -4,6 +4,7 @@ import { ESubscriptionMode, EventBus, type TEventContext } from "../events";
 import type { TEvent } from "../events/catalog";
 import { aiAuthCommand } from "./ai-auth";
 import { calendarAddReadCommand, calendarAddWriteCommand } from "./calendar-add";
+import { dashboardCommand } from "./dashboard";
 import { mcpAuthCommand } from "./mcp-auth";
 import { mcpPromptCommand, mcpPromptsCommand } from "./mcp-prompts";
 import { COMMAND_PREFIX, type TCommand, type TCommandResult } from "./types";
@@ -15,6 +16,7 @@ const REGISTERED_COMMANDS: TCommand[] = [
   mcpPromptsCommand,
   mcpPromptCommand,
   aiAuthCommand,
+  dashboardCommand,
 ];
 
 export function formatCommandList(): string {

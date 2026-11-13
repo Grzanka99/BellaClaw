@@ -109,6 +109,8 @@ bus.subscribe({
 - `scheduling` → `automations`, `memory`
 - `commands` → `mcp-auth`, `ai-auth`, `calendar`
 - `ai-auth` → `settings`
+- `internal-api` → `settings`, `conversation`. An HTTP request is on no lane: it publishes the
+  command and awaits the outcome through live subscriptions.
 
 A new wait is a new edge there; the test fails on a cycle.
 

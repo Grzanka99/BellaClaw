@@ -1,25 +1,11 @@
 import { EEventType } from "@bellaclaw/database";
-import type { TOption } from "@bellaclaw/shared";
-import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { bool, obj, oneOf, opt, type Static, str } from "@earendil-works/pi-schema";
-import { SettingsService, type TConfigUpdate } from "../../../settings";
+import type { TConfigUpdate } from "../../../settings";
 import { ConfigValidators, EConfigKey } from "../../../settings/schema";
-import {
-  decodeAiModelPreferences,
-  encodeAiModelPreferences,
-  getAiModelPreference,
-  setAiModelPreference,
-  type TAiModelPreferences,
-} from "../../model-preferences";
-import {
-  aiModels,
-  getAiModelConfig,
-  refreshAiModels,
-  supportsAiServiceTier,
-} from "../../providers/registry";
 import { EAiProvider, EModelPurpose } from "../../types";
 import { defineTool, requireChatId } from "../define-tool";
-import { createAiRuntime, resolveAiProvider } from "../get-settings";
+import { createAiRuntime } from "../get-settings";
+import { prepareAiSettingsUpdate, validateAiSettingsArgs } from "./ai-settings";
 import instructions from "./instructions.xml" with { type: "text" };
 
 const SUpdateSettingsArgs = {
@@ -81,35 +67,6 @@ const SUpdateSettingsArgs = {
 
 type TUpdateSettingsArgs = Static<typeof SUpdateSettingsArgs>;
 
-function validateUpdateSettingsArgs(args: TUpdateSettingsArgs): boolean {
-  const hasModelOperation =
-    args.aiModel !== undefined ||
-    args.aiReasoningEffort !== undefined ||
-    args.aiServiceTier !== undefined ||
-    args.resetAiModel === true ||
-    args.resetAiReasoningEffort === true;
-
-  if (args.aiModelPurpose !== undefined && !hasModelOperation) {
-    throw new Error("aiModelPurpose requires a model or reasoning-effort change");
-  }
-
-  if (
-    args.resetAiModel === true &&
-    (args.aiModel !== undefined ||
-      args.aiReasoningEffort !== undefined ||
-      args.aiServiceTier !== undefined ||
-      args.resetAiReasoningEffort === true)
-  ) {
-    throw new Error("resetAiModel cannot be combined with another model change");
-  }
-
-  if (args.resetAiReasoningEffort === true && args.aiReasoningEffort !== undefined) {
-    throw new Error("Choose aiReasoningEffort or resetAiReasoningEffort, not both");
-  }
-
-  return hasModelOperation;
-}
-
 export const updateSettings = defineTool({
   name: "update-settings",
   label: "Update settings",
@@ -121,7 +78,7 @@ export const updateSettings = defineTool({
   logSafe: [["settings", "settingKeys"]],
   execute: async (context, parsedArgs) => {
     const chatId = requireChatId(context.chatId);
-    const hasModelOperation = validateUpdateSettingsArgs(parsedArgs);
+    const hasModelOperation = validateAiSettingsArgs(parsedArgs);
 
     const updates: TConfigUpdate[] = [];
     const fields: Array<{ field: keyof TUpdateSettingsArgs; key: EConfigKey }> = [
@@ -130,7 +87,6 @@ export const updateSettings = defineTool({
       { field: "assistantName", key: EConfigKey.AiInstructionsAssistantName },
       { field: "addressStyle", key: EConfigKey.AiInstructionsAddressStyle },
       { field: "preferredReplyLength", key: EConfigKey.AiInstructionsPreferredReplyLength },
-      { field: "aiProvider", key: EConfigKey.AiProvider },
     ];
 
     for (const field of fields) {
@@ -147,183 +103,13 @@ export const updateSettings = defineTool({
       }
     }
 
-    const settings = await SettingsService.instance.getAll(chatId);
-    const currentProvider = resolveAiProvider(settings);
-    let provider = currentProvider;
-
-    if (parsedArgs.aiProvider !== undefined) {
-      provider = parsedArgs.aiProvider;
-    }
-
-    if (hasModelOperation || parsedArgs.aiProvider !== undefined) {
-      const forceRefresh =
-        parsedArgs.aiModel !== undefined &&
-        aiModels.getModel(provider, parsedArgs.aiModel) === undefined;
-      await refreshAiModels(provider, forceRefresh);
-    }
-    let purpose: TOption<EModelPurpose>;
-    const preferences = decodeAiModelPreferences(settings[EConfigKey.AiModelPreferences]);
-    const fallbacks: Array<{ purpose: EModelPurpose; reason: string }> = [];
-
-    if (hasModelOperation) {
-      purpose = EModelPurpose.Main;
-
-      if (parsedArgs.aiModelPurpose !== undefined) {
-        purpose = parsedArgs.aiModelPurpose;
-      }
-
-      if (parsedArgs.resetAiModel === true) {
-        setAiModelPreference(preferences, provider, purpose, undefined);
-      } else {
-        const currentConfig = getAiModelConfig(
-          provider,
-          purpose,
-          getAiModelPreference(preferences, provider, purpose),
-        );
-        let modelId = currentConfig.model.id;
-
-        if (parsedArgs.aiModel !== undefined) {
-          modelId = parsedArgs.aiModel;
-        }
-
-        const model = aiModels.getModel(provider, modelId);
-
-        if (model === undefined) {
-          throw new Error(`Model "${modelId}" is not available from provider "${provider}"`);
-        }
-
-        let effort = currentConfig.effort;
-
-        if (parsedArgs.resetAiReasoningEffort === true) {
-          effort = getAiModelConfig(provider, purpose, { model: modelId }).effort;
-        } else if (parsedArgs.aiReasoningEffort !== undefined) {
-          effort = parsedArgs.aiReasoningEffort;
-        }
-
-        if (effort !== undefined && !getSupportedThinkingLevels(model).includes(effort)) {
-          fallbacks.push({
-            purpose,
-            reason: `Effort ${effort} is unsupported by ${modelId}; using the model default`,
-          });
-          effort = getAiModelConfig(provider, purpose, { model: modelId }).effort;
-        }
-
-        let serviceTier = currentConfig.serviceTier;
-
-        if (parsedArgs.aiServiceTier === "default") {
-          serviceTier = undefined;
-        } else if (parsedArgs.aiServiceTier !== undefined) {
-          if (!supportsAiServiceTier(model)) {
-            throw new Error(`Service tier is unsupported by ${modelId}`);
-          }
-
-          serviceTier = parsedArgs.aiServiceTier;
-        }
-
-        if (serviceTier !== undefined && !supportsAiServiceTier(model)) {
-          fallbacks.push({
-            purpose,
-            reason: `Service tier ${serviceTier} is unsupported by ${modelId}; using the default tier`,
-          });
-          serviceTier = undefined;
-        }
-
-        const defaultConfig = getAiModelConfig(provider, purpose);
-
-        if (
-          modelId === defaultConfig.model.id &&
-          effort === defaultConfig.effort &&
-          serviceTier === undefined
-        ) {
-          setAiModelPreference(preferences, provider, purpose, undefined);
-        } else {
-          setAiModelPreference(preferences, provider, purpose, {
-            model: modelId,
-            effort,
-            serviceTier,
-          });
-        }
-      }
-    }
-
-    if (parsedArgs.aiProvider !== undefined) {
-      fallbacks.push(...normalizeProviderPreferences(provider, preferences));
-    }
-
-    if (updates.length === 0 && !hasModelOperation) {
-      throw new Error("Provide at least one field to update");
-    }
-
-    const nextSettings = { ...settings };
-
-    for (const update of updates) {
-      nextSettings[update.key] = update.value;
-    }
-
-    nextSettings[EConfigKey.AiModelPreferences] = encodeAiModelPreferences(preferences);
-    const purposes: EModelPurpose[] = [];
-
-    if (parsedArgs.aiProvider !== undefined) {
-      purposes.push(...Object.values(EModelPurpose));
-    } else if (purpose !== undefined) {
-      purposes.push(purpose);
-    }
-
-    const verifications = new Map<string, Promise<TOption<string>>>();
-    const results = await Promise.all(
-      purposes.map(async (verificationPurpose) => {
-        const { model, effort, serviceTier } = getAiModelConfig(
-          provider,
-          verificationPurpose,
-          getAiModelPreference(preferences, provider, verificationPurpose),
-        );
-        const key = JSON.stringify([model.id, effort, serviceTier]);
-        let verification = verifications.get(key);
-
-        if (verification === undefined) {
-          verification = context.verifySettings(nextSettings, [verificationPurpose]);
-          verifications.set(key, verification);
-        }
-
-        return { purpose: verificationPurpose, error: await verification };
-      }),
+    const { settings, purpose, fallbacks } = await prepareAiSettingsUpdate(
+      chatId,
+      parsedArgs,
+      hasModelOperation,
+      updates,
+      context.verifySettings,
     );
-
-    for (const { purpose: verificationPurpose, error } of results) {
-      if (error === undefined) {
-        continue;
-      }
-
-      const isExplicitModelChange = hasModelOperation && verificationPurpose === purpose;
-      const rememberedPreference = getAiModelPreference(preferences, provider, verificationPurpose);
-
-      if (
-        isExplicitModelChange ||
-        parsedArgs.aiProvider === undefined ||
-        rememberedPreference === undefined
-      ) {
-        throw new Error(error);
-      }
-
-      setAiModelPreference(preferences, provider, verificationPurpose, undefined);
-      nextSettings[EConfigKey.AiModelPreferences] = encodeAiModelPreferences(preferences);
-      const fallbackError = await context.verifySettings(nextSettings, [verificationPurpose]);
-
-      if (fallbackError !== undefined) {
-        throw new Error(fallbackError);
-      }
-
-      fallbacks.push({
-        purpose: verificationPurpose,
-        reason: `Remembered model failed verification; using the provider default`,
-      });
-    }
-
-    const encodedPreferences = encodeAiModelPreferences(preferences);
-
-    if (encodedPreferences !== settings[EConfigKey.AiModelPreferences]) {
-      updates.push({ key: EConfigKey.AiModelPreferences, value: encodedPreferences });
-    }
 
     let savedSettings = settings;
 
@@ -347,39 +133,3 @@ export const updateSettings = defineTool({
     };
   },
 });
-
-function normalizeProviderPreferences(provider: EAiProvider, preferences: TAiModelPreferences) {
-  const fallbacks: Array<{ purpose: EModelPurpose; reason: string }> = [];
-
-  for (const purpose of Object.values(EModelPurpose)) {
-    const preference = getAiModelPreference(preferences, provider, purpose);
-
-    if (preference === undefined) {
-      continue;
-    }
-
-    const model = aiModels.getModel(provider, preference.model);
-
-    if (model === undefined) {
-      setAiModelPreference(preferences, provider, purpose, undefined);
-      fallbacks.push({ purpose, reason: `Remembered model ${preference.model} is unavailable` });
-      continue;
-    }
-
-    if (
-      preference.effort !== undefined &&
-      !getSupportedThinkingLevels(model).includes(preference.effort)
-    ) {
-      setAiModelPreference(preferences, provider, purpose, {
-        model: preference.model,
-        serviceTier: preference.serviceTier,
-      });
-      fallbacks.push({
-        purpose,
-        reason: `Remembered effort ${preference.effort} is unsupported by ${preference.model}`,
-      });
-    }
-  }
-
-  return fallbacks;
-}

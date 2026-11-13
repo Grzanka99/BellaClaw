@@ -381,6 +381,15 @@ const SCalendarEventChanged = z
   .object({ chatId: z.string(), event: z.record(z.string(), z.unknown()) })
   .strict();
 
+const SConversationMessageDeleteRequested = z
+  .object({ chatId: z.string(), messageId: z.number().int() })
+  .strict();
+
+// messageIds: every removed row, the message and the tool rows that went with it
+const SConversationMessageDeleted = z
+  .object({ chatId: z.string(), messageIds: z.array(z.number().int()) })
+  .strict();
+
 // errorCode: the handler's stable code for an expected failure, such as job-not-found
 const SCommandRejected = z
   .object({
@@ -472,6 +481,10 @@ export type TEventPayloads = {
   [EEventType.CalendarEventUpdated]: z.infer<typeof SCalendarEventChanged>;
   [EEventType.CalendarEventDeleteRequested]: z.infer<typeof SCalendarEventTarget>;
   [EEventType.CalendarEventDeleted]: z.infer<typeof SCalendarEventTarget>;
+  [EEventType.ConversationMessageDeleteRequested]: z.infer<
+    typeof SConversationMessageDeleteRequested
+  >;
+  [EEventType.ConversationMessageDeleted]: z.infer<typeof SConversationMessageDeleted>;
   [EEventType.CommandRejected]: z.infer<typeof SCommandRejected>;
   [EEventType.EventDeadLettered]: z.infer<typeof SEventDeadLettered>;
   [EEventType.AppStarted]: z.infer<typeof SAppStarted>;
@@ -547,6 +560,8 @@ export const EVENT_SCHEMAS: { [K in EEventType]: z.ZodType<TEventPayloads[K]> } 
   [EEventType.CalendarEventUpdated]: SCalendarEventChanged,
   [EEventType.CalendarEventDeleteRequested]: SCalendarEventTarget,
   [EEventType.CalendarEventDeleted]: SCalendarEventTarget,
+  [EEventType.ConversationMessageDeleteRequested]: SConversationMessageDeleteRequested,
+  [EEventType.ConversationMessageDeleted]: SConversationMessageDeleted,
   [EEventType.CommandRejected]: SCommandRejected,
   [EEventType.EventDeadLettered]: SEventDeadLettered,
   [EEventType.AppStarted]: SAppStarted,
@@ -620,6 +635,8 @@ export const EVENT_KINDS: Record<EEventType, EEventKind> = {
   [EEventType.CalendarEventUpdated]: EEventKind.Event,
   [EEventType.CalendarEventDeleteRequested]: EEventKind.Command,
   [EEventType.CalendarEventDeleted]: EEventKind.Event,
+  [EEventType.ConversationMessageDeleteRequested]: EEventKind.Command,
+  [EEventType.ConversationMessageDeleted]: EEventKind.Event,
   [EEventType.CommandRejected]: EEventKind.Event,
   [EEventType.EventDeadLettered]: EEventKind.Event,
   [EEventType.AppStarted]: EEventKind.Event,
