@@ -1,16 +1,32 @@
 import { AppLogger, EBehaviorLogLevel, type TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
-import { type Api, contentText, type Model, type Models } from "@earendil-works/pi-ai";
+import {
+  type Api,
+  contentText,
+  type Message,
+  type Model,
+  type Models,
+} from "@earendil-works/pi-ai";
 import {
   calculateContextTokens,
   estimateMessageTokens,
 } from "@earendil-works/pi-ai/utils/estimate";
 import compactionInstructions from "../ai/instructions/compaction.xml" with { type: "text" };
-import { conversationMessages, type TConversation } from "./types";
+import { conversationMessages, SAttachmentBlock, type TConversation } from "./types";
 
 const COMPACTION_TRIGGER = 65_000;
 const CONTEXT_SOFT_LIMIT = 100_000;
 const TARGET_TOKENS = 25_000;
 const SUMMARY_RESERVE = 4_096;
+// NOTE: a stored image is only the "[Image]" marker, but every turn sends the real picture
+const IMAGE_TOKENS = 1_500;
+
+function estimateTokens(message: Message): number {
+  let images = 0;
+  if (message.role === "user" && typeof message.content !== "string") {
+    images = message.content.filter((block) => SAttachmentBlock.safeParse(block).success).length;
+  }
+  return estimateMessageTokens(message) + images * IMAGE_TOKENS;
+}
 
 /** Summarize older complete turns without mutating the stored conversation. */
 export async function compactConversation(
@@ -21,7 +37,7 @@ export async function compactConversation(
   trace: TBehaviorTraceContext,
 ) {
   const messages = conversationMessages(state);
-  const estimates = messages.map((message) => estimateMessageTokens(message));
+  const estimates = messages.map(estimateTokens);
   let tokensBefore = fixedTokens + estimates.reduce((sum, tokens) => sum + tokens, 0);
   const lastMessage = state.entries.at(-1)?.message;
   // Usage before the summary was written describes the old, larger context.
@@ -153,10 +169,7 @@ export async function compactConversation(
   // Old assistant usage describes the pre-compaction request; do not reuse it.
   const tokensAfter =
     fixedTokens +
-    conversationMessages(compacted).reduce(
-      (sum, message) => sum + estimateMessageTokens(message),
-      0,
-    );
+    conversationMessages(compacted).reduce((sum, message) => sum + estimateTokens(message), 0);
   if (tokensAfter >= tokensBefore) {
     throw new Error("Compaction did not reduce context");
   }

@@ -9,7 +9,7 @@ import {
   type Message,
 } from "@earendil-works/pi-ai";
 import { compactConversation } from "./compaction";
-import type { TConversation } from "./types";
+import { attachmentBlock, type TConversation } from "./types";
 
 const TEST_TRACE: TBehaviorTraceContext = {
   turnId: "test",
@@ -54,6 +54,20 @@ describe("conversation compaction", () => {
     state.entries = state.entries.slice(2);
     expect(await compactConversation(state, models, model, 3000, TEST_TRACE)).toBeUndefined();
     expect(faux.state.callCount).toBe(0);
+  });
+
+  test("counts stored images toward the trigger", async () => {
+    const { state, models, model, faux } = fixture();
+    const image = attachmentBlock({ id: "photo", mimeType: "image/png" });
+    state.entries = Array.from({ length: 50 }, (_, index) => ({
+      id: index + 1,
+      message: { role: "user", content: [image], timestamp: index + 2 },
+    }));
+    faux.setResponses([fauxAssistantMessage("The user sent many pictures.")]);
+
+    const result = await compactConversation(state, models, model, 3000, TEST_TRACE);
+
+    expect(result?.state.entries.length).toBeLessThan(50);
   });
 
   test("updates the previous summary, retains whole recent tool exchanges and ignores stale usage", async () => {
