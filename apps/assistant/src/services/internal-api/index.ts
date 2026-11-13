@@ -270,7 +270,10 @@ export function startInternalApiServer(): void {
   }
 
   server = Bun.serve({
+    hostname: Bun.env.BELLACLAW_INTERNAL_API_HOSTNAME?.trim() || "127.0.0.1",
     port,
+    // every request body is a small JSON object
+    maxRequestBodySize: 65_536,
     // NOTE: the maximum. A model change waits for a provider verification, far beyond the
     // default 10 s.
     idleTimeout: 255,

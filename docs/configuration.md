@@ -129,8 +129,10 @@ See [Behavior Logs](behavior-logs.md).
 | --- | --- | --- |
 | `BELLACLAW_DASHBOARD_PUBLIC_URL` | — | Public HTTPS origin of the dashboard. Builds the `!dashboard` link and is checked against `Origin`. |
 | `BELLACLAW_DASHBOARD_SECRET` | — | Shared secret. Signs link tokens and authenticates the dashboard to the assistant's internal listener. |
+| `BELLACLAW_DASHBOARD_HOSTNAME` | `127.0.0.1` | Dashboard bind address. Compose sets `0.0.0.0` inside the container. |
 | `BELLACLAW_DASHBOARD_PORT` | `8988` | Dashboard listen port. |
 | `BELLACLAW_DASHBOARD_DB_PATH` | `.data/dashboard.db` in the repository | Dashboard SQLite file for accounts, sessions and chat links. |
+| `BELLACLAW_INTERNAL_API_HOSTNAME` | `127.0.0.1` | Assistant's internal listener bind address. Compose sets `0.0.0.0` inside the container. |
 | `BELLACLAW_INTERNAL_API_PORT` | `3081` | Assistant's internal listener port. Never expose it. |
 | `BELLACLAW_INTERNAL_API_URL` | `http://127.0.0.1:3081` | Where the dashboard reaches the internal listener. |
 

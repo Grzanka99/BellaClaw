@@ -114,7 +114,7 @@ Exposed:
 Not exposed:
 
 - The assistant's internal listener (`BELLACLAW_INTERNAL_API_PORT`, default `3081`). In Compose it
-  is only on the Compose network. Outside Compose, keep the port closed with a firewall.
+  is only on the Compose network. Outside Compose it binds `127.0.0.1`.
 - The log viewer.
 
 The dashboard reads message history and facts directly from the assistant's libSQL/Turso database

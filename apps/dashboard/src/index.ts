@@ -50,6 +50,7 @@ if (!URL.canParse(publicUrl)) {
   throw new Error("BELLACLAW_DASHBOARD_PUBLIC_URL must be a URL");
 }
 
+const hostname = Bun.env.BELLACLAW_DASHBOARD_HOSTNAME?.trim() || "127.0.0.1";
 const port = Number(Bun.env.BELLACLAW_DASHBOARD_PORT?.trim() || 8988);
 
 if (!Number.isInteger(port) || port < 1 || port > 65_535) {
@@ -90,11 +91,14 @@ const app = createApp({
 });
 
 const server = Bun.serve({
+  hostname,
   port,
+  // every request body is a small JSON object
+  maxRequestBodySize: 65_536,
   // NOTE: the maximum. A model change waits for the assistant's provider verification, far beyond
   // the default 10 s.
   idleTimeout: 255,
   fetch: app.fetch,
 });
 
-logger.info(`Dashboard listening on port ${server.port}`);
+logger.info(`Dashboard listening on http://${hostname}:${server.port}`);
