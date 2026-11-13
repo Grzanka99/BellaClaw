@@ -26,6 +26,8 @@ const READY_TIMEOUT_MS = 120_000;
 const STOP_TIMEOUT_MS = 30_000;
 const FOLLOW_INTERVAL_MS = 30_000;
 const CI_PASSED_CONCLUSIONS = ["success", "skipped", "neutral"];
+// an error message goes to chat, and a remote URL can carry a token
+const URL_CREDENTIALS = /\/\/[^/@\s]+@/g;
 
 const SRole = z.enum(["assistant", "log-viewer"]);
 const SChildMessage = z.object({ type: z.enum(["ready", "update"]) });
@@ -58,10 +60,10 @@ async function run(command: string[], cwd: string): Promise<string> {
   ]);
 
   if (exitCode !== 0) {
-    const message = `${command.join(" ")} failed: ${(stderr.trim() || stdout.trim()).slice(-500)}`;
+    // removed before the cut, so a token cannot survive in part
+    const output = (stderr.trim() || stdout.trim()).replace(URL_CREDENTIALS, "//").slice(-500);
 
-    // the message goes to chat, and a remote URL can carry a token
-    throw new Error(message.replace(/\/\/[^/@\s]+@/g, "//"));
+    throw new Error(`${command.join(" ").replace(URL_CREDENTIALS, "//")} failed: ${output}`);
   }
 
   return stdout.trim();
