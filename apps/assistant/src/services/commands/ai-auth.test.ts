@@ -38,7 +38,13 @@ async function send(chatId: string, content: string) {
     source: "test",
     key: chatId,
     trace: { turnId: "test:ai-auth", chatId, platform: EMessagePlatform.Discord },
-    payload: { chatId, content, receivedAt: Date.now(), platform: EMessagePlatform.Discord },
+    payload: {
+      chatId,
+      content,
+      attachments: [],
+      receivedAt: Date.now(),
+      platform: EMessagePlatform.Discord,
+    },
     causationId: undefined,
     dedupeKey: undefined,
   });

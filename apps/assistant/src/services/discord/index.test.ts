@@ -25,6 +25,7 @@ type TDiscordSingletonInternals = {
     author: { id: string };
     channel: { type: ChannelType };
     content: string;
+    attachments: Map<string, { id: string; contentType: string | null }>;
   }) => Promise<void>;
   onReady: (client: { user: { tag: string } }) => Promise<void>;
   logger: { error: (message: string) => void };
@@ -110,6 +111,7 @@ describe("DiscordSingleton", () => {
       author: { id: "user-1" },
       channel: { type: ChannelType.DM },
       content: "hello",
+      attachments: new Map(),
     });
 
     const rows = await DatabaseConnector.instance.database.select().from(eventsTable);
@@ -123,6 +125,40 @@ describe("DiscordSingleton", () => {
     expect(rows[0]?.payload).toEqual({
       chatId: "discord:user-1",
       content: "hello",
+      attachments: [],
+      receivedAt: expect.any(Number),
+      platform: EMessagePlatform.Discord,
+    });
+  });
+
+  test("references image attachments by message and attachment id and drops other files", async () => {
+    const discord = DiscordSingleton.instance as unknown as TDiscordSingletonInternals;
+    discord.client = { user: { id: "bot-1" } } as never;
+
+    await discord.handleMessage({
+      id: "message-1",
+      author: { id: "user-1" },
+      channel: { type: ChannelType.DM },
+      content: "",
+      attachments: new Map([
+        ["att-1", { id: "att-1", contentType: "image/png" }],
+        ["att-2", { id: "att-2", contentType: "application/pdf" }],
+      ]),
+    });
+    await discord.handleMessage({
+      id: "message-2",
+      author: { id: "user-1" },
+      channel: { type: ChannelType.DM },
+      content: "",
+      attachments: new Map([["att-3", { id: "att-3", contentType: "audio/ogg" }]]),
+    });
+
+    const rows = await DatabaseConnector.instance.database.select().from(eventsTable);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.payload).toEqual({
+      chatId: "discord:user-1",
+      content: "",
+      attachments: [{ id: "message-1:att-1", mimeType: "image/png" }],
       receivedAt: expect.any(Number),
       platform: EMessagePlatform.Discord,
     });
@@ -146,6 +182,7 @@ describe("DiscordSingleton", () => {
         author: { id: "user-1" },
         channel: { type: ChannelType.DM },
         content: "hello",
+        attachments: new Map(),
       }),
     ).toBeUndefined();
     expect(errorMock).toHaveBeenCalledWith(expect.stringContaining("database is gone"));

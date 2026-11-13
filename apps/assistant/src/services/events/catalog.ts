@@ -6,7 +6,7 @@ import { EAuthorizationDecision, SAuthorizationState } from "../authorization/sc
 import { EAutomationRunMode, EAutomationRunOutcome } from "../automation/runner";
 import { EAutomationStatus } from "../automation/types";
 import { ECronFinishedReason, ECronJobStatus, ECronJobType } from "../cron/types";
-import { EMessagePlatform } from "../messaging/types";
+import { EMessagePlatform, SAttachmentRef } from "../messaging/types";
 import { EConfigKey } from "../settings/schema";
 
 export enum EEventKind {
@@ -101,6 +101,7 @@ const SInboundMessage = z
   .object({
     chatId: z.string(),
     content: z.string(),
+    attachments: z.array(SAttachmentRef),
     receivedAt: z.number().int(),
     platform: z.enum(EMessagePlatform),
   })
@@ -118,6 +119,7 @@ const STurnRequested = z
   .object({
     chatId: z.string(),
     content: z.string(),
+    attachments: z.array(SAttachmentRef),
     receivedAt: z.number().int(),
     platform: z.enum(EMessagePlatform),
   })

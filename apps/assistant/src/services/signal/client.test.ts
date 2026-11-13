@@ -40,6 +40,7 @@ describe("parseSignalReceiveMessage", () => {
     expect(result).toEqual({
       sourceNumber: "+111",
       message: "hello",
+      attachments: [],
       timestamp: 123,
     });
   });
@@ -60,6 +61,7 @@ describe("parseSignalReceiveMessage", () => {
     expect(result).toEqual({
       sourceNumber: "+111",
       message: "hello",
+      attachments: [],
       timestamp: undefined,
     });
   });
@@ -81,8 +83,39 @@ describe("parseSignalReceiveMessage", () => {
     expect(result).toEqual({
       sourceNumber: "+222",
       message: "hello",
+      attachments: [],
       timestamp: 456,
     });
+  });
+
+  test("keeps images, with or without text, and drops a message with only other files", () => {
+    const parse = (contentTypes: string[]) =>
+      parseSignalReceiveMessage(
+        JSON.stringify({
+          envelope: {
+            sourceNumber: "+111",
+            dataMessage: {
+              message: null,
+              timestamp: 123,
+              attachments: contentTypes.map((contentType, index) => ({
+                id: `file-${index}`,
+                contentType,
+              })),
+            },
+          },
+        }),
+      );
+
+    expect(parse(["image/jpeg", "audio/aac", "image/png"])).toEqual({
+      sourceNumber: "+111",
+      message: "",
+      attachments: [
+        { id: "file-0", mimeType: "image/jpeg" },
+        { id: "file-2", mimeType: "image/png" },
+      ],
+      timestamp: 123,
+    });
+    expect(parse(["video/mp4"])).toBeUndefined();
   });
 
   test("ignores unsupported events", () => {
@@ -384,6 +417,7 @@ describe("SignalClient", () => {
     expect(onMessage).toHaveBeenCalledWith({
       sourceNumber: "+200",
       message: "hello",
+      attachments: [],
       timestamp: 123,
     });
     unsubscribe?.();

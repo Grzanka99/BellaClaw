@@ -6,10 +6,11 @@ import { ERole } from "../ai/types";
 import { logHandlerStarted, startHandlerSpan, startMemorySaveSpan } from "../app-logger/operations";
 import { startSpan } from "../app-logger/span";
 import { ConversationStore } from "../conversation";
-import type { TConversation } from "../conversation/types";
+import { IMAGE_MARKER, type TConversation } from "../conversation/types";
 import type { TSelectMemory } from "../database/schema";
 import { ESubscriptionMode, EventBus, type TEventContext, type TEventRequester } from "../events";
 import { EEventType, type TEvent } from "../events/catalog";
+import { MessagingAdapter } from "../messaging";
 import type { EMessagePlatform } from "../messaging/types";
 import { SettingsService } from "../settings";
 import { EConfigKey, type TConfigRecord } from "../settings/schema";
@@ -93,7 +94,7 @@ export class MessageHandler {
     event: TEvent<EEventType.TurnRequested>,
     ctx: TEventContext,
   ): Promise<void> {
-    const { chatId, content, receivedAt, platform } = event.payload;
+    const { chatId, content, attachments, receivedAt, platform } = event.payload;
     const trace = event.trace;
     const handleMessageStart = performance.now();
     this.logger.info("handleTurn: start");
@@ -129,7 +130,10 @@ export class MessageHandler {
         conversation = await this.compact(chatId, conversation, settings, platform, trace, ctx);
       }
 
-      const saveSpan = startMemorySaveSpan(trace, ERole.User, content.length);
+      const storedText = [content, ...attachments.map(() => IMAGE_MARKER)]
+        .filter((part) => part.length > 0)
+        .join(" ");
+      const saveSpan = startMemorySaveSpan(trace, ERole.User, storedText.length);
       let saveFailure: TOption<string>;
       let savedMessage: TSelectMemory;
       try {
@@ -138,7 +142,7 @@ export class MessageHandler {
             tx,
             chatId,
             ERole.User,
-            content,
+            storedText,
             new Date(receivedAt),
           );
           emit(EEventType.TurnStarted, { chatId, userMessageId: row.id }, undefined, undefined);
@@ -155,6 +159,11 @@ export class MessageHandler {
       const aiRes = await this.ai.runMain({
         prompt: content,
         conversation,
+        images: {
+          refs: attachments,
+          fetch: (ref, maxBytes) =>
+            MessagingAdapter.instance.fetchAttachment(chatId, ref, maxBytes),
+        },
         currentTimeContext: createCurrentTimeContext(settings, savedMessage.createdAt),
         chatId,
         settings,
@@ -275,7 +284,14 @@ export class MessageHandler {
       if (result === undefined) {
         return state;
       }
-      await this.conversations.saveSummary(chatId, result.state);
+      const unused = await this.conversations.saveSummary(chatId, result.state);
+      for (const ref of unused) {
+        try {
+          await MessagingAdapter.instance.deleteAttachment(chatId, ref);
+        } catch (error) {
+          this.logger.warning(`Attachment delete failed: ${String(error)}`);
+        }
+      }
       span.ok({
         summary: "Conversation compacted",
         metadata: {

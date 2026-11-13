@@ -6,7 +6,7 @@ import { DatabaseConnector } from "../database";
 import { memoriesTable } from "../database/schema";
 import { Memory } from "../memory";
 import { ConversationStore } from ".";
-import type { TConversation } from "./types";
+import { attachmentBlock, type TConversation } from "./types";
 
 async function transcriptMessages(chatId: string) {
   const rows = await DatabaseConnector.instance.database
@@ -162,4 +162,37 @@ test("a scheduled delivery replays after a scheduler notice the model cannot mer
     "2026-11-10T16:06:00.000Z",
   );
   expect(await transcriptMessages(chatId)).toEqual(["[CRON REMINDER oven]: Check the oven."]);
+});
+
+test("after three kept compactions, saveSummary returns the images of the dropped range", async () => {
+  const chatId = "conversation-image-cleanup";
+  const store = new ConversationStore();
+  const db = DatabaseConnector.instance.database;
+  const ids: number[] = [];
+  for (const name of ["a", "b", "c", "d"]) {
+    const row = await store.saveUserMessage(db, chatId, ERole.User, "[Image]", new Date());
+    const ref = { id: name, mimeType: "image/png" };
+    await store.saveTurn(
+      db,
+      chatId,
+      [{ role: "user", content: [attachmentBlock(ref)], timestamp: 1 }],
+      row.id,
+      undefined,
+    );
+    ids.push(row.id);
+  }
+  const summarize = (summarizedThroughId: number) =>
+    store.saveSummary(chatId, {
+      summary: "s",
+      summaryTimestamp: 1,
+      summarizedThroughId,
+      entries: [],
+    });
+
+  expect(await summarize(ids[0] ?? 0)).toEqual([]);
+  expect(await summarize(ids[1] ?? 0)).toEqual([]);
+  // boundaries [a, b, c]: nothing was dropped yet, so everything through a goes
+  expect((await summarize(ids[2] ?? 0)).map((ref) => ref.id)).toEqual(["a"]);
+  // boundaries [b, c, d]: a was dropped, so (a, b] goes
+  expect((await summarize(ids[3] ?? 0)).map((ref) => ref.id)).toEqual(["b"]);
 });

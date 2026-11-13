@@ -37,7 +37,12 @@ describe("Notices", () => {
     Object.assign(Notices, { _instance: undefined });
     bus = EventBus.instance;
     sendText = mock(async () => undefined);
-    MessagingAdapter.instance.registerTransport({ platform: EMessagePlatform.Signal, sendText });
+    MessagingAdapter.instance.registerTransport({
+      platform: EMessagePlatform.Signal,
+      sendText,
+      fetchAttachment: async () => new Uint8Array(),
+      deleteAttachment: async () => undefined,
+    });
     MessagingAdapter.instance.setup();
     Notices.instance.setup();
     await bus.start();

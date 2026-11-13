@@ -5,7 +5,7 @@ import { ESubscriptionMode, EventBus } from "../events";
 import { EEventType, type TEvent } from "../events/catalog";
 import { MessagingAdapter } from "../messaging";
 import { createCanonicalChatKey, parseCanonicalChatKey } from "../messaging/chat-key";
-import { EMessagePlatform, type TMessageTransport } from "../messaging/types";
+import { EMessagePlatform, type TAttachmentRef, type TMessageTransport } from "../messaging/types";
 import { SignalClient, type TSignalInboundMessage } from "./client";
 
 export class SignalSingleton implements TMessageTransport {
@@ -137,13 +137,33 @@ export class SignalSingleton implements TMessageTransport {
     await this.client.sendText(chatId, text);
   }
 
+  public async fetchAttachment(
+    _chatId: string,
+    ref: TAttachmentRef,
+    maxBytes: number,
+  ): Promise<TOption<Uint8Array>> {
+    if (this.client === undefined) {
+      throw new Error("Signal client is not initialized");
+    }
+
+    return this.client.fetchAttachment(ref.id, maxBytes);
+  }
+
+  public async deleteAttachment(_chatId: string, ref: TAttachmentRef): Promise<void> {
+    if (this.client === undefined) {
+      throw new Error("Signal client is not initialized");
+    }
+
+    await this.client.deleteAttachment(ref.id);
+  }
+
   private async handleInboundMessage(message: TSignalInboundMessage) {
     const ownNumber = Bun.env.SIGNAL_PHONE_NUMBER;
     if (ownNumber !== undefined && message.sourceNumber === ownNumber) {
       return;
     }
 
-    if (message.message.trim().length === 0) {
+    if (message.message.trim().length === 0 && message.attachments.length === 0) {
       return;
     }
 
@@ -172,7 +192,13 @@ export class SignalSingleton implements TMessageTransport {
       source: "signal",
       key: chatId,
       trace: { turnId: createMessageTurnId(), chatId, platform: EMessagePlatform.Signal },
-      payload: { chatId, content: message.message, receivedAt, platform: EMessagePlatform.Signal },
+      payload: {
+        chatId,
+        content: message.message,
+        attachments: message.attachments,
+        receivedAt,
+        platform: EMessagePlatform.Signal,
+      },
       causationId: undefined,
       dedupeKey,
     });

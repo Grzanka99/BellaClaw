@@ -213,7 +213,12 @@ export class AuthorizationService {
     });
 
     if (result.decision === EAuthorizationDecision.Allow) {
-      logMessageReceived(event.trace, event.payload.platform, content.length);
+      logMessageReceived(
+        event.trace,
+        event.payload.platform,
+        content.length,
+        event.payload.attachments.map((attachment) => attachment.mimeType),
+      );
       return;
     }
 
@@ -277,15 +282,22 @@ function logAuthorizationDecision(trace: TBehaviorTraceContext, result: TAuthori
   });
 }
 
-function logMessageReceived(trace: TBehaviorTraceContext, platform: string, chars: number) {
+function logMessageReceived(
+  trace: TBehaviorTraceContext,
+  platform: string,
+  chars: number,
+  imageTypes: string[],
+) {
+  const markers = imageTypes.map((mimeType) => ` [Image ${mimeType}]`).join("");
   AppLogger.instance.record({
     trace,
     event: "message.received",
     component: "messaging",
-    summary: `message received platform=${platform}`,
+    summary: `message received platform=${platform}${markers}`,
     metadata: {
       platform,
       messageChars: chars,
+      images: imageTypes,
     },
   });
 }

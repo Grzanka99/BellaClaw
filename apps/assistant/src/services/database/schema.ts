@@ -72,6 +72,11 @@ export const conversationSummariesTable = sqliteTable("conversation_summaries", 
   chatId: text("chatId").primaryKey(),
   summary: text("summary").notNull(),
   summarizedThroughId: integer("summarizedThroughId").notNull(),
+  // the summarizedThroughId of the last compactions, oldest first
+  compactionBoundaries: text("compactionBoundaries", { mode: "json" })
+    .$type<number[]>()
+    .notNull()
+    .default(sql`'[]'`),
   createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull(),
 });
 

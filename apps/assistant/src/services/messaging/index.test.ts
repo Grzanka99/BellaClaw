@@ -6,7 +6,7 @@ import { resetEventTables } from "../database/test-utils";
 import { EventBus, type TEventDraft } from "../events";
 import { EEventType } from "../events/catalog";
 import { MessagingAdapter } from ".";
-import { EMessagePlatform } from "./types";
+import { EMessagePlatform, readAttachment } from "./types";
 
 beforeEach(async () => {
   Object.assign(MessagingAdapter, { _instance: undefined });
@@ -64,7 +64,12 @@ describe("MessagingAdapter outbound", () => {
     while (((await deliveries())[0]?.attempts ?? 0) < 1) {
       await Bun.sleep(1);
     }
-    adapter.registerTransport({ platform: EMessagePlatform.Signal, sendText });
+    adapter.registerTransport({
+      platform: EMessagePlatform.Signal,
+      sendText,
+      fetchAttachment: async () => new Uint8Array(),
+      deleteAttachment: async () => undefined,
+    });
     await bus.idle();
 
     expect(sendText).toHaveBeenCalledTimes(1);
@@ -86,7 +91,12 @@ describe("MessagingAdapter outbound", () => {
     const sendText = mock(async () => undefined);
     const adapter = MessagingAdapter.instance;
     Object.assign(adapter, { outboundBackoffMs: [] });
-    adapter.registerTransport({ platform: EMessagePlatform.Signal, sendText });
+    adapter.registerTransport({
+      platform: EMessagePlatform.Signal,
+      sendText,
+      fetchAttachment: async () => new Uint8Array(),
+      deleteAttachment: async () => undefined,
+    });
     adapter.setup();
     await bus.start();
     const reply = { ...notice(), type: EEventType.ReplyReady };
@@ -103,5 +113,22 @@ describe("MessagingAdapter outbound", () => {
     ).resolves.toBeUndefined();
     await bus.idle();
     expect((await deliveries()).map((row) => row.status)).toEqual(["done", "dead"]);
+  });
+});
+
+describe("readAttachment", () => {
+  test("refuses a file declared larger than the cap without reading it", async () => {
+    let cancelled = false;
+    const body = new ReadableStream({
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const response = new Response(body, { headers: { "content-length": "6000000" } });
+
+    expect(await readAttachment(response, 5_000_000)).toBeUndefined();
+    expect(cancelled).toBe(true);
+    expect(await readAttachment(new Response("abc"), 2)).toBeUndefined();
+    expect(await readAttachment(new Response("abc"), 3)).toEqual(new TextEncoder().encode("abc"));
   });
 });

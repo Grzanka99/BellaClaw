@@ -5,12 +5,16 @@ import {
   type Message,
   type UserMessage,
 } from "@earendil-works/pi-ai";
-import { and, asc, eq, gt, isNotNull } from "drizzle-orm";
+import { and, asc, eq, gt, isNotNull, lte } from "drizzle-orm";
 import { emptyUsage } from "../ai/llm";
 import { ERole } from "../ai/types";
 import { DatabaseConnector, type TDatabaseHandle } from "../database";
 import { conversationSummariesTable, memoriesTable, type TSelectMemory } from "../database/schema";
-import { SConversationMessage, type TConversation } from "./types";
+import type { TAttachmentRef } from "../messaging/types";
+import { SAttachmentBlock, SConversationMessage, type TConversation } from "./types";
+
+// NOTE: platform files of the images older than this many compactions are deleted
+const KEPT_COMPACTIONS = 3;
 
 export class ConversationStore {
   private static _instance: TOption<ConversationStore>;
@@ -178,17 +182,61 @@ export class ConversationStore {
     });
   }
 
-  public saveSummary(chatId: string, state: TConversation): Promise<void> {
+  // returns the attachments whose platform files are no longer needed
+  public saveSummary(chatId: string, state: TConversation): Promise<TAttachmentRef[]> {
     return this.database.run(async (db) => {
+      const existing = await db
+        .select({ compactionBoundaries: conversationSummariesTable.compactionBoundaries })
+        .from(conversationSummariesTable)
+        .where(eq(conversationSummariesTable.chatId, chatId))
+        .get();
+      const boundaries = [...(existing?.compactionBoundaries ?? []), state.summarizedThroughId];
+      let dropped = 0;
+      if (boundaries.length > KEPT_COMPACTIONS) {
+        dropped = boundaries[boundaries.length - KEPT_COMPACTIONS - 1] ?? 0;
+      }
+      const kept = boundaries.slice(-KEPT_COMPACTIONS);
       const values = {
         summary: state.summary,
         summarizedThroughId: state.summarizedThroughId,
+        compactionBoundaries: kept,
         createdAt: new Date(state.summaryTimestamp),
       };
       await db
         .insert(conversationSummariesTable)
         .values({ chatId, ...values })
         .onConflictDoUpdate({ target: conversationSummariesTable.chatId, set: values });
+
+      const oldest = kept[0];
+      if (kept.length < KEPT_COMPACTIONS || oldest === undefined) {
+        return [];
+      }
+      const rows = await db
+        .select({ modelMessage: memoriesTable.modelMessage })
+        .from(memoriesTable)
+        .where(
+          and(
+            eq(memoriesTable.chatId, chatId),
+            eq(memoriesTable.author, ERole.User),
+            gt(memoriesTable.id, dropped),
+            lte(memoriesTable.id, oldest),
+            isNotNull(memoriesTable.modelMessage),
+          ),
+        );
+      const refs: TAttachmentRef[] = [];
+      for (const row of rows) {
+        const parsed = SConversationMessage.safeParse(JSON.parse(row.modelMessage ?? "null"));
+        if (!parsed.success || typeof parsed.data.content === "string") {
+          continue;
+        }
+        for (const block of parsed.data.content) {
+          const attachment = SAttachmentBlock.safeParse(block);
+          if (attachment.success) {
+            refs.push(attachment.data.attachment);
+          }
+        }
+      }
+      return refs;
     });
   }
 }

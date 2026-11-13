@@ -34,7 +34,13 @@ async function send(content: string) {
     source: "test",
     key: chatId,
     trace: { turnId: "test:mcp-auth", chatId, platform: EMessagePlatform.Signal },
-    payload: { chatId, content, receivedAt: Date.now(), platform: EMessagePlatform.Signal },
+    payload: {
+      chatId,
+      content,
+      attachments: [],
+      receivedAt: Date.now(),
+      platform: EMessagePlatform.Signal,
+    },
     causationId: undefined,
     dedupeKey: undefined,
   });
