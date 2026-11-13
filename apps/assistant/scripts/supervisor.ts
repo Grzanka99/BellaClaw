@@ -58,7 +58,10 @@ async function run(command: string[], cwd: string): Promise<string> {
   ]);
 
   if (exitCode !== 0) {
-    throw new Error(`${command.join(" ")} failed: ${(stderr.trim() || stdout.trim()).slice(-500)}`);
+    const message = `${command.join(" ")} failed: ${(stderr.trim() || stdout.trim()).slice(-500)}`;
+
+    // the message goes to chat, and a remote URL can carry a token
+    throw new Error(message.replace(/\/\/[^/@\s]+@/g, "//"));
   }
 
   return stdout.trim();

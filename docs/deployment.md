@@ -50,7 +50,8 @@ The package scripts include the Signal profile:
 The assistant container updates itself from `main` of the checkout's `origin` remote. It needs
 only the running containers.
 
-- `!update` in an activated chat checks and updates at once.
+- `!update` in an activated chat checks and updates at once. It needs
+  `BELLACLAW_ACTIVATION_TOKEN`.
 - `BELLACLAW_AUTO_UPDATE=true` also checks every day at 04:00, container time.
 
 An update downloads the new commit into the `bellaclaw-src` volume, installs its dependencies,
