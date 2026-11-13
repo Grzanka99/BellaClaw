@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, type Mock, spyOn, test } from "bun:test";
+import { EEventType, eventsTable } from "@bellaclaw/database";
 import type { TOption } from "@bellaclaw/shared";
 import { createProvider, type Provider } from "@earendil-works/pi-ai";
 import { openAICodexResponsesApi } from "@earendil-works/pi-ai/api/openai-codex-responses.lazy";
@@ -8,10 +9,9 @@ import { aiCredentials, aiModels } from "../ai/providers/registry";
 import { EAiProvider } from "../ai/types";
 import { AuthorizationService } from "../authorization";
 import { DatabaseConnector } from "../database";
-import { eventsTable } from "../database/schema";
 import { resetEventTables, resetUserConfigsTable } from "../database/test-utils";
 import { ESubscriptionMode, EventBus } from "../events";
-import { EEventType, type TEvent } from "../events/catalog";
+import type { TEvent } from "../events/catalog";
 import { EMessagePlatform } from "../messaging/types";
 import { SettingsService } from "../settings";
 import { EConfigKey } from "../settings/schema";

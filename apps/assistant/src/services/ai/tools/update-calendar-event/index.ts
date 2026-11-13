@@ -1,6 +1,6 @@
+import { EEventType } from "@bellaclaw/database";
 import { obj, oneOf, opt, type Static, str } from "@earendil-works/pi-schema";
 import type { TUpdateEventPatch } from "../../../calendar/types";
-import { EEventType } from "../../../events/catalog";
 import { SCalendarEventFields, validateCreateCalendarEventArgs } from "../create-calendar-event";
 import { defineTool, requireChatId } from "../define-tool";
 import instructions from "./instructions.xml" with { type: "text" };

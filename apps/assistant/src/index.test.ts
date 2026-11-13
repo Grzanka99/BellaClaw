@@ -3,11 +3,15 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import {
+  EEventType,
+  eventDeliveriesTable,
+  eventsTable,
+  MIGRATIONS_FOLDER,
+} from "@bellaclaw/database";
 import { asc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/libsql";
 import { migrate } from "drizzle-orm/libsql/migrator";
-import { eventDeliveriesTable, eventsTable } from "./services/database/schema";
-import { EEventType } from "./services/events/catalog";
 
 test.each([
   "SIGINT",
@@ -56,7 +60,7 @@ describe("crash recovery", () => {
     directory = await mkdtemp(join(tmpdir(), "bellaclaw-crash-"));
     // the fixture runs in this directory, so its test database lives here
     db = drizzle({ connection: { url: `file:${join(directory, "test.db")}` } });
-    await migrate(db, { migrationsFolder: join(import.meta.dir, "../migrations") });
+    await migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
   });
 
   afterEach(async () => {

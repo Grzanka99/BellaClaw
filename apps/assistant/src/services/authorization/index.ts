@@ -1,12 +1,12 @@
 import { AppLogger, EBehaviorLogLevel, type TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
+import { EEventType, messageAuthorizationsTable } from "@bellaclaw/database";
 import type { TOption } from "@bellaclaw/shared";
 import { createLogger, type TLogger } from "@bellaclaw/shared";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { DatabaseConnector, type TDatabaseHandle } from "../database";
-import { messageAuthorizationsTable } from "../database/schema";
 import { ESubscriptionMode, EventBus, type TEventContext } from "../events";
-import { EEventType, type TEvent } from "../events/catalog";
+import type { TEvent } from "../events/catalog";
 import {
   EAuthorizationDecision,
   EAuthorizationStatus,

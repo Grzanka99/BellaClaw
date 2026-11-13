@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
+import { ECronJobStatus, ECronJobType } from "@bellaclaw/database";
 import { compile } from "@earendil-works/pi-schema";
 import { formats } from "@earendil-works/pi-schema/formats";
 import { AutomationService } from "../../../automation";
 import { CronScheduler } from "../../../cron";
-import { ECronJobStatus, ECronJobType, type TCronJob, toCronJobRecord } from "../../../cron/types";
+import { type TCronJob, toCronJobRecord } from "../../../cron/types";
 import type { TEventRequester } from "../../../events";
 import { testEventRequester } from "../../../events/test-utils";
 import { DefaultConfigRecord } from "../../../settings/schema";

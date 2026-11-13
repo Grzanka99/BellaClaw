@@ -1,9 +1,8 @@
 import { beforeEach, expect, test } from "bun:test";
+import { EEventType, eventDeliveriesTable, eventsTable } from "@bellaclaw/database";
 import { asc } from "drizzle-orm";
 import { DatabaseConnector } from "../src/services/database";
-import { eventDeliveriesTable, eventsTable } from "../src/services/database/schema";
 import { resetEventTables } from "../src/services/database/test-utils";
-import { EEventType } from "../src/services/events/catalog";
 import { listDeadDeliveries, redriveDeliveries } from "./redrive-events";
 
 const db = DatabaseConnector.instance.database;

@@ -1,6 +1,6 @@
+import { EEventType } from "@bellaclaw/database";
 import { AI_OAUTH_PROVIDERS, findAiOAuthProvider, getAiAuthStatus } from "../ai/auth";
 import { AuthorizationService } from "../authorization";
-import { EEventType } from "../events/catalog";
 import type { TCommand } from "./types";
 
 const USAGE = `Usage: !ai-auth login|status|logout PROVIDER (${AI_OAUTH_PROVIDERS.join(", ")})`;

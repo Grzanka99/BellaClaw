@@ -1,18 +1,19 @@
+import {
+  EEventType,
+  EMBEDDING_DIMENSIONS,
+  factDistillationStateTable,
+  factsTable,
+  memoriesTable,
+} from "@bellaclaw/database";
 import { createLogger, type TLogger, type TOption } from "@bellaclaw/shared";
 import { and, asc, desc, eq, gt, inArray, isNull, lte, sql } from "drizzle-orm";
 import type { LibSQLDatabase } from "drizzle-orm/libsql";
 import { z } from "zod";
 import { ERole } from "../ai/types";
 import { DatabaseConnector, type TDatabaseTransaction } from "../database";
-import {
-  EMBEDDING_DIMENSIONS,
-  factDistillationStateTable,
-  factsTable,
-  memoriesTable,
-} from "../database/schema";
 import { EmbeddingClient } from "../embedding";
 import { commandFailed, ESubscriptionMode, EventBus, type TEventContext } from "../events";
-import { EEventType, type TEvent } from "../events/catalog";
+import type { TEvent } from "../events/catalog";
 import {
   SPreparedFact,
   type TFact,

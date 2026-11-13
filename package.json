@@ -9,7 +9,7 @@
   "scripts": {
     "auth:generate-token": "bun run --cwd apps/assistant auth:generate-token",
     "check": "turbo run check && bunx @biomejs/biome check package.json turbo.json tsconfig.json biome.json",
-    "db": "bun run --cwd apps/assistant db",
+    "db": "bun run --cwd packages/database db",
     "dev": "turbo run dev",
     "dev:sim": "bun --no-env-file apps/signal-sim/src/dev.ts",
     "embeddings:rebuild": "bun run --cwd apps/assistant embeddings:rebuild",

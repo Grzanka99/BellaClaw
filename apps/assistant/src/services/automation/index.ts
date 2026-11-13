@@ -1,11 +1,16 @@
+import {
+  automationDraftsTable,
+  automationsTable,
+  EAutomationStatus,
+  EEventType,
+} from "@bellaclaw/database";
 import type { TOption } from "@bellaclaw/shared";
 import { createLogger } from "@bellaclaw/shared";
 import { and, asc, eq, inArray, lt } from "drizzle-orm";
 import { summarizeAutomation } from "../ai/tools/automation-summary";
 import { DatabaseConnector, type TDatabaseHandle } from "../database";
-import { automationDraftsTable, automationsTable } from "../database/schema";
 import { commandFailed, ESubscriptionMode, EventBus, type TEventContext } from "../events";
-import { EEventType, type TEvent } from "../events/catalog";
+import type { TEvent } from "../events/catalog";
 import {
   createPausedReport,
   createReport,
@@ -17,7 +22,6 @@ import {
   AUTOMATION_DRAFT_TTL_MS,
   AutomationError,
   DEFAULT_AUTOMATION_OUTPUT_CAP_BYTES,
-  EAutomationStatus,
   MAX_AUTOMATION_OUTPUT_CAP_BYTES,
   MAX_CONSECUTIVE_AUTOMATION_FAILURES,
   type TAutomation,

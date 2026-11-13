@@ -11,6 +11,7 @@ COPY apps/assistant/package.json apps/assistant/package.json
 COPY apps/log-viewer/package.json apps/log-viewer/package.json
 COPY apps/signal-sim/package.json apps/signal-sim/package.json
 COPY packages/behavior-logs/package.json packages/behavior-logs/package.json
+COPY packages/database/package.json packages/database/package.json
 COPY packages/shared/package.json packages/shared/package.json
 RUN bun install --frozen-lockfile
 

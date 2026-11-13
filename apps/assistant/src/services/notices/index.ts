@@ -1,8 +1,9 @@
+import { EEventType } from "@bellaclaw/database";
 import type { TOption } from "@bellaclaw/shared";
 import { z } from "zod";
 import { AuthorizationService } from "../authorization";
 import { ESubscriptionMode, EventBus, type TEventContext } from "../events";
-import { EEventKind, EEventType, EVENT_KINDS } from "../events/catalog";
+import { EEventKind, EVENT_KINDS } from "../events/catalog";
 
 const DEAD_LETTER_NOTICE = "Something I was doing failed and was dropped. Try again.";
 // a notice for these would loop

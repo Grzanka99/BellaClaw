@@ -1,4 +1,5 @@
 import { AppLogger, EBehaviorLogLevel } from "@bellaclaw/behavior-logs";
+import { EEventType } from "@bellaclaw/database";
 import { setupAiAuth } from "./services/ai/auth";
 import { startAiOAuthKeepAlive } from "./services/ai/auth/oauth-keep-alive";
 import { AuthorizationService } from "./services/authorization";
@@ -8,7 +9,6 @@ import { Commands } from "./services/commands";
 import { CronScheduler } from "./services/cron";
 import { DiscordSingleton } from "./services/discord";
 import { EventBus } from "./services/events";
-import { EEventType } from "./services/events/catalog";
 import { McpService } from "./services/mcp";
 import { setupMcpAuth, startMcpAuthServer, stopMcpAuthServer } from "./services/mcp/auth";
 import { Memory } from "./services/memory";

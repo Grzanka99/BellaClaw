@@ -1,14 +1,13 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import type { TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
+import { EEventType, eventsTable, type TSelectMemory } from "@bellaclaw/database";
 import { eq } from "drizzle-orm";
 import { LlmClient, LlmResponseError } from "../ai/llm";
 import { EModelPurpose, ERole } from "../ai/types";
 import { ConversationStore } from "../conversation";
 import { DatabaseConnector } from "../database";
-import { eventsTable, type TSelectMemory } from "../database/schema";
 import { resetEventTables } from "../database/test-utils";
 import { EventBus, type TEventContext } from "../events";
-import { EEventType } from "../events/catalog";
 import { SettingsService } from "../settings";
 import { DefaultConfigRecord } from "../settings/schema";
 import { Memory } from ".";

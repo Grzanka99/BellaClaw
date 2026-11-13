@@ -1,14 +1,13 @@
 import type { TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
+import { EEventType, type TSelectMemory } from "@bellaclaw/database";
 import type { TOption } from "@bellaclaw/shared";
 import { createLogger } from "@bellaclaw/shared";
 import { z } from "zod";
 import { LlmClient, LlmResponseError } from "../ai/llm";
 import { EModelPurpose, ERole } from "../ai/types";
 import { ConversationStore } from "../conversation";
-import type { TSelectMemory } from "../database/schema";
 import { EmbeddingClient } from "../embedding";
 import { commandFailed, ESubscriptionMode, EventBus, type TEventContext } from "../events";
-import { EEventType } from "../events/catalog";
 import { SettingsService } from "../settings";
 import type { TConfigRecord } from "../settings/schema";
 import { Memory } from ".";

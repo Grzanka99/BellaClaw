@@ -1,6 +1,6 @@
+import { EEventType } from "@bellaclaw/database";
 import { int, obj, opt, str } from "@earendil-works/pi-schema";
 import { EmbeddingClient } from "../../../embedding";
-import { EEventType } from "../../../events/catalog";
 import { MEMORY_REQUEST_TIMEOUT_MS, Memory } from "../../../memory";
 import type { TFactSearchResult } from "../../../memory/types";
 import { defineTool, requireChatId } from "../define-tool";

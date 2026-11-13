@@ -1,7 +1,7 @@
+import { EEventType } from "@bellaclaw/database";
 import type { TOption } from "@bellaclaw/shared";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { bool, obj, oneOf, opt, type Static, str } from "@earendil-works/pi-schema";
-import { EEventType } from "../../../events/catalog";
 import { SettingsService, type TConfigUpdate } from "../../../settings";
 import { ConfigValidators, EConfigKey } from "../../../settings/schema";
 import {

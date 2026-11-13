@@ -1,9 +1,10 @@
 import { EBehaviorLogLevel, type TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
+import { EEventType } from "@bellaclaw/database";
 import type { TOption } from "@bellaclaw/shared";
 import { createLogger, type TLogger } from "@bellaclaw/shared";
 import { startSpan } from "../app-logger/span";
 import { ESubscriptionMode, EventBus, type TEventContext } from "../events";
-import { EEventType, type TDeliveryTranscript, type TEvent } from "../events/catalog";
+import type { TDeliveryTranscript, TEvent } from "../events/catalog";
 import { parseCanonicalChatKey } from "./chat-key";
 import type { EMessagePlatform, TAttachmentRef, TMessageTransport } from "./types";
 

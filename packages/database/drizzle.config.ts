@@ -8,7 +8,7 @@ if (!TURSO_URL || !TURSO_TOKEN) {
 }
 
 export default defineConfig({
-  schema: "./src/services/database/schema.ts",
+  schema: "./src/schema.ts",
   out: "./migrations",
   dialect: "turso",
   dbCredentials: {

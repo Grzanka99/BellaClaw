@@ -1,10 +1,9 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { EEventType, eventDeliveriesTable, eventsTable } from "@bellaclaw/database";
 import { eq } from "drizzle-orm";
 import { DatabaseConnector } from "../database";
-import { eventDeliveriesTable, eventsTable } from "../database/schema";
 import { resetEventTables } from "../database/test-utils";
 import { EventBus, type TEventDraft } from "../events";
-import { EEventType } from "../events/catalog";
 import { MessagingAdapter } from ".";
 import { EMessagePlatform, readAttachment } from "./types";
 

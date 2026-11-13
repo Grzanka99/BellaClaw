@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { EAutomationStatus, ECronJobStatus, ECronJobType } from "@bellaclaw/database";
 import type { TOption } from "@bellaclaw/shared";
-import { AutomationService, EAutomationStatus } from "../../../automation";
+import { AutomationService } from "../../../automation";
 import { EAutomationRunOutcome } from "../../../automation/runner";
 import { CronScheduler } from "../../../cron";
-import { ECronJobStatus, ECronJobType, type TCronJob } from "../../../cron/types";
+import type { TCronJob } from "../../../cron/types";
 import { DatabaseConnector } from "../../../database";
 import { testEventRequester } from "../../../events/test-utils";
 import { SettingsService } from "../../../settings";

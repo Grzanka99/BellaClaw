@@ -1,11 +1,10 @@
+import { calendarsTable, EEventType } from "@bellaclaw/database";
 import type { TOption } from "@bellaclaw/shared";
 import { createLogger, repositoryPath } from "@bellaclaw/shared";
 import { and, eq, ne } from "drizzle-orm";
 import { z } from "zod";
 import { DatabaseConnector, type TDatabaseTransaction } from "../database";
-import { calendarsTable } from "../database/schema";
 import { commandFailed, ESubscriptionMode, EventBus, type TEventContext } from "../events";
-import { EEventType } from "../events/catalog";
 import { calculateAvailability } from "./availability";
 import { GwsCalendarClient, type TCalendarProbe } from "./gws";
 import {

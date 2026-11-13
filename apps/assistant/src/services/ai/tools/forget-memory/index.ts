@@ -1,5 +1,5 @@
+import { EEventType } from "@bellaclaw/database";
 import { arr, int, obj } from "@earendil-works/pi-schema";
-import { EEventType } from "../../../events/catalog";
 import { MEMORY_REQUEST_TIMEOUT_MS } from "../../../memory";
 import { defineTool, requireChatId } from "../define-tool";
 import instructions from "./instructions.xml" with { type: "text" };
