@@ -685,7 +685,6 @@ export class AgentHarness {
             delegationSignal = signal;
           }
 
-          // only the accurate specialists see the user's images
           let images: TAgentRunArgs["images"];
           if (AGENTS[target].purpose === EModelPurpose.SpecialistAccurate) {
             images = args.images;
@@ -816,14 +815,9 @@ export class AgentHarness {
               close: () => session.close(),
               run: async (runSignal, elicit) => {
                 forwardElicitation = elicit;
-                let images: TAgentRunArgs["images"];
-                if (AGENTS[EAgentName.Mcp].purpose === EModelPurpose.SpecialistAccurate) {
-                  images = args.images;
-                }
                 const result = await this.run({
                   ...args,
                   name: EAgentName.Mcp,
-                  images,
                   prompt: this.createMcpPrompt(args.prompt, parsed.task, parsed.context),
                   conversation: undefined,
                   parentToolCallId: toolCallId,

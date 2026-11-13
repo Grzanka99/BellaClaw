@@ -92,7 +92,6 @@ export class Commands {
 
       let prompt = content;
       let images = attachments;
-      // a command ignores the images sent with it
       if (result !== undefined) {
         prompt = result.prompt;
         images = [];

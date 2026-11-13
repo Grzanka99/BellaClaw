@@ -31,7 +31,6 @@ describe("parseSignalReceiveMessage", () => {
           sourceNumber: "+111",
           dataMessage: {
             message: "hello",
-            attachments: [],
             timestamp: 123,
           },
         },
@@ -89,37 +88,8 @@ describe("parseSignalReceiveMessage", () => {
     });
   });
 
-  test("keeps supported image attachments and drops other files", () => {
-    const result = parseSignalReceiveMessage(
-      JSON.stringify({
-        envelope: {
-          sourceNumber: "+111",
-          dataMessage: {
-            message: "look",
-            timestamp: 123,
-            attachments: [
-              { id: "photo.jpg", contentType: "image/jpeg", filename: null, size: 10 },
-              { id: "voice.aac", contentType: "audio/aac", filename: null, size: 10 },
-              { id: "sticker.png", contentType: "image/png", filename: "a.png", size: 10 },
-            ],
-          },
-        },
-      }),
-    );
-
-    expect(result).toEqual({
-      sourceNumber: "+111",
-      message: "look",
-      attachments: [
-        { id: "photo.jpg", mimeType: "image/jpeg" },
-        { id: "sticker.png", mimeType: "image/png" },
-      ],
-      timestamp: 123,
-    });
-  });
-
-  test("parses an image without text and drops a message with only other files", () => {
-    const parse = (contentType: string) =>
+  test("keeps images, with or without text, and drops a message with only other files", () => {
+    const parse = (contentTypes: string[]) =>
       parseSignalReceiveMessage(
         JSON.stringify({
           envelope: {
@@ -127,19 +97,25 @@ describe("parseSignalReceiveMessage", () => {
             dataMessage: {
               message: null,
               timestamp: 123,
-              attachments: [{ id: "file-1", contentType, filename: null, size: 10 }],
+              attachments: contentTypes.map((contentType, index) => ({
+                id: `file-${index}`,
+                contentType,
+              })),
             },
           },
         }),
       );
 
-    expect(parse("image/webp")).toEqual({
+    expect(parse(["image/jpeg", "audio/aac", "image/png"])).toEqual({
       sourceNumber: "+111",
       message: "",
-      attachments: [{ id: "file-1", mimeType: "image/webp" }],
+      attachments: [
+        { id: "file-0", mimeType: "image/jpeg" },
+        { id: "file-2", mimeType: "image/png" },
+      ],
       timestamp: 123,
     });
-    expect(parse("video/mp4")).toBeUndefined();
+    expect(parse(["video/mp4"])).toBeUndefined();
   });
 
   test("ignores unsupported events", () => {
@@ -394,7 +370,6 @@ describe("SignalClient", () => {
             sourceNumber: "+200",
             dataMessage: {
               message: "hello",
-              attachments: [],
               timestamp: 123,
             },
           },
@@ -431,7 +406,6 @@ describe("SignalClient", () => {
               sourceNumber: "+200",
               dataMessage: {
                 message: "hello",
-                attachments: [],
                 timestamp: 123,
               },
             },

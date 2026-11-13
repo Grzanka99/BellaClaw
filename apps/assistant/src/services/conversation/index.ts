@@ -6,7 +6,6 @@ import {
   type UserMessage,
 } from "@earendil-works/pi-ai";
 import { and, asc, eq, gt, isNotNull, lte } from "drizzle-orm";
-import { z } from "zod";
 import { emptyUsage } from "../ai/llm";
 import { ERole } from "../ai/types";
 import { DatabaseConnector, type TDatabaseHandle } from "../database";
@@ -191,11 +190,7 @@ export class ConversationStore {
         .from(conversationSummariesTable)
         .where(eq(conversationSummariesTable.chatId, chatId))
         .get();
-      const stored = z.array(z.number().int()).safeParse(existing?.compactionBoundaries ?? []);
-      if (!stored.success) {
-        throw new Error("Invalid stored compaction boundaries");
-      }
-      const boundaries = [...stored.data, state.summarizedThroughId];
+      const boundaries = [...(existing?.compactionBoundaries ?? []), state.summarizedThroughId];
       let dropped = 0;
       if (boundaries.length > KEPT_COMPACTIONS) {
         dropped = boundaries[boundaries.length - KEPT_COMPACTIONS - 1] ?? 0;

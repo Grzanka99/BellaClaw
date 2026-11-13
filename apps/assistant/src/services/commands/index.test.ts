@@ -100,7 +100,6 @@ describe("commands consumer", () => {
     );
     Bun.env.BELLACLAW_MCP_CONFIG = configPath;
 
-    // the image sent with a command is ignored
     await authorized("discord:channel-1", '!mcp-prompt documents summarize {"style":"brief"}', 5, [
       { id: "m:a", mimeType: "image/png" },
     ]);

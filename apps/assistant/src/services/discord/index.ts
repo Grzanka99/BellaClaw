@@ -59,8 +59,8 @@ export class DiscordSingleton implements TMessageTransport {
     // NOTE: the reference names the message, not the CDN URL, which expires
     const attachments: TAttachmentRef[] = [];
     for (const attachment of message.attachments.values()) {
-      const mimeType = attachment.contentType?.split(";")[0]?.trim();
-      if (mimeType === undefined || !SUPPORTED_IMAGE_TYPES.includes(mimeType)) {
+      const mimeType = attachment.contentType;
+      if (mimeType === null || !SUPPORTED_IMAGE_TYPES.includes(mimeType)) {
         continue;
       }
 

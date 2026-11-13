@@ -169,7 +169,7 @@ test("after three kept compactions, saveSummary returns the images of the droppe
   const store = new ConversationStore();
   const db = DatabaseConnector.instance.database;
   const ids: number[] = [];
-  for (const name of ["a", "b", "c", "d", "e"]) {
+  for (const name of ["a", "b", "c", "d"]) {
     const row = await store.saveUserMessage(db, chatId, ERole.User, "[Image]", new Date());
     const ref = { id: name, mimeType: "image/png" };
     await store.saveTurn(

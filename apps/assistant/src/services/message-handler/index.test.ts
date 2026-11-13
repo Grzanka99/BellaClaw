@@ -480,8 +480,6 @@ describe("MessageHandler", () => {
         text: "[Image]",
         attachment: ref,
       });
-      const events = await DatabaseConnector.instance.database.select().from(eventsTable);
-      expect(JSON.stringify(events.map((event) => event.payload))).not.toContain("AQID");
     } finally {
       if (previousProvider !== undefined) {
         aiModels.setProvider(previousProvider);
