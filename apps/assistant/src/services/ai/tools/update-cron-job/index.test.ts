@@ -3,7 +3,9 @@ import { compile } from "@earendil-works/pi-schema";
 import { formats } from "@earendil-works/pi-schema/formats";
 import { AutomationService } from "../../../automation";
 import { CronScheduler } from "../../../cron";
-import { ECronJobStatus, ECronJobType, type TCronJob } from "../../../cron/types";
+import { ECronJobStatus, ECronJobType, type TCronJob, toCronJobRecord } from "../../../cron/types";
+import type { TEventRequester } from "../../../events";
+import { testEventRequester } from "../../../events/test-utils";
 import { DefaultConfigRecord } from "../../../settings/schema";
 import { SUpdateCronJobArgs, updateCronJob, validateUpdateCronJobArgs } from ".";
 
@@ -11,11 +13,33 @@ const context = {
   chatId: "discord:1",
   settings: DefaultConfigRecord,
   trace: { turnId: "test", chatId: undefined, platform: undefined },
+  events: testEventRequester,
   verifySettings: mock(async () => undefined),
   runScheduledTask: mock(async () => {
     throw new Error("not used");
   }),
 };
+
+// records the schedule requests the tool sends and answers with the job
+function createEvents(job: TCronJob) {
+  const createRecurring = mock(async (_payload: Record<string, unknown>) => undefined);
+  const createOnce = mock(async (_payload: Record<string, unknown>) => undefined);
+  const request = async (_type: unknown, payload: Record<string, unknown>) => {
+    if ("pattern" in payload) {
+      await createRecurring(payload);
+    } else {
+      await createOnce(payload);
+    }
+
+    return { payload: { job: toCronJobRecord(job) } };
+  };
+  const events = {
+    ...testEventRequester,
+    request: request as unknown as TEventRequester["request"],
+  };
+
+  return { createRecurring, createOnce, events };
+}
 
 afterEach(() => {
   (CronScheduler as unknown as { _instance: unknown })._instance = undefined;
@@ -73,12 +97,11 @@ describe("update-cron-job", () => {
       automationIds: [],
       content: { kind: "task", prompt: "Old task", fallback: "Old fallback" },
     };
-    const createRecurring = mock(async (args) => ({ ...existing, ...args }));
+    const { createRecurring, events } = createEvents(existing);
     (CronScheduler as unknown as { _instance: unknown })._instance = {
       get: mock(async () => existing),
-      createRecurring,
     };
-    const tool = updateCronJob.createAgentTool(context);
+    const tool = updateCronJob.createAgentTool({ ...context, events });
 
     await tool.execute("call", {
       name: "daily",
@@ -127,14 +150,11 @@ describe("update-cron-job", () => {
     };
 
     function installJob(job: TCronJob) {
-      const createRecurring = mock(async (args) => ({ ...job, ...args }));
-      const createOnce = mock(async (args) => ({ ...job, ...args }));
+      const { createRecurring, createOnce, events } = createEvents(job);
       (CronScheduler as unknown as { _instance: unknown })._instance = {
         get: mock(async () => job),
-        createRecurring,
-        createOnce,
       };
-      const tool = updateCronJob.createAgentTool(context);
+      const tool = updateCronJob.createAgentTool({ ...context, events });
 
       return { tool, createRecurring, createOnce };
     }
@@ -197,7 +217,7 @@ describe("update-cron-job", () => {
 
       expect(createOnce).toHaveBeenCalledWith(
         expect.objectContaining({
-          fireAt: new Date("2026-12-25T02:30:00.000Z"),
+          fireAt: Date.parse("2026-12-25T02:30:00.000Z"),
           content: { kind: "text", text: "Water the plants" },
         }),
       );
@@ -253,17 +273,20 @@ describe("update-cron-job", () => {
     };
 
     function installJob(job: TCronJob) {
-      const createRecurring = mock(async (args) => ({ ...job, ...args }));
+      const { createRecurring, events } = createEvents(job);
       const resolveNames = mock(async (_scope: string, names: string[]) =>
         names.map((_name, index) => index + 10),
       );
       (CronScheduler as unknown as { _instance: unknown })._instance = {
         get: mock(async () => job),
-        createRecurring,
       };
       (AutomationService as unknown as { _instance: unknown })._instance = { resolveNames };
 
-      return { tool: updateCronJob.createAgentTool(context), createRecurring, resolveNames };
+      return {
+        tool: updateCronJob.createAgentTool({ ...context, events }),
+        createRecurring,
+        resolveNames,
+      };
     }
 
     test("keeps attached automations when the list is omitted", async () => {

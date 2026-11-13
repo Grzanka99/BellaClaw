@@ -1,9 +1,11 @@
-import { afterEach, beforeEach, describe, expect, type Mock, mock, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, mock, test } from "bun:test";
 import { compile } from "@earendil-works/pi-schema";
 import { formats } from "@earendil-works/pi-schema/formats";
 import { EmbeddingClient } from "../../../embedding";
-import { Memory } from "../../../memory";
-import { FactDistiller } from "../../../memory/distill";
+import type { TEventRequester } from "../../../events";
+import { EEventType } from "../../../events/catalog";
+import { testEventRequester } from "../../../events/test-utils";
+import { MEMORY_REQUEST_TIMEOUT_MS, Memory } from "../../../memory";
 import { DefaultConfigRecord } from "../../../settings/schema";
 import { SSearchMemoryArgs, searchMemory } from ".";
 
@@ -15,25 +17,20 @@ const EmbeddingClientWithInternals = EmbeddingClient as unknown as TSingletonSta
 const MemoryWithInternals = Memory as unknown as TSingletonStatic;
 const originalEmbeddingClient = EmbeddingClientWithInternals._instance;
 const originalMemory = MemoryWithInternals._instance;
+// answers memory.facts.refresh.requested at once
+const request = mock(async () => ({ payload: {} }));
 const context = {
   chatId: "discord:1",
   settings: DefaultConfigRecord,
   trace: { turnId: "test", chatId: undefined, platform: undefined },
+  events: { ...testEventRequester, request: request as unknown as TEventRequester["request"] },
   verifySettings: mock(async () => undefined),
   runScheduledTask: mock(async () => {
     throw new Error("not used");
   }),
 };
-let ensureFactsCurrent: Mock<FactDistiller["ensureFactsCurrent"]>;
-
-beforeEach(() => {
-  ensureFactsCurrent = spyOn(FactDistiller.instance, "ensureFactsCurrent").mockResolvedValue(
-    undefined,
-  );
-});
-
 afterEach(() => {
-  ensureFactsCurrent.mockRestore();
+  request.mockClear();
   EmbeddingClientWithInternals._instance = originalEmbeddingClient;
   MemoryWithInternals._instance = originalMemory;
 });
@@ -74,7 +71,15 @@ describe("search-memory", () => {
 
     const result = await execute("chat-1", { query: "What does the user drink?" });
 
-    expect(ensureFactsCurrent).toHaveBeenCalledWith("chat-1", context.trace);
+    expect(request).toHaveBeenCalledWith(
+      EEventType.MemoryFactsRefreshRequested,
+      {},
+      expect.objectContaining({
+        outcome: EEventType.MemoryFactsRefreshed,
+        key: "chat-1",
+        timeoutMs: MEMORY_REQUEST_TIMEOUT_MS,
+      }),
+    );
     expect(embedQuery).toHaveBeenCalledWith("What does the user drink?");
     expect(searchFacts).toHaveBeenCalledWith("chat-1", vector, 10);
     expect(result.details).toEqual({ facts });
@@ -125,7 +130,7 @@ describe("search-memory", () => {
     await expect(tool.execute("call", { query: "preferences" })).rejects.toThrow(
       "This tool requires a chat owner",
     );
-    expect(ensureFactsCurrent).not.toHaveBeenCalled();
+    expect(request).not.toHaveBeenCalled();
     expect(embedQuery).not.toHaveBeenCalled();
   });
 });

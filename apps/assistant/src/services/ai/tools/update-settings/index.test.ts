@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, type Mock, mock, spyOn, test } from "bun:test";
 import { opencodeGoProvider } from "@earendil-works/pi-ai/providers/opencode-go";
+import type { TEventRequester } from "../../../events";
+import { testEventRequester } from "../../../events/test-utils";
 import { SettingsService, type TConfigUpdate } from "../../../settings";
 import { DefaultConfigRecord, EConfigKey, type TConfigRecord } from "../../../settings/schema";
 import { decodeAiModelPreferences, getAiModelPreference } from "../../model-preferences";
@@ -13,6 +15,7 @@ const context = {
   chatId: "discord:1",
   settings: DefaultConfigRecord,
   trace: { turnId: "test", chatId: undefined, platform: undefined },
+  events: { ...testEventRequester },
   verifySettings: mock(async () => undefined),
   runScheduledTask: mock(async () => {
     throw new Error("not used");
@@ -22,20 +25,25 @@ const context = {
 function installSettingsMock(initial: TConfigRecord) {
   const current = { ...initial };
   const getAll = mock(async () => ({ ...current }));
-  const setMany = mock(async (_ownerKey: string, updates: TConfigUpdate[]) => {
-    for (const update of updates) {
-      current[update.key] = update.value;
-    }
+  // answers settings.update.requested with settings.changed
+  const update = mock(
+    async (_type: string, payload: { ownerKey: string; updates: TConfigUpdate[] }) => {
+      for (const change of payload.updates) {
+        current[change.key] = change.value;
+      }
 
-    return { ...current };
-  });
-  (SettingsService as unknown as { _instance: unknown })._instance = { getAll, setMany };
+      return { payload: { ownerKey: payload.ownerKey, record: { ...current } } };
+    },
+  );
+  (SettingsService as unknown as { _instance: unknown })._instance = { getAll };
+  context.events.request = update as unknown as TEventRequester["request"];
 
-  return { getAll, setMany };
+  return { getAll, update };
 }
 
 afterEach(() => {
   (SettingsService as unknown as { _instance: unknown })._instance = undefined;
+  context.events.request = testEventRequester.request;
 });
 
 describe("update-settings", () => {
@@ -56,7 +64,7 @@ describe("update-settings", () => {
       }),
       [EModelPurpose.Utility],
     );
-    expect(settingsMock.setMany).not.toHaveBeenCalled();
+    expect(settingsMock.update).not.toHaveBeenCalled();
   });
 
   test.each(["claude-haiku-5-5", "gpt-6-luna"])("lists and selects Go model %s", async (model) => {
@@ -82,7 +90,7 @@ describe("update-settings", () => {
         aiRuntime: { models: { [EModelPurpose.Main]: { model } } },
       });
       expect(verifySettings).toHaveBeenCalledTimes(1);
-      expect(settingsMock.setMany).toHaveBeenCalledTimes(1);
+      expect(settingsMock.update).toHaveBeenCalledTimes(1);
     } finally {
       if (previousProvider !== undefined) {
         aiModels.setProvider(previousProvider);
@@ -154,7 +162,7 @@ describe("update-settings", () => {
         aiRuntime: { models: { [EModelPurpose.Main]: { model: currentModel } } },
       });
       expect(fetchMock).toHaveBeenCalledTimes(6);
-      expect(settingsMock.setMany).toHaveBeenCalledTimes(2);
+      expect(settingsMock.update).toHaveBeenCalledTimes(2);
       expect(verifySettings).toHaveBeenCalledTimes(2);
       await Promise.all([read.execute("list-a", {}), read.execute("list-b", {})]);
       expect(fetchMock).toHaveBeenCalledTimes(8);
@@ -205,7 +213,7 @@ describe("update-settings", () => {
     });
     expect(JSON.stringify(resetResult?.details)).not.toContain("availableModels");
     expect(verifySettings).toHaveBeenCalledTimes(2);
-    expect(settingsMock.setMany).toHaveBeenCalledTimes(2);
+    expect(settingsMock.update).toHaveBeenCalledTimes(2);
   });
 
   test("selects a service tier and rejects it for unsupported models", async () => {
@@ -240,7 +248,7 @@ describe("update-settings", () => {
         aiServiceTier: "priority",
       }),
     ).rejects.toThrow("Service tier is unsupported by openai/gpt-5.4-mini");
-    expect(settingsMock.setMany).toHaveBeenCalledTimes(1);
+    expect(settingsMock.update).toHaveBeenCalledTimes(1);
   });
 
   test("checks distinct model/effort pairs concurrently before saving a provider", async () => {
@@ -248,7 +256,7 @@ describe("update-settings", () => {
     const verifySettings = mock(async (_settings: TConfigRecord, _purposes: EModelPurpose[]) => {
       await Promise.resolve();
       expect(verifySettings).toHaveBeenCalledTimes(3);
-      expect(settingsMock.setMany).not.toHaveBeenCalled();
+      expect(settingsMock.update).not.toHaveBeenCalled();
       return undefined;
     });
     const tool = updateSettings.createAgentTool({ ...context, verifySettings });
@@ -260,7 +268,7 @@ describe("update-settings", () => {
       [EModelPurpose.Main],
       [EModelPurpose.Specialist],
     ]);
-    expect(settingsMock.setMany).toHaveBeenCalledTimes(1);
+    expect(settingsMock.update).toHaveBeenCalledTimes(1);
   });
 
   test("retries shared failed preferences separately and clears them sequentially", async () => {
@@ -281,7 +289,7 @@ describe("update-settings", () => {
       const purpose = purposes[0] as EModelPurpose;
       await Promise.resolve();
       expect(settings[EConfigKey.AiModelPreferences]).toBe(serialized);
-      expect(settingsMock.setMany).not.toHaveBeenCalled();
+      expect(settingsMock.update).not.toHaveBeenCalled();
 
       if (getAiModelPreference(preferences, EAiProvider.OpenaiCodex, purpose) !== undefined) {
         return "remembered model unavailable";
@@ -303,6 +311,6 @@ describe("update-settings", () => {
       settings: { [EConfigKey.AiModelPreferences]: "{}" },
       change: { fallbacks: retries.map((purpose) => ({ purpose, reason: expect.any(String) })) },
     });
-    expect(settingsMock.setMany).toHaveBeenCalledTimes(1);
+    expect(settingsMock.update).toHaveBeenCalledTimes(1);
   });
 });

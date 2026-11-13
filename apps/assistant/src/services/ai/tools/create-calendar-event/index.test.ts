@@ -1,23 +1,24 @@
-import { afterEach, describe, expect, mock, test } from "bun:test";
+import { describe, expect, mock, test } from "bun:test";
 import { compile } from "@earendil-works/pi-schema";
 import { formats } from "@earendil-works/pi-schema/formats";
-import { CalendarService } from "../../../calendar";
+import type { TEventRequester } from "../../../events";
+import { EEventType } from "../../../events/catalog";
+import { testEventRequester } from "../../../events/test-utils";
 import { DefaultConfigRecord } from "../../../settings/schema";
 import { createCalendarEvent, SCreateCalendarEventArgs, validateCreateCalendarEventArgs } from ".";
 
-const context = {
-  chatId: "discord:1",
-  settings: DefaultConfigRecord,
-  trace: { turnId: "test", chatId: undefined, platform: undefined },
-  verifySettings: mock(async () => undefined),
-  runScheduledTask: mock(async () => {
-    throw new Error("not used");
-  }),
-};
-
-afterEach(() => {
-  (CalendarService as unknown as { _instance: unknown })._instance = undefined;
-});
+function contextWith(request: ReturnType<typeof mock>) {
+  return {
+    chatId: "discord:1",
+    settings: DefaultConfigRecord,
+    trace: { turnId: "test", chatId: undefined, platform: undefined },
+    events: { ...testEventRequester, request: request as unknown as TEventRequester["request"] },
+    verifySettings: mock(async () => undefined),
+    runScheduledTask: mock(async () => {
+      throw new Error("not used");
+    }),
+  };
+}
 
 describe("create-calendar-event", () => {
   test("accepts valid args and rejects unknown fields", () => {
@@ -76,22 +77,27 @@ describe("create-calendar-event", () => {
     ).toHaveLength(3);
   });
 
-  test("uses the configured timezone and trusted service for calendar creation", async () => {
-    const createEvent = mock(async (args) => args);
-    (CalendarService as unknown as { _instance: unknown })._instance = { createEvent };
-    const tool = createCalendarEvent.createAgentTool(context);
+  test("requests the create with the configured timezone on the chat's lane", async () => {
+    const request = mock(async () => ({
+      payload: { chatId: "discord:1", event: { id: "created", summary: "Meeting" } },
+    }));
+    const tool = createCalendarEvent.createAgentTool(contextWith(request));
 
-    await tool.execute("call", {
+    const result = await tool.execute("call", {
       summary: "Meeting",
       start: "2026-08-01T10:00:00+02:00",
     });
 
-    expect(createEvent).toHaveBeenCalledWith({
-      userId: "discord:1",
-      summary: "Meeting",
-      start: "2026-08-01T10:00:00+02:00",
-      timezone: "Europe/Warsaw",
-      signal: undefined,
-    });
+    expect(request).toHaveBeenCalledWith(
+      EEventType.CalendarEventCreateRequested,
+      {
+        chatId: "discord:1",
+        summary: "Meeting",
+        start: "2026-08-01T10:00:00+02:00",
+        timezone: "Europe/Warsaw",
+      },
+      expect.objectContaining({ outcome: EEventType.CalendarEventCreated, key: "discord:1" }),
+    );
+    expect(result.details).toEqual({ id: "created", summary: "Meeting" });
   });
 });

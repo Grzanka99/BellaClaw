@@ -3,6 +3,8 @@ import type { TOption } from "@bellaclaw/shared";
 import type { AgentTool, AgentToolResult, ToolExecutionMode } from "@earendil-works/pi-agent-core";
 import { compile, type Schema, type Static } from "@earendil-works/pi-schema";
 import { formats } from "@earendil-works/pi-schema/formats";
+import type { TLogSafeField, TToolLogPolicy } from "../../app-logger/sanitizers";
+import type { TEventRequester } from "../../events";
 import type { TConfigRecord } from "../../settings/schema";
 import type { AgentHarness } from "../agent-harness";
 import type { EModelPurpose } from "../types";
@@ -13,19 +15,8 @@ export type TToolExecutionContext = {
   trace: TBehaviorTraceContext;
   verifySettings: (settings: TConfigRecord, purposes: EModelPurpose[]) => Promise<TOption<string>>;
   runScheduledTask: AgentHarness["runScheduledTask"];
-};
-
-/**
- * A field whose value may be logged as-is. A tuple logs it under another metadata key.
- */
-export type TLogSafeField = string | readonly [field: string, logKey: string];
-
-export type TToolLogPolicy = {
-  logSafe: ReadonlyArray<TLogSafeField>;
-  /** Error text can quote private values, so only ToolError codes are logged. */
-  privateErrors: boolean;
-  /** String fields also logged as a bounded, secret-redacted `<key>Preview`. */
-  previews?: ReadonlyArray<string>;
+  // the handler's requests; each tool request gets a unique step
+  events: TEventRequester;
 };
 
 export type TTool = TToolLogPolicy & {
@@ -60,10 +51,28 @@ export function defineTool<T extends Schema>(definition: {
       description: definition.description,
       parameters: definition.schema,
       executionMode: definition.mode,
-      execute: async (_toolCallId, args, signal): Promise<AgentToolResult<unknown>> => {
+      execute: async (toolCallId, args, signal): Promise<AgentToolResult<unknown>> => {
+        const toolContext: TToolExecutionContext = {
+          ...context,
+          events: {
+            request: (type, payload, options) => {
+              // a turn never runs twice, so a tool command needs no replay dedupe; a unique step
+              // keeps a reused tool call id from returning another call's stored outcome
+              let step = `${toolCallId}:${Bun.randomUUIDv7()}`;
+
+              if (options.step !== undefined) {
+                step = `${step}:${options.step}`;
+              }
+
+              return context.events.request(type, payload, { ...options, step });
+            },
+            waitFor: context.events.waitFor,
+          },
+        };
+
         try {
           const details = await definition.execute(
-            context,
+            toolContext,
             validateToolArguments(definition.schema, args),
             signal,
           );

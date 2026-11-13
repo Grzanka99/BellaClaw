@@ -1,5 +1,5 @@
-import type { TOption } from "@bellaclaw/shared";
 import type { cronEngineJobsTable } from "../database/schema";
+import type { TCronJobRecord } from "../events/catalog";
 
 export enum ECronJobType {
   Recurring = "recurring",
@@ -34,19 +34,6 @@ export type TCronJob = Omit<
   content: TJobContent;
   /** Automations run in this order before the job's message is produced. */
   automationIds: number[];
-};
-
-export type TCronJobContext = {
-  name: string;
-  scope: string;
-  type: ECronJobType;
-  pattern: TOption<string>;
-  content: TJobContent;
-  automationIds: number[];
-  lastRunAt: TOption<Date>;
-  nextRunAt: Date;
-  createdAt: Date;
-  timezone: TOption<string>;
 };
 
 type TCreateJobArgs = {
@@ -86,3 +73,46 @@ export class CronSchedulerError extends Error {
 export type TCronSchedulerOptions = {
   timezone?: string;
 };
+
+export function toCronJobRecord(job: TCronJob): TCronJobRecord {
+  return {
+    id: job.id,
+    name: job.name,
+    scope: job.scope,
+    type: job.type,
+    pattern: job.pattern ?? undefined,
+    content: job.content,
+    automationIds: job.automationIds,
+    nextRunAt: job.nextRunAt.getTime(),
+    lastRunAt: job.lastRunAt?.getTime(),
+    createdAt: job.createdAt.getTime(),
+    status: job.status,
+    finishedAt: job.finishedAt?.getTime(),
+    finishedReason: job.finishedReason ?? undefined,
+    timezone: job.timezone ?? undefined,
+  };
+}
+
+export function fromCronJobRecord(record: TCronJobRecord): TCronJob {
+  let lastRunAt: Date | null = null;
+  let finishedAt: Date | null = null;
+
+  if (record.lastRunAt !== undefined) {
+    lastRunAt = new Date(record.lastRunAt);
+  }
+
+  if (record.finishedAt !== undefined) {
+    finishedAt = new Date(record.finishedAt);
+  }
+
+  return {
+    ...record,
+    pattern: record.pattern ?? null,
+    nextRunAt: new Date(record.nextRunAt),
+    lastRunAt,
+    createdAt: new Date(record.createdAt),
+    finishedAt,
+    finishedReason: record.finishedReason ?? null,
+    timezone: record.timezone ?? null,
+  };
+}

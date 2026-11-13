@@ -4,6 +4,8 @@ import { AutomationService, EAutomationStatus } from "../../../automation";
 import { EAutomationRunOutcome } from "../../../automation/runner";
 import { CronScheduler } from "../../../cron";
 import { ECronJobStatus, ECronJobType, type TCronJob } from "../../../cron/types";
+import { DatabaseConnector } from "../../../database";
+import { testEventRequester } from "../../../events/test-utils";
 import { SettingsService } from "../../../settings";
 import { DefaultConfigRecord } from "../../../settings/schema";
 import type { AgentHarness } from "../../agent-harness";
@@ -23,13 +25,14 @@ function createContext() {
     chatId: scope,
     settings: DefaultConfigRecord,
     trace: { turnId: "test", chatId: undefined, platform: undefined },
+    events: testEventRequester,
     verifySettings: mock(async () => undefined),
     runScheduledTask,
   };
 }
 
 async function saveAutomation(name: string, source: string) {
-  const draft = await AutomationService.instance.createDraft({
+  const draft = await AutomationService.instance.createDraft(DatabaseConnector.instance.database, {
     scope,
     name,
     source,
@@ -37,7 +40,7 @@ async function saveAutomation(name: string, source: string) {
     allowedOrigins: [],
   });
 
-  return AutomationService.instance.saveDraft(scope, draft.id);
+  return AutomationService.instance.saveDraft(DatabaseConnector.instance.database, scope, draft.id);
 }
 
 function job(overrides: Partial<TCronJob>): TCronJob {

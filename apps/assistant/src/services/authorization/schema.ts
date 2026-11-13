@@ -6,6 +6,14 @@ export enum EAuthorizationStatus {
   Locked = "locked",
 }
 
+export enum EAuthorizationDecision {
+  Allow = "allow",
+  FailedAttempt = "failed_attempt",
+  Locked = "locked",
+  Activated = "activated",
+  AlreadyActivated = "already_activated",
+}
+
 export const SAuthorizationState = z.object({
   chatId: z.string().min(1),
   status: z.enum(EAuthorizationStatus),

@@ -1,6 +1,7 @@
 import { arr, bool, obj, opt, type Static, str } from "@earendil-works/pi-schema";
 import { AutomationService } from "../../../automation";
-import { CronScheduler } from "../../../cron";
+import { fromCronJobRecord } from "../../../cron/types";
+import { EEventType } from "../../../events/catalog";
 import { EConfigKey } from "../../../settings/schema";
 import { runAutomationOperation } from "../automation-errors";
 import {
@@ -75,13 +76,20 @@ export const scheduleOnce = defineTool({
       AutomationService.instance.resolveNames(scope, automations),
     );
 
-    return runCronJobOperation(() =>
-      CronScheduler.instance.createOnce({
-        ...validatedArgs,
-        automationIds,
-        scope,
-        timezone: ownerTimezone,
-      }),
-    );
+    return runCronJobOperation(async () => {
+      const scheduled = await context.events.request(
+        EEventType.CronJobScheduleRequested,
+        {
+          ...validatedArgs,
+          fireAt: validatedArgs.fireAt.getTime(),
+          automationIds,
+          scope,
+          timezone: ownerTimezone,
+        },
+        { outcome: EEventType.CronJobScheduled, step: undefined, key: scope, timeoutMs: undefined },
+      );
+
+      return fromCronJobRecord(scheduled.payload.job);
+    });
   },
 });

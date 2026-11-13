@@ -1,31 +1,38 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { resetCronEngineJobsTable } from "../database/test-utils";
+import { resetCronEngineJobsTable, resetEventTables } from "../database/test-utils";
+import { CommandRejectedError, EventBus } from "../events";
 import { CronScheduler } from "./index";
-import { CronSchedulerError } from "./types";
+import { createOnce, createRecurring } from "./test-utils";
 
 describe("CronScheduler schedule edge cases", () => {
   let engine: CronScheduler;
 
   beforeEach(async () => {
     await resetCronEngineJobsTable();
+    await resetEventTables();
+    Object.assign(EventBus, { _instance: undefined });
     engine = new CronScheduler({});
+    engine.subscribe();
+    await EventBus.instance.start();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     engine.destroy();
+    await EventBus.instance.idle();
+    await EventBus.instance.stop();
   });
 
   test("throws a coded error for unschedulable valid cron patterns", async () => {
     await expect(
-      engine.createRecurring({
+      createRecurring({
         name: "impossible-pattern",
         scope: "scope-a",
         pattern: "0 0 31 2 *",
         content: { kind: "text", text: "Hi." },
       }),
     ).rejects.toMatchObject({
-      code: "unschedulable-pattern",
-      message: "Cron pattern '0 0 31 2 *' cannot be scheduled",
+      errorCode: "unschedulable-pattern",
+      message: "create failed: Cron pattern '0 0 31 2 *' cannot be scheduled",
     });
 
     const storedJob = await engine.get("impossible-pattern", "scope-a");
@@ -34,13 +41,13 @@ describe("CronScheduler schedule edge cases", () => {
 
   test("concurrent recurring schedules allow one success and one duplicate error", async () => {
     const results = await Promise.allSettled([
-      engine.createRecurring({
+      createRecurring({
         name: "duplicate-recurring",
         scope: "scope-a",
         pattern: "0 9 * * *",
         content: { kind: "text", text: "Hi." },
       }),
-      engine.createRecurring({
+      createRecurring({
         name: "duplicate-recurring",
         scope: "scope-a",
         pattern: "0 9 * * *",
@@ -53,8 +60,8 @@ describe("CronScheduler schedule edge cases", () => {
 
     expect(successfulResults).toHaveLength(1);
     expect(failedResults).toHaveLength(1);
-    expect(failedResults[0]?.reason).toBeInstanceOf(CronSchedulerError);
-    expect(failedResults[0]?.reason).toMatchObject({ code: "job-already-exists" });
+    expect(failedResults[0]?.reason).toBeInstanceOf(CommandRejectedError);
+    expect(failedResults[0]?.reason).toMatchObject({ errorCode: "job-already-exists" });
     expect(String(failedResults[0]?.reason.message)).toContain("already exists");
 
     const jobs = await engine.list("scope-a");
@@ -65,13 +72,13 @@ describe("CronScheduler schedule edge cases", () => {
   test("concurrent one-time schedules allow one success and one duplicate error", async () => {
     const fireAt = new Date(Date.now() + 60_000);
     const results = await Promise.allSettled([
-      engine.createOnce({
+      createOnce({
         name: "duplicate-onetime",
         scope: "scope-a",
         fireAt: fireAt,
         content: { kind: "text", text: "Hi." },
       }),
-      engine.createOnce({
+      createOnce({
         name: "duplicate-onetime",
         scope: "scope-a",
         fireAt: fireAt,
@@ -84,8 +91,8 @@ describe("CronScheduler schedule edge cases", () => {
 
     expect(successfulResults).toHaveLength(1);
     expect(failedResults).toHaveLength(1);
-    expect(failedResults[0]?.reason).toBeInstanceOf(CronSchedulerError);
-    expect(failedResults[0]?.reason).toMatchObject({ code: "job-already-exists" });
+    expect(failedResults[0]?.reason).toBeInstanceOf(CommandRejectedError);
+    expect(failedResults[0]?.reason).toMatchObject({ errorCode: "job-already-exists" });
     expect(String(failedResults[0]?.reason.message)).toContain("already exists");
 
     const jobs = await engine.list("scope-a");

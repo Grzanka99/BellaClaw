@@ -1,18 +1,23 @@
 import { AppLogger, EBehaviorLogLevel } from "@bellaclaw/behavior-logs";
-import { registerAiAuthChannel } from "./services/ai/auth";
+import { setupAiAuth } from "./services/ai/auth";
 import { startAiOAuthKeepAlive } from "./services/ai/auth/oauth-keep-alive";
 import { AuthorizationService } from "./services/authorization";
+import { AutomationService } from "./services/automation";
 import { CalendarService } from "./services/calendar";
+import { Commands } from "./services/commands";
+import { CronScheduler } from "./services/cron";
 import { DiscordSingleton } from "./services/discord";
+import { EventBus } from "./services/events";
+import { EEventType } from "./services/events/catalog";
 import { McpService } from "./services/mcp";
-import {
-  registerMcpAuthConnectedListener,
-  startMcpAuthServer,
-  stopMcpAuthServer,
-} from "./services/mcp/auth";
+import { setupMcpAuth, startMcpAuthServer, stopMcpAuthServer } from "./services/mcp/auth";
+import { Memory } from "./services/memory";
 import { FactDistiller } from "./services/memory/distill";
+import { MessageHandler } from "./services/message-handler";
 import { MessagingAdapter } from "./services/messaging";
+import { Notices } from "./services/notices";
 import { ScheduledDelivery } from "./services/scheduling/delivery";
+import { SettingsService } from "./services/settings";
 import { SignalSingleton } from "./services/signal";
 
 async function init(): Promise<void> {
@@ -39,13 +44,19 @@ async function init(): Promise<void> {
   });
 
   try {
-    registerMcpAuthConnectedListener((chatId, profileId) =>
-      MessagingAdapter.instance.sendMcpConnectedMessage(chatId, profileId),
-    );
-    registerAiAuthChannel({
-      listChatIds: () => AuthorizationService.instance.listAuthorizedChatIds(),
-      send: (chatId, text) => MessagingAdapter.instance.sendNotice(chatId, text),
-    });
+    MessagingAdapter.instance.setup();
+    Notices.instance.setup();
+    Commands.instance.setup();
+    ScheduledDelivery.instance.setup();
+    CronScheduler.instance.subscribe();
+    AutomationService.instance.setup();
+    MessageHandler.instance.setup();
+    Memory.instance.setup();
+    FactDistiller.instance.setup();
+    SettingsService.instance.setup();
+    setupAiAuth();
+    setupMcpAuth();
+    McpService.instance.setup();
     if (Bun.env.BELLACLAW_MCP_PUBLIC_URL?.trim()) {
       startMcpAuthServer();
     }
@@ -55,8 +66,17 @@ async function init(): Promise<void> {
       DiscordSingleton.instance.setup(),
       SignalSingleton.instance.setup(),
     ]);
-    await ScheduledDelivery.instance.setup();
-    await FactDistiller.instance.scheduleFactDrainForAllChats(turnId);
+    await EventBus.instance.start();
+    await CronScheduler.instance.setup();
+    await EventBus.instance.publish({
+      type: EEventType.AppStarted,
+      source: "app",
+      key: "global",
+      trace: { turnId, chatId: undefined, platform: undefined },
+      payload: {},
+      causationId: undefined,
+      dedupeKey: undefined,
+    });
     startAiOAuthKeepAlive();
 
     AppLogger.instance.record({
@@ -102,7 +122,11 @@ async function init(): Promise<void> {
 
 for (const signal of ["SIGINT", "SIGTERM"]) {
   process.once(signal, () => {
-    void Promise.allSettled([McpService.instance.close(), stopMcpAuthServer()]).then(async () => {
+    void Promise.allSettled([
+      McpService.instance.close(),
+      stopMcpAuthServer(),
+      EventBus.instance.stop(),
+    ]).then(async () => {
       await AppLogger.instance.close();
       process.exit(0);
     });

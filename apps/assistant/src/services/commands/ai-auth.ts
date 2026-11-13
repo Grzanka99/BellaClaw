@@ -1,11 +1,6 @@
-import {
-  AI_OAUTH_PROVIDERS,
-  beginAiLogin,
-  findAiOAuthProvider,
-  getAiAuthStatus,
-  logoutAi,
-} from "../ai/auth";
+import { AI_OAUTH_PROVIDERS, findAiOAuthProvider, getAiAuthStatus } from "../ai/auth";
 import { AuthorizationService } from "../authorization";
+import { EEventType } from "../events/catalog";
 import type { TCommand } from "./types";
 
 const USAGE = `Usage: !ai-auth login|status|logout PROVIDER (${AI_OAUTH_PROVIDERS.join(", ")})`;
@@ -14,7 +9,7 @@ export const aiAuthCommand: TCommand = {
   name: "ai-auth",
   description: "Log in to, check, or log out of an AI provider subscription.",
   usage: "!ai-auth login|status|logout PROVIDER",
-  handler: async (chatId, args) => {
+  handler: async (chatId, args, ctx) => {
     const [action, provider, extra] = args.trim().split(/\s+/);
 
     if (
@@ -39,11 +34,30 @@ export const aiAuthCommand: TCommand = {
 
     try {
       if (action === "login") {
-        return await beginAiLogin(chatId, providerId);
+        const started = await ctx.request(
+          EEventType.AiAuthLoginRequested,
+          { chatId, providerId },
+          {
+            outcome: EEventType.AiAuthLoginStarted,
+            step: undefined,
+            key: "global",
+            timeoutMs: undefined,
+          },
+        );
+        return started.payload.instructions;
       }
 
       if (action === "logout") {
-        await logoutAi(providerId);
+        await ctx.request(
+          EEventType.AiAuthLogoutRequested,
+          { providerId },
+          {
+            outcome: EEventType.AiAuthLoggedOut,
+            step: undefined,
+            key: "global",
+            timeoutMs: undefined,
+          },
+        );
         return `Logged out of ${providerId}.`;
       }
 

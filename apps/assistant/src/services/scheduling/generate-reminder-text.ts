@@ -7,7 +7,8 @@ import { createPlatformInstructions } from "../ai/instructions/platform";
 import { readXmlAndInjectConfig } from "../ai/instructions/read-xml-and-inject-config";
 import type { LlmClient } from "../ai/llm";
 import { EModelPurpose } from "../ai/types";
-import type { TCronJobContext } from "../cron/types";
+import type { TEventRequester } from "../events";
+import type { TCronFiredPayload } from "../events/catalog";
 import type { EMessagePlatform } from "../messaging/types";
 import { SettingsService } from "../settings";
 import { DefaultConfigRecord, EConfigKey, type TConfigRecord } from "../settings/schema";
@@ -25,7 +26,7 @@ export type TScheduledTaskResult = {
 
 const logger = createLogger("REMINDER");
 
-export async function resolveCronScopeContext(ctx: TCronJobContext, logPrefix: string) {
+export async function resolveCronScopeContext(ctx: TCronFiredPayload, logPrefix: string) {
   let timezone: TOption<string> = ctx.timezone;
   let settings: TConfigRecord = DefaultConfigRecord;
 
@@ -50,7 +51,7 @@ export async function resolveCronScopeContext(ctx: TCronJobContext, logPrefix: s
 }
 
 export async function generateReminderText(
-  ctx: TCronJobContext,
+  ctx: TCronFiredPayload,
   platform: TOption<EMessagePlatform>,
   ai: TReminderAi,
   trace: TBehaviorTraceContext,
@@ -84,7 +85,7 @@ export async function generateReminderText(
         content.promptData,
         "",
         "Firing context JSON:",
-        JSON.stringify(createFiringContext(ctx.nextRunAt, timezone)),
+        JSON.stringify(createFiringContext(new Date(ctx.nextRunAt), timezone)),
       ].join("\n"),
       instructions: instructions.join("\n\n"),
       purpose: EModelPurpose.Main,
@@ -105,9 +106,10 @@ export async function generateReminderText(
 }
 
 export async function generateScheduledTaskText(
-  ctx: TCronJobContext,
+  ctx: TCronFiredPayload,
   platform: TOption<EMessagePlatform>,
   ai: TScheduledTaskAi,
+  events: TEventRequester,
   trace: TBehaviorTraceContext,
   automationOutputs?: string,
 ): Promise<TScheduledTaskResult> {
@@ -141,11 +143,12 @@ export async function generateScheduledTaskText(
   try {
     const result = await ai.runScheduledTask({
       prompt,
-      currentTimeContext: `Scheduled firing context JSON:\n${JSON.stringify(createFiringContext(ctx.nextRunAt, timezone))}`,
+      currentTimeContext: `Scheduled firing context JSON:\n${JSON.stringify(createFiringContext(new Date(ctx.nextRunAt), timezone))}`,
       chatId: ctx.scope,
       settings,
       platform,
       trace,
+      events,
       signal: undefined,
     });
 

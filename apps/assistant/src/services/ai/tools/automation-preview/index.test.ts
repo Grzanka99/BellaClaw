@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { AutomationService } from "../../../automation";
 import { EAutomationRunOutcome } from "../../../automation/runner";
-import { CronScheduler } from "../../../cron";
-import { resetAutomationsTables, resetCronEngineJobsTable } from "../../../database/test-utils";
+import { resetAutomationsTables, resetEventTables } from "../../../database/test-utils";
+import { EventBus } from "../../../events";
+import { testEventRequester } from "../../../events/test-utils";
 import { DefaultConfigRecord } from "../../../settings/schema";
 import { automationPreview } from ".";
 
@@ -10,6 +11,7 @@ const tool = automationPreview.createAgentTool({
   chatId: "discord:1",
   settings: DefaultConfigRecord,
   trace: { turnId: "test", chatId: undefined, platform: undefined },
+  events: testEventRequester,
   verifySettings: mock(async () => undefined),
   runScheduledTask: mock(async () => {
     throw new Error("not used");
@@ -28,11 +30,15 @@ const args = {
 describe("automation-preview", () => {
   beforeEach(async () => {
     await resetAutomationsTables();
-    await resetCronEngineJobsTable();
+    await resetEventTables();
+    Object.assign(EventBus, { _instance: undefined });
+    AutomationService.instance.setup();
+    await EventBus.instance.start();
   });
 
-  afterEach(() => {
-    CronScheduler.instance.destroy();
+  afterEach(async () => {
+    await EventBus.instance.idle();
+    await EventBus.instance.stop();
   });
 
   test("returns a previewId with the input and output of a successful run", async () => {

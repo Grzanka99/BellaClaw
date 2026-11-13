@@ -76,6 +76,7 @@ Bun workspaces own dependencies and Turborepo coordinates tasks from the reposit
 - [MCP](docs/mcp.md) — integration profiles, specialist behavior, OAuth and logs
 - [Behavior Logs](docs/behavior-logs.md) — log viewer, CLI, and security
 - [Architecture](docs/architecture.md) — message flow and AI runtime
+- [Event Architecture](docs/event-architecture.html) — event graph, bus internals and guarantees
 
 ## License
 

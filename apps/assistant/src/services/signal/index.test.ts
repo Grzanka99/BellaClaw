@@ -1,4 +1,10 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { asc, eq } from "drizzle-orm";
+import { DatabaseConnector } from "../database";
+import { eventsTable } from "../database/schema";
+import { resetEventTables } from "../database/test-utils";
+import { EventBus } from "../events";
+import { EEventType, type TEventPayloads } from "../events/catalog";
 import { MessagingAdapter } from "../messaging";
 import { EMessagePlatform } from "../messaging/types";
 import { SignalClient } from "./client";
@@ -11,7 +17,6 @@ type TSignalSingletonStatic = {
 type TSignalSingletonInternals = {
   retryDelayMs: number;
   setupBootGraceMs: number;
-  seenMessageKeysLimit: number;
   client: Pick<SignalClient, "sendReadReceipt" | "showTyping" | "hideTyping"> | undefined;
   handleInboundMessage: (message: {
     sourceNumber: string;
@@ -24,6 +29,14 @@ type TMessagingAdapterStatic = {
   _instance: MessagingAdapter | undefined;
 };
 
+function receivedRows() {
+  return DatabaseConnector.instance.database
+    .select()
+    .from(eventsTable)
+    .where(eq(eventsTable.type, EEventType.MessageReceived))
+    .orderBy(asc(eventsTable.seq));
+}
+
 const originalCheckReadiness = SignalClient.prototype.checkReadiness;
 const originalSubscribe = SignalClient.prototype.subscribe;
 
@@ -33,6 +46,8 @@ function cleanupSingletons() {
 
   const MessagingAdapterWithInternals = MessagingAdapter as unknown as TMessagingAdapterStatic;
   MessagingAdapterWithInternals._instance = undefined;
+
+  Object.assign(EventBus, { _instance: undefined });
 }
 
 describe("SignalSingleton", () => {
@@ -113,22 +128,22 @@ describe("SignalSingleton", () => {
     expect(subscribeMock).toHaveBeenCalledTimes(1);
   });
 
-  test("forwards inbound messages to messaging adapter", async () => {
-    Bun.env.SIGNAL_PHONE_NUMBER = "+100";
-    const signal = SignalSingleton.instance as unknown as TSignalSingletonInternals;
-    const adapter = MessagingAdapter.instance as unknown as {
-      handleInboundMessage: typeof MessagingAdapter.prototype.handleInboundMessage;
-    };
-    const handleInboundMessageMock = mock(async () => {});
-    const sendReadReceiptMock = mock(async () => {});
-    const showTypingMock = mock(async () => {});
-    const hideTypingMock = mock(async () => {});
+  test("sendText without a client rejects", async () => {
+    await expect(SignalSingleton.instance.sendText("+200", "hello")).rejects.toThrow(
+      "Signal client is not initialized",
+    );
+  });
 
-    adapter.handleInboundMessage = handleInboundMessageMock;
+  test("publishes inbound messages as message.received and sends a read receipt", async () => {
+    Bun.env.SIGNAL_PHONE_NUMBER = "+100";
+    await resetEventTables();
+    const signal = SignalSingleton.instance as unknown as TSignalSingletonInternals;
+    const sendReadReceiptMock = mock(async () => {});
+
     signal.client = {
       sendReadReceipt: sendReadReceiptMock,
-      showTyping: showTypingMock,
-      hideTyping: hideTypingMock,
+      showTyping: mock(async () => {}),
+      hideTyping: mock(async () => {}),
     };
 
     await signal.handleInboundMessage({
@@ -138,84 +153,112 @@ describe("SignalSingleton", () => {
     });
 
     expect(sendReadReceiptMock).toHaveBeenCalledWith("+200", 123);
-    expect(handleInboundMessageMock).toHaveBeenCalledWith({
+    const rows = await receivedRows();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.key).toBe("signal:+200");
+    expect(rows[0]?.dedupeKey).toBe("signal:+200:123");
+    expect(rows[0]?.chatId).toBe("signal:+200");
+    expect(rows[0]?.platform).toBe(EMessagePlatform.Signal);
+    expect(rows[0]?.turnId).toStartWith("msg:");
+    expect(rows[0]?.payload).toEqual({
+      chatId: "signal:+200",
+      content: "hello",
+      receivedAt: expect.any(Number),
       platform: EMessagePlatform.Signal,
-      chatId: "+200",
-      message: {
-        content: "hello",
-      },
     });
   });
 
-  test("ignores a re-delivered message and forwards distinct ones", async () => {
+  test("a re-delivered message is one row and distinct ones are kept", async () => {
     Bun.env.SIGNAL_PHONE_NUMBER = "+100";
+    await resetEventTables();
     const signal = SignalSingleton.instance as unknown as TSignalSingletonInternals;
-    const adapter = MessagingAdapter.instance as unknown as {
-      handleInboundMessage: typeof MessagingAdapter.prototype.handleInboundMessage;
-    };
-    const handleInboundMessageMock = mock(async () => {});
-
-    adapter.handleInboundMessage = handleInboundMessageMock;
 
     await signal.handleInboundMessage({ sourceNumber: "+200", message: "hello", timestamp: 123 });
     await signal.handleInboundMessage({ sourceNumber: "+200", message: "hello", timestamp: 123 });
     await signal.handleInboundMessage({ sourceNumber: "+200", message: "hello", timestamp: 124 });
     await signal.handleInboundMessage({ sourceNumber: "+300", message: "hello", timestamp: 123 });
+    await signal.handleInboundMessage({
+      sourceNumber: "+200",
+      message: "hi",
+      timestamp: undefined,
+    });
+    await signal.handleInboundMessage({
+      sourceNumber: "+200",
+      message: "hi",
+      timestamp: undefined,
+    });
 
-    expect(handleInboundMessageMock).toHaveBeenCalledTimes(3);
-  });
-
-  test("forgets the oldest message once the seen limit is exceeded", async () => {
-    Bun.env.SIGNAL_PHONE_NUMBER = "+100";
-    const signal = SignalSingleton.instance as unknown as TSignalSingletonInternals;
-    const adapter = MessagingAdapter.instance as unknown as {
-      handleInboundMessage: typeof MessagingAdapter.prototype.handleInboundMessage;
-    };
-    const handleInboundMessageMock = mock(async () => {});
-
-    adapter.handleInboundMessage = handleInboundMessageMock;
-    signal.seenMessageKeysLimit = 2;
-
-    await signal.handleInboundMessage({ sourceNumber: "+200", message: "one", timestamp: 1 });
-    await signal.handleInboundMessage({ sourceNumber: "+200", message: "two", timestamp: 2 });
-    await signal.handleInboundMessage({ sourceNumber: "+200", message: "one", timestamp: 1 });
-
-    expect(handleInboundMessageMock).toHaveBeenCalledTimes(2);
-
-    await signal.handleInboundMessage({ sourceNumber: "+200", message: "three", timestamp: 3 });
-    await signal.handleInboundMessage({ sourceNumber: "+200", message: "one", timestamp: 1 });
-
-    expect(handleInboundMessageMock).toHaveBeenCalledTimes(4);
-  });
-
-  test("does not wait for typing indicator before forwarding inbound messages", async () => {
-    Bun.env.SIGNAL_PHONE_NUMBER = "+100";
-    const signal = SignalSingleton.instance as unknown as TSignalSingletonInternals;
-    const adapter = MessagingAdapter.instance as unknown as {
-      handleInboundMessage: typeof MessagingAdapter.prototype.handleInboundMessage;
-    };
-    const handleInboundMessageMock = mock(async () => {});
-
-    adapter.handleInboundMessage = handleInboundMessageMock;
-    signal.client = {
-      sendReadReceipt: mock(async () => {}),
-      showTyping: mock(() => new Promise<void>(() => {})),
-      hideTyping: mock(async () => {}),
-    };
-
-    const result = await Promise.race([
-      signal
-        .handleInboundMessage({
-          sourceNumber: "+200",
-          message: "hello",
-          timestamp: 123,
-        })
-        .then(() => "handled"),
-      Bun.sleep(20).then(() => "timeout"),
+    expect((await receivedRows()).map((row) => row.dedupeKey)).toEqual([
+      "signal:+200:123",
+      "signal:+200:124",
+      "signal:+300:123",
+      null,
+      null,
     ]);
+  });
 
-    expect(result).toBe("handled");
-    expect(handleInboundMessageMock).toHaveBeenCalledTimes(1);
+  test("typing follows turn.requested, turn.completed, turn.failed and event.dead_lettered", async () => {
+    Bun.env.SIGNAL_ENABLED = "true";
+    Bun.env.SIGNAL_PHONE_NUMBER = "+100";
+    Bun.env.SIGNAL_CLI_RPC_URL = "http://127.0.0.1:8080";
+    SignalClient.prototype.checkReadiness = mock(async () => true);
+    SignalClient.prototype.subscribe = mock(async () => () => {});
+    await resetEventTables();
+    await SignalSingleton.instance.setup();
+    const signal = SignalSingleton.instance as unknown as TSignalSingletonInternals;
+    const showTyping = mock(async (_recipient: string) => {});
+    const hideTyping = mock(async (_recipient: string) => {});
+    signal.client = { sendReadReceipt: mock(async () => {}), showTyping, hideTyping };
+    const bus = EventBus.instance;
+    await bus.start();
+    const publish = <T extends EEventType>(type: T, chatId: string, payload: TEventPayloads[T]) =>
+      bus.publish({
+        type,
+        source: "test",
+        key: chatId,
+        trace: { turnId: "test", chatId, platform: undefined },
+        payload,
+        causationId: undefined,
+        dedupeKey: undefined,
+      });
+
+    try {
+      await publish(EEventType.TurnRequested, "signal:+200", {
+        chatId: "signal:+200",
+        content: "hello",
+        receivedAt: 1,
+        platform: EMessagePlatform.Signal,
+      });
+      await publish(EEventType.TurnRequested, "discord:+200", {
+        chatId: "discord:+200",
+        content: "hello",
+        receivedAt: 1,
+        platform: EMessagePlatform.Discord,
+      });
+      await bus.idle();
+      expect(showTyping.mock.calls).toEqual([["+200"]]);
+      expect(hideTyping).not.toHaveBeenCalled();
+
+      await publish(EEventType.TurnCompleted, "signal:+200", {
+        chatId: "signal:+200",
+        userMessageId: 1,
+      });
+      await publish(EEventType.TurnFailed, "signal:+200", {
+        chatId: "signal:+200",
+        reason: "error",
+      });
+      await publish(EEventType.EventDeadLettered, "signal:+200", {
+        eventId: "event",
+        eventType: EEventType.ReplyReady,
+        consumer: "outbound",
+        attempts: 1,
+        error: "offline",
+      });
+      await bus.idle();
+      expect(hideTyping.mock.calls).toEqual([["+200"], ["+200"], ["+200"]]);
+    } finally {
+      await bus.stop();
+    }
   });
 
   test("resolves setup and keeps retrying when signal-cli never becomes ready", async () => {

@@ -1,7 +1,15 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { AutomationService } from "../../../automation";
 import { CronScheduler } from "../../../cron";
-import { resetAutomationsTables, resetCronEngineJobsTable } from "../../../database/test-utils";
+import { createRecurring } from "../../../cron/test-utils";
+import { DatabaseConnector } from "../../../database";
+import {
+  resetAutomationsTables,
+  resetCronEngineJobsTable,
+  resetEventTables,
+} from "../../../database/test-utils";
+import { EventBus } from "../../../events";
+import { testEventRequester } from "../../../events/test-utils";
 import { DefaultConfigRecord } from "../../../settings/schema";
 import { automationDelete } from ".";
 
@@ -9,6 +17,7 @@ const tool = automationDelete.createAgentTool({
   chatId: "discord:1",
   settings: DefaultConfigRecord,
   trace: { turnId: "test", chatId: undefined, platform: undefined },
+  events: testEventRequester,
   verifySettings: mock(async () => undefined),
   runScheduledTask: mock(async () => {
     throw new Error("not used");
@@ -16,7 +25,7 @@ const tool = automationDelete.createAgentTool({
 });
 
 async function saveAutomation(name: string) {
-  const draft = await AutomationService.instance.createDraft({
+  const draft = await AutomationService.instance.createDraft(DatabaseConnector.instance.database, {
     scope: "discord:1",
     name,
     source: "export default async () => ({ kind: 'silent' })",
@@ -24,30 +33,41 @@ async function saveAutomation(name: string) {
     allowedOrigins: [],
   });
 
-  return AutomationService.instance.saveDraft("discord:1", draft.id);
+  return AutomationService.instance.saveDraft(
+    DatabaseConnector.instance.database,
+    "discord:1",
+    draft.id,
+  );
 }
 
 describe("automation-delete", () => {
   beforeEach(async () => {
     await resetAutomationsTables();
     await resetCronEngineJobsTable();
+    await resetEventTables();
+    Object.assign(EventBus, { _instance: undefined });
+    CronScheduler.instance.subscribe();
+    AutomationService.instance.setup();
+    await EventBus.instance.start();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     CronScheduler.instance.destroy();
+    await EventBus.instance.idle();
+    await EventBus.instance.stop();
   });
 
   test("reports the cron jobs that lost the automation", async () => {
     const automation = await saveAutomation("weather");
     const keep = await saveAutomation("keep");
-    await CronScheduler.instance.createRecurring({
+    await createRecurring({
       name: "raw-only",
       scope: "discord:1",
       pattern: "0 8 * * *",
       content: { kind: "automations" },
       automationIds: [automation.id],
     });
-    await CronScheduler.instance.createRecurring({
+    await createRecurring({
       name: "briefing",
       scope: "discord:1",
       pattern: "0 7 * * *",

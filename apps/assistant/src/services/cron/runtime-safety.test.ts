@@ -1,9 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
 import { DatabaseConnector } from "../database";
-import { cronEngineJobsTable } from "../database/schema";
-import { resetCronEngineJobsTable } from "../database/test-utils";
+import { cronEngineJobsTable, eventsTable } from "../database/schema";
+import { resetCronEngineJobsTable, resetEventTables } from "../database/test-utils";
+import { EventBus } from "../events";
+import { EEventType } from "../events/catalog";
 import { CronScheduler } from "./index";
+import { createOnce } from "./test-utils";
 
 type TSchedulerInternals = {
   fire: (id: number) => Promise<void>;
@@ -25,15 +28,21 @@ describe("CronScheduler runtime safety", () => {
 
   beforeEach(async () => {
     await resetCronEngineJobsTable();
+    await resetEventTables();
+    Object.assign(EventBus, { _instance: undefined });
     scheduler = new CronScheduler({});
+    scheduler.subscribe();
+    await EventBus.instance.start();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     scheduler.destroy();
+    await EventBus.instance.idle();
+    await EventBus.instance.stop();
   });
 
   test("overlapping fires complete a one-time job named error once", async () => {
-    const scheduled = await scheduler.createOnce({
+    const scheduled = await createOnce({
       name: "error",
       scope: "scope-a",
       fireAt: new Date(Date.now() + 60_000),
@@ -41,14 +50,13 @@ describe("CronScheduler runtime safety", () => {
     });
     await forceJobNextRunAt(scheduled.id, new Date(Date.now() - 1_000));
 
-    const fireEvents: string[] = [];
-    scheduler.onFire((ctx) => {
-      fireEvents.push(ctx.name);
-    });
-
     await Promise.all([fireJob(scheduler, scheduled.id), fireJob(scheduler, scheduled.id)]);
 
-    expect(fireEvents).toEqual(["error"]);
+    const fired = await DatabaseConnector.instance.database
+      .select()
+      .from(eventsTable)
+      .where(eq(eventsTable.type, EEventType.CronFired));
+    expect(fired.map((row) => row.key)).toEqual(["scope-a|error"]);
     expect(await scheduler.get("error", "scope-a")).toBeUndefined();
   });
 });

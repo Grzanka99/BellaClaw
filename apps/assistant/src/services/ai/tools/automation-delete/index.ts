@@ -1,5 +1,5 @@
 import { obj, str } from "@earendil-works/pi-schema";
-import { AutomationService } from "../../../automation";
+import { EEventType } from "../../../events/catalog";
 import { runAutomationOperation } from "../automation-errors";
 import { defineTool, requireChatId } from "../define-tool";
 import instructions from "./instructions.xml" with { type: "text" };
@@ -18,14 +18,29 @@ export const automationDelete = defineTool({
   logSafe: [],
   execute: async (context, args) => {
     const scope = requireChatId(context.chatId);
-    const result = await runAutomationOperation(() =>
-      AutomationService.instance.delete(scope, args.name),
+    const deleted = await runAutomationOperation(() =>
+      context.events.request(
+        EEventType.AutomationDeleteRequested,
+        { scope, name: args.name },
+        {
+          outcome: EEventType.AutomationDeleted,
+          step: undefined,
+          key: scope,
+          timeoutMs: undefined,
+        },
+      ),
+    );
+    // cron detaches the automation from its jobs in reaction to the deletion
+    const detached = await context.events.waitFor(
+      deleted.id,
+      EEventType.CronAutomationDetached,
+      undefined,
     );
 
     return {
-      name: result.automation.name,
-      updatedJobs: result.updatedJobs,
-      cancelledJobs: result.cancelledJobs.map((job) => job.name),
+      name: deleted.payload.name,
+      updatedJobs: detached.payload.updatedJobs,
+      cancelledJobs: detached.payload.cancelledJobs,
     };
   },
 });

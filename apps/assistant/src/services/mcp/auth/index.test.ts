@@ -1,8 +1,10 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { auth } from "@modelcontextprotocol/sdk/client/auth.js";
+import { EventBus, type TEventDraft } from "../../events";
+import { EEventType } from "../../events/catalog";
 
 let directory: string;
 let oauthServer: ReturnType<typeof Bun.serve>;
@@ -195,24 +197,12 @@ describe("MCP OAuth", () => {
     if (provider === undefined) {
       throw new Error("Missing OAuth provider");
     }
-    const disconnected: string[] = [];
-    const unregister = service.registerMcpAuthDisconnectListener(
-      (disconnectedChatId, profileId) => {
-        disconnected.push(`${disconnectedChatId}/${profileId}`);
-      },
+    await expect(service.beginMcpAuth(chatId, "reserved-parameter")).rejects.toThrow(
+      "OAuth authorization parameter state is reserved",
     );
-
-    try {
-      await expect(service.beginMcpAuth(chatId, "reserved-parameter")).rejects.toThrow(
-        "OAuth authorization parameter state is reserved",
-      );
-      expect(disconnected).toEqual([`${chatId}/reserved-parameter`]);
-      await expect(provider.tokens()).rejects.toThrow(
-        "MCP authentication for profile reserved-parameter was cancelled",
-      );
-    } finally {
-      unregister();
-    }
+    await expect(provider.tokens()).rejects.toThrow(
+      "MCP authentication for profile reserved-parameter was cancelled",
+    );
   });
 
   test("persists credentials with restrictive permissions and refreshes through the SDK", async () => {
@@ -242,16 +232,9 @@ describe("MCP OAuth", () => {
   });
 
   test("disconnect removes only that chat and invalidates its runtime session", async () => {
-    const disconnected: string[] = [];
-    const unregister = service.registerMcpAuthDisconnectListener((chatId, profileId) => {
-      disconnected.push(`${chatId}/${profileId}`);
-    });
-
     expect(await service.disconnectMcpAuth("signal:first", "documents")).toBe(true);
     expect(await service.getMcpAuthStatus("signal:first", "documents")).toBe(false);
     expect(await service.getMcpAuthStatus("discord:second", "documents")).toBe(true);
-    expect(disconnected).toEqual(["signal:first/documents"]);
-    unregister();
   });
 
   test("starting a new connection invalidates the previous link", async () => {
@@ -289,21 +272,12 @@ describe("MCP OAuth", () => {
     if (provider === undefined) {
       throw new Error("Missing OAuth provider");
     }
-    const disconnected: string[] = [];
-    const unregister = service.registerMcpAuthDisconnectListener(
-      (disconnectedChatId, profileId) => {
-        disconnected.push(`${disconnectedChatId}/${profileId}`);
-      },
-    );
-
     await expect(service.beginMcpAuth(chatId, "documents")).rejects.toThrow(
       "MCP profile documents is already connected",
     );
-    expect(disconnected).toEqual([`${chatId}/documents`]);
     await expect(provider.tokens()).rejects.toThrow(
       "MCP authentication for profile documents was cancelled",
     );
-    unregister();
   });
 
   test("replaces the runtime session after a successful re-authentication", async () => {
@@ -327,16 +301,14 @@ describe("MCP OAuth", () => {
     await provider.invalidateCredentials("tokens");
 
     const notifications: string[] = [];
-    const unregisterDisconnected = service.registerMcpAuthDisconnectListener(() => {
-      notifications.push("disconnected");
-    });
-    const unregisterConnected = service.registerMcpAuthConnectedListener(() => {
-      notifications.push("connected");
+    const publish = spyOn(EventBus.instance, "publish").mockImplementation(async (draft) => {
+      if (draft.type === EEventType.McpAuthConnected) {
+        notifications.push("connected");
+      }
     });
 
     try {
       const secondUrl = new URL(await service.beginMcpAuth(chatId, "documents"));
-      expect(notifications).toEqual(["disconnected"]);
       const secondCallback = await service.handleMcpAuthCallback(
         new Request(
           `http://localhost:3080/mcp/oauth/callback?code=re-authenticated&state=${secondUrl.searchParams.get("state")}`,
@@ -344,13 +316,12 @@ describe("MCP OAuth", () => {
       );
 
       expect(secondCallback.status).toBe(200);
-      expect(notifications).toEqual(["disconnected", "connected"]);
+      expect(notifications).toEqual(["connected"]);
       await expect(provider.tokens()).rejects.toThrow(
         "MCP authentication for profile documents was cancelled",
       );
     } finally {
-      unregisterDisconnected();
-      unregisterConnected();
+      publish.mockRestore();
     }
   });
 
@@ -372,11 +343,11 @@ describe("MCP OAuth", () => {
     }
   });
 
-  test("reports a successful callback when chat notification fails", async () => {
-    const connected: string[] = [];
-    const unregister = service.registerMcpAuthConnectedListener((chatId, profileId) => {
-      connected.push(`${chatId}/${profileId}`);
-      throw new Error("delivery failed");
+  test("reports a successful callback when the connected event cannot be published", async () => {
+    const published: TEventDraft[] = [];
+    const publish = spyOn(EventBus.instance, "publish").mockImplementation(async (draft) => {
+      published.push(draft);
+      throw new Error("database down");
     });
     const url = new URL(await service.beginMcpAuth("signal:notification", "documents"));
 
@@ -387,9 +358,15 @@ describe("MCP OAuth", () => {
     );
 
     expect(callback.status).toBe(200);
-    expect(connected).toEqual(["signal:notification/documents"]);
+    expect(published.map((draft) => [draft.type, draft.key, draft.payload])).toEqual([
+      [
+        EEventType.McpAuthConnected,
+        "signal:notification",
+        { chatId: "signal:notification", profileId: "documents" },
+      ],
+    ]);
     expect(await service.getMcpAuthStatus("signal:notification", "documents")).toBe(true);
-    unregister();
+    publish.mockRestore();
   });
 
   test("disconnect wins over an in-flight callback", async () => {

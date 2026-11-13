@@ -2,7 +2,10 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { eq } from "drizzle-orm";
 import { DatabaseConnector } from "../database";
 import { userConfigsTable } from "../database/schema";
-import { resetUserConfigsTable } from "../database/test-utils";
+import { resetEventTables, resetUserConfigsTable } from "../database/test-utils";
+import { EventBus } from "../events";
+import { EEventType, ERejectionCode } from "../events/catalog";
+import { withEventContext } from "../events/test-utils";
 import { DefaultConfigRecord, EConfigKey } from "./schema";
 
 const { SettingsService } = await import("./index");
@@ -36,20 +39,62 @@ async function getOwnerRows(ownerKey: string) {
 }
 
 describe("SettingsService", () => {
+  let bus: EventBus;
+  let started: boolean;
+
   beforeEach(async () => {
     resetSettingsInstance();
     await resetUserConfigsTable();
+    await resetEventTables();
+    Object.assign(EventBus, { _instance: undefined });
+    bus = EventBus.instance;
+    started = false;
+    SettingsService.instance.setup();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await bus.idle();
+    await bus.stop();
     resetSettingsInstance();
   });
+
+  async function start() {
+    await bus.start();
+    started = true;
+  }
+
+  // the settings tool's path: request settings.update.requested and return the new record
+  async function update(ownerKey: string, key: EConfigKey, value: string) {
+    if (!started) {
+      await start();
+    }
+
+    const changed = await withEventContext((ctx) =>
+      ctx.request(
+        EEventType.SettingsUpdateRequested,
+        { ownerKey, updates: [{ key, value }] },
+        {
+          outcome: EEventType.SettingsChanged,
+          step: undefined,
+          key: ownerKey,
+          timeoutMs: undefined,
+        },
+      ),
+    );
+    await bus.idle();
+    return changed.payload.record;
+  }
 
   describe("getAll", () => {
     test("caches defaults and refreshes independent records after set and reset", async () => {
       const settings = SettingsService.instance;
       const ownerKey = "owner-default-cache";
-      const select = spyOn(DatabaseConnector.instance.database, "select");
+      await start();
+      // the bus reads the event tables too, so count the service's own table reads
+      const select = spyOn(
+        settings as unknown as { selectOwnerRows: (ownerKey: string) => Promise<unknown> },
+        "selectOwnerRows",
+      );
 
       try {
         const first = await settings.getAll(ownerKey);
@@ -62,25 +107,22 @@ describe("SettingsService", () => {
           DefaultConfigRecord[EConfigKey.AiInstructionsTimezone],
         );
 
-        const changed = await settings.set(
-          ownerKey,
-          EConfigKey.AiInstructionsTimezone,
-          "Asia/Tokyo",
-        );
+        const changed = await update(ownerKey, EConfigKey.AiInstructionsTimezone, "Asia/Tokyo");
         changed[EConfigKey.AiInstructionsTimezone] = "mutated";
         expect((await settings.getAll(ownerKey))[EConfigKey.AiInstructionsTimezone]).toBe(
           "Asia/Tokyo",
         );
-        expect(select).toHaveBeenCalledTimes(2);
+        // settings.changed refreshed the cache
+        expect(select).toHaveBeenCalledTimes(1);
 
-        const reset = await settings.set(
+        const reset = await update(
           ownerKey,
           EConfigKey.AiInstructionsTimezone,
           DefaultConfigRecord[EConfigKey.AiInstructionsTimezone],
         );
         reset[EConfigKey.AiInstructionsTimezone] = "mutated";
         expect(await settings.getAll(ownerKey)).toEqual(DefaultConfigRecord);
-        expect(select).toHaveBeenCalledTimes(3);
+        expect(select).toHaveBeenCalledTimes(1);
       } finally {
         select.mockRestore();
       }
@@ -157,37 +199,27 @@ describe("SettingsService", () => {
     });
   });
 
-  describe("set", () => {
-    test("rejects unknown key", async () => {
-      const settings = SettingsService.instance;
-
-      await expect(settings.set("owner-set", "unknown.key", "value")).rejects.toThrow(
-        'Unknown config key: "unknown.key"',
-      );
-    });
-
+  describe("update", () => {
     test("rejects invalid timezone", async () => {
-      const settings = SettingsService.instance;
+      const rejected = update("owner-set", EConfigKey.AiInstructionsTimezone, "Not/A_Real_Tz");
 
-      await expect(
-        settings.set("owner-set", EConfigKey.AiInstructionsTimezone, "Not/A_Real_Tz"),
-      ).rejects.toThrow("Invalid value for config key");
+      await expect(rejected).rejects.toThrow("Invalid value for config key");
+      await expect(rejected).rejects.toMatchObject({ code: ERejectionCode.Invalid });
+      expect(await getOwnerRows("owner-set")).toHaveLength(0);
     });
 
     test("rejects invalid provider", async () => {
-      const settings = SettingsService.instance;
-
-      await expect(
-        settings.set("owner-set", EConfigKey.AiProvider, "invalid-provider"),
-      ).rejects.toThrow("Invalid value for config key");
+      await expect(update("owner-set", EConfigKey.AiProvider, "invalid-provider")).rejects.toThrow(
+        "Invalid value for config key",
+      );
     });
 
-    test("upserts valid value, reads back, and updates cache so immediate get/getAll see readback", async () => {
+    test("upserts valid value, reads back, and updates cache after settings.changed", async () => {
       const settings = SettingsService.instance;
       const ownerKey = "owner-set-valid";
       const newValue = "America/New_York";
 
-      const result = await settings.set(ownerKey, EConfigKey.AiInstructionsTimezone, newValue);
+      const result = await update(ownerKey, EConfigKey.AiInstructionsTimezone, newValue);
 
       expect(result[EConfigKey.AiInstructionsTimezone]).toBe(newValue);
 
@@ -209,8 +241,8 @@ describe("SettingsService", () => {
       const settings = SettingsService.instance;
       const ownerKey = "owner-overwrite";
 
-      await settings.set(ownerKey, EConfigKey.AiInstructionsTimezone, "America/New_York");
-      await settings.set(ownerKey, EConfigKey.AiInstructionsTimezone, "Asia/Tokyo");
+      await update(ownerKey, EConfigKey.AiInstructionsTimezone, "America/New_York");
+      await update(ownerKey, EConfigKey.AiInstructionsTimezone, "Asia/Tokyo");
 
       const value = await settings.get(ownerKey, EConfigKey.AiInstructionsTimezone);
 
@@ -228,8 +260,8 @@ describe("SettingsService", () => {
     test("different owner keys keep isolated settings after set", async () => {
       const settings = SettingsService.instance;
 
-      await settings.set("owner-a", EConfigKey.AiInstructionsTimezone, "America/New_York");
-      await settings.set("owner-b", EConfigKey.AiInstructionsTimezone, "Asia/Tokyo");
+      await update("owner-a", EConfigKey.AiInstructionsTimezone, "America/New_York");
+      await update("owner-b", EConfigKey.AiInstructionsTimezone, "Asia/Tokyo");
 
       const valueA = await settings.get("owner-a", EConfigKey.AiInstructionsTimezone);
       const valueB = await settings.get("owner-b", EConfigKey.AiInstructionsTimezone);

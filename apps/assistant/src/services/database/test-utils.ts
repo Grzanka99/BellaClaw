@@ -43,3 +43,15 @@ export async function resetAutomationsTables() {
   await db.run(sql`DELETE FROM automations`);
   await db.run(sql`DELETE FROM sqlite_sequence WHERE name IN ('automations', 'automation_drafts')`);
 }
+
+export async function resetEventTables() {
+  if (Bun.env.BELLACLAW_DATABASE_MODE !== "test" && Bun.env.NODE_ENV !== "test") {
+    throw new Error("resetEventTables can only run in test database mode");
+  }
+
+  const db = DatabaseConnector.instance.database;
+
+  await db.run(sql`DELETE FROM event_deliveries`);
+  await db.run(sql`DELETE FROM events`);
+  await db.run(sql`DELETE FROM sqlite_sequence WHERE name = 'events'`);
+}

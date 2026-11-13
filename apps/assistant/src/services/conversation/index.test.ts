@@ -20,7 +20,13 @@ async function transcriptMessages(chatId: string) {
 test("replays native messages after restart; compaction preserves fact source history", async () => {
   const chatId = "conversation-restart";
   const store = new ConversationStore();
-  const source = await store.saveUserMessage(chatId, ERole.User, "Check calendar", new Date());
+  const source = await store.saveUserMessage(
+    DatabaseConnector.instance.database,
+    chatId,
+    ERole.User,
+    "Check calendar",
+    new Date(),
+  );
   const call = fauxAssistantMessage(fauxToolCall("calendar", {}, { id: "calendar-1" }));
   call.content.push({
     type: "thinking",
@@ -40,7 +46,13 @@ test("replays native messages after restart; compaction preserves fact source hi
     },
     fauxAssistantMessage("Free"),
   ];
-  const persisted = await store.saveTurn(chatId, messages, source.id, undefined);
+  const persisted = await store.saveTurn(
+    DatabaseConnector.instance.database,
+    chatId,
+    messages,
+    source.id,
+    undefined,
+  );
   expect((await new ConversationStore().load(chatId))?.entries).toEqual(persisted.entries);
   expect(persisted.entries.map((entry) => entry.message)).toEqual(messages);
   expect(new Set(persisted.entries.map((entry) => entry.id)).size).toBe(4);
@@ -60,16 +72,29 @@ test("replays native messages after restart; compaction preserves fact source hi
 test("appends later turns, skips rows without replay and reloads the retained tail", async () => {
   const store = new ConversationStore();
   const chatId = "summary-cutoff";
-  await store.saveUserMessage(chatId, ERole.User, "failed turn", new Date());
+  await store.saveUserMessage(
+    DatabaseConnector.instance.database,
+    chatId,
+    ERole.User,
+    "failed turn",
+    new Date(),
+  );
   expect(await store.load(chatId)).toBeUndefined();
   let state: TConversation | undefined;
   for (const text of ["first", "second", "third"]) {
-    const source = await store.saveUserMessage(chatId, ERole.User, text, new Date());
+    const source = await store.saveUserMessage(
+      DatabaseConnector.instance.database,
+      chatId,
+      ERole.User,
+      text,
+      new Date(),
+    );
     let history: Message[] = [];
     if (state !== undefined) {
       history = state.entries.map((entry) => entry.message);
     }
     state = await store.saveTurn(
+      DatabaseConnector.instance.database,
       chatId,
       [
         ...history,
@@ -109,6 +134,7 @@ test("a missing user row fails the turn", async () => {
   const store = new ConversationStore();
   await expect(
     store.saveTurn(
+      DatabaseConnector.instance.database,
       chatId,
       [{ role: "user", content: "missing", timestamp: 2 }, fauxAssistantMessage("answer")],
       999999,
@@ -123,6 +149,7 @@ test("a scheduled delivery replays after a scheduler notice the model cannot mer
   const store = new ConversationStore();
   const deliveredAt = Date.UTC(2026, 10, 10, 16, 6);
   await store.saveDeliveredMessage(
+    DatabaseConnector.instance.database,
     chatId,
     "[CRON REMINDER oven]: Check the oven.",
     'Scheduler notice, not from the user: reminder "oven" fired at 2026-11-10T16:06:00.000Z.',

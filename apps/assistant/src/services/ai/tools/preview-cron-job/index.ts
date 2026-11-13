@@ -3,12 +3,8 @@ import { arr, obj, opt, str } from "@earendil-works/pi-schema";
 import { AutomationService } from "../../../automation";
 import { dryRunSavedAutomation } from "../../../automation/runner";
 import { CronScheduler } from "../../../cron";
-import {
-  ECronJobType,
-  type TCronJob,
-  type TCronJobContext,
-  type TJobContent,
-} from "../../../cron/types";
+import { ECronJobType, type TCronJob, type TJobContent } from "../../../cron/types";
+import type { TCronFiredPayload } from "../../../events/catalog";
 import { parseCanonicalChatKey } from "../../../messaging/chat-key";
 import { runCronJobAutomations } from "../../../scheduling/cron-automations";
 import { EConfigKey } from "../../../settings/schema";
@@ -97,28 +93,26 @@ export const previewCronJob = defineTool({
       );
     }
 
-    const now = new Date();
-    let ctx: TCronJobContext = {
+    // NOTE: a job that is not saved yet has no id
+    let ctx: TCronFiredPayload = {
+      jobId: 0,
       name: "preview",
       scope: chatId,
-      type: ECronJobType.OneTime,
+      jobType: ECronJobType.OneTime,
       pattern: undefined,
       content,
       automationIds,
-      lastRunAt: undefined,
-      nextRunAt: now,
-      createdAt: now,
+      nextRunAt: Date.now(),
       timezone,
     };
 
     if (base !== undefined) {
       ctx = {
         ...ctx,
+        jobId: base.id,
         name: base.name,
-        type: base.type,
+        jobType: base.type,
         pattern: base.pattern ?? undefined,
-        lastRunAt: base.lastRunAt ?? undefined,
-        createdAt: base.createdAt,
         timezone: base.timezone ?? timezone,
       };
     }
@@ -132,6 +126,7 @@ export const previewCronJob = defineTool({
           return context.runScheduledTask({ ...runArgs, withoutMcp: true });
         },
       },
+      context.events,
       (automation, options) => dryRunSavedAutomation(automation, { ...options, signal }),
       context.trace,
     );

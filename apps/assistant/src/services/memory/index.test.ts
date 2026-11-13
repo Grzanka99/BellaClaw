@@ -1,8 +1,15 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { sql } from "drizzle-orm";
+import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { and, eq, sql } from "drizzle-orm";
 import { ERole } from "../ai/types";
 import { ConversationStore } from "../conversation";
 import { DatabaseConnector } from "../database";
+import { factsTable } from "../database/schema";
+import { resetEventTables } from "../database/test-utils";
+import { EmbeddingClient } from "../embedding";
+import { CommandRejectedError, EventBus } from "../events";
+import { EEventType, ERejectionCode } from "../events/catalog";
+import { withEventContext } from "../events/test-utils";
+import { EMBEDDING_UNAVAILABLE, MEMORY_REQUEST_TIMEOUT_MS } from "./index";
 
 const { Memory } = await import("./index");
 
@@ -58,6 +65,7 @@ describe("Memory", () => {
       const memory = Memory.instance;
       for (let index = 1; index <= 3; index += 1) {
         await ConversationStore.instance.saveUserMessage(
+          DatabaseConnector.instance.database,
           "chat-a",
           ERole.User,
           `Fact source ${index}`,
@@ -65,6 +73,7 @@ describe("Memory", () => {
         );
       }
       await ConversationStore.instance.saveUserMessage(
+        DatabaseConnector.instance.database,
         "chat-b",
         ERole.User,
         "Another chat fact source",
@@ -144,7 +153,9 @@ describe("Memory", () => {
       expect(await memory.searchFacts("chat-c", embedding(1), 10)).toEqual([]);
 
       const forgottenIds = searchResults.map((fact) => fact.id);
-      await memory.forgetFacts("chat-a", forgottenIds);
+      await DatabaseConnector.instance.database.transaction((tx) =>
+        memory.forgetFacts(tx, "chat-a", forgottenIds),
+      );
       expect(await memory.searchFacts("chat-a", embedding(1), 10)).toEqual([]);
       expect(await memory.findLiveFactCandidates("chat-a", embedding(1))).toEqual([]);
 
@@ -153,30 +164,39 @@ describe("Memory", () => {
       if (survivor === undefined || !crossChatFact) {
         throw new Error("Expected rejection facts");
       }
-      await expect(memory.forgetFacts("chat-a", [survivor.id, crossChatFact.id])).rejects.toThrow(
-        "Every fact ID must identify a same-chat live fact",
-      );
+      await expect(
+        DatabaseConnector.instance.database.transaction((tx) =>
+          memory.forgetFacts(tx, "chat-a", [survivor.id, crossChatFact.id]),
+        ),
+      ).rejects.toThrow("Every fact ID must identify a same-chat live fact");
       expect((await memory.searchFacts("chat-a", survivor.embedding, 10))[0]?.id).toBe(survivor.id);
 
       await ConversationStore.instance.saveUserMessage(
+        DatabaseConnector.instance.database,
         "chat-a",
         ERole.User,
         "The bicycle is named Comet again.",
         new Date(),
       );
-      await memory.rememberFact(
-        "chat-a",
-        "The bicycle is named Comet again.",
-        "The bicycle is named Comet again.",
-        embedding(1),
-        [],
+      await DatabaseConnector.instance.database.transaction((tx) =>
+        memory.rememberFact(
+          tx,
+          "chat-a",
+          "The bicycle is named Comet again.",
+          "The bicycle is named Comet again.",
+          embedding(1),
+          [],
+        ),
       );
-      await memory.rememberFact(
-        "chat-a",
-        "The bicycle is named Comet again.",
-        "The bicycle is named Comet again.",
-        embedding(1),
-        [],
+      await DatabaseConnector.instance.database.transaction((tx) =>
+        memory.rememberFact(
+          tx,
+          "chat-a",
+          "The bicycle is named Comet again.",
+          "The bicycle is named Comet again.",
+          embedding(1),
+          [],
+        ),
       );
       expect(
         (await memory.searchFacts("chat-a", embedding(1), 10)).map((fact) => fact.text),
@@ -192,6 +212,7 @@ describe("Memory", () => {
         }
 
         await ConversationStore.instance.saveUserMessage(
+          DatabaseConnector.instance.database,
           "chat-window",
           author,
           `Window message ${index}`,
@@ -199,6 +220,7 @@ describe("Memory", () => {
         );
       }
       await ConversationStore.instance.saveUserMessage(
+        DatabaseConnector.instance.database,
         "chat-other",
         ERole.User,
         "Other chat message",
@@ -237,6 +259,7 @@ describe("Memory", () => {
     test("commits supersessions atomically and rolls back failures", async () => {
       const memory = Memory.instance;
       await ConversationStore.instance.saveUserMessage(
+        DatabaseConnector.instance.database,
         "chat-atomic",
         ERole.User,
         "The bicycle used to be called Spark.",
@@ -265,6 +288,7 @@ describe("Memory", () => {
       }
 
       await ConversationStore.instance.saveUserMessage(
+        DatabaseConnector.instance.database,
         "chat-atomic",
         ERole.User,
         "The bicycle is now called Comet.",
@@ -289,6 +313,7 @@ describe("Memory", () => {
       ).toEqual(["The bicycle is now called Comet."]);
 
       await ConversationStore.instance.saveUserMessage(
+        DatabaseConnector.instance.database,
         "chat-atomic",
         ERole.User,
         "This transaction must roll back.",
@@ -318,6 +343,7 @@ describe("Memory", () => {
       const memory = Memory.instance;
       for (let index = 1; index <= 5; index += 1) {
         await ConversationStore.instance.saveUserMessage(
+          DatabaseConnector.instance.database,
           "chat-stale",
           ERole.User,
           `Stale source ${index}`,
@@ -366,6 +392,7 @@ describe("Memory", () => {
     test("rejects fact provenance outside the current same-chat user window", async () => {
       const memory = Memory.instance;
       await ConversationStore.instance.saveUserMessage(
+        DatabaseConnector.instance.database,
         "chat-provenance",
         ERole.Assistant,
         "Assistant context only",
@@ -390,6 +417,132 @@ describe("Memory", () => {
       expect(
         (await memory.loadLiveFactWindow("chat-provenance")).state.lastProcessedMessageId,
       ).toBe(0);
+    });
+  });
+
+  describe("commands", () => {
+    const EmbeddingClientWithInternals = EmbeddingClient as unknown as { _instance: unknown };
+    const originalEmbeddingClient = EmbeddingClientWithInternals._instance;
+    let embed: ReturnType<typeof mock>;
+
+    beforeEach(async () => {
+      await resetEventTables();
+      Object.assign(EventBus, { _instance: undefined });
+      embed = mock(async () => embedding(1));
+      EmbeddingClientWithInternals._instance = { embed };
+      Memory.instance.setup();
+      await EventBus.instance.start();
+    });
+
+    afterEach(async () => {
+      await EventBus.instance.stop();
+      EmbeddingClientWithInternals._instance = originalEmbeddingClient;
+    });
+
+    function remember(chatId: string, text: string, sourceMessage: string) {
+      return withEventContext((ctx) =>
+        ctx.request(
+          EEventType.MemoryFactRememberRequested,
+          { chatId, text, sourceMessage, supersedesFactIds: [] },
+          {
+            outcome: EEventType.MemoryFactRemembered,
+            step: undefined,
+            key: chatId,
+            timeoutMs: MEMORY_REQUEST_TIMEOUT_MS,
+          },
+        ),
+      );
+    }
+
+    function forget(chatId: string, factIds: number[]) {
+      return withEventContext((ctx) =>
+        ctx.request(
+          EEventType.MemoryFactsForgetRequested,
+          { chatId, factIds },
+          {
+            outcome: EEventType.MemoryFactsForgotten,
+            step: undefined,
+            key: chatId,
+            timeoutMs: MEMORY_REQUEST_TIMEOUT_MS,
+          },
+        ),
+      );
+    }
+
+    async function liveFacts(chatId: string) {
+      return DatabaseConnector.instance.database
+        .select()
+        .from(factsTable)
+        .where(and(eq(factsTable.chatId, chatId), sql`${factsTable.forgottenAt} IS NULL`));
+    }
+
+    test("remember embeds outside the transaction and commits the fact with its outcome", async () => {
+      await ConversationStore.instance.saveUserMessage(
+        DatabaseConnector.instance.database,
+        "chat-cmd",
+        ERole.User,
+        "My bike is red.",
+        new Date(),
+      );
+
+      const remembered = await remember("chat-cmd", "The user's bike is red.", "My bike is red.");
+
+      expect(embed).toHaveBeenCalledWith("The user's bike is red.");
+      const facts = await liveFacts("chat-cmd");
+      expect(facts.map((fact) => fact.text)).toEqual(["The user's bike is red."]);
+      expect(remembered.payload).toEqual({ chatId: "chat-cmd", factId: facts[0]?.id ?? 0 });
+    });
+
+    test("remember without a transcript source is rejected without a write", async () => {
+      const rejected = await remember("chat-cmd", "The user's bike is red.", "Never said.").catch(
+        (error: unknown) => error,
+      );
+
+      expect(rejected).toBeInstanceOf(CommandRejectedError);
+      expect(rejected).toMatchObject({
+        code: ERejectionCode.Failed,
+        message: "A remembered fact requires its exact same-chat user transcript source",
+      });
+      expect(await liveFacts("chat-cmd")).toEqual([]);
+    });
+
+    test("remember is rejected with its code when the embedding service is unavailable", async () => {
+      embed.mockImplementation(async () => undefined);
+
+      const rejected = await remember(
+        "chat-cmd",
+        "The user's bike is red.",
+        "My bike is red.",
+      ).catch((error: unknown) => error);
+
+      expect(rejected).toMatchObject({
+        message: "Embedding service unavailable",
+        errorCode: EMBEDDING_UNAVAILABLE,
+      });
+    });
+
+    test("forget retires live facts and rejects a stale ID without a write", async () => {
+      await ConversationStore.instance.saveUserMessage(
+        DatabaseConnector.instance.database,
+        "chat-cmd",
+        ERole.User,
+        "My bike is red.",
+        new Date(),
+      );
+      const remembered = await remember("chat-cmd", "The user's bike is red.", "My bike is red.");
+      const factId = remembered.payload.factId;
+
+      const rejected = await forget("chat-cmd", [factId, factId + 100]).catch(
+        (error: unknown) => error,
+      );
+      expect(rejected).toMatchObject({
+        message: "Every fact ID must identify a same-chat live fact",
+      });
+      expect(await liveFacts("chat-cmd")).toHaveLength(1);
+
+      const forgotten = await forget("chat-cmd", [factId]);
+      expect(forgotten.payload).toEqual({ chatId: "chat-cmd", factIds: [factId] });
+      expect(await liveFacts("chat-cmd")).toEqual([]);
     });
   });
 });

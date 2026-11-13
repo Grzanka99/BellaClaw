@@ -23,17 +23,26 @@ moving a file cannot silently change which directory it reads.
 
 ## Message Flow
 
-1. A Discord or Signal transport receives a direct message.
-2. The messaging adapter creates a platform-scoped chat key and behavior trace.
-3. The message handler loads settings and structured conversation state. A chat without replay
-   starts with an empty conversation.
-4. It saves the user transcript before generating a reply.
-5. A fresh Main agent receives the current message with the structured replay.
-6. Main answers directly or delegates focused work to a specialist.
-7. The completed model turn, including tool exchanges, is persisted for replay. Fact distillation
-   runs in the background. Conversation compaction runs after the reply is handed back, and the
-   chat's next turn starts only after it finishes.
-8. The transport sends Main's final response.
+Services talk through one durable event log in SQLite; see the
+[event architecture page](event-architecture.html) for the graph and guarantees, and
+`.agents/skills/architecture/SKILL.md` for the rules when changing it.
+
+![Every BellaClaw service talks through the event bus](event-architecture.svg)
+
+Requesters are conversation tools, slash commands and scheduling; command owners are cron, automations, memory, settings, calendar, mcp-auth and ai-auth. Reads from the allow-list (settings and authorization caches, read tools, drivers) are direct calls and are not drawn.
+
+1. A Discord or Signal transport publishes `message.received` with a dedupe key per platform
+   message.
+2. Authorization decides activation and lockout, then publishes `message.authorized`.
+3. Commands answers a `!command` with `reply.ready`, or publishes `turn.requested`.
+4. Conversation runs the turn on the chat's lane: it saves the user message with a `turn.started`
+   checkpoint, runs Main with the structured replay, and commits the turn with `reply.ready` and
+   `turn.completed`. Tool writes go out as commands to their owning service. Compaction runs after
+   the reply is committed, and the chat's next turn starts only after it finishes.
+5. Outbound sends the reply and records `message.sent`. Memory distills facts from
+   `turn.completed`.
+6. After a restart, unfinished deliveries replay. A turn that was interrupted mid-model gets one
+   notice instead of a second model run.
 
 Discord and Signal use separate chat keys. Their histories and scheduled deliveries do not merge.
 

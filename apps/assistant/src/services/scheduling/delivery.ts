@@ -1,26 +1,20 @@
-import { AppLogger, createCronTurnId, type TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
+import { AppLogger, type TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
 import type { TOption } from "@bellaclaw/shared";
 import { createLogger, type TLogger } from "@bellaclaw/shared";
 import { AgentHarness } from "../ai/agent-harness";
 import { LlmClient } from "../ai/llm";
-import { ERole } from "../ai/types";
+import { logHandlerStarted, startHandlerSpan, type THandlerSpan } from "../app-logger/operations";
+import { AUTOMATION_RUN_TIMEOUT_MS, EAutomationRunMode } from "../automation/runner";
+import { ESubscriptionMode, EventBus, type TEventContext } from "../events";
 import {
-  logHandlerStarted,
-  startHandlerSpan,
-  startMemorySaveSpan,
-  type THandlerSpan,
-} from "../app-logger/operations";
-import {
-  EAutomationRunMode,
-  runSavedAutomation,
+  EEventType,
   type TAutomationRunReport,
-} from "../automation/runner";
-import { CronScheduler } from "../cron";
-import type { TCronJobContext } from "../cron/types";
-import { MessageHandler } from "../message-handler";
-import { MessagingAdapter } from "../messaging";
+  type TCronFiredPayload,
+  type TDeliveryTranscript,
+  type TEvent,
+} from "../events/catalog";
 import { parseCanonicalChatKey } from "../messaging/chat-key";
-import type { EMessagePlatform, TMessageTransport } from "../messaging/types";
+import type { EMessagePlatform } from "../messaging/types";
 import {
   createAutomationFailedNotices,
   createAutomationPausedNotices,
@@ -33,13 +27,15 @@ import {
   type TScheduledTaskResult,
 } from "./generate-reminder-text";
 
+type TCronMessage = { text: string; transcript: TDeliveryTranscript };
+
 export class ScheduledDelivery {
   private static _instance: TOption<ScheduledDelivery>;
   private logger: TLogger = createLogger("SCHEDULING");
-  private messaging = MessagingAdapter.instance;
   private ai = AgentHarness.instance;
   private llm = LlmClient.instance;
-  private runningCronTaskKeys = new Set<string>();
+  // end of the last heavy run per lane key (scope|name)
+  private lastRunEndedAt = new Map<string, number>();
 
   private constructor() {}
 
@@ -51,91 +47,147 @@ export class ScheduledDelivery {
     return ScheduledDelivery._instance;
   }
 
-  public async setup() {
-    CronScheduler.instance.onFire(this.handleCronFire.bind(this));
-    await CronScheduler.instance.setup();
+  public setup(): void {
+    EventBus.instance.subscribe({
+      consumer: "scheduling",
+      type: EEventType.CronFired,
+      mode: ESubscriptionMode.Durable,
+      backoffMs: [],
+      handler: (event, ctx) => this.handleCronFire(event, ctx),
+    });
   }
 
-  private async handleCronFire(ctx: TCronJobContext) {
-    const trace: TBehaviorTraceContext = {
-      turnId: createCronTurnId(),
-      chatId: ctx.scope,
-      platform: undefined,
-    };
+  private async handleCronFire(event: TEvent<EEventType.CronFired>, ctx: TEventContext) {
+    const job = event.payload;
+    const canonicalChatId = job.scope;
+    const parsedScope = parseCanonicalChatKey(canonicalChatId);
+    const trace: TBehaviorTraceContext = { ...event.trace, platform: parsedScope?.platform };
     logHandlerStarted(trace, "cron-fire");
     const span = startHandlerSpan(trace, "cron-fire");
 
-    const canonicalChatId = ctx.scope;
-    const parsedScope = parseCanonicalChatKey(canonicalChatId);
     if (parsedScope === undefined) {
       this.logger.warning(
-        `handleCronFire: job "${ctx.name}" has invalid scope "${canonicalChatId}", skipping delivery`,
+        `handleCronFire: job "${job.name}" has invalid scope "${canonicalChatId}", skipping delivery`,
       );
       span.fail("invalid scope", 0);
       return;
     }
 
-    trace.platform = parsedScope.platform;
+    let messages: TCronMessage[];
 
-    const transport = await this.messaging.waitForTransport(parsedScope.platform);
-    if (transport === undefined) {
-      this.logger.warning(
-        `handleCronFire: no ${parsedScope.platform} transport for reminder "${ctx.name}", skipping delivery`,
-      );
-      span.fail("missing transport", 0);
-      return;
-    }
+    if (job.content.kind === "task" || job.automationIds.length > 0) {
+      const previousEnd = this.lastRunEndedAt.get(event.key);
 
-    if (ctx.content.kind === "task" || ctx.automationIds.length > 0) {
-      const taskKey = JSON.stringify([canonicalChatId, ctx.name]);
-
-      if (this.runningCronTaskKeys.has(taskKey)) {
-        this.logger.warning(`handleCronFire: task "${ctx.name}" is already running, skipping`);
+      // fired while the previous run of this job was still going
+      if (previousEnd !== undefined && event.occurredAt < previousEnd) {
+        this.logger.warning(`handleCronFire: task "${job.name}" is already running, skipping`);
         span.ok("task overlap skipped", 0);
         return;
       }
 
-      this.runningCronTaskKeys.add(taskKey);
+      let interrupted = false;
 
-      try {
-        await this.handleCronDelivery(ctx, canonicalChatId, parsedScope, transport, trace, span);
-      } finally {
-        this.runningCronTaskKeys.delete(taskKey);
+      // an earlier attempt died mid-run: the agent never runs twice. A replayed fire of
+      // automations alone runs again and reuses the stored reports of finished runs
+      if (job.content.kind === "task") {
+        interrupted = (await ctx.findCaused(EEventType.CronTaskStarted, undefined)) !== undefined;
+
+        if (!interrupted) {
+          await ctx.transact(async (_tx, emit) => {
+            emit(EEventType.CronTaskStarted, { jobId: job.jobId }, undefined, undefined);
+          });
+        }
       }
 
+      try {
+        messages = await this.createCronMessages(
+          job,
+          parsedScope.platform,
+          trace,
+          span,
+          interrupted,
+          ctx,
+        );
+      } finally {
+        this.lastRunEndedAt.set(event.key, Date.now());
+      }
+    } else {
+      messages = await this.createCronMessages(job, parsedScope.platform, trace, span, false, ctx);
+    }
+
+    if (messages.length === 0) {
       return;
     }
 
-    await this.handleCronDelivery(ctx, canonicalChatId, parsedScope, transport, trace, span);
+    await ctx.complete(async (_tx, emit) => {
+      for (const [index, message] of messages.entries()) {
+        emit(
+          EEventType.DeliveryReady,
+          { chatId: canonicalChatId, text: message.text, transcript: message.transcript },
+          String(index),
+          // the chat lane, so the transcript append orders with the chat's turns
+          canonicalChatId,
+        );
+      }
+    });
   }
 
-  private async handleCronDelivery(
-    ctx: TCronJobContext,
-    canonicalChatId: string,
-    parsedScope: { platform: EMessagePlatform; chatId: string },
-    transport: TMessageTransport,
+  private async createCronMessages(
+    job: TCronFiredPayload,
+    platform: EMessagePlatform,
     trace: TBehaviorTraceContext,
     span: THandlerSpan,
-  ) {
+    interrupted: boolean,
+    ctx: TEventContext,
+  ): Promise<TCronMessage[]> {
+    const messages: TCronMessage[] = [];
     let text: TOption<string>;
     let memoryPrefix = "CRON REMINDER";
     let toolCallCount: TOption<number>;
 
-    if (ctx.automationIds.length > 0) {
+    if (interrupted) {
+      memoryPrefix = "CRON TASK";
+
+      // only a task has fallback text
+      if (job.content.kind === "task") {
+        text = job.content.fallback;
+        toolCallCount = 0;
+      }
+    } else if (job.automationIds.length > 0) {
       memoryPrefix = "CRON TASK";
       let result: TOption<TCronAutomationsResult>;
 
       try {
         result = await runCronJobAutomations(
-          ctx,
-          parsedScope.platform,
+          job,
+          platform,
           this.ai,
-          (automation, options) => runSavedAutomation(automation, EAutomationRunMode.Cron, options),
+          ctx,
+          async (automation, options) => {
+            const completed = await ctx.request(
+              EEventType.AutomationRunRequested,
+              {
+                scope: job.scope,
+                automationId: automation.id,
+                mode: EAutomationRunMode.Cron,
+                timezone: options.timezone,
+              },
+              {
+                outcome: EEventType.AutomationRunCompleted,
+                // a replayed fire gets the stored report of a finished run
+                step: String(automation.id),
+                key: job.scope,
+                timeoutMs: AUTOMATION_RUN_TIMEOUT_MS,
+              },
+            );
+
+            return completed.payload.report;
+          },
           trace,
         );
       } catch (error) {
         this.logger.error(
-          `handleCronFire: automations of job "${ctx.name}" failed: ${String(error)}`,
+          `handleCronFire: automations of job "${job.name}" failed: ${String(error)}`,
         );
       }
 
@@ -149,8 +201,8 @@ export class ScheduledDelivery {
           toolCallCount = result.taskResult.toolCallCount;
           logCronTaskCompleted(trace, result.taskResult);
         }
-      } else if (ctx.content.kind === "task") {
-        text = ctx.content.fallback;
+      } else if (job.content.kind === "task") {
+        text = job.content.fallback;
         toolCallCount = 0;
       }
 
@@ -159,123 +211,84 @@ export class ScheduledDelivery {
       });
 
       // A task's message covers failures; a job that sends outputs as written needs a notice.
-      if (ctx.content.kind === "automations") {
+      if (job.content.kind === "automations") {
         for (const notice of createAutomationFailedNotices(reports)) {
           notices.push({ notice, event: "had an automation fail" });
         }
       }
 
       for (const { notice, event } of notices) {
-        await this.deliverCronText(
-          ctx,
-          canonicalChatId,
-          parsedScope.chatId,
-          transport,
-          trace,
-          memoryPrefix,
-          notice,
-          (firedAt) =>
-            `Scheduler notice, not from the user: scheduled job "${ctx.name}" ran at ${firedAt} and ${event}. The next assistant message is that notice.`,
+        messages.push(
+          createCronMessage(
+            job,
+            memoryPrefix,
+            notice,
+            `scheduled job "${job.name}" ran at ${new Date().toISOString()} and ${event}. The next assistant message is that notice.`,
+          ),
         );
       }
 
       if (text === undefined) {
-        this.logger.info(`handleCronFire: job "${ctx.name}" has nothing to send`);
+        this.logger.info(`handleCronFire: job "${job.name}" has nothing to send`);
         span.ok("nothing to send", 0);
-        return;
+        return messages;
       }
-    } else if (ctx.content.kind === "task") {
-      const taskResult = await generateScheduledTaskText(ctx, parsedScope.platform, this.ai, trace);
+    } else if (job.content.kind === "task") {
+      const taskResult = await generateScheduledTaskText(job, platform, this.ai, ctx, trace);
       text = taskResult.text;
       memoryPrefix = "CRON TASK";
       toolCallCount = taskResult.toolCallCount;
       logCronTaskCompleted(trace, taskResult);
     } else {
-      text = await generateReminderText(ctx, parsedScope.platform, this.llm, trace);
+      text = await generateReminderText(job, platform, this.llm, trace);
     }
 
     if (text === undefined) {
-      this.logger.info(`handleCronFire: job "${ctx.name}" has no reminder text, skipping delivery`);
+      this.logger.info(`handleCronFire: job "${job.name}" has no reminder text, skipping delivery`);
       span.fail("missing reminder text", 0);
-      return;
+      return messages;
     }
 
     if (text.trim().length === 0) {
       this.logger.info(
-        `handleCronFire: job "${ctx.name}" has blank reminder text, skipping delivery`,
+        `handleCronFire: job "${job.name}" has blank reminder text, skipping delivery`,
       );
       span.fail("blank reminder text", 0);
-      return;
+      return messages;
     }
 
-    const sendError = await this.deliverCronText(
-      ctx,
-      canonicalChatId,
-      parsedScope.chatId,
-      transport,
-      trace,
-      memoryPrefix,
-      text,
-      (firedAt) => {
-        if (toolCallCount !== undefined) {
-          let notice = `Scheduler notice, not from the user: scheduled task "${ctx.name}" ran at ${firedAt} as a separate agent run that made ${toolCallCount} tool calls, such as web searches, to produce the next assistant message.`;
-          if (ctx.automationIds.length > 0) {
-            notice = `${notice} It also used the outputs of the job's automations.`;
-          }
+    // NOTE: the notice is built when the text is produced, not when it is sent
+    const firedAt = new Date().toISOString();
+    let notice = `reminder "${job.name}" fired at ${firedAt}. The next assistant message is its delivery.`;
 
-          return notice;
-        }
-
-        if (ctx.content.kind === "automations") {
-          return `Scheduler notice, not from the user: scheduled job "${ctx.name}" ran at ${firedAt}. The next assistant message is the text output of its automations, sent as written.`;
-        }
-
-        return `Scheduler notice, not from the user: reminder "${ctx.name}" fired at ${firedAt}. The next assistant message is its delivery.`;
-      },
-    );
-    if (sendError !== undefined) {
-      span.fail("send failed", text.length, sendError);
-      return;
+    if (toolCallCount !== undefined) {
+      notice = `scheduled task "${job.name}" ran at ${firedAt} as a separate agent run that made ${toolCallCount} tool calls, such as web searches, to produce the next assistant message.`;
+      if (job.automationIds.length > 0) {
+        notice = `${notice} It also used the outputs of the job's automations.`;
+      }
+    } else if (job.content.kind === "automations") {
+      notice = `scheduled job "${job.name}" ran at ${firedAt}. The next assistant message is the text output of its automations, sent as written.`;
     }
 
+    messages.push(createCronMessage(job, memoryPrefix, text, notice));
     span.ok("completed", text.length);
+    return messages;
   }
+}
 
-  /** Sends one cron message and records it in the chat history once delivered. */
-  private async deliverCronText(
-    ctx: TCronJobContext,
-    canonicalChatId: string,
-    chatId: string,
-    transport: TMessageTransport,
-    trace: TBehaviorTraceContext,
-    memoryPrefix: string,
-    text: string,
-    createNotice: (firedAt: string) => string,
-  ): Promise<TOption<string>> {
-    const sendError = await this.messaging.sendText(transport, chatId, text, trace);
-    if (sendError !== undefined) {
-      return sendError;
-    }
-
-    const deliveredAt = Date.now();
-    const saveSpan = startMemorySaveSpan(trace, ERole.Assistant, text.length);
-
-    try {
-      await MessageHandler.getInstance(canonicalChatId).saveDeliveredMessage(
-        `[${memoryPrefix} ${ctx.name}]: ${text}`,
-        createNotice(new Date(deliveredAt).toISOString()),
-        deliveredAt,
-      );
-      saveSpan.ok();
-    } catch (error) {
-      this.logger.error(
-        `handleCronFire: failed to save reminder "${ctx.name}" to memory for chat ${canonicalChatId}: ${String(error)}`,
-      );
-      saveSpan.fail(String(error));
-    }
-
-    return undefined;
-  }
+function createCronMessage(
+  job: TCronFiredPayload,
+  memoryPrefix: string,
+  text: string,
+  notice: string,
+): TCronMessage {
+  return {
+    text,
+    transcript: {
+      text: `[${memoryPrefix} ${job.name}]: ${text}`,
+      notice: `Scheduler notice, not from the user: ${notice}`,
+    },
+  };
 }
 
 function logCronTaskCompleted(trace: TBehaviorTraceContext, result: TScheduledTaskResult) {

@@ -1,6 +1,8 @@
 import { and, eq } from "drizzle-orm";
-import { DatabaseConnector } from "../database";
+import { DatabaseConnector, type TDatabaseTransaction } from "../database";
 import { type TSelectUserConfig, userConfigsTable } from "../database/schema";
+import { ESubscriptionMode, EventBus } from "../events";
+import { EEventType, ERejectionCode } from "../events/catalog";
 import {
   ConfigValidators,
   DefaultConfigRecord,
@@ -13,6 +15,8 @@ export type TConfigUpdate = {
   key: EConfigKey;
   value: string;
 };
+
+type TValidation = { valid: true; updates: TConfigUpdate[] } | { valid: false; problem: string };
 
 export class SettingsService {
   private static _instance: SettingsService;
@@ -28,6 +32,52 @@ export class SettingsService {
     }
 
     return SettingsService._instance;
+  }
+
+  // NOTE: the cache has its own consumer, so its update never waits behind a command on the
+  // owner's lane
+  public setup(): void {
+    const bus = EventBus.instance;
+
+    bus.subscribe({
+      consumer: "settings",
+      type: EEventType.SettingsUpdateRequested,
+      mode: ESubscriptionMode.Durable,
+      backoffMs: [],
+      handler: async (event, ctx) => {
+        const { ownerKey, updates } = event.payload;
+
+        await ctx.complete(async (tx, emit) => {
+          const validation = this.validate(updates);
+
+          if (!validation.valid) {
+            emit(
+              EEventType.CommandRejected,
+              {
+                commandType: event.type,
+                code: ERejectionCode.Invalid,
+                message: validation.problem,
+              },
+              undefined,
+              undefined,
+            );
+            return;
+          }
+
+          const record = await this.writeMany(tx, ownerKey, validation.updates);
+          emit(EEventType.SettingsChanged, { ownerKey, record }, undefined, undefined);
+        });
+      },
+    });
+    bus.subscribe({
+      consumer: "settings-cache",
+      type: EEventType.SettingsChanged,
+      mode: ESubscriptionMode.Live,
+      backoffMs: [],
+      handler: async (event) => {
+        this.cache.set(event.payload.ownerKey, event.payload.record);
+      },
+    });
   }
 
   public async getAll(ownerKey: string): Promise<TConfigRecord> {
@@ -55,72 +105,59 @@ export class SettingsService {
     return record[key];
   }
 
-  public async set(ownerKey: string, key: string, value: string): Promise<TConfigRecord> {
-    if (!isConfigKey(key)) {
-      throw new Error(`Unknown config key: "${key}"`);
-    }
-
-    return this.setMany(ownerKey, [{ key, value }]);
-  }
-
-  public async setMany(ownerKey: string, updates: TConfigUpdate[]): Promise<TConfigRecord> {
+  private validate(updates: TConfigUpdate[]): TValidation {
     if (updates.length === 0) {
-      throw new Error("Provide at least one config update");
+      return { valid: false, problem: "Provide at least one config update" };
     }
 
-    const validatedUpdates: TConfigUpdate[] = [];
+    const validated: TConfigUpdate[] = [];
 
     for (const update of updates) {
-      const validator = ConfigValidators[update.key];
-      const parsed = validator.safeParse(update.value);
+      const parsed = ConfigValidators[update.key].safeParse(update.value);
 
       if (!parsed.success) {
-        throw new Error(
-          `Invalid value for config key "${update.key}": ${JSON.stringify(update.value)}`,
-        );
+        return {
+          valid: false,
+          problem: `Invalid value for config key "${update.key}": ${parsed.error.issues.map((issue) => issue.message).join(", ")}`,
+        };
       }
 
-      validatedUpdates.push({ key: update.key, value: parsed.data });
+      validated.push({ key: update.key, value: parsed.data });
     }
 
+    return { valid: true, updates: validated };
+  }
+
+  // writes validated updates and returns the owner's new record
+  private async writeMany(
+    tx: TDatabaseTransaction,
+    ownerKey: string,
+    updates: TConfigUpdate[],
+  ): Promise<TConfigRecord> {
     const now = Date.now();
 
-    await this.database.run(async (db) => {
-      await db.transaction(async (tx) => {
-        for (const update of validatedUpdates) {
-          if (update.value === DefaultConfigRecord[update.key]) {
-            await tx
-              .delete(userConfigsTable)
-              .where(
-                and(eq(userConfigsTable.ownerKey, ownerKey), eq(userConfigsTable.key, update.key)),
-              );
-          } else {
-            await tx
-              .insert(userConfigsTable)
-              .values({
-                ownerKey,
-                key: update.key,
-                value: update.value,
-                createdAt: now,
-                updatedAt: now,
-              })
-              .onConflictDoUpdate({
-                target: [userConfigsTable.ownerKey, userConfigsTable.key],
-                set: { value: update.value, updatedAt: now },
-              });
-          }
-        }
-      });
-    });
+    for (const { key, value } of updates) {
+      if (value === DefaultConfigRecord[key]) {
+        await tx
+          .delete(userConfigsTable)
+          .where(and(eq(userConfigsTable.ownerKey, ownerKey), eq(userConfigsTable.key, key)));
+      } else {
+        await tx
+          .insert(userConfigsTable)
+          .values({ ownerKey, key, value, createdAt: now, updatedAt: now })
+          .onConflictDoUpdate({
+            target: [userConfigsTable.ownerKey, userConfigsTable.key],
+            set: { value, updatedAt: now },
+          });
+      }
+    }
 
-    this.cache.delete(ownerKey);
+    const rows = await tx
+      .select()
+      .from(userConfigsTable)
+      .where(eq(userConfigsTable.ownerKey, ownerKey));
 
-    const rows = await this.selectOwnerRows(ownerKey);
-    const record = this.createRecord(rows);
-
-    this.cache.set(ownerKey, record);
-
-    return { ...record };
+    return this.createRecord(rows);
   }
 
   private createRecord(rows: TSelectUserConfig[]): TConfigRecord {

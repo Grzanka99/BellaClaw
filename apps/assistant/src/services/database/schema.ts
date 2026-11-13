@@ -11,6 +11,7 @@ import {
 } from "drizzle-orm/sqlite-core";
 import type { EAutomationStatus } from "../automation/types";
 import type { ECronFinishedReason, ECronJobStatus, ECronJobType } from "../cron/types";
+import type { EEventType } from "../events/catalog";
 
 export const EMBEDDING_DIMENSIONS = 768;
 
@@ -208,6 +209,51 @@ export const messageAuthorizationsTable = sqliteTable(
   ],
 );
 
+export const eventsTable = sqliteTable(
+  "events",
+  {
+    seq: integer("seq").primaryKey({ autoIncrement: true }),
+    id: text("id").notNull(),
+    type: text("type").$type<EEventType>().notNull(),
+    kind: text("kind", { enum: ["event", "command"] }).notNull(),
+    source: text("source").notNull(),
+    key: text("key").notNull(),
+    turnId: text("turnId").notNull(),
+    chatId: text("chatId"),
+    platform: text("platform"),
+    causationId: text("causationId"),
+    dedupeKey: text("dedupeKey"),
+    // NULL after scrubbing
+    payload: text("payload", { mode: "json" }).$type<unknown>(),
+    occurredAt: integer("occurredAt", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("events_id_unique").on(table.id),
+    // SQLite treats NULLs as distinct, so events without a key never collide
+    uniqueIndex("events_dedupe_key_unique").on(table.dedupeKey),
+    index("events_causation_idx").on(table.causationId),
+    index("events_turn_idx").on(table.turnId, table.seq),
+  ],
+);
+
+export const eventDeliveriesTable = sqliteTable(
+  "event_deliveries",
+  {
+    eventSeq: integer("eventSeq").notNull(),
+    consumer: text("consumer").notNull(),
+    status: text("status", { enum: ["pending", "done", "dead"] })
+      .notNull()
+      .default("pending"),
+    attempts: integer("attempts").notNull().default(0),
+    lastError: text("lastError"),
+    updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.eventSeq, table.consumer] }),
+    index("event_deliveries_pending_idx").on(table.status, table.eventSeq),
+  ],
+);
+
 export type TInsertMemory = typeof memoriesTable.$inferInsert;
 export type TSelectMemory = typeof memoriesTable.$inferSelect;
 
@@ -219,3 +265,6 @@ export type TSelectUserConfig = typeof userConfigsTable.$inferSelect;
 
 export type TInsertCalendar = typeof calendarsTable.$inferInsert;
 export type TSelectCalendar = typeof calendarsTable.$inferSelect;
+
+export type TSelectEvent = typeof eventsTable.$inferSelect;
+export type TSelectEventDelivery = typeof eventDeliveriesTable.$inferSelect;

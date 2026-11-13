@@ -1,6 +1,7 @@
 import { arr, bool, obj, opt, type Static, str } from "@earendil-works/pi-schema";
 import { AutomationService } from "../../../automation";
-import { CronScheduler } from "../../../cron";
+import { fromCronJobRecord } from "../../../cron/types";
+import { EEventType } from "../../../events/catalog";
 import { EConfigKey } from "../../../settings/schema";
 import { runAutomationOperation } from "../automation-errors";
 import { parseAutomationNames, parseCronContent, runCronJobOperation } from "../cron-content";
@@ -58,8 +59,14 @@ export const scheduleRecurring = defineTool({
       AutomationService.instance.resolveNames(scope, automations),
     );
 
-    return runCronJobOperation(() =>
-      CronScheduler.instance.createRecurring({ ...validatedArgs, automationIds, scope, timezone }),
-    );
+    return runCronJobOperation(async () => {
+      const scheduled = await context.events.request(
+        EEventType.CronJobScheduleRequested,
+        { ...validatedArgs, automationIds, scope, timezone },
+        { outcome: EEventType.CronJobScheduled, step: undefined, key: scope, timeoutMs: undefined },
+      );
+
+      return fromCronJobRecord(scheduled.payload.job);
+    });
   },
 });

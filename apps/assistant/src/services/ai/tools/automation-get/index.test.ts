@@ -1,7 +1,8 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { beforeEach, describe, expect, mock, test } from "bun:test";
 import { AutomationService } from "../../../automation";
-import { CronScheduler } from "../../../cron";
-import { resetAutomationsTables, resetCronEngineJobsTable } from "../../../database/test-utils";
+import { DatabaseConnector } from "../../../database";
+import { resetAutomationsTables } from "../../../database/test-utils";
+import { testEventRequester } from "../../../events/test-utils";
 import { DefaultConfigRecord } from "../../../settings/schema";
 import { automationGet } from ".";
 
@@ -10,6 +11,7 @@ const tool = automationGet.createAgentTool({
   chatId: "discord:1",
   settings: DefaultConfigRecord,
   trace: { turnId: "test", chatId: undefined, platform: undefined },
+  events: testEventRequester,
   verifySettings: mock(async () => undefined),
   runScheduledTask: mock(async () => {
     throw new Error("not used");
@@ -19,19 +21,21 @@ const tool = automationGet.createAgentTool({
 describe("automation-get", () => {
   beforeEach(async () => {
     await resetAutomationsTables();
-    await resetCronEngineJobsTable();
-    const draft = await AutomationService.instance.createDraft({
-      scope: "discord:1",
-      name: "weather",
-      source,
-      config: { city: "Warsaw" },
-      allowedOrigins: [],
-    });
-    await AutomationService.instance.saveDraft("discord:1", draft.id);
-  });
-
-  afterEach(() => {
-    CronScheduler.instance.destroy();
+    const draft = await AutomationService.instance.createDraft(
+      DatabaseConnector.instance.database,
+      {
+        scope: "discord:1",
+        name: "weather",
+        source,
+        config: { city: "Warsaw" },
+        allowedOrigins: [],
+      },
+    );
+    await AutomationService.instance.saveDraft(
+      DatabaseConnector.instance.database,
+      "discord:1",
+      draft.id,
+    );
   });
 
   test("returns details and includes source only on request", async () => {

@@ -6,8 +6,10 @@ import { stopMcpAuthServer } from "../services/mcp/auth";
 for (const [path, name] of [
   ["../services/authorization", "AuthorizationService"],
   ["../services/calendar", "CalendarService"],
+  ["../services/commands", "Commands"],
   ["../services/discord", "DiscordSingleton"],
   ["../services/messaging", "MessagingAdapter"],
+  ["../services/notices", "Notices"],
   ["../services/scheduling/delivery", "ScheduledDelivery"],
   ["../services/signal", "SignalSingleton"],
 ]) {
@@ -15,11 +17,27 @@ for (const [path, name] of [
     mock.module(path, () => ({ [name]: { instance: { setup: async () => undefined } } }));
   }
 }
+mock.module("../services/message-handler", () => ({
+  MessageHandler: { instance: { setup: () => undefined } },
+}));
+mock.module("../services/cron", () => ({
+  CronScheduler: { instance: { subscribe: () => undefined, setup: async () => undefined } },
+}));
 mock.module("../services/memory/distill", () => ({
-  FactDistiller: { instance: { scheduleFactDrainForAllChats: async () => undefined } },
+  FactDistiller: { instance: { setup: () => undefined } },
+}));
+mock.module("../services/events", () => ({
+  EventBus: {
+    instance: {
+      subscribe: () => undefined,
+      start: async () => undefined,
+      publish: async () => undefined,
+      stop: async () => undefined,
+    },
+  },
 }));
 mock.module("../services/mcp/auth", () => ({
-  registerMcpAuthConnectedListener: () => undefined,
+  setupMcpAuth: () => undefined,
   startMcpAuthServer: () => undefined,
   stopMcpAuthServer,
 }));

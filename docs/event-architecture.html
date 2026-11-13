@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>BellaClaw Event Architecture</title>
+<style>
+:root{color-scheme:light dark;--bg:#f5f5f5;--card:#ffffff;--text:#1a1a1a;--muted:#666;--line:#d0d0d0;--box:#f0f0f0;--accent:#444;--soft:#e6e6e6;--ev:#555;--cmd:#555;--live:#555}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0f0f0f;--card:#171717;--text:#e6e6e6;--muted:#9a9a9a;--line:#3a3a3a;--box:#1f1f1f;--accent:#bdbdbd;--soft:#2a2a2a;--ev:#9a9a9a;--cmd:#9a9a9a;--live:#9a9a9a}}
+:root[data-theme="dark"]{--bg:#0f0f0f;--card:#171717;--text:#e6e6e6;--muted:#9a9a9a;--line:#3a3a3a;--box:#1f1f1f;--accent:#bdbdbd;--soft:#2a2a2a;--ev:#9a9a9a;--cmd:#9a9a9a;--live:#9a9a9a}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:16px/1.55 system-ui,sans-serif}
+main{width:min(920px,100% - 32px);margin:auto;padding:32px 0 64px}
+h1{font-size:clamp(1.9rem,6vw,2.8rem);line-height:1.1;letter-spacing:-.03em;margin:.2em 0}
+h2{font-size:1.2rem;margin:0 0 .4rem}
+p{margin:.4rem 0}
+section{background:var(--card);border:1px solid var(--line);border-radius:0;padding:18px;margin-top:16px}
+.tag{color:var(--accent);font-size:.75rem;font-weight:800;letter-spacing:.1em;text-transform:uppercase}
+.muted{color:var(--muted)}
+code{font-size:.88em}
+.scroll{overflow-x:auto;margin-top:8px}
+svg{display:block;width:100%;min-width:620px;height:auto}
+svg text{fill:var(--text);font:13px system-ui,sans-serif}
+svg .sm{font-size:11px;fill:var(--muted)}
+svg .b{fill:var(--box);stroke:var(--line);stroke-width:1.5}
+svg .own{fill:var(--box);stroke:var(--line);stroke-width:1}
+svg .bus{fill:var(--soft);stroke:var(--accent);stroke-width:2}
+svg .ev{stroke:var(--ev);stroke-width:1.8;fill:none;marker-end:url(#aE)}
+svg .cmd{stroke:var(--cmd);stroke-width:1.8;fill:none;stroke-dasharray:6 4;marker-end:url(#aC)}
+svg .lv{stroke:var(--live);stroke-width:1.6;fill:none;stroke-dasharray:2 3;marker-end:url(#aL)}
+svg .evt{fill:var(--ev);font-size:11.5px;font-weight:600}
+svg .cmt{fill:var(--cmd);font-size:11.5px;font-weight:600}
+.legend span::before{content:"";display:inline-block;width:26px;margin-right:6px;vertical-align:middle;border-top:2px solid var(--ev)}
+.legend .c::before{border-top:2px dashed var(--cmd)}
+.legend .l::before{border-top:2px dotted var(--live)}
+ul{margin:.4rem 0;padding-left:1.2rem}
+li+li{margin-top:.25rem}
+table{border-collapse:collapse;width:100%;font-size:.9rem}
+th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--muted);font-weight:600}
+</style>
+</head>
+<body>
+<main>
+<div class="tag">BellaClaw · apps/assistant</div>
+<h1>Event architecture</h1>
+<p class="muted">Services talk through one durable event log. A service writes only its own tables and reaches another service with a fact it publishes or a command it requests. Rules for changing it: <code>.agents/skills/architecture/SKILL.md</code>.</p>
+
+<section>
+  <div class="tag">1 · Services and the bus</div>
+  <h2>Services around the bus: who publishes, who consumes</h2>
+  <div class="scroll"><img src="event-architecture.svg" alt="Every BellaClaw service talks through the event bus" style="display:block;width:100%;min-width:620px"></div>
+  <p class="muted">Requesters are conversation tools, slash commands and scheduling; command owners are cron, automations, memory, settings, calendar, mcp-auth and ai-auth. Reads from the allow-list (settings and authorization caches, read tools, drivers) are direct calls and are not drawn. Caches, Signal typing and MCP session closing are live subscriptions: in memory, never replayed.</p>
+</section>
+
+<section>
+  <div class="tag">2 · Inside the bus</div>
+  <h2>How one event is stored, ordered and delivered</h2>
+  <div class="scroll">
+  <svg viewBox="0 0 760 300" role="img" aria-label="Event bus internals">
+    <defs>
+      <marker id="aE" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" fill="var(--ev)"/></marker>
+      <marker id="aC" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" fill="var(--cmd)"/></marker>
+    </defs>
+    <rect class="b" x="20" y="30" width="160" height="70"/><text x="100" y="54" text-anchor="middle">producer</text><text class="sm" x="100" y="72" text-anchor="middle">transact / ctx.complete</text><text class="sm" x="100" y="88" text-anchor="middle">rows + events, one tx</text>
+    <rect class="bus" x="230" y="20" width="200" height="90"/><text x="330" y="44" text-anchor="middle">event log (SQLite)</text><text class="sm" x="330" y="64" text-anchor="middle">events: outbox + history</text><text class="sm" x="330" y="80" text-anchor="middle">event_deliveries: one row</text><text class="sm" x="330" y="96" text-anchor="middle">per durable consumer</text>
+    <rect class="b" x="480" y="30" width="120" height="70"/><text x="540" y="54" text-anchor="middle">lane</text><text class="sm" x="540" y="72" text-anchor="middle">consumer × key</text><text class="sm" x="540" y="88" text-anchor="middle">serial, in order</text>
+    <rect class="own" x="630" y="30" width="110" height="70"/><text x="685" y="54" text-anchor="middle">handler</text><text class="sm" x="685" y="72" text-anchor="middle">ack inside</text><text class="sm" x="685" y="88" text-anchor="middle">ctx.complete</text>
+    <path class="ev" d="M180,65H228"/><path class="ev" d="M430,65H478"/><path class="ev" d="M600,65H628"/>
+    <path class="cmd" d="M685,100V150H600"/><text class="cmt" x="612" y="143">fails</text>
+    <rect class="b" x="440" y="130" width="160" height="50"/><text x="520" y="152" text-anchor="middle">retry with backoff</text><text class="sm" x="520" y="168" text-anchor="middle">lane holds its order</text>
+    <path class="ev" d="M520,180V210"/>
+    <rect class="b" x="440" y="212" width="160" height="56"/><text x="520" y="234" text-anchor="middle">dead</text><text class="sm" x="520" y="250" text-anchor="middle">event.dead_lettered</text><text class="sm" x="520" y="262" text-anchor="middle">+ command.rejected</text>
+    <path class="ev" d="M600,240H648"/><rect class="own" x="650" y="214" width="90" height="52"/><text x="695" y="238" text-anchor="middle">notice</text><text class="sm" x="695" y="254" text-anchor="middle">to the chat</text>
+    <rect class="b" x="20" y="150" width="380" height="136"/><text x="40" y="174">On boot</text>
+    <text class="sm" x="40" y="196">• replay pending deliveries in log order</text>
+    <text class="sm" x="40" y="214">• each boot costs a pending delivery one attempt</text>
+    <text class="sm" x="40" y="232">• abandon pending commands (a repeat revives them)</text>
+    <text class="sm" x="40" y="250">• prune done events older than 30 days</text>
+    <text class="sm" x="40" y="268">• null secret payloads once nothing is pending</text>
+  </svg>
+  </div>
+</section>
+
+<section>
+  <div class="tag">3 · Guarantees</div>
+  <table>
+    <tr><th>Effect</th><th>After a crash</th></tr>
+    <tr><td>Database rows</td><td>Committed with the ack: exactly once.</td></tr>
+    <tr><td>Follow-up events</td><td>Derived dedupe key: published once.</td></tr>
+    <tr><td>Model turn</td><td><code>turn.started</code> found on replay → one "I was restarted" reply, no second model run.</td></tr>
+    <tr><td>Scheduled task</td><td><code>cron.task.started</code> found → the job's fallback text.</td></tr>
+    <tr><td>Chat send</td><td>Sent, then <code>message.sent</code> commits; a crash in between may send twice.</td></tr>
+    <tr><td>Calendar create</td><td>Event id derived from the command id: a retry returns the same event.</td></tr>
+    <tr><td>Inbound message</td><td>Dedupe key per platform message: a redelivery is ignored.</td></tr>
+  </table>
+</section>
+
+<section>
+  <div class="tag">4 · Where it is enforced</div>
+  <ul>
+    <li><code>apps/assistant/src/services/events/boundaries.test.ts</code>: cross-service imports are type-only, infrastructure, or on the allow-list; waits form an acyclic graph; every command has exactly one durable consumer.</li>
+    <li><code>apps/assistant/src/index.test.ts</code> with <code>src/fixtures/crash.ts</code>: the app is killed at named points and booted again.</li>
+    <li><code>apps/assistant/scripts/redrive-events.ts</code>: lists dead deliveries and puts chosen ones back to pending.</li>
+  </ul>
+</section>
+</main>
+</body>
+</html>

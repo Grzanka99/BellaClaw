@@ -1,6 +1,9 @@
 import { AsyncQueue } from "@bellaclaw/shared";
 import { drizzle, type LibSQLDatabase } from "drizzle-orm/libsql";
 
+export type TDatabaseTransaction = Parameters<Parameters<LibSQLDatabase["transaction"]>[0]>[0];
+export type TDatabaseHandle = LibSQLDatabase | TDatabaseTransaction;
+
 const TURSO_URL = Bun.env.TURSO_CONNECTION_URL;
 const TURSO_TOKEN = Bun.env.TURSO_AUTH_TOKEN;
 const TEST_DATABASE_URL = "file:./test.db";

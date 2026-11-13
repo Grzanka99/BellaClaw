@@ -1,6 +1,7 @@
 import { obj, str } from "@earendil-works/pi-schema";
 import { AutomationService } from "../../../automation";
-import { EAutomationRunMode, runSavedAutomation } from "../../../automation/runner";
+import { AUTOMATION_RUN_TIMEOUT_MS, EAutomationRunMode } from "../../../automation/runner";
+import { EEventType } from "../../../events/catalog";
 import { EConfigKey } from "../../../settings/schema";
 import { runAutomationOperation } from "../automation-errors";
 import { defineTool, requireChatId, ToolError } from "../define-tool";
@@ -18,7 +19,7 @@ export const automationRun = defineTool({
   mode: "sequential",
   logSafe: ["outcome", "paused"],
   privateErrors: true,
-  execute: async (context, args, signal) => {
+  execute: async (context, args) => {
     const scope = requireChatId(context.chatId);
     const automation = await AutomationService.instance.get(scope, args.name);
 
@@ -26,13 +27,24 @@ export const automationRun = defineTool({
       throw new ToolError("automation-not-found", `Automation '${args.name}' not found`);
     }
 
-    const report = await runAutomationOperation(() =>
-      runSavedAutomation(automation, EAutomationRunMode.Manual, {
-        timezone: context.settings[EConfigKey.AiInstructionsTimezone],
-        trace: context.trace,
-        signal,
-      }),
+    const completed = await runAutomationOperation(() =>
+      context.events.request(
+        EEventType.AutomationRunRequested,
+        {
+          scope,
+          automationId: automation.id,
+          mode: EAutomationRunMode.Manual,
+          timezone: context.settings[EConfigKey.AiInstructionsTimezone],
+        },
+        {
+          outcome: EEventType.AutomationRunCompleted,
+          step: undefined,
+          key: scope,
+          timeoutMs: AUTOMATION_RUN_TIMEOUT_MS,
+        },
+      ),
     );
+    const report = completed.payload.report;
 
     return {
       name: report.name,

@@ -1,7 +1,6 @@
 import { int, obj } from "@earendil-works/pi-schema";
-import { AutomationService } from "../../../automation";
+import { EEventType } from "../../../events/catalog";
 import { runAutomationOperation } from "../automation-errors";
-import { summarizeAutomation } from "../automation-summary";
 import { defineTool, requireChatId } from "../define-tool";
 import instructions from "./instructions.xml" with { type: "text" };
 
@@ -22,10 +21,14 @@ export const automationSave = defineTool({
   logSafe: ["status", "failureCount", "outputCapBytes"],
   execute: async (context, args) => {
     const scope = requireChatId(context.chatId);
-    const automation = await runAutomationOperation(() =>
-      AutomationService.instance.saveDraft(scope, args.previewId),
+    const saved = await runAutomationOperation(() =>
+      context.events.request(
+        EEventType.AutomationSaveRequested,
+        { scope, previewId: args.previewId },
+        { outcome: EEventType.AutomationSaved, step: undefined, key: scope, timeoutMs: undefined },
+      ),
     );
 
-    return summarizeAutomation(automation);
+    return saved.payload.automation;
   },
 });

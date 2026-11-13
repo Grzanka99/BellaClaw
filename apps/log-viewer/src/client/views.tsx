@@ -938,6 +938,10 @@ function describeTurn(turnId: string): { label: string; icon: string } {
     return { label: "System boot", icon: "□" };
   }
 
+  if (turnId.startsWith("sys:")) {
+    return { label: "System", icon: "◆" };
+  }
+
   return { label: "Turn", icon: "◇" };
 }
 

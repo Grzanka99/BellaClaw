@@ -2,8 +2,11 @@ import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import type { TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
 import type { AgentHarness } from "../ai/agent-harness";
 import { AutomationService, type TAutomation } from "../automation";
-import { EAutomationRunOutcome, type TAutomationRunReport } from "../automation/runner";
-import { ECronJobType, type TCronJobContext } from "../cron/types";
+import { EAutomationRunOutcome } from "../automation/runner";
+import { ECronJobType } from "../cron/types";
+import { DatabaseConnector } from "../database";
+import type { TAutomationRunReport, TCronFiredPayload } from "../events/catalog";
+import { testEventRequester } from "../events/test-utils";
 import { EMessagePlatform } from "../messaging/types";
 import { SettingsService } from "../settings";
 import { DefaultConfigRecord } from "../settings/schema";
@@ -23,17 +26,16 @@ const TEST_TRACE: TBehaviorTraceContext = {
 // The test database is shared, so each test owns a fresh scope instead of clearing tables.
 let scope = "";
 
-function context(overrides: Partial<TCronJobContext> = {}): TCronJobContext {
+function context(overrides: Partial<TCronFiredPayload> = {}): TCronFiredPayload {
   return {
+    jobId: 1,
     name: "briefing",
     scope,
-    type: ECronJobType.Recurring,
+    jobType: ECronJobType.Recurring,
     pattern: "0 9 * * *",
     content: { kind: "automations" },
     automationIds: [],
-    lastRunAt: undefined,
-    nextRunAt: new Date("2026-01-05T08:00:00.000Z"),
-    createdAt: new Date("2026-01-01T08:00:00.000Z"),
+    nextRunAt: Date.parse("2026-01-05T08:00:00.000Z"),
     timezone: "Europe/Warsaw",
     ...overrides,
   };
@@ -60,7 +62,7 @@ function report(
 }
 
 async function saveAutomation(name: string, instructions?: string) {
-  const draft = await AutomationService.instance.createDraft({
+  const draft = await AutomationService.instance.createDraft(DatabaseConnector.instance.database, {
     scope,
     name,
     instructions,
@@ -69,7 +71,7 @@ async function saveAutomation(name: string, instructions?: string) {
     allowedOrigins: [],
   });
 
-  return AutomationService.instance.saveDraft(scope, draft.id);
+  return AutomationService.instance.saveDraft(DatabaseConnector.instance.database, scope, draft.id);
 }
 
 function fakeRunner(reports: Record<string, TAutomationRunReport>) {
@@ -127,6 +129,7 @@ describe("runCronJobAutomations", () => {
       context({ automationIds: [weather.id, quiet.id, metrics.id, departures.id] }),
       EMessagePlatform.Signal,
       ai,
+      testEventRequester,
       run,
       TEST_TRACE,
     );
@@ -145,6 +148,7 @@ describe("runCronJobAutomations", () => {
       context({ automationIds: [quiet.id, 999] }),
       EMessagePlatform.Signal,
       scheduledTaskAi().ai,
+      testEventRequester,
       run,
       TEST_TRACE,
     );
@@ -181,6 +185,7 @@ describe("runCronJobAutomations", () => {
       }),
       EMessagePlatform.Signal,
       ai,
+      testEventRequester,
       run,
       TEST_TRACE,
     );
@@ -215,6 +220,7 @@ describe("runCronJobAutomations", () => {
       }),
       EMessagePlatform.Signal,
       scheduledTaskAi(" ").ai,
+      testEventRequester,
       run,
       TEST_TRACE,
     );

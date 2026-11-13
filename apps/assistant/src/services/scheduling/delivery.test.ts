@@ -6,17 +6,20 @@ import { transformMessages } from "@earendil-works/pi-ai/api/transform-messages"
 import { eq } from "drizzle-orm";
 import type { AgentHarness } from "../ai/agent-harness";
 import { getAiModelConfig } from "../ai/providers/registry";
-import { EAiProvider, EModelPurpose, ERole } from "../ai/types";
+import { EAiProvider, EModelPurpose } from "../ai/types";
 import { AutomationService } from "../automation";
+import { EAutomationRunMode, EAutomationRunOutcome } from "../automation/runner";
 import { conversationMessages, type TConversation } from "../conversation/types";
-import { ECronJobType, type TCronJobContext } from "../cron/types";
+import { ECronJobType } from "../cron/types";
 import { DatabaseConnector } from "../database";
-import { memoriesTable } from "../database/schema";
+import { eventsTable, memoriesTable } from "../database/schema";
+import { resetEventTables } from "../database/test-utils";
+import { EventBus } from "../events";
+import { EEventType, type TCronFiredPayload } from "../events/catalog";
 import { Memory } from "../memory";
 import { MessageHandler } from "../message-handler";
-import type { TIncommingMessage } from "../message-handler/types";
 import { MessagingAdapter } from "../messaging";
-import { EMessagePlatform, type TMessageTransport } from "../messaging/types";
+import { EMessagePlatform } from "../messaging/types";
 import { SettingsService } from "../settings";
 import { DefaultConfigRecord } from "../settings/schema";
 import { ScheduledDelivery } from "./delivery";
@@ -34,30 +37,56 @@ type TDeliveryInternals = {
   llm: {
     completeText: ReturnType<typeof mock>;
   };
-  runningCronTaskKeys: Set<string>;
-  handleCronFire(ctx: TCronJobContext): Promise<void>;
 };
 
-type TMessagingInternals = {
-  transports: Map<EMessagePlatform, TMessageTransport>;
-  transportWaitAttempts: number;
-  transportWaitIntervalMs: number;
-};
-
-function cron(overrides: Partial<TCronJobContext> = {}): TCronJobContext {
+function cron(overrides: Partial<TCronFiredPayload> = {}): TCronFiredPayload {
   return {
+    jobId: 1,
     name: "daily",
     scope: "signal:+100",
-    type: ECronJobType.Recurring,
+    jobType: ECronJobType.Recurring,
     pattern: "0 9 * * *",
     content: { kind: "text", text: "Take a break." },
     automationIds: [],
-    lastRunAt: undefined,
-    nextRunAt: new Date("2026-07-24T08:00:00.000Z"),
-    createdAt: new Date("2026-07-01T08:00:00.000Z"),
+    nextRunAt: Date.parse("2026-07-24T08:00:00.000Z"),
     timezone: "Europe/Warsaw",
     ...overrides,
   };
+}
+
+function fire(payload: TCronFiredPayload): Promise<void> {
+  return EventBus.instance.publish({
+    type: EEventType.CronFired,
+    source: "test",
+    key: `${payload.scope}|${payload.name}`,
+    trace: TEST_TRACE,
+    causationId: undefined,
+    dedupeKey: undefined,
+    payload,
+  });
+}
+
+// the consumers of the cron path, registered on a fresh bus
+async function setupBus(start = true) {
+  await resetEventTables();
+  Object.assign(EventBus, { _instance: undefined });
+  // a failed send is dead at once instead of waiting for the outbound backoff
+  Object.assign(MessagingAdapter.instance, { outboundBackoffMs: [] });
+  ScheduledDelivery.instance.setup();
+  AutomationService.instance.setup();
+  MessagingAdapter.instance.setup();
+  MessageHandler.instance.setup();
+
+  if (start) {
+    await EventBus.instance.start();
+  }
+}
+
+async function eventsOf(type: EEventType) {
+  return DatabaseConnector.instance.database
+    .select()
+    .from(eventsTable)
+    .where(eq(eventsTable.type, type));
 }
 
 function reset() {
@@ -65,14 +94,14 @@ function reset() {
   (ScheduledDelivery as unknown as { _instance: unknown })._instance = undefined;
   (Memory as unknown as { _instance: unknown })._instance = undefined;
   (SettingsService as unknown as { _instance: unknown })._instance = undefined;
-  (MessageHandler as unknown as { _instances: Map<string, MessageHandler> })._instances.clear();
+  Object.assign(MessageHandler, { _instance: undefined });
 }
 
 function setupConversationHandler(chatId: string) {
   (SettingsService as unknown as { _instance: unknown })._instance = {
     getAll: mock(async () => DefaultConfigRecord),
   };
-  const handler = MessageHandler.getInstance(chatId);
+  const handler = MessageHandler.instance;
   const runMain = mock(async (args: Parameters<AgentHarness["runMain"]>[0]) => {
     const messages: Message[] = [
       ...(args.conversation?.entries.map((entry) => entry.message) ?? []),
@@ -88,21 +117,31 @@ function setupConversationHandler(chatId: string) {
     };
   });
   const compactConversation = mock(async (_state: TConversation): Promise<unknown> => undefined);
-  Object.assign(handler, {
-    ai: { runMain, compactConversation },
-    factDistiller: { enqueueFactDrain: async () => true },
-  });
-  const message: TIncommingMessage = {
-    chatId,
-    receivedAt: new Date(),
-    author: { type: ERole.User },
-    message: { content: "Hello" },
+  Object.assign(handler, { ai: { runMain, compactConversation } });
+  const requestTurn = () =>
+    EventBus.instance.publish({
+      type: EEventType.TurnRequested,
+      source: "test",
+      key: chatId,
+      trace: { ...TEST_TRACE, chatId },
+      payload: {
+        chatId,
+        content: "Hello",
+        receivedAt: Date.now(),
+        platform: EMessagePlatform.Signal,
+      },
+      causationId: undefined,
+      dedupeKey: undefined,
+    });
+  const turn = async () => {
+    await requestTurn();
+    await EventBus.instance.idle();
   };
-  return { handler, runMain, compactConversation, message };
+  return { runMain, compactConversation, requestTurn, turn };
 }
 
 async function saveAutomation(scope: string, name: string, source: string) {
-  const draft = await AutomationService.instance.createDraft({
+  const draft = await AutomationService.instance.createDraft(DatabaseConnector.instance.database, {
     scope,
     name,
     source,
@@ -110,15 +149,15 @@ async function saveAutomation(scope: string, name: string, source: string) {
     allowedOrigins: [],
   });
 
-  return AutomationService.instance.saveDraft(scope, draft.id);
+  return AutomationService.instance.saveDraft(DatabaseConnector.instance.database, scope, draft.id);
 }
 
-function setupAutomationDelivery(scope: string) {
+function setupAutomationDelivery() {
   (SettingsService as unknown as { _instance: unknown })._instance = {
     getAll: mock(async () => DefaultConfigRecord),
   };
   const save = mock(async () => undefined);
-  Object.assign(MessageHandler.getInstance(scope), {
+  Object.assign(MessageHandler.instance, {
     conversations: { saveDeliveredMessage: save },
   });
   const sendText = mock(async () => undefined);
@@ -146,11 +185,14 @@ async function waitForCall(callback: ReturnType<typeof mock>) {
   throw new Error("Expected callback to run");
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   reset();
+  await setupBus();
 });
 
-afterEach(() => {
+afterEach(async () => {
+  await EventBus.instance.idle();
+  await EventBus.instance.stop();
   reset();
 });
 
@@ -159,9 +201,9 @@ describe("ScheduledDelivery", () => {
     "reminder",
     "task",
   ])("replays a delivered %s in the next Main request", async (kind) => {
-    const chatId = `signal:replay-${kind}`;
-    const { handler, runMain, message } = setupConversationHandler(chatId);
-    await handler.handleMessage(message, TEST_TRACE, EMessagePlatform.Signal);
+    const chatId = `signal:replay-${kind}-${crypto.randomUUID()}`;
+    const { runMain, turn } = setupConversationHandler(chatId);
+    await turn();
     const adapter = MessagingAdapter.instance;
     const sendText = mock(async () => undefined);
     adapter.registerTransport({ platform: EMessagePlatform.Signal, sendText });
@@ -185,8 +227,9 @@ describe("ScheduledDelivery", () => {
       transcript = "[CRON TASK daily]: Your briefing is ready.";
     }
 
-    await internals.handleCronFire(context);
-    await handler.handleMessage(message, TEST_TRACE, EMessagePlatform.Signal);
+    await fire(context);
+    await EventBus.instance.idle();
+    await turn();
 
     const conversation = runMain.mock.calls[1]?.[0].conversation;
     expect(JSON.stringify(conversation)).toContain(transcript);
@@ -218,8 +261,8 @@ describe("ScheduledDelivery", () => {
     "turn",
     "compaction",
   ])("retains delivery during an active %s after compaction", async (phase) => {
-    const chatId = `signal:overlap-${phase}`;
-    const { handler, runMain, compactConversation, message } = setupConversationHandler(chatId);
+    const chatId = `signal:overlap-${phase}-${crypto.randomUUID()}`;
+    const { runMain, compactConversation, requestTurn, turn } = setupConversationHandler(chatId);
     const started = Promise.withResolvers<void>();
     const finish = Promise.withResolvers<void>();
     const deliveredAt = 1_800_000_000_000;
@@ -252,20 +295,21 @@ describe("ScheduledDelivery", () => {
       };
     });
     const adapter = MessagingAdapter.instance;
-    const sendText = mock(async () => undefined);
+    const sendText = mock(async (_chatId: string, _text: string) => undefined);
     adapter.registerTransport({ platform: EMessagePlatform.Signal, sendText });
-    const internals = ScheduledDelivery.instance as unknown as TDeliveryInternals;
 
     try {
-      const turn = handler.handleMessage(message, TEST_TRACE, EMessagePlatform.Signal);
+      await requestTurn();
       await started.promise;
-      const delivery = internals.handleCronFire(cron({ scope: chatId }));
-      await waitForCall(sendText);
+      await fire(cron({ scope: chatId }));
+      // the turn's own reply is sent before its compaction, so wait for the reminder itself
+      while (!sendText.mock.calls.some((call) => call[1] === "Take a break.")) {
+        await Bun.sleep(1);
+      }
       clock.mockReturnValue(deliveredAt + 60_000);
       finish.resolve();
-      await turn;
-      await delivery;
-      await handler.handleMessage(message, TEST_TRACE, EMessagePlatform.Signal);
+      await EventBus.instance.idle();
+      await turn();
 
       const conversation = runMain.mock.calls[1]?.[0].conversation;
       expect(conversation?.summary).toBe("The normal turn was summarized.");
@@ -293,19 +337,20 @@ describe("ScheduledDelivery", () => {
     }
   });
 
-  test("records the reminder transcript only after successful delivery", async () => {
+  test("conversation appends on message.sent only", async () => {
     const save = mock(async () => undefined);
-    Object.assign(MessageHandler.getInstance("signal:+100"), {
+    Object.assign(MessageHandler.instance, {
       conversations: { saveDeliveredMessage: save },
     });
     const sendText = mock(async () => undefined);
     const adapter = MessagingAdapter.instance;
     adapter.registerTransport({ platform: EMessagePlatform.Signal, sendText });
-    const internals = ScheduledDelivery.instance as unknown as TDeliveryInternals;
 
-    await internals.handleCronFire(cron());
+    await fire(cron());
+    await EventBus.instance.idle();
     expect(sendText).toHaveBeenCalledWith("+100", "Take a break.");
     expect(save).toHaveBeenCalledWith(
+      expect.anything(),
       "signal:+100",
       "[CRON REMINDER daily]: Take a break.",
       expect.stringContaining('reminder "daily" fired at'),
@@ -316,30 +361,30 @@ describe("ScheduledDelivery", () => {
     sendText.mockImplementation(async () => {
       throw new Error("offline");
     });
-    await internals.handleCronFire(cron({ name: "failed" }));
+    await fire(cron({ name: "failed" }));
+    await EventBus.instance.idle();
+    expect(await eventsOf(EEventType.DeliveryReady)).toHaveLength(2);
+    expect(await eventsOf(EEventType.MessageSent)).toHaveLength(1);
     expect(save).not.toHaveBeenCalled();
   });
 
-  test("prevents overlapping scheduled tasks and delivers fallback output once", async () => {
+  test("skips a task fired during its run and runs one fired after it", async () => {
     (SettingsService as unknown as { _instance: unknown })._instance = {
       getAll: mock(async () => DefaultConfigRecord),
     };
     const save = mock(async () => undefined);
-    Object.assign(MessageHandler.getInstance("signal:+100"), {
+    Object.assign(MessageHandler.instance, {
       conversations: { saveDeliveredMessage: save },
     });
     const sendText = mock(async () => undefined);
-    let release: () => void = () => undefined;
-    const waiting = new Promise<void>((resolve) => {
-      release = resolve;
-    });
+    const release = Promise.withResolvers<void>();
     const adapter = MessagingAdapter.instance;
     adapter.registerTransport({ platform: EMessagePlatform.Signal, sendText });
     const internals = ScheduledDelivery.instance as unknown as TDeliveryInternals;
     internals.llm = { completeText: mock(async () => undefined) };
     internals.ai = {
       runScheduledTask: mock(async () => {
-        await waiting;
+        await release.promise;
         return {
           text: " ",
           stopReason: "error",
@@ -352,22 +397,70 @@ describe("ScheduledDelivery", () => {
       content: { kind: "task", prompt: "Prepare briefing.", fallback: "Briefing unavailable." },
     });
 
-    const first = internals.handleCronFire(task);
-    await Promise.resolve();
-    await internals.handleCronFire(task);
-    release();
-    await first;
+    await fire(task);
+    await waitForCall(internals.ai.runScheduledTask);
+    await fire(task);
+    release.resolve();
+    await EventBus.instance.idle();
 
     expect(internals.ai.runScheduledTask).toHaveBeenCalledTimes(1);
     expect(sendText).toHaveBeenCalledTimes(1);
     expect(sendText).toHaveBeenCalledWith("+100", "Briefing unavailable.");
     expect(save).toHaveBeenCalledWith(
+      expect.anything(),
       "signal:+100",
       "[CRON TASK daily]: Briefing unavailable.",
       expect.stringContaining('scheduled task "daily" ran at'),
       expect.any(Number),
     );
-    expect(internals.runningCronTaskKeys.size).toBe(0);
+
+    await fire(task);
+    await EventBus.instance.idle();
+    expect(internals.ai.runScheduledTask).toHaveBeenCalledTimes(2);
+    expect(sendText).toHaveBeenCalledTimes(2);
+  });
+
+  test("a replayed task fire with cron.task.started sends the fallback without the agent", async () => {
+    const chatId = `signal:interrupted-${crypto.randomUUID()}`;
+    const sendText = mock(async () => undefined);
+    MessagingAdapter.instance.registerTransport({ platform: EMessagePlatform.Signal, sendText });
+    const internals = ScheduledDelivery.instance as unknown as TDeliveryInternals;
+    internals.ai = { runScheduledTask: mock(async () => undefined) };
+    await EventBus.instance.stop();
+    await setupBus(false);
+    await fire(
+      cron({
+        scope: chatId,
+        content: { kind: "task", prompt: "Prepare briefing.", fallback: "Briefing unavailable." },
+      }),
+    );
+    const [fired] = await eventsOf(EEventType.CronFired);
+    if (fired === undefined) {
+      throw new Error("Expected cron.fired");
+    }
+    // the checkpoint an earlier attempt committed before it died
+    await EventBus.instance.publish({
+      type: EEventType.CronTaskStarted,
+      source: "scheduling",
+      key: fired.key,
+      trace: TEST_TRACE,
+      causationId: fired.id,
+      dedupeKey: `${fired.id}:scheduling:${EEventType.CronTaskStarted}:`,
+      payload: { jobId: 1 },
+    });
+
+    await EventBus.instance.start();
+    await EventBus.instance.idle();
+
+    expect(internals.ai.runScheduledTask).not.toHaveBeenCalled();
+    expect(sendText).toHaveBeenCalledWith(chatId.slice("signal:".length), "Briefing unavailable.");
+    const memories = await DatabaseConnector.instance.database
+      .select()
+      .from(memoriesTable)
+      .where(eq(memoriesTable.chatId, chatId));
+    expect(memories.map((row) => row.message)).toContain(
+      "[CRON TASK daily]: Briefing unavailable.",
+    );
   });
 
   describe("cron jobs with automations", () => {
@@ -396,28 +489,93 @@ describe("ScheduledDelivery", () => {
         "tram",
         "export default async () => ({ kind: 'text', text: 'Tram at 7:10' })",
       );
-      const { save, sendText, internals } = setupAutomationDelivery(scope);
+      const { save, sendText, internals } = setupAutomationDelivery();
       const job = cron({
         scope,
         content: { kind: "automations" },
         automationIds: [tram.id, quiet.id, bus.id],
       });
 
-      const first = internals.handleCronFire(job);
-      await Promise.resolve();
-      await internals.handleCronFire(job);
-      await first;
+      await fire(job);
+      await fire(job);
+      await EventBus.instance.idle();
 
       expect(sendText).toHaveBeenCalledTimes(1);
       expect(sendText).toHaveBeenCalledWith(chatId, "Tram at 7:10\n\nBus at 7:05");
       expect(save).toHaveBeenCalledWith(
+        expect.anything(),
         scope,
         "[CRON TASK daily]: Tram at 7:10\n\nBus at 7:05",
         expect.stringContaining("text output of its automations, sent as written"),
         expect.any(Number),
       );
       expect(internals.ai.runScheduledTask).not.toHaveBeenCalled();
-      expect(internals.runningCronTaskKeys.size).toBe(0);
+    });
+
+    test("a replayed fire reuses the stored report of a finished automation run", async () => {
+      const counter = await saveAutomation(
+        scope,
+        "counter",
+        "export default async (ctx) => ({ kind: 'text', text: 'live run', state: { ran: true } })",
+      );
+      const { sendText } = setupAutomationDelivery();
+      await EventBus.instance.stop();
+      await setupBus(false);
+      await fire(cron({ scope, content: { kind: "automations" }, automationIds: [counter.id] }));
+      const [fired] = await eventsOf(EEventType.CronFired);
+      if (fired === undefined) {
+        throw new Error("Expected cron.fired");
+      }
+      const commandId = Bun.randomUUIDv7();
+      // the run an earlier attempt requested and finished before the process died
+      await EventBus.instance.transact(async (_tx, emit) => {
+        emit({
+          type: EEventType.AutomationRunRequested,
+          source: "scheduling",
+          key: scope,
+          trace: TEST_TRACE,
+          causationId: fired.id,
+          dedupeKey: `${fired.id}:scheduling:${EEventType.AutomationRunRequested}:${counter.id}`,
+          payload: {
+            scope,
+            automationId: counter.id,
+            mode: EAutomationRunMode.Cron,
+            timezone: "Europe/Warsaw",
+          },
+        });
+      });
+      const [command] = await eventsOf(EEventType.AutomationRunRequested);
+      if (command === undefined) {
+        throw new Error("Expected automation.run.requested");
+      }
+      await EventBus.instance.publish({
+        type: EEventType.AutomationRunCompleted,
+        source: "automations",
+        key: scope,
+        trace: TEST_TRACE,
+        causationId: command.id,
+        dedupeKey: `${commandId}:stored`,
+        payload: {
+          report: {
+            name: "counter",
+            outcome: EAutomationRunOutcome.Text,
+            text: "stored run",
+            fetches: [],
+            logs: [],
+            durationMs: 1,
+            paused: false,
+            data: undefined,
+          },
+        },
+      });
+
+      await EventBus.instance.start();
+      await EventBus.instance.idle();
+
+      expect(sendText).toHaveBeenCalledTimes(1);
+      expect(sendText).toHaveBeenCalledWith(chatId, "stored run");
+      expect((await AutomationService.instance.get(scope, "counter"))?.state).toBeNull();
+      expect(await eventsOf(EEventType.AutomationRunCompleted)).toHaveLength(1);
     });
 
     test("sends nothing when no automation returns text", async () => {
@@ -431,24 +589,25 @@ describe("ScheduledDelivery", () => {
         "metrics",
         "export default async () => ({ kind: 'data', data: { value: 1 } })",
       );
-      const { save, sendText, internals } = setupAutomationDelivery(scope);
+      const { save, sendText } = setupAutomationDelivery();
 
-      await internals.handleCronFire(
+      await fire(
         cron({ scope, content: { kind: "automations" }, automationIds: [quiet.id, metrics.id] }),
       );
+      await EventBus.instance.idle();
 
       expect(sendText).not.toHaveBeenCalled();
       expect(save).not.toHaveBeenCalled();
     });
 
     test("falls back to the task fallback text when running the automations throws", async () => {
-      const { sendText, internals } = setupAutomationDelivery(scope);
+      const { sendText } = setupAutomationDelivery();
       const getByIds = spyOn(AutomationService.instance, "getByIds").mockRejectedValue(
         new Error("database unavailable"),
       );
 
       try {
-        await internals.handleCronFire(
+        await fire(
           cron({
             scope,
             content: {
@@ -459,9 +618,10 @@ describe("ScheduledDelivery", () => {
             automationIds: [1],
           }),
         );
-        await internals.handleCronFire(
+        await fire(
           cron({ scope, name: "raw", content: { kind: "automations" }, automationIds: [1] }),
         );
+        await EventBus.instance.idle();
       } finally {
         getByIds.mockRestore();
       }
@@ -476,20 +636,22 @@ describe("ScheduledDelivery", () => {
         "metrics",
         "export default async () => ({ kind: 'data', data: { value: 1 } })",
       );
-      const { save, sendText, internals, prompts } = setupAutomationDelivery(scope);
+      const { save, sendText, prompts } = setupAutomationDelivery();
 
-      await internals.handleCronFire(
+      await fire(
         cron({
           scope,
           content: { kind: "task", prompt: "Prepare briefing.", fallback: "Briefing unavailable." },
           automationIds: [metrics.id],
         }),
       );
+      await EventBus.instance.idle();
 
       expect(prompts[0]).toContain("Prepare briefing.\n\n<automation_outputs>");
       expect(prompts[0]).toContain('"data": {');
       expect(sendText).toHaveBeenCalledWith(chatId, "Your briefing.");
       expect(save).toHaveBeenCalledWith(
+        expect.anything(),
         scope,
         "[CRON TASK daily]: Your briefing.",
         expect.stringContaining("It also used the outputs of the job's automations."),
@@ -503,11 +665,10 @@ describe("ScheduledDelivery", () => {
         "broken",
         "export default async () => { throw new Error('boom'); }",
       );
-      const { save, sendText, internals } = setupAutomationDelivery(scope);
+      const { save, sendText } = setupAutomationDelivery();
 
-      await internals.handleCronFire(
-        cron({ scope, content: { kind: "automations" }, automationIds: [broken.id] }),
-      );
+      await fire(cron({ scope, content: { kind: "automations" }, automationIds: [broken.id] }));
+      await EventBus.instance.idle();
 
       expect(sendText).toHaveBeenCalledTimes(1);
       expect(sendText).toHaveBeenCalledWith(
@@ -515,6 +676,7 @@ describe("ScheduledDelivery", () => {
         'Automation "broken" failed in this run. Ask me what went wrong.',
       );
       expect(save).toHaveBeenCalledWith(
+        expect.anything(),
         scope,
         expect.stringMatching(/^\[CRON TASK daily\]: Automation "broken" failed/),
         expect.stringContaining("had an automation fail"),
@@ -528,15 +690,16 @@ describe("ScheduledDelivery", () => {
         "broken",
         "export default async () => { throw new Error('boom'); }",
       );
-      const { sendText, internals } = setupAutomationDelivery(scope);
+      const { sendText } = setupAutomationDelivery();
 
-      await internals.handleCronFire(
+      await fire(
         cron({
           scope,
           content: { kind: "task", prompt: "Prepare briefing.", fallback: "Briefing unavailable." },
           automationIds: [broken.id],
         }),
       );
+      await EventBus.instance.idle();
 
       expect(sendText).toHaveBeenCalledTimes(1);
       expect(sendText).toHaveBeenCalledWith(chatId, "Your briefing.");
@@ -548,13 +711,23 @@ describe("ScheduledDelivery", () => {
         "broken",
         "export default async () => { throw new Error('boom'); }",
       );
-      await AutomationService.instance.recordFailure(broken.id, "boom");
-      await AutomationService.instance.recordFailure(broken.id, "boom");
-      const { save, sendText, internals } = setupAutomationDelivery(scope);
+      await AutomationService.instance.recordFailure(
+        DatabaseConnector.instance.database,
+        broken.id,
+        "boom",
+      );
+      await AutomationService.instance.recordFailure(
+        DatabaseConnector.instance.database,
+        broken.id,
+        "boom",
+      );
+      const { save, sendText } = setupAutomationDelivery();
       const job = cron({ scope, content: { kind: "automations" }, automationIds: [broken.id] });
 
-      await internals.handleCronFire(job);
-      await internals.handleCronFire(job);
+      await fire(job);
+      await EventBus.instance.idle();
+      await fire(job);
+      await EventBus.instance.idle();
 
       expect(sendText).toHaveBeenCalledTimes(1);
       expect(sendText).toHaveBeenCalledWith(
@@ -565,32 +738,12 @@ describe("ScheduledDelivery", () => {
       );
       expect(save).toHaveBeenCalledTimes(1);
       expect(save).toHaveBeenCalledWith(
+        expect.anything(),
         scope,
         expect.stringMatching(/^\[CRON TASK daily\]: Automation "broken" was paused/),
         expect.stringContaining("paused a failing automation"),
         expect.any(Number),
       );
     });
-  });
-
-  test("waits for a still-connecting transport before giving up on a cron delivery", async () => {
-    const adapter = MessagingAdapter.instance as unknown as TMessagingInternals;
-    const internals = ScheduledDelivery.instance as unknown as TDeliveryInternals;
-    const sendTextMock = mock(async () => {});
-
-    adapter.transportWaitAttempts = 20;
-    adapter.transportWaitIntervalMs = 1;
-    adapter.transports.clear();
-
-    setTimeout(() => {
-      adapter.transports.set(EMessagePlatform.Signal, {
-        platform: EMessagePlatform.Signal,
-        sendText: sendTextMock,
-      });
-    }, 5);
-
-    await internals.handleCronFire(cron({ content: { kind: "text", text: "Take a break." } }));
-
-    expect(sendTextMock).toHaveBeenCalledWith("+100", "Take a break.");
   });
 });

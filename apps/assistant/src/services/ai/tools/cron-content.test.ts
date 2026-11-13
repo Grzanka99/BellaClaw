@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { CronSchedulerError, ECronJobStatus, ECronJobType } from "../../cron/types";
+import { ECronJobStatus, ECronJobType } from "../../cron/types";
 import { parseAutomationNames, parseCronContent, runCronJobOperation } from "./cron-content";
 
 describe("parseCronContent", () => {
@@ -208,16 +208,5 @@ describe("runCronJobOperation", () => {
     expect(result.reminderFallbackText).toBeUndefined();
     expect(result.taskPrompt).toBeUndefined();
     expect(result.taskFallbackText).toBeUndefined();
-  });
-
-  test("turns scheduler errors into tool errors with the scheduler code", async () => {
-    await expect(
-      runCronJobOperation(async () => {
-        throw new CronSchedulerError("job-not-found", "cancel", "No job found with name: daily");
-      }),
-    ).rejects.toMatchObject({
-      code: "job-not-found",
-      message: "cancel failed: No job found with name: daily",
-    });
   });
 });

@@ -1,5 +1,6 @@
 import { obj, str } from "@earendil-works/pi-schema";
-import { CronScheduler } from "../../../cron";
+import { fromCronJobRecord } from "../../../cron/types";
+import { EEventType } from "../../../events/catalog";
 import { runCronJobOperation } from "../cron-content";
 import { defineTool, requireChatId } from "../define-tool";
 import instructions from "./instructions.xml" with { type: "text" };
@@ -20,6 +21,14 @@ export const unscheduleCronJob = defineTool({
   execute: async (context, args) => {
     const scope = requireChatId(context.chatId);
 
-    return runCronJobOperation(() => CronScheduler.instance.cancel(args.name, scope));
+    return runCronJobOperation(async () => {
+      const cancelled = await context.events.request(
+        EEventType.CronJobCancelRequested,
+        { name: args.name, scope },
+        { outcome: EEventType.CronJobCancelled, step: undefined, key: scope, timeoutMs: undefined },
+      );
+
+      return fromCronJobRecord(cancelled.payload.job);
+    });
   },
 });

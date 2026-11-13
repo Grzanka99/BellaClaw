@@ -1,9 +1,14 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import type { TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
+import { eq } from "drizzle-orm";
 import { LlmClient, LlmResponseError } from "../ai/llm";
 import { EModelPurpose, ERole } from "../ai/types";
 import { ConversationStore } from "../conversation";
-import type { TSelectMemory } from "../database/schema";
+import { DatabaseConnector } from "../database";
+import { eventsTable, type TSelectMemory } from "../database/schema";
+import { resetEventTables } from "../database/test-utils";
+import { EventBus, type TEventContext } from "../events";
+import { EEventType } from "../events/catalog";
 import { SettingsService } from "../settings";
 import { DefaultConfigRecord } from "../settings/schema";
 import { Memory } from ".";
@@ -411,12 +416,14 @@ describe("FactDistiller", () => {
       secondText = "The user's bicycle is blue.";
     }
     const first = await ConversationStore.instance.saveUserMessage(
+      DatabaseConnector.instance.database,
       chatId,
       ERole.User,
       firstText,
       new Date(),
     );
     const second = await ConversationStore.instance.saveUserMessage(
+      DatabaseConnector.instance.database,
       chatId,
       ERole.User,
       secondText,
@@ -624,27 +631,44 @@ describe("FactDistiller", () => {
     expect(commit).not.toHaveBeenCalled();
   });
 
-  test("scheduleFactDrain catches up chats without an inbound message", async () => {
+  test("app.started refreshes chats without an inbound message on their memory lane", async () => {
+    await resetEventTables();
+    Object.assign(EventBus, { _instance: undefined });
     const { distiller, internals } = setupDistiller();
     (SettingsService as unknown as { _instance: unknown })._instance = {
       getAll: mock(async () => DefaultConfigRecord),
     };
     const windows = [makeWindow(), { ...makeWindow(), messages: [] }];
     internals.memory.loadLiveFactWindow = mock(async () => windows.shift());
+    internals.conversations.findChatIds = mock(async () => ["chat-comet"]);
     internals.processWindow = mock(async () => undefined);
+    distiller.setup();
+    const bus = EventBus.instance;
 
-    distiller.scheduleFactDrain("chat-comet", TEST_TRACE);
-    for (
-      let attempt = 0;
-      attempt < 20 && internals.processWindow.mock.calls.length < 1;
-      attempt++
-    ) {
-      await new Promise((resolve) => setTimeout(resolve, 0));
+    try {
+      await bus.start();
+      await bus.publish({
+        type: EEventType.AppStarted,
+        source: "test",
+        key: "global",
+        trace: TEST_TRACE,
+        payload: {},
+        causationId: undefined,
+        dedupeKey: undefined,
+      });
+      await bus.idle();
+
+      expect(internals.processWindow.mock.calls[0]?.[0]).toEqual(
+        expect.objectContaining({ window: makeWindow() }),
+      );
+      const refreshed = await DatabaseConnector.instance.database
+        .select({ key: eventsTable.key })
+        .from(eventsTable)
+        .where(eq(eventsTable.type, EEventType.MemoryFactsRefreshed));
+      expect(refreshed).toEqual([{ key: "chat-comet" }]);
+    } finally {
+      await bus.stop();
     }
-
-    expect(internals.processWindow.mock.calls[0]?.[0]).toEqual(
-      expect.objectContaining({ window: makeWindow() }),
-    );
   });
 
   test("a boot fact drain sweep never rejects when chat discovery fails", async () => {
@@ -653,6 +677,8 @@ describe("FactDistiller", () => {
       throw new Error("turso unreachable");
     });
 
-    await expect(distiller.scheduleFactDrainForAllChats("boot:1")).resolves.toBeUndefined();
+    await expect(
+      distiller.scheduleFactDrainForAllChats({} as TEventContext),
+    ).resolves.toBeUndefined();
   });
 });

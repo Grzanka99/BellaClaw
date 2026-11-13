@@ -1,6 +1,6 @@
 import { arr, obj, oneOf, opt, type Static, str } from "@earendil-works/pi-schema";
-import { CalendarService } from "../../../calendar";
 import { ALL_DAY_DATE } from "../../../calendar/recurrence";
+import { EEventType } from "../../../events/catalog";
 import { EConfigKey } from "../../../settings/schema";
 import { defineTool, requireChatId } from "../define-tool";
 import instructions from "./instructions.xml" with { type: "text" };
@@ -97,14 +97,23 @@ export const createCalendarEvent = defineTool({
   instructions,
   mode: "sequential",
   logSafe: [],
-  execute: async (context, args, signal) => {
-    const userId = requireChatId(context.chatId);
+  execute: async (context, args) => {
+    const chatId = requireChatId(context.chatId);
     const validatedArgs = validateCreateCalendarEventArgs(args);
-    return CalendarService.instance.createEvent({
-      ...validatedArgs,
-      userId,
-      timezone: validatedArgs.timezone ?? context.settings[EConfigKey.AiInstructionsTimezone],
-      signal,
-    });
+    const created = await context.events.request(
+      EEventType.CalendarEventCreateRequested,
+      {
+        ...validatedArgs,
+        chatId,
+        timezone: validatedArgs.timezone ?? context.settings[EConfigKey.AiInstructionsTimezone],
+      },
+      {
+        outcome: EEventType.CalendarEventCreated,
+        step: undefined,
+        key: chatId,
+        timeoutMs: undefined,
+      },
+    );
+    return created.payload.event;
   },
 });

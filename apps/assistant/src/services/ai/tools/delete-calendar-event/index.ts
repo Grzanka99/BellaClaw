@@ -1,5 +1,5 @@
 import { obj, oneOf, str } from "@earendil-works/pi-schema";
-import { CalendarService } from "../../../calendar";
+import { EEventType } from "../../../events/catalog";
 import { defineTool, requireChatId } from "../define-tool";
 import instructions from "./instructions.xml" with { type: "text" };
 
@@ -17,9 +17,18 @@ export const deleteCalendarEvent = defineTool({
   instructions,
   mode: "sequential",
   logSafe: [],
-  execute: async (context, args, signal) => {
-    const userId = requireChatId(context.chatId);
-    await CalendarService.instance.deleteEvent({ ...args, userId, signal });
+  execute: async (context, args) => {
+    const chatId = requireChatId(context.chatId);
+    await context.events.request(
+      EEventType.CalendarEventDeleteRequested,
+      { chatId, eventId: args.eventId, scope: args.scope },
+      {
+        outcome: EEventType.CalendarEventDeleted,
+        step: undefined,
+        key: chatId,
+        timeoutMs: undefined,
+      },
+    );
     return { success: true };
   },
 });

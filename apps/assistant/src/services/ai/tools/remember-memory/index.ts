@@ -1,6 +1,7 @@
 import { arr, int, obj, str } from "@earendil-works/pi-schema";
-import { EmbeddingClient } from "../../../embedding";
-import { Memory } from "../../../memory";
+import { CommandRejectedError } from "../../../events";
+import { EEventType } from "../../../events/catalog";
+import { EMBEDDING_UNAVAILABLE, MEMORY_REQUEST_TIMEOUT_MS } from "../../../memory";
 import { defineTool, requireChatId } from "../define-tool";
 import instructions from "./instructions.xml" with { type: "text" };
 
@@ -36,21 +37,28 @@ export const rememberMemory = defineTool({
       throw new Error("Memory fact must not be blank");
     }
 
-    const embedding = await EmbeddingClient.instance.embed(fact);
-    if (embedding === undefined) {
-      throw new Error("Embedding service unavailable");
-    }
-
     try {
-      const remembered = await Memory.instance.rememberFact(
-        chatId,
-        fact,
-        args.sourceMessage,
-        embedding,
-        args.supersedesFactIds,
+      const remembered = await context.events.request(
+        EEventType.MemoryFactRememberRequested,
+        {
+          chatId,
+          text: fact,
+          sourceMessage: args.sourceMessage,
+          supersedesFactIds: args.supersedesFactIds,
+        },
+        {
+          outcome: EEventType.MemoryFactRemembered,
+          step: undefined,
+          key: chatId,
+          timeoutMs: MEMORY_REQUEST_TIMEOUT_MS,
+        },
       );
-      return { rememberedFactId: remembered.id };
+      return { rememberedFactId: remembered.payload.factId };
     } catch (error) {
+      if (error instanceof CommandRejectedError && error.errorCode === EMBEDDING_UNAVAILABLE) {
+        throw new Error(error.message);
+      }
+
       throw new Error(`Memory remember failed: ${String(error)}`);
     }
   },
