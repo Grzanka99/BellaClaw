@@ -38,6 +38,8 @@ Compose starts the `dashboard` service with the other services, so `bun run serv
 - reaches the assistant's internal listener at `http://bellaclaw:3081` on the Compose network
 - keeps its own database in the `dashboard-data` volume
 - restarts only on failure, so an unconfigured dashboard stays stopped
+- receives only the Turso credentials, the public URL and the secret from `.env`, not the other
+  assistant secrets
 
 The assistant publishes no port for the internal listener.
 

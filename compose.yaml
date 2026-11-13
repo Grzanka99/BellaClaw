@@ -53,9 +53,11 @@ services:
     pull_policy: never
     container_name: bellaclaw-dashboard
     restart: on-failure
-    env_file:
-      - .env
     environment:
+      - TURSO_CONNECTION_URL=${TURSO_CONNECTION_URL:-}
+      - TURSO_AUTH_TOKEN=${TURSO_AUTH_TOKEN:-}
+      - BELLACLAW_DASHBOARD_PUBLIC_URL=${BELLACLAW_DASHBOARD_PUBLIC_URL:-}
+      - BELLACLAW_DASHBOARD_SECRET=${BELLACLAW_DASHBOARD_SECRET:-}
       - BELLACLAW_INTERNAL_API_URL=http://bellaclaw:3081
       - BELLACLAW_DASHBOARD_HOSTNAME=0.0.0.0
       - BELLACLAW_DASHBOARD_DB_PATH=/dashboard-data/dashboard.db
