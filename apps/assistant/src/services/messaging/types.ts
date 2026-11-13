@@ -1,3 +1,4 @@
+import type { TOption } from "@bellaclaw/shared";
 import { z } from "zod";
 
 export enum EMessagePlatform {
@@ -15,6 +16,29 @@ export const SUPPORTED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "
 export type TMessageTransport = {
   platform: EMessagePlatform;
   sendText(chatId: string, text: string): Promise<void>;
-  fetchAttachment(chatId: string, ref: TAttachmentRef): Promise<Uint8Array>;
+  // undefined when the file is larger than maxBytes
+  fetchAttachment(
+    chatId: string,
+    ref: TAttachmentRef,
+    maxBytes: number,
+  ): Promise<TOption<Uint8Array>>;
   deleteAttachment(chatId: string, ref: TAttachmentRef): Promise<void>;
 };
+
+// NOTE: the declared size is checked first, so an oversized file is refused without downloading it
+export async function readAttachment(
+  response: Response,
+  maxBytes: number,
+): Promise<TOption<Uint8Array>> {
+  if (Number(response.headers.get("content-length")) > maxBytes) {
+    await response.body?.cancel();
+    return undefined;
+  }
+
+  const data = new Uint8Array(await response.arrayBuffer());
+  if (data.byteLength > maxBytes) {
+    return undefined;
+  }
+
+  return data;
+}

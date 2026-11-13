@@ -137,12 +137,16 @@ export class SignalSingleton implements TMessageTransport {
     await this.client.sendText(chatId, text);
   }
 
-  public async fetchAttachment(_chatId: string, ref: TAttachmentRef): Promise<Uint8Array> {
+  public async fetchAttachment(
+    _chatId: string,
+    ref: TAttachmentRef,
+    maxBytes: number,
+  ): Promise<TOption<Uint8Array>> {
     if (this.client === undefined) {
       throw new Error("Signal client is not initialized");
     }
 
-    return this.client.fetchAttachment(ref.id);
+    return this.client.fetchAttachment(ref.id, maxBytes);
   }
 
   public async deleteAttachment(_chatId: string, ref: TAttachmentRef): Promise<void> {

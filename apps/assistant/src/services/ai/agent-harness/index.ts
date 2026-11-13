@@ -552,8 +552,8 @@ export class AgentHarness {
       block = { type: "text", text: NO_VISION_NOTE };
     } else if (args.images !== undefined) {
       try {
-        const data = await args.images.fetch(ref);
-        if (data.byteLength > MAX_IMAGE_BYTES) {
+        const data = await args.images.fetch(ref, MAX_IMAGE_BYTES);
+        if (data === undefined) {
           block = { type: "text", text: TOO_LARGE_NOTE };
         } else {
           block = {

@@ -8,6 +8,7 @@ import { MessagingAdapter } from "../messaging";
 import { createCanonicalChatKey } from "../messaging/chat-key";
 import {
   EMessagePlatform,
+  readAttachment,
   SUPPORTED_IMAGE_TYPES,
   type TAttachmentRef,
   type TMessageTransport,
@@ -117,7 +118,11 @@ export class DiscordSingleton implements TMessageTransport {
     await user.send(remainingText);
   }
 
-  public async fetchAttachment(chatId: string, ref: TAttachmentRef): Promise<Uint8Array> {
+  public async fetchAttachment(
+    chatId: string,
+    ref: TAttachmentRef,
+    maxBytes: number,
+  ): Promise<TOption<Uint8Array>> {
     const [messageId, attachmentId] = ref.id.split(":");
     if (messageId === undefined || attachmentId === undefined) {
       throw new Error("Invalid Discord attachment reference");
@@ -137,7 +142,7 @@ export class DiscordSingleton implements TMessageTransport {
       throw new Error(`Discord attachment fetch failed with status ${response.status}`);
     }
 
-    return new Uint8Array(await response.arrayBuffer());
+    return readAttachment(response, maxBytes);
   }
 
   // NOTE: Discord keeps the file with the message; there is nothing to delete

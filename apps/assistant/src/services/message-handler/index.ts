@@ -161,7 +161,8 @@ export class MessageHandler {
         conversation,
         images: {
           refs: attachments,
-          fetch: (ref) => MessagingAdapter.instance.fetchAttachment(chatId, ref),
+          fetch: (ref, maxBytes) =>
+            MessagingAdapter.instance.fetchAttachment(chatId, ref, maxBytes),
         },
         currentTimeContext: createCurrentTimeContext(settings, savedMessage.createdAt),
         chatId,

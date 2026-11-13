@@ -466,7 +466,7 @@ describe("MessageHandler", () => {
       // the next turn fetches the image in the history again
       expect(JSON.stringify(requests[1]?.messages)).toContain(JSON.stringify(image));
       expect(fetchAttachment).toHaveBeenCalledTimes(2);
-      expect(fetchAttachment).toHaveBeenCalledWith("image-turn", ref);
+      expect(fetchAttachment).toHaveBeenCalledWith("image-turn", ref, 5 * 1024 * 1024);
 
       const rows = await DatabaseConnector.instance.database
         .select()

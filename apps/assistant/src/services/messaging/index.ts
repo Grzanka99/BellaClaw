@@ -27,9 +27,13 @@ export class MessagingAdapter {
     this.transports.set(transport.platform, transport);
   }
 
-  public fetchAttachment(chatId: string, ref: TAttachmentRef): Promise<Uint8Array> {
+  public fetchAttachment(
+    chatId: string,
+    ref: TAttachmentRef,
+    maxBytes: number,
+  ): Promise<TOption<Uint8Array>> {
     const owner = this.resolve(chatId);
-    return owner.transport.fetchAttachment(owner.chatId, ref);
+    return owner.transport.fetchAttachment(owner.chatId, ref, maxBytes);
   }
 
   public deleteAttachment(chatId: string, ref: TAttachmentRef): Promise<void> {

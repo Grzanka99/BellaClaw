@@ -31,7 +31,8 @@ export type TAgentRunArgs = {
 
 export type TTurnImages = {
   refs: TAttachmentRef[];
-  fetch: (ref: TAttachmentRef) => Promise<Uint8Array>;
+  // undefined when the image is larger than maxBytes
+  fetch: (ref: TAttachmentRef, maxBytes: number) => Promise<TOption<Uint8Array>>;
 };
 
 export type TAgentRunResult = {

@@ -1,7 +1,7 @@
 import type { TOption } from "@bellaclaw/shared";
 import { createLogger, type TLogger } from "@bellaclaw/shared";
 import { z } from "zod";
-import { SUPPORTED_IMAGE_TYPES, type TAttachmentRef } from "../messaging/types";
+import { readAttachment, SUPPORTED_IMAGE_TYPES, type TAttachmentRef } from "../messaging/types";
 
 const RECONNECT_DELAY_MS = 5000;
 
@@ -154,13 +154,13 @@ export class SignalClient {
     }
   }
 
-  public async fetchAttachment(id: string): Promise<Uint8Array> {
+  public async fetchAttachment(id: string, maxBytes: number): Promise<TOption<Uint8Array>> {
     const response = await fetch(this.attachmentUrl(id));
     if (!response.ok) {
       throw new Error(`Signal attachment fetch failed with status ${response.status}`);
     }
 
-    return new Uint8Array(await response.arrayBuffer());
+    return readAttachment(response, maxBytes);
   }
 
   public async deleteAttachment(id: string): Promise<void> {
