@@ -11,12 +11,13 @@ BellaClaw is a Bun workspace orchestrated by Turborepo:
 | --- | --- |
 | `@bellaclaw/assistant` | Messaging, AI orchestration, authorization, scheduling, memory, settings, and the Turso database connection. |
 | `@bellaclaw/log-viewer` | Hono routes, query parsing, assets, and behavior-log rendering. |
+| `@bellaclaw/dashboard` | Per-user web control panel: accounts, sessions, chat links, message history, fact graph and model settings. |
 | `@bellaclaw/behavior-logs` | Behavior event types, SQLite schema, read/write access, and log CLI tools. |
 | `@bellaclaw/database` | Drizzle schema, the enums it stores, migrations, and drizzle-kit configs. |
 | `@bellaclaw/shared` | Primitives every workspace needs: `TOption`, `AsyncQueue`, the logger, and `REPOSITORY_ROOT`. |
 
-The apps do not import each other. Both depend on the behavior-log package and communicate through
-its shared SQLite contract.
+The apps do not import each other. The assistant and the log viewer depend on the behavior-log
+package and communicate through its shared SQLite contract.
 
 Repository-level paths (`.secrets`, hoisted `node_modules`, the default log database) resolve through
 `repositoryPath()` from `@bellaclaw/shared`. Workspaces never count `../` segments to the root, so
@@ -30,7 +31,7 @@ Services talk through one durable event log in SQLite; see the
 
 ![Every BellaClaw service talks through the event bus](event-architecture.svg)
 
-Requesters are conversation tools, slash commands and scheduling; command owners are cron, automations, memory, settings, calendar, mcp-auth and ai-auth. Reads from the allow-list (settings and authorization caches, read tools, drivers) are direct calls and are not drawn.
+Requesters are conversation tools, slash commands, scheduling and the internal API the dashboard calls; command owners are cron, automations, memory, settings, calendar, conversation, mcp-auth and ai-auth. Reads from the allow-list (settings and authorization caches, read tools, drivers) are direct calls and are not drawn.
 
 1. A Discord or Signal transport publishes `message.received` with a dedupe key per platform
    message.

@@ -85,6 +85,8 @@ export enum EEventType {
   CalendarEventUpdated = "calendar.event.updated",
   CalendarEventDeleteRequested = "calendar.event.delete.requested",
   CalendarEventDeleted = "calendar.event.deleted",
+  ConversationMessageDeleteRequested = "conversation.message.delete.requested",
+  ConversationMessageDeleted = "conversation.message.deleted",
   CommandRejected = "command.rejected",
   EventDeadLettered = "event.dead_lettered",
   AppStarted = "app.started",

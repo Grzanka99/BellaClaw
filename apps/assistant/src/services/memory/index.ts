@@ -128,6 +128,38 @@ export class Memory {
         }
       },
     });
+    // a deleted message takes the live facts it was the source of
+    bus.subscribe({
+      consumer: "memory",
+      type: EEventType.ConversationMessageDeleted,
+      mode: ESubscriptionMode.Durable,
+      backoffMs: [1_000, 5_000, 30_000],
+      handler: async (event, ctx) => {
+        const { chatId, messageIds } = event.payload;
+
+        await ctx.complete(async (tx, emit) => {
+          const facts = await tx
+            .select({ id: factsTable.id })
+            .from(factsTable)
+            .where(
+              and(
+                eq(factsTable.chatId, chatId),
+                inArray(factsTable.sourceMessageId, messageIds),
+                isNull(factsTable.supersededBy),
+                isNull(factsTable.forgottenAt),
+              ),
+            );
+
+          if (facts.length === 0) {
+            return;
+          }
+
+          const factIds = facts.map((fact) => fact.id);
+          await this.forgetFacts(tx, chatId, factIds);
+          emit(EEventType.MemoryFactsForgotten, { chatId, factIds }, undefined, undefined);
+        });
+      },
+    });
   }
 
   public async loadLiveFactWindow(chatId: string): Promise<TLiveFactWindow> {

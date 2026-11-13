@@ -8,6 +8,7 @@ import { AutomationService } from "../automation";
 import { CalendarService } from "../calendar";
 import { Commands } from "../commands";
 import { CronScheduler } from "../cron";
+import { setupInternalApi } from "../internal-api";
 import { McpService } from "../mcp";
 import { setupMcpAuth } from "../mcp/auth";
 import { Memory } from "../memory";
@@ -55,6 +56,12 @@ const ALLOWED: Record<string, string> = {
   "discord -> messaging": "registerTransport: boot wiring of the driver, no stored state",
   "discord -> messaging/chat-key": "pure functions",
   "events -> automation/runner": "enums the catalog payloads use",
+  "internal-api -> ai/llm": "driver",
+  "internal-api -> ai/model-preferences": "pure helpers",
+  "internal-api -> ai/providers/registry": "driver: the model catalog",
+  "internal-api -> ai/tools/get-settings": "resolveAiProvider, a pure helper",
+  "internal-api -> ai/tools/update-settings/ai-settings":
+    "checks and verification that prepare the settings command",
   "mcp -> ai/llm": "driver helper",
   "memory -> ai/llm": "driver",
   "memory -> conversation": "ConversationStore.findChatIds read",
@@ -85,6 +92,8 @@ const ALLOWED_WAITS: Record<string, string[]> = {
   scheduling: ["automations", "memory"],
   commands: ["mcp-auth", "ai-auth", "calendar"],
   "ai-auth": ["settings"],
+  // an HTTP request, on no lane: it awaits the outcome through live subscriptions
+  "internal-api": ["settings", "conversation"],
 };
 
 const STATIC_IMPORT =
@@ -240,6 +249,7 @@ describe("boundaries", () => {
       setupAiAuth();
       setupMcpAuth();
       McpService.instance.setup();
+      setupInternalApi();
       await AuthorizationService.instance.setup();
       await CalendarService.instance.setup();
     });
@@ -269,6 +279,7 @@ describe("boundaries", () => {
         "setupAiAuth",
         "setupMcpAuth",
         "McpService.setup",
+        "setupInternalApi",
         "AuthorizationService.setup",
         "CalendarService.setup",
       ]);

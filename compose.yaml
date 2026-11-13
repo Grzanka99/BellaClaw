@@ -47,6 +47,24 @@ services:
     volumes:
       - bellaclaw-data:/app-data:ro
 
+  dashboard:
+    image: bellaclaw:local
+    pull_policy: never
+    container_name: bellaclaw-dashboard
+    restart: on-failure
+    env_file:
+      - .env
+    environment:
+      - BELLACLAW_INTERNAL_API_URL=http://bellaclaw:3081
+      - BELLACLAW_DASHBOARD_DB_PATH=/dashboard-data/dashboard.db
+    depends_on:
+      - bellaclaw
+    command: ["bun", "run", "--cwd", "apps/dashboard", "start"]
+    ports:
+      - "127.0.0.1:8988:8988"
+    volumes:
+      - dashboard-data:/dashboard-data
+
   signal-cli:
     image: docker.io/bbernhard/signal-cli-rest-api:0.100-rootless
     container_name: bellaclaw-signal-cli
@@ -62,5 +80,6 @@ services:
 
 volumes:
   bellaclaw-data:
+  dashboard-data:
   ollama-data:
   signal-cli-data:
