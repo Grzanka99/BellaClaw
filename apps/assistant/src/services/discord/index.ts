@@ -137,6 +137,10 @@ export class DiscordSingleton implements TMessageTransport {
       throw new Error("Discord attachment is missing");
     }
 
+    if (attachment.size > maxBytes) {
+      return undefined;
+    }
+
     const response = await fetch(attachment.url);
     if (!response.ok) {
       throw new Error(`Discord attachment fetch failed with status ${response.status}`);
