@@ -41,9 +41,40 @@ The package scripts include the Signal profile:
 | Command | Action |
 | --- | --- |
 | `bun run server:init` | Build, rebuild embeddings, and start all services. |
-| `bun run server:update` | Rebuild without cache, recreate all services, and remove dangling images. |
+| `bun run server:update` | Rebuild without cache, recreate all services, and remove dangling BellaClaw images. |
 | `bun run server:rebuild-embeddings` | Stop the assistant, pull the embedding model, re-embed all facts, and start the assistant on the current image. |
 | `bun run server:down` | Stop all services, including the Signal profile. |
+
+## Self-Update
+
+The assistant container updates itself from `main` of the checkout's `origin` remote. It needs
+only the running containers.
+
+- `!update` in an activated chat checks and updates at once.
+- `BELLACLAW_AUTO_UPDATE=true` also checks every day at 04:00, container time.
+
+An update downloads the new commit into the `bellaclaw-src` volume, installs its dependencies,
+stops the assistant, applies the database migrations, and starts the new code. The assistant is
+down for well under a minute. The log viewer follows within 30 seconds. Only the assistant and the log viewer
+restart.
+
+Every outcome is sent to all authorized chats:
+
+| Case | Result |
+| --- | --- |
+| Update installed | Running the new commit. |
+| CI of the commit failed | Skipped. A commit with no CI result is installed. |
+| Download or install failed | Still running the old commit. |
+| Migration failed | Old commit restarted. |
+| New commit does not start, no new migration | Rolled back to the old commit. |
+| New commit does not start after a migration | No rollback and no notice: the container restarts the new commit until it is fixed. Check `podman logs bellaclaw`. |
+| `Containerfile`, `compose.yaml` or the supervisor changed | Held. Run `git pull && bun run server:update` on the server. |
+
+A failed commit is not retried until `main` moves or `!update` is sent. A rollback
+keeps the migrated database schema.
+
+A release is a clean copy of `main`: local changes in the server checkout are not carried over.
+`bun run server:update` replaces any self-updated release with the checkout's commit.
 
 ## AI Provider Login
 

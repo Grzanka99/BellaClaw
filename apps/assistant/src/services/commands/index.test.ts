@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -79,6 +79,27 @@ describe("commands consumer", () => {
         receivedAt: 1_234,
         platform: EMessagePlatform.Discord,
       },
+    ]);
+  });
+
+  test("!update asks the supervisor for an update, and says so when there is none", async () => {
+    const send = mock((_message: unknown) => true);
+
+    await authorized("signal:+100", "!update", 1);
+    process.send = send;
+    try {
+      await authorized("signal:+100", "!update", 2);
+    } finally {
+      process.send = undefined;
+    }
+
+    expect(send.mock.calls).toEqual([[{ type: "update" }]]);
+    expect(await payloadsOf(EEventType.ReplyReady)).toEqual([
+      {
+        chatId: "signal:+100",
+        text: "Self-update is unavailable: the bot is not running under its supervisor.",
+      },
+      { chatId: "signal:+100", text: "Checking for an update." },
     ]);
   });
 

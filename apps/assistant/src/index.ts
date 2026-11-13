@@ -92,6 +92,7 @@ async function init(): Promise<void> {
       durationMs: performance.now() - start,
       summary: "Application boot completed",
     });
+    process.send?.({ type: "ready" });
   } catch (error) {
     let serializedError = String(error);
 
@@ -132,5 +133,9 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
     });
   });
 }
+
+process.on("message", (message) => {
+  void Notices.instance.handleSupervisorMessage(message);
+});
 
 init();
