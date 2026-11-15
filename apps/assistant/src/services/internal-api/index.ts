@@ -33,6 +33,9 @@ import { SettingsService, type TConfigUpdate } from "../settings";
 import { EConfigKey, type TConfigRecord } from "../settings/schema";
 
 const COMMAND_TIMEOUT_MS = 60_000;
+// NOTE: a delete waits on the chat's lane behind a running turn and its compaction. Just under
+// the dashboard's 250 s wait for this API, so the dashboard gets the answer.
+const DELETE_TIMEOUT_MS = 240_000;
 
 // the shared body, with provider and purpose narrowed to the assistant's enums
 const SModelUpdate = SDashboardModelUpdate.extend({
@@ -88,13 +91,14 @@ async function requestOutcome<T extends EEventType, R>(
   chatId: string,
   type: T,
   payload: TEventPayloads[T],
+  timeoutMs: number,
   timeoutMessage: string,
 ): Promise<R> {
   const outcome = Promise.withResolvers<R>();
   pending.set(trace.turnId, outcome);
   const timer = setTimeout(() => {
     outcome.reject(new Error(timeoutMessage));
-  }, COMMAND_TIMEOUT_MS);
+  }, timeoutMs);
 
   try {
     const [result] = await Promise.all([
@@ -167,6 +171,7 @@ async function updateModel(chatId: string, body: unknown): Promise<TConfigRecord
     chatId,
     EEventType.SettingsUpdateRequested,
     { ownerKey: chatId, updates },
+    COMMAND_TIMEOUT_MS,
     "Settings update timed out",
   );
 }
@@ -224,7 +229,9 @@ export async function handleInternalApiRequest(
           chatId,
           EEventType.ConversationMessageDeleteRequested,
           { chatId, messageId },
-          "Message delete timed out",
+          DELETE_TIMEOUT_MS,
+          // the command stays queued on the lane
+          "The assistant is busy with this chat. The message is deleted once it finishes.",
         ),
       };
 
@@ -286,6 +293,7 @@ export async function stopInternalApiServer(): Promise<void> {
     return;
   }
 
-  await server.stop();
+  // NOTE: open requests are closed. They wait on the bus, which stops at the same time.
+  await server.stop(true);
   server = undefined;
 }

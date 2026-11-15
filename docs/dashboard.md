@@ -38,8 +38,7 @@ Compose starts the `dashboard` service with the other services, so `bun run serv
 - reaches the assistant's internal listener at `http://bellaclaw:3081` on the Compose network
 - keeps its own database in the `dashboard-data` volume
 - restarts only on failure, so an unconfigured dashboard stays stopped
-- receives only the Turso credentials, the public URL and the secret from `.env`, not the other
-  assistant secrets
+- receives only the Turso credentials, the public URL and the secret from `.env`
 
 The assistant publishes no port for the internal listener.
 
@@ -73,13 +72,13 @@ dashboard.example.com {
    expires after 10 minutes.
 3. Open it, then create an account or log in. The chat is linked to that account.
 
-There is no open sign-up: an account can only be created from a link.
+An account can only be created from a link.
 
 One account can hold many chats. A chat belongs to one account at a time; the latest redeemed link
 wins.
 
-There is no password reset. If you forget the password, send `!dashboard` again and create a new
-account. The chat moves to it.
+If you forget the password, send `!dashboard` again and create a new account. The chat moves to
+it.
 
 ## Tabs
 

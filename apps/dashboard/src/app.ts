@@ -162,7 +162,9 @@ export function createApp({
   });
 
   app.use(async (c, next) => {
-    if (c.req.method !== "GET" && c.req.header("Origin") !== config.publicOrigin) {
+    const reads = c.req.method === "GET" || c.req.method === "HEAD";
+
+    if (!reads && c.req.header("Origin") !== config.publicOrigin) {
       return c.json<TApiError>({ error: "Forbidden" }, 403);
     }
 
@@ -194,7 +196,7 @@ export function createApp({
       return c.json(invalidBody(body.error), 400);
     }
 
-    // no open sign-up: nothing is hashed or created without a usable link
+    // nothing is hashed or created without a usable link
     const link = findUnusedLink(body.data.token, Date.now());
 
     if (link === undefined) {
