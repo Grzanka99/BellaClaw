@@ -1,8 +1,8 @@
+import { ECronJobType, EEventType } from "@bellaclaw/database";
 import { arr, obj, opt, type Static, str } from "@earendil-works/pi-schema";
 import { AutomationService } from "../../../automation";
 import { CronScheduler } from "../../../cron";
-import { ECronJobType, fromCronJobRecord } from "../../../cron/types";
-import { EEventType } from "../../../events/catalog";
+import { fromCronJobRecord } from "../../../cron/types";
 import { EConfigKey } from "../../../settings/schema";
 import { runAutomationOperation } from "../automation-errors";
 import {

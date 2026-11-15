@@ -1,7 +1,7 @@
+import { EEventType } from "@bellaclaw/database";
 import { arr, int, map, obj, opt, str, unknown } from "@earendil-works/pi-schema";
 import { MAX_AUTOMATION_OUTPUT_CAP_BYTES } from "../../../automation";
 import { AUTOMATION_RUN_TIMEOUT_MS } from "../../../automation/runner";
-import { EEventType } from "../../../events/catalog";
 import { EConfigKey } from "../../../settings/schema";
 import { runAutomationOperation } from "../automation-errors";
 import { defineTool, requireChatId } from "../define-tool";

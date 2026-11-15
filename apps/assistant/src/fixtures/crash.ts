@@ -1,16 +1,21 @@
 // Boots the app with a stub transport and a stub model, and dies with SIGKILL at a named point.
 // usage: crash.ts <directory> <point> [message...]
 // The directory holds the sends and model logs; the cwd holds the test database.
+
 import { appendFileSync } from "node:fs";
 import { join } from "node:path";
 import { AppLogger } from "@bellaclaw/behavior-logs";
+import {
+  EEventType,
+  eventDeliveriesTable,
+  eventsTable,
+  type TSelectEvent,
+} from "@bellaclaw/database";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { and, eq } from "drizzle-orm";
 import { AgentHarness } from "../services/ai/agent-harness";
 import { DatabaseConnector } from "../services/database";
-import { eventDeliveriesTable, eventsTable, type TSelectEvent } from "../services/database/schema";
 import { ESubscriptionMode, EventBus } from "../services/events";
-import { EEventType } from "../services/events/catalog";
 import { FactDistiller } from "../services/memory/distill";
 import { MessagingAdapter } from "../services/messaging";
 import { EMessagePlatform } from "../services/messaging/types";

@@ -1,6 +1,6 @@
+import { EEventType } from "@bellaclaw/database";
 import { obj, str } from "@earendil-works/pi-schema";
 import { fromCronJobRecord } from "../../../cron/types";
-import { EEventType } from "../../../events/catalog";
 import { runCronJobOperation } from "../cron-content";
 import { defineTool, requireChatId } from "../define-tool";
 import instructions from "./instructions.xml" with { type: "text" };

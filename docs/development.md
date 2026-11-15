@@ -11,13 +11,13 @@ Fill in `.env` as described in [Configuration](configuration.md).
 
 ## Run
 
-Start both apps once:
+Start the apps once:
 
 ```bash
 bun run start
 ```
 
-Start both apps with file watching:
+Start the apps with file watching:
 
 ```bash
 bun run dev

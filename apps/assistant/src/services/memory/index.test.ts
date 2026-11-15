@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { EEventType, factsTable } from "@bellaclaw/database";
 import { and, eq, sql } from "drizzle-orm";
 import { ERole } from "../ai/types";
 import { ConversationStore } from "../conversation";
 import { DatabaseConnector } from "../database";
-import { factsTable } from "../database/schema";
 import { resetEventTables } from "../database/test-utils";
 import { EmbeddingClient } from "../embedding";
 import { CommandRejectedError, EventBus } from "../events";
-import { EEventType, ERejectionCode } from "../events/catalog";
+import { ERejectionCode } from "../events/catalog";
 import { withEventContext } from "../events/test-utils";
 import { EMBEDDING_UNAVAILABLE, MEMORY_REQUEST_TIMEOUT_MS } from "./index";
 

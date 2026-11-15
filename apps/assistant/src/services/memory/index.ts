@@ -1,18 +1,19 @@
+import {
+  EEventType,
+  EMBEDDING_DIMENSIONS,
+  factDistillationStateTable,
+  factsTable,
+  memoriesTable,
+} from "@bellaclaw/database";
 import { createLogger, type TLogger, type TOption } from "@bellaclaw/shared";
 import { and, asc, desc, eq, gt, inArray, isNull, lte, sql } from "drizzle-orm";
 import type { LibSQLDatabase } from "drizzle-orm/libsql";
 import { z } from "zod";
 import { ERole } from "../ai/types";
 import { DatabaseConnector, type TDatabaseTransaction } from "../database";
-import {
-  EMBEDDING_DIMENSIONS,
-  factDistillationStateTable,
-  factsTable,
-  memoriesTable,
-} from "../database/schema";
 import { EmbeddingClient } from "../embedding";
 import { commandFailed, ESubscriptionMode, EventBus, type TEventContext } from "../events";
-import { EEventType, type TEvent } from "../events/catalog";
+import type { TEvent } from "../events/catalog";
 import {
   SPreparedFact,
   type TFact,
@@ -125,6 +126,38 @@ export class Memory {
         } catch (error) {
           await this.reject(event.type, error, undefined, ctx);
         }
+      },
+    });
+    // a deleted message takes the live facts it was the source of
+    bus.subscribe({
+      consumer: "memory",
+      type: EEventType.ConversationMessageDeleted,
+      mode: ESubscriptionMode.Durable,
+      backoffMs: [1_000, 5_000, 30_000],
+      handler: async (event, ctx) => {
+        const { chatId, messageIds } = event.payload;
+
+        await ctx.complete(async (tx, emit) => {
+          const facts = await tx
+            .select({ id: factsTable.id })
+            .from(factsTable)
+            .where(
+              and(
+                eq(factsTable.chatId, chatId),
+                inArray(factsTable.sourceMessageId, messageIds),
+                isNull(factsTable.supersededBy),
+                isNull(factsTable.forgottenAt),
+              ),
+            );
+
+          if (facts.length === 0) {
+            return;
+          }
+
+          const factIds = facts.map((fact) => fact.id);
+          await this.forgetFacts(tx, chatId, factIds);
+          emit(EEventType.MemoryFactsForgotten, { chatId, factIds }, undefined, undefined);
+        });
       },
     });
   }

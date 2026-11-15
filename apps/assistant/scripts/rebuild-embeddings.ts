@@ -1,8 +1,8 @@
+import { factsTable } from "@bellaclaw/database";
 import { AsyncQueue, createLogger, logger } from "@bellaclaw/shared";
 import { asc, eq } from "drizzle-orm";
 import type { LibSQLDatabase } from "drizzle-orm/libsql";
 import { DatabaseConnector } from "../src/services/database";
-import { factsTable } from "../src/services/database/schema";
 import { EmbeddingClient } from "../src/services/embedding";
 
 const BATCH_SIZE = 32;

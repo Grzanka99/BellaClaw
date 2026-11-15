@@ -1,4 +1,4 @@
-import { EEventType } from "../events/catalog";
+import { EEventType } from "@bellaclaw/database";
 import { testEventRequester } from "../events/test-utils";
 import {
   fromCronJobRecord,

@@ -29,7 +29,7 @@ const CI_PASSED_CONCLUSIONS = ["success", "skipped", "neutral"];
 // an error message goes to chat, and a remote URL can carry a token
 const URL_CREDENTIALS = /\/\/[^/@\s]+@/g;
 
-const SRole = z.enum(["assistant", "log-viewer"]);
+const SRole = z.enum(["assistant", "log-viewer", "dashboard"]);
 const SChildMessage = z.object({ type: z.enum(["ready", "update"]) });
 const SCheckRuns = z.object({
   check_runs: z.array(z.object({ conclusion: z.string().nullable() })),
@@ -40,7 +40,9 @@ const role = SRole.safeParse(Bun.argv[2]);
 const releasesDir = Bun.env.BELLACLAW_RELEASES_DIR;
 
 if (!role.success || !releasesDir) {
-  throw new Error("Usage: BELLACLAW_RELEASES_DIR=<dir> supervisor.ts assistant|log-viewer");
+  throw new Error(
+    "Usage: BELLACLAW_RELEASES_DIR=<dir> supervisor.ts assistant|log-viewer|dashboard",
+  );
 }
 
 const root: string = releasesDir;
@@ -91,7 +93,7 @@ async function currentDir(): Promise<string> {
 async function setCurrent(sha: string): Promise<void> {
   const link = join(root, CURRENT_LINK);
 
-  // renamed into place, so the log viewer never sees the link missing
+  // renamed into place, so a follower never sees the link missing
   await symlink(sha, `${link}.new`);
   await rename(`${link}.new`, link);
 }
@@ -212,7 +214,7 @@ async function ciState(repo: string, sha: string): Promise<ECiState> {
 }
 
 async function listMigrations(dir: string): Promise<string> {
-  return (await readdir(join(dir, "apps/assistant/migrations"))).sort().join("\n");
+  return (await readdir(join(dir, "packages/database/migrations"))).sort().join("\n");
 }
 
 async function runUpdate(manual: boolean): Promise<void> {
@@ -416,7 +418,7 @@ if (role.data === "assistant") {
     scheduleDailyUpdate();
   }
 } else {
-  // the log viewer only follows the release the assistant's supervisor selects
+  // the log viewer and the dashboard only follow the release the assistant's supervisor selects
   let dir = await currentDir();
 
   void startApp(dir);

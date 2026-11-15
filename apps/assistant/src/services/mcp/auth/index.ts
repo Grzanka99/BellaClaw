@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { createSystemTurnId } from "@bellaclaw/behavior-logs";
+import { EEventType } from "@bellaclaw/database";
 import { AsyncQueue, logger, type TOption } from "@bellaclaw/shared";
 import { auth, type OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
 import type {
@@ -9,7 +10,6 @@ import type {
 } from "@modelcontextprotocol/sdk/shared/auth.js";
 import type { FetchLike } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { commandFailed, ESubscriptionMode, EventBus } from "../../events";
-import { EEventType } from "../../events/catalog";
 import { getMcpProfile, type TMcpProfile } from "../config";
 import { McpAuthCredentialStore } from "./store";
 

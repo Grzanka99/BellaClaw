@@ -86,7 +86,7 @@ describe("supervisor", () => {
       Containerfile: "FROM scratch\n",
       "compose.yaml": "services: {}\n",
       "apps/assistant/scripts/migrate.ts": "",
-      "apps/assistant/migrations/0000.sql": "",
+      "packages/database/migrations/0000.sql": "",
       "apps/assistant/src/index.ts": APP,
       "apps/assistant/scripts/supervisor.ts": await Bun.file(
         join(import.meta.dir, "supervisor.ts"),

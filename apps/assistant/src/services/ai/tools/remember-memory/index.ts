@@ -1,6 +1,6 @@
+import { EEventType } from "@bellaclaw/database";
 import { arr, int, obj, str } from "@earendil-works/pi-schema";
 import { CommandRejectedError } from "../../../events";
-import { EEventType } from "../../../events/catalog";
 import { EMBEDDING_UNAVAILABLE, MEMORY_REQUEST_TIMEOUT_MS } from "../../../memory";
 import { defineTool, requireChatId } from "../define-tool";
 import instructions from "./instructions.xml" with { type: "text" };

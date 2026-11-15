@@ -1,6 +1,5 @@
+import { EAutomationStatus, EEventType } from "@bellaclaw/database";
 import { obj, oneOf, str } from "@earendil-works/pi-schema";
-import { EAutomationStatus } from "../../../automation";
-import { EEventType } from "../../../events/catalog";
 import { runAutomationOperation } from "../automation-errors";
 import { defineTool, requireChatId } from "../define-tool";
 import instructions from "./instructions.xml" with { type: "text" };

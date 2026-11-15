@@ -1,9 +1,9 @@
 import { createMessageTurnId } from "@bellaclaw/behavior-logs";
+import { EEventType } from "@bellaclaw/database";
 import type { TOption } from "@bellaclaw/shared";
 import { createLogger, type TLogger } from "@bellaclaw/shared";
 import { ChannelType, Client, Events, GatewayIntentBits, type Message, Partials } from "discord.js";
 import { EventBus } from "../events";
-import { EEventType } from "../events/catalog";
 import { MessagingAdapter } from "../messaging";
 import { createCanonicalChatKey } from "../messaging/chat-key";
 import {

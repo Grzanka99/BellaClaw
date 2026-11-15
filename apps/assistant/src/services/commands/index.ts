@@ -1,8 +1,10 @@
+import { EEventType } from "@bellaclaw/database";
 import type { TOption } from "@bellaclaw/shared";
 import { ESubscriptionMode, EventBus, type TEventContext } from "../events";
-import { EEventType, type TEvent } from "../events/catalog";
+import type { TEvent } from "../events/catalog";
 import { aiAuthCommand } from "./ai-auth";
 import { calendarAddReadCommand, calendarAddWriteCommand } from "./calendar-add";
+import { dashboardCommand } from "./dashboard";
 import { mcpAuthCommand } from "./mcp-auth";
 import { mcpPromptCommand, mcpPromptsCommand } from "./mcp-prompts";
 import { COMMAND_PREFIX, type TCommand, type TCommandResult } from "./types";
@@ -16,6 +18,7 @@ const REGISTERED_COMMANDS: TCommand[] = [
   mcpPromptCommand,
   aiAuthCommand,
   updateCommand,
+  dashboardCommand,
 ];
 
 export function formatCommandList(): string {

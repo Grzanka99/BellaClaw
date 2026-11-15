@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { EEventType, userConfigsTable } from "@bellaclaw/database";
 import { eq } from "drizzle-orm";
 import { DatabaseConnector } from "../database";
-import { userConfigsTable } from "../database/schema";
 import { resetEventTables, resetUserConfigsTable } from "../database/test-utils";
 import { EventBus } from "../events";
-import { EEventType, ERejectionCode } from "../events/catalog";
+import { ERejectionCode } from "../events/catalog";
 import { withEventContext } from "../events/test-utils";
 import { DefaultConfigRecord, EConfigKey } from "./schema";
 

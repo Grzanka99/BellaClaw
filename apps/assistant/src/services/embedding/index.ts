@@ -1,6 +1,6 @@
+import { EMBEDDING_DIMENSIONS } from "@bellaclaw/database";
 import { createLogger, type TOption } from "@bellaclaw/shared";
 import { z } from "zod";
-import { EMBEDDING_DIMENSIONS } from "../database/schema";
 
 const DEFAULT_BASE_URL = "http://localhost:11434";
 const DEFAULT_MODEL = "embeddinggemma-2:270m";

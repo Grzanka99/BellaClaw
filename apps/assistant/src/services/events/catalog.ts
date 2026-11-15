@@ -1,91 +1,22 @@
 import type { TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
+import {
+  EAutomationStatus,
+  ECronFinishedReason,
+  ECronJobStatus,
+  ECronJobType,
+  EEventType,
+} from "@bellaclaw/database";
 import type { TOption } from "@bellaclaw/shared";
 import { z } from "zod";
 import { EAiProvider } from "../ai/types";
 import { EAuthorizationDecision, SAuthorizationState } from "../authorization/schema";
 import { EAutomationRunMode, EAutomationRunOutcome } from "../automation/runner";
-import { EAutomationStatus } from "../automation/types";
-import { ECronFinishedReason, ECronJobStatus, ECronJobType } from "../cron/types";
 import { EMessagePlatform, SAttachmentRef } from "../messaging/types";
 import { EConfigKey } from "../settings/schema";
 
 export enum EEventKind {
   Event = "event",
   Command = "command",
-}
-
-export enum EEventType {
-  MessageReceived = "message.received",
-  MessageAuthorized = "message.authorized",
-  MessageRejected = "message.rejected",
-  AuthorizationChanged = "authorization.changed",
-  TurnRequested = "turn.requested",
-  TurnStarted = "turn.started",
-  TurnCompleted = "turn.completed",
-  TurnFailed = "turn.failed",
-  ReplyReady = "reply.ready",
-  NoticeReady = "notice.ready",
-  DeliveryReady = "delivery.ready",
-  MessageSent = "message.sent",
-  CronFired = "cron.fired",
-  CronTaskStarted = "cron.task.started",
-  CronJobScheduleRequested = "cron.job.schedule.requested",
-  CronJobScheduled = "cron.job.scheduled",
-  CronJobCancelRequested = "cron.job.cancel.requested",
-  CronJobCancelled = "cron.job.cancelled",
-  CronAutomationDetached = "cron.automation.detached",
-  AutomationDeleteRequested = "automation.delete.requested",
-  AutomationDeleted = "automation.deleted",
-  AutomationRunRequested = "automation.run.requested",
-  AutomationRunCompleted = "automation.run.completed",
-  AutomationPreviewRequested = "automation.preview.requested",
-  AutomationPreviewed = "automation.previewed",
-  AutomationSaveRequested = "automation.save.requested",
-  AutomationSaved = "automation.saved",
-  AutomationStatusSetRequested = "automation.status.set.requested",
-  AutomationStatusChanged = "automation.status.changed",
-  McpAuthConnected = "mcp.auth.connected",
-  AiAuthLoginNeeded = "ai.auth.login.needed",
-  AiAuthLoginCompleted = "ai.auth.login.completed",
-  AiAuthLoginFailed = "ai.auth.login.failed",
-  McpAuthCredentialsChanged = "mcp.auth.credentials.changed",
-  McpAuthConnectRequested = "mcp.auth.connect.requested",
-  McpAuthLinkCreated = "mcp.auth.link.created",
-  McpAuthDisconnectRequested = "mcp.auth.disconnect.requested",
-  McpAuthDisconnected = "mcp.auth.disconnected",
-  McpAuthTokenSaveRequested = "mcp.auth.token.save.requested",
-  McpAuthTokenSaved = "mcp.auth.token.saved",
-  AiAuthLoginRequested = "ai.auth.login.requested",
-  AiAuthLoginStarted = "ai.auth.login.started",
-  AiAuthLogoutRequested = "ai.auth.logout.requested",
-  AiAuthLoggedOut = "ai.auth.logged_out",
-  AiAuthDiagnoseRequested = "ai.auth.diagnose.requested",
-  AiAuthDiagnosed = "ai.auth.diagnosed",
-  MemoryFactsRefreshRequested = "memory.facts.refresh.requested",
-  MemoryFactsRefreshed = "memory.facts.refreshed",
-  MemoryFactRememberRequested = "memory.fact.remember.requested",
-  MemoryFactRemembered = "memory.fact.remembered",
-  MemoryFactsForgetRequested = "memory.facts.forget.requested",
-  MemoryFactsForgotten = "memory.facts.forgotten",
-  SettingsUpdateRequested = "settings.update.requested",
-  SettingsChanged = "settings.changed",
-  CalendarSourceAddRequested = "calendar.source.add.requested",
-  CalendarSourceAdded = "calendar.source.added",
-  CalendarSourceRemoveRequested = "calendar.source.remove.requested",
-  CalendarSourceRemoved = "calendar.source.removed",
-  CalendarEventCreateRequested = "calendar.event.create.requested",
-  CalendarEventCreated = "calendar.event.created",
-  CalendarEventUpdateRequested = "calendar.event.update.requested",
-  CalendarEventUpdated = "calendar.event.updated",
-  CalendarEventDeleteRequested = "calendar.event.delete.requested",
-  CalendarEventDeleted = "calendar.event.deleted",
-  CommandRejected = "command.rejected",
-  EventDeadLettered = "event.dead_lettered",
-  AppStarted = "app.started",
-  // NOTE: test types for the bus tests; real types arrive with their phase
-  TestNoted = "test.noted",
-  TestSecret = "test.secret",
-  TestRequested = "test.requested",
 }
 
 export enum ERejectionCode {
@@ -450,6 +381,15 @@ const SCalendarEventChanged = z
   .object({ chatId: z.string(), event: z.record(z.string(), z.unknown()) })
   .strict();
 
+const SConversationMessageDeleteRequested = z
+  .object({ chatId: z.string(), messageId: z.number().int() })
+  .strict();
+
+// messageIds: every removed row, the message and the tool rows that went with it
+const SConversationMessageDeleted = z
+  .object({ chatId: z.string(), messageIds: z.array(z.number().int()) })
+  .strict();
+
 // errorCode: the handler's stable code for an expected failure, such as job-not-found
 const SCommandRejected = z
   .object({
@@ -541,6 +481,10 @@ export type TEventPayloads = {
   [EEventType.CalendarEventUpdated]: z.infer<typeof SCalendarEventChanged>;
   [EEventType.CalendarEventDeleteRequested]: z.infer<typeof SCalendarEventTarget>;
   [EEventType.CalendarEventDeleted]: z.infer<typeof SCalendarEventTarget>;
+  [EEventType.ConversationMessageDeleteRequested]: z.infer<
+    typeof SConversationMessageDeleteRequested
+  >;
+  [EEventType.ConversationMessageDeleted]: z.infer<typeof SConversationMessageDeleted>;
   [EEventType.CommandRejected]: z.infer<typeof SCommandRejected>;
   [EEventType.EventDeadLettered]: z.infer<typeof SEventDeadLettered>;
   [EEventType.AppStarted]: z.infer<typeof SAppStarted>;
@@ -616,6 +560,8 @@ export const EVENT_SCHEMAS: { [K in EEventType]: z.ZodType<TEventPayloads[K]> } 
   [EEventType.CalendarEventUpdated]: SCalendarEventChanged,
   [EEventType.CalendarEventDeleteRequested]: SCalendarEventTarget,
   [EEventType.CalendarEventDeleted]: SCalendarEventTarget,
+  [EEventType.ConversationMessageDeleteRequested]: SConversationMessageDeleteRequested,
+  [EEventType.ConversationMessageDeleted]: SConversationMessageDeleted,
   [EEventType.CommandRejected]: SCommandRejected,
   [EEventType.EventDeadLettered]: SEventDeadLettered,
   [EEventType.AppStarted]: SAppStarted,
@@ -689,6 +635,8 @@ export const EVENT_KINDS: Record<EEventType, EEventKind> = {
   [EEventType.CalendarEventUpdated]: EEventKind.Event,
   [EEventType.CalendarEventDeleteRequested]: EEventKind.Command,
   [EEventType.CalendarEventDeleted]: EEventKind.Event,
+  [EEventType.ConversationMessageDeleteRequested]: EEventKind.Command,
+  [EEventType.ConversationMessageDeleted]: EEventKind.Event,
   [EEventType.CommandRejected]: EEventKind.Event,
   [EEventType.EventDeadLettered]: EEventKind.Event,
   [EEventType.AppStarted]: EEventKind.Event,

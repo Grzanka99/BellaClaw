@@ -2,13 +2,12 @@ import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { EEventType, eventsTable } from "@bellaclaw/database";
 import { asc, eq } from "drizzle-orm";
 import { AuthorizationService } from "../authorization";
 import { DatabaseConnector } from "../database";
-import { eventsTable } from "../database/schema";
 import { resetEventTables } from "../database/test-utils";
 import { EventBus } from "../events";
-import { EEventType } from "../events/catalog";
 import { EMessagePlatform } from "../messaging/types";
 import { Commands } from ".";
 

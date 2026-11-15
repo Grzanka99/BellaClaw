@@ -1,10 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { cronEngineJobsTable, EEventType, eventsTable } from "@bellaclaw/database";
 import { eq } from "drizzle-orm";
 import { DatabaseConnector } from "../database";
-import { cronEngineJobsTable, eventsTable } from "../database/schema";
 import { resetCronEngineJobsTable, resetEventTables } from "../database/test-utils";
 import { EventBus } from "../events";
-import { EEventType } from "../events/catalog";
 import { CronScheduler } from "./index";
 import { createOnce } from "./test-utils";
 

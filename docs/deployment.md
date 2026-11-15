@@ -1,10 +1,10 @@
 # Deployment
 
-BellaClaw includes a Podman Compose setup for the assistant, behavior-log viewer, and optional
-Signal sidecar.
+BellaClaw includes a Podman Compose setup for the assistant, behavior-log viewer, dashboard, and
+optional Signal sidecar.
 
-The repository builds one image. Compose starts the assistant and viewer as separate workspace
-commands while mounting the same behavior-log volume.
+The repository builds one image. Compose starts the assistant, viewer and dashboard as separate
+workspace commands. The assistant and viewer mount the same behavior-log volume.
 
 ## First Deployment
 
@@ -28,6 +28,7 @@ This starts:
 
 - `bellaclaw`
 - `log-viewer`
+- `dashboard`, which exits when it is not configured (see [Dashboard](dashboard.md))
 
 The assistant can use the logs MCP profile immediately; Compose configures its connection to
 the log viewer without a separate profile file or per-chat sign-in.
@@ -56,8 +57,8 @@ only the running containers.
 
 An update downloads the new commit into the `bellaclaw-src` volume, installs its dependencies,
 stops the assistant, applies the database migrations, and starts the new code. The assistant is
-down for well under a minute. The log viewer follows within 30 seconds. Only the assistant and the log viewer
-restart.
+down for well under a minute. The log viewer and the dashboard follow within 30 seconds. No other
+container restarts.
 
 Every outcome is sent to all authorized chats:
 
@@ -96,6 +97,7 @@ Compose stores:
 
 - Behavior logs in the `bellaclaw-data` volume
 - Signal link state in the `signal-cli-data` volume
+- Dashboard accounts and sessions in the `dashboard-data` volume
 - AI and Google credentials in the host `.secrets/` directory
 
 Published ports:
@@ -103,7 +105,12 @@ Published ports:
 | Port | Bind | Purpose |
 | --- | --- | --- |
 | `8989` | `0.0.0.0` | Behavior-log viewer |
+| `8988` | `127.0.0.1` | Dashboard, for the reverse proxy |
 | `8080` | `127.0.0.1` | Signal API, when its profile is active |
 
 The log viewer has no login and may contain sensitive data. Restrict port `8989` with a firewall,
 Tailnet policy, or authenticated reverse proxy. See [Behavior Logs](behavior-logs.md).
+
+The dashboard is meant for the internet behind a TLS reverse proxy. The assistant's internal
+listener on `3081` stays on the Compose network and is not published. See
+[Dashboard](dashboard.md#reverse-proxy).

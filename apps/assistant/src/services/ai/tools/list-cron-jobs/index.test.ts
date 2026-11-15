@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
+import { ECronJobStatus, ECronJobType } from "@bellaclaw/database";
 import { AutomationService } from "../../../automation";
 import { CronScheduler } from "../../../cron";
-import { ECronJobStatus, ECronJobType, type TCronJob } from "../../../cron/types";
+import type { TCronJob } from "../../../cron/types";
 import { testEventRequester } from "../../../events/test-utils";
 import { DefaultConfigRecord } from "../../../settings/schema";
 import { listCronJobs } from ".";

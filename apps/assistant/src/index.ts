@@ -1,4 +1,5 @@
 import { AppLogger, EBehaviorLogLevel } from "@bellaclaw/behavior-logs";
+import { EEventType } from "@bellaclaw/database";
 import { setupAiAuth } from "./services/ai/auth";
 import { startAiOAuthKeepAlive } from "./services/ai/auth/oauth-keep-alive";
 import { AuthorizationService } from "./services/authorization";
@@ -8,7 +9,11 @@ import { Commands } from "./services/commands";
 import { CronScheduler } from "./services/cron";
 import { DiscordSingleton } from "./services/discord";
 import { EventBus } from "./services/events";
-import { EEventType } from "./services/events/catalog";
+import {
+  setupInternalApi,
+  startInternalApiServer,
+  stopInternalApiServer,
+} from "./services/internal-api";
 import { McpService } from "./services/mcp";
 import { setupMcpAuth, startMcpAuthServer, stopMcpAuthServer } from "./services/mcp/auth";
 import { Memory } from "./services/memory";
@@ -57,6 +62,7 @@ async function init(): Promise<void> {
     setupAiAuth();
     setupMcpAuth();
     McpService.instance.setup();
+    setupInternalApi();
     if (Bun.env.BELLACLAW_MCP_PUBLIC_URL?.trim()) {
       startMcpAuthServer();
     }
@@ -67,6 +73,8 @@ async function init(): Promise<void> {
       SignalSingleton.instance.setup(),
     ]);
     await EventBus.instance.start();
+    // after the bus: a command published before it starts is abandoned
+    startInternalApiServer();
     await CronScheduler.instance.setup();
     await EventBus.instance.publish({
       type: EEventType.AppStarted,
@@ -126,6 +134,7 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
     void Promise.allSettled([
       McpService.instance.close(),
       stopMcpAuthServer(),
+      stopInternalApiServer(),
       EventBus.instance.stop(),
     ]).then(async () => {
       await AppLogger.instance.close();
