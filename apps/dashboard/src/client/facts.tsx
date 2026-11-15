@@ -50,6 +50,7 @@ export function FactsTab({ chatId }: { chatId: string }) {
         facts.nodes.map((fact) => [fact.id, fact]),
       );
       let selectedId: NodeObject["id"];
+      let fitted = false;
       const created = new ForceGraph3D(element)
         .width(element.clientWidth)
         .height(element.clientHeight)
@@ -86,7 +87,24 @@ export function FactsTab({ chatId }: { chatId: string }) {
         .enableNodeDrag(false)
         .warmupTicks(150)
         .cooldownTicks(0)
-        .onEngineStop(() => created.zoomToFit(0))
+        // NOTE: the fit measures the dots' world matrices. A drawn frame writes them, but the first
+        // one can come after the fit, so they are written here, with the positions.
+        .nodePositionUpdate((dot, position) => {
+          dot.position.set(position.x, position.y, position.z);
+          dot.updateMatrixWorld();
+
+          return true;
+        })
+        // NOTE: once. A repaint of the dots restarts the engine for a tick, and it stops again.
+        .onEngineStop(() => {
+          if (fitted) {
+            return;
+          }
+
+          fitted = true;
+          // a frame later: the engine stops before the dots get their positions
+          requestAnimationFrame(() => created.zoomToFit(0));
+        })
         .onNodeClick((node) => {
           selectedId = node.id;
           setSelected(factsById.get(node.id));
