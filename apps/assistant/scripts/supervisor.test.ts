@@ -115,6 +115,8 @@ describe("supervisor", () => {
   test("installs a new commit and reports it", async () => {
     const sha = await commit({ "apps/assistant/src/index.ts": `${APP}// v2\n` });
 
+    // a local edit in the server checkout does not hold the update
+    await Bun.write(join(image, "compose.yaml"), "services: { local: {} }\n");
     start();
 
     expect(await outcome()).toContain(`Updated to ${sha.slice(0, 7)}: next`);

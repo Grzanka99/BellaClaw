@@ -51,6 +51,7 @@ let child: TOption<Subprocess>;
 let childReady = false;
 let probing = false;
 let updating = false;
+let ciRetry: TOption<Timer>;
 const pendingNotices: string[] = [];
 
 async function run(command: string[], cwd: string): Promise<string> {
@@ -270,7 +271,9 @@ async function runUpdate(manual: boolean): Promise<void> {
       notify(`CI is still running for ${short}. Updating when it is green.`);
     }
 
-    setTimeout(() => void update(false), CI_RETRY_MS);
+    // one timer, however many checks found CI pending
+    clearTimeout(ciRetry);
+    ciRetry = setTimeout(() => void update(false), CI_RETRY_MS);
     return;
   }
 
@@ -296,7 +299,11 @@ async function runUpdate(manual: boolean): Promise<void> {
     }
 
     for (const file of IMAGE_FILES) {
-      if ((await readText(join(dir, file))) !== (await readText(join(IMAGE_DIR, file)))) {
+      // compared with the commit the image was built from, so a local edit holds nothing
+      if (
+        (await readText(join(dir, file))) !==
+        (await run(["git", "show", `HEAD:${file}`], IMAGE_DIR))
+      ) {
         await Bun.write(failedFile, sha);
         notify(
           `The update to ${short} needs a new image. On the server run: git pull && bun run server:update`,
@@ -321,8 +328,8 @@ async function runUpdate(manual: boolean): Promise<void> {
   try {
     await run(["bun", "scripts/migrate.ts"], join(dir, "apps/assistant"));
   } catch (error) {
-    await Bun.write(failedFile, sha);
     void startApp(runningDir);
+    await Bun.write(failedFile, sha);
     notify(
       `The update to ${short} failed in its database migration, restarted ${runningShort}: ${String(error)}`,
     );
@@ -339,6 +346,8 @@ async function runUpdate(manual: boolean): Promise<void> {
     return;
   }
 
+  // stopped at once, so its exit cannot end the supervisor before the rollback
+  await stopApp();
   await Bun.write(failedFile, sha);
 
   // NOTE: the old code must not run against the migrated schema, and no app is up to send a
@@ -347,8 +356,6 @@ async function runUpdate(manual: boolean): Promise<void> {
     log.error(`${short} failed to start after its database migration. Not rolling back.`);
     process.exit(1);
   }
-
-  await stopApp();
 
   if (runningDir === IMAGE_DIR) {
     await rm(join(root, CURRENT_LINK), { force: true });

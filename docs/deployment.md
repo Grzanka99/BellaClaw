@@ -57,8 +57,8 @@ only the running containers.
 
 An update downloads the new commit into the `bellaclaw-src` volume, installs its dependencies,
 stops the assistant, applies the database migrations, and starts the new code. The assistant is
-down for well under a minute. The log viewer and the dashboard follow within 30 seconds. No other
-container restarts.
+down for well under a minute. The log viewer and the dashboard follow within 30 seconds. Ollama and
+the Signal sidecar keep running.
 
 Every outcome is sent to all authorized chats:
 
@@ -72,8 +72,7 @@ Every outcome is sent to all authorized chats:
 | New commit does not start after a migration | No rollback and no notice: the container restarts the new commit until it is fixed. Check `podman logs bellaclaw`. |
 | `Containerfile`, `compose.yaml` or the supervisor changed | Held. Run `git pull && bun run server:update` on the server. |
 
-A failed commit is not retried until `main` moves or `!update` is sent. A rollback
-keeps the migrated database schema.
+A failed commit is not retried until `main` moves or `!update` is sent.
 
 A release is a clean copy of `main`: local changes in the server checkout are not carried over.
 `bun run server:update` replaces any self-updated release with the checkout's commit.

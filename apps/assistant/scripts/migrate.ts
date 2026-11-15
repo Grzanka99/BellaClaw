@@ -10,3 +10,6 @@ try {
   logger.error(String(error));
   process.exit(1);
 }
+
+// an open database connection would keep the process alive
+process.exit(0);
