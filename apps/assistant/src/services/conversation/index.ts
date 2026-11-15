@@ -6,7 +6,7 @@ import {
   type Message,
   type UserMessage,
 } from "@earendil-works/pi-ai";
-import { and, asc, eq, gt, isNotNull, lte } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNotNull, lt, lte } from "drizzle-orm";
 import { emptyUsage } from "../ai/llm";
 import { ERole } from "../ai/types";
 import { DatabaseConnector, type TDatabaseHandle } from "../database";
@@ -180,6 +180,62 @@ export class ConversationStore {
       modelMessage: JSON.stringify(message),
       createdAt: new Date(deliveredAt),
     });
+  }
+
+  // Deletes one transcript message. An assistant reply takes the tool rows of its turn with it:
+  // the chat's rows after the transcript message before it, so no tool call or result stays in
+  // the replay without its reply.
+  // Returns the deleted row ids, or undefined when messageId is no user or assistant transcript
+  // message of this chat.
+  public async deleteMessage(
+    db: TDatabaseHandle,
+    chatId: string,
+    messageId: number,
+  ): Promise<TOption<number[]>> {
+    const target = await db
+      .select({ author: memoriesTable.author })
+      .from(memoriesTable)
+      .where(
+        and(
+          eq(memoriesTable.id, messageId),
+          eq(memoriesTable.chatId, chatId),
+          eq(memoriesTable.kind, "message"),
+          inArray(memoriesTable.author, [ERole.User, ERole.Assistant]),
+        ),
+      )
+      .get();
+    if (target === undefined) {
+      return undefined;
+    }
+    // the chat's rows in (after, messageId] go
+    let after = messageId - 1;
+    if (target.author === ERole.Assistant) {
+      const previous = await db
+        .select({ id: memoriesTable.id })
+        .from(memoriesTable)
+        .where(
+          and(
+            eq(memoriesTable.chatId, chatId),
+            eq(memoriesTable.kind, "message"),
+            lt(memoriesTable.id, messageId),
+          ),
+        )
+        .orderBy(desc(memoriesTable.id))
+        .limit(1)
+        .get();
+      after = previous?.id ?? 0;
+    }
+    const deleted = await db
+      .delete(memoriesTable)
+      .where(
+        and(
+          eq(memoriesTable.chatId, chatId),
+          gt(memoriesTable.id, after),
+          lte(memoriesTable.id, messageId),
+        ),
+      )
+      .returning({ id: memoriesTable.id });
+    return deleted.map((row) => row.id).sort((a, b) => a - b);
   }
 
   // returns the attachments whose platform files are no longer needed

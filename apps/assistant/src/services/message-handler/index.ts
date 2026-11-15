@@ -9,7 +9,7 @@ import { startSpan } from "../app-logger/span";
 import { ConversationStore } from "../conversation";
 import { IMAGE_MARKER, type TConversation } from "../conversation/types";
 import { ESubscriptionMode, EventBus, type TEventContext, type TEventRequester } from "../events";
-import type { TEvent } from "../events/catalog";
+import { ERejectionCode, type TEvent } from "../events/catalog";
 import { MessagingAdapter } from "../messaging";
 import type { EMessagePlatform } from "../messaging/types";
 import { SettingsService } from "../settings";
@@ -39,8 +39,8 @@ export class MessageHandler {
     return MessageHandler._instance;
   }
 
-  // NOTE: both subscriptions share the consumer, so one lane per chat orders turns, their
-  // compaction and transcript appends
+  // NOTE: the subscriptions share the consumer, so one lane per chat orders turns, their
+  // compaction, transcript appends and message deletes
   public setup(): void {
     const bus = EventBus.instance;
 
@@ -57,6 +57,35 @@ export class MessageHandler {
       mode: ESubscriptionMode.Durable,
       backoffMs: [1_000, 5_000, 30_000],
       handler: (event, ctx) => this.saveDeliveredMessage(event, ctx),
+    });
+    bus.subscribe({
+      consumer: "conversation",
+      type: EEventType.ConversationMessageDeleteRequested,
+      mode: ESubscriptionMode.Durable,
+      backoffMs: [],
+      handler: async (event, ctx) => {
+        const { chatId, messageId } = event.payload;
+
+        await ctx.complete(async (tx, emit) => {
+          const messageIds = await this.conversations.deleteMessage(tx, chatId, messageId);
+
+          if (messageIds === undefined) {
+            emit(
+              EEventType.CommandRejected,
+              {
+                commandType: event.type,
+                code: ERejectionCode.Invalid,
+                message: "No such user or assistant message in this chat",
+              },
+              undefined,
+              undefined,
+            );
+            return;
+          }
+
+          emit(EEventType.ConversationMessageDeleted, { chatId, messageIds }, undefined, undefined);
+        });
+      },
     });
   }
 
