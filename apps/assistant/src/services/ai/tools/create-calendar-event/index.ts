@@ -1,6 +1,6 @@
+import { EEventType } from "@bellaclaw/database";
 import { arr, obj, oneOf, opt, type Static, str } from "@earendil-works/pi-schema";
 import { ALL_DAY_DATE } from "../../../calendar/recurrence";
-import { EEventType } from "../../../events/catalog";
 import { EConfigKey } from "../../../settings/schema";
 import { defineTool, requireChatId } from "../define-tool";
 import instructions from "./instructions.xml" with { type: "text" };

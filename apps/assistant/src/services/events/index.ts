@@ -1,13 +1,17 @@
 import { AppLogger, EBehaviorLogLevel, type TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
+import {
+  EEventType,
+  eventDeliveriesTable,
+  eventsTable,
+  type TSelectEvent,
+} from "@bellaclaw/database";
 import { AsyncQueue, createLogger, type TOption } from "@bellaclaw/shared";
 import { and, asc, eq, inArray, lt, ne, notExists } from "drizzle-orm";
 import { sanitizeErrorMessage } from "../app-logger/sanitizers";
 import { startSpan } from "../app-logger/span";
 import { DatabaseConnector, type TDatabaseTransaction } from "../database";
-import { eventDeliveriesTable, eventsTable, type TSelectEvent } from "../database/schema";
 import {
   EEventKind,
-  EEventType,
   ERejectionCode,
   EVENT_KINDS,
   EVENT_SCHEMAS,

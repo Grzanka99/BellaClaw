@@ -1,11 +1,12 @@
 import { createSystemTurnId } from "@bellaclaw/behavior-logs";
+import { EEventType } from "@bellaclaw/database";
 import { logger, type TOption } from "@bellaclaw/shared";
 import type { Models } from "@earendil-works/pi-ai";
 import { ModelsError } from "@earendil-works/pi-ai/utils/models-error";
 import { sanitizeErrorMessage } from "../../app-logger/sanitizers";
 import { AuthorizationService } from "../../authorization";
 import { commandFailed, ESubscriptionMode, EventBus, type TEventContext } from "../../events";
-import { EEventType, type TEvent, type TEventPayloads } from "../../events/catalog";
+import type { TEvent, TEventPayloads } from "../../events/catalog";
 import { SettingsService } from "../../settings";
 import { EConfigKey } from "../../settings/schema";
 import { aiCredentials, aiModels } from "../providers/registry";

@@ -102,7 +102,7 @@ async function ensureEmbeddingModel(): Promise<void> {
 async function migrate(): Promise<void> {
   const child = Bun.spawn(
     ["bun", "--no-env-file", "--bun", repositoryPath("node_modules/.bin/drizzle-kit"), "migrate"],
-    { cwd: repositoryPath("apps/assistant"), env, stdio: ["inherit", "inherit", "inherit"] },
+    { cwd: repositoryPath("packages/database"), env, stdio: ["inherit", "inherit", "inherit"] },
   );
   if ((await child.exited) !== 0) {
     fail("Database migration failed");

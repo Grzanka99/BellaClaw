@@ -9,9 +9,13 @@ import {
   text,
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
-import type { EAutomationStatus } from "../automation/types";
-import type { ECronFinishedReason, ECronJobStatus, ECronJobType } from "../cron/types";
-import type { EEventType } from "../events/catalog";
+import type {
+  EAutomationStatus,
+  ECronFinishedReason,
+  ECronJobStatus,
+  ECronJobType,
+  EEventType,
+} from "./enums";
 
 export const EMBEDDING_DIMENSIONS = 768;
 

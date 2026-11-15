@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
+import { EEventType } from "@bellaclaw/database";
 import { compile } from "@earendil-works/pi-schema";
 import { formats } from "@earendil-works/pi-schema/formats";
 import { EmbeddingClient } from "../../../embedding";
 import type { TEventRequester } from "../../../events";
-import { EEventType } from "../../../events/catalog";
 import { testEventRequester } from "../../../events/test-utils";
 import { MEMORY_REQUEST_TIMEOUT_MS, Memory } from "../../../memory";
 import { DefaultConfigRecord } from "../../../settings/schema";

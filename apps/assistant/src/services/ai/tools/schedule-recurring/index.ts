@@ -1,7 +1,7 @@
+import { EEventType } from "@bellaclaw/database";
 import { arr, bool, obj, opt, type Static, str } from "@earendil-works/pi-schema";
 import { AutomationService } from "../../../automation";
 import { fromCronJobRecord } from "../../../cron/types";
-import { EEventType } from "../../../events/catalog";
 import { EConfigKey } from "../../../settings/schema";
 import { runAutomationOperation } from "../automation-errors";
 import { parseAutomationNames, parseCronContent, runCronJobOperation } from "../cron-content";

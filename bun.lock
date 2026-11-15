@@ -15,6 +15,7 @@
       "name": "@bellaclaw/assistant",
       "dependencies": {
         "@bellaclaw/behavior-logs": "workspace:*",
+        "@bellaclaw/database": "workspace:*",
         "@bellaclaw/shared": "workspace:*",
         "@earendil-works/pi-agent-core": "latest",
         "@earendil-works/pi-ai": "latest",
@@ -62,6 +63,15 @@
       "dependencies": {
         "@bellaclaw/shared": "workspace:*",
         "zod": "^4.3.6",
+      },
+    },
+    "packages/database": {
+      "name": "@bellaclaw/database",
+      "dependencies": {
+        "drizzle-orm": "^0.45.2",
+      },
+      "devDependencies": {
+        "drizzle-kit": "^0.31.10",
       },
     },
     "packages/shared": {
@@ -117,6 +127,8 @@
     "@bellaclaw/assistant": ["@bellaclaw/assistant@workspace:apps/assistant"],
 
     "@bellaclaw/behavior-logs": ["@bellaclaw/behavior-logs@workspace:packages/behavior-logs"],
+
+    "@bellaclaw/database": ["@bellaclaw/database@workspace:packages/database"],
 
     "@bellaclaw/log-viewer": ["@bellaclaw/log-viewer@workspace:apps/log-viewer"],
 

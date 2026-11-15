@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
+import { factsTable } from "@bellaclaw/database";
 import { logger } from "@bellaclaw/shared";
 import { asc, sql } from "drizzle-orm";
 import { DatabaseConnector } from "../src/services/database";
-import { factsTable } from "../src/services/database/schema";
 import { FactEmbeddingRebuilder } from "./rebuild-embeddings";
 
 const db = DatabaseConnector.instance.database;

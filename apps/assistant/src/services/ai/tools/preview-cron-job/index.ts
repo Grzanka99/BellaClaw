@@ -1,9 +1,10 @@
+import { ECronJobType } from "@bellaclaw/database";
 import type { TOption } from "@bellaclaw/shared";
 import { arr, obj, opt, str } from "@earendil-works/pi-schema";
 import { AutomationService } from "../../../automation";
 import { dryRunSavedAutomation } from "../../../automation/runner";
 import { CronScheduler } from "../../../cron";
-import { ECronJobType, type TCronJob, type TJobContent } from "../../../cron/types";
+import type { TCronJob, TJobContent } from "../../../cron/types";
 import type { TCronFiredPayload } from "../../../events/catalog";
 import { parseCanonicalChatKey } from "../../../messaging/chat-key";
 import { runCronJobAutomations } from "../../../scheduling/cron-automations";

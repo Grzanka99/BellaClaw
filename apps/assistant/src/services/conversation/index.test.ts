@@ -1,9 +1,9 @@
 import { expect, test } from "bun:test";
+import { memoriesTable } from "@bellaclaw/database";
 import { fauxAssistantMessage, fauxToolCall, type Message } from "@earendil-works/pi-ai";
 import { and, desc, eq } from "drizzle-orm";
 import { ERole } from "../ai/types";
 import { DatabaseConnector } from "../database";
-import { memoriesTable } from "../database/schema";
 import { Memory } from "../memory";
 import { ConversationStore } from ".";
 import { attachmentBlock, type TConversation } from "./types";

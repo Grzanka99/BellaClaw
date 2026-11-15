@@ -1,4 +1,5 @@
 import type { TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
+import { EEventType, type TSelectMemory } from "@bellaclaw/database";
 import type { TOption } from "@bellaclaw/shared";
 import { createLogger } from "@bellaclaw/shared";
 import { AgentHarness } from "../ai/agent-harness";
@@ -7,9 +8,8 @@ import { logHandlerStarted, startHandlerSpan, startMemorySaveSpan } from "../app
 import { startSpan } from "../app-logger/span";
 import { ConversationStore } from "../conversation";
 import { IMAGE_MARKER, type TConversation } from "../conversation/types";
-import type { TSelectMemory } from "../database/schema";
 import { ESubscriptionMode, EventBus, type TEventContext, type TEventRequester } from "../events";
-import { EEventType, type TEvent } from "../events/catalog";
+import type { TEvent } from "../events/catalog";
 import { MessagingAdapter } from "../messaging";
 import type { EMessagePlatform } from "../messaging/types";
 import { SettingsService } from "../settings";

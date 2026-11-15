@@ -1,20 +1,18 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { automationDraftsTable, EAutomationStatus, EEventType } from "@bellaclaw/database";
 import { eq } from "drizzle-orm";
 import { CronScheduler } from "../cron";
 import { DatabaseConnector } from "../database";
-import { automationDraftsTable } from "../database/schema";
 import {
   resetAutomationsTables,
   resetCronEngineJobsTable,
   resetEventTables,
 } from "../database/test-utils";
 import { EventBus } from "../events";
-import { EEventType } from "../events/catalog";
 import { testEventRequester } from "../events/test-utils";
 import {
   AutomationService,
   DEFAULT_AUTOMATION_OUTPUT_CAP_BYTES,
-  EAutomationStatus,
   type TCreateAutomationDraftInput,
 } from "./index";
 import { EAutomationRunMode, EAutomationRunOutcome } from "./runner";

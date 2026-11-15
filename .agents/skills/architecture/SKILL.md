@@ -136,9 +136,10 @@ Table owners: `memories`, `conversation_summaries` → Conversation · `facts`,
 
 ## Adding a fact or command
 
-1. **Catalog** (`events/catalog.ts`): add the `EEventType` member, an `S*` strict schema, and the
-   entries in `TEventPayloads`, `EVENT_SCHEMAS` and `EVENT_KINDS`; add it to `EVENT_SCRUBBED` if
-   it carries a secret. A command also gets its outcome fact.
+1. **Catalog**: add the `EEventType` member in `packages/database/src/enums.ts`; in
+   `events/catalog.ts` add an `S*` strict schema and the entries in `TEventPayloads`,
+   `EVENT_SCHEMAS` and `EVENT_KINDS`; add it to `EVENT_SCRUBBED` if it carries a secret. A command
+   also gets its outcome fact.
 2. **Consumer**: subscribe in the owning service's `setup()`. If the service is new, call its
    `setup()` in `src/index.ts` before `EventBus.instance.start()`, and add the same call to the
    registration in `events/boundaries.test.ts`.

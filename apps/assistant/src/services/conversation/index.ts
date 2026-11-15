@@ -1,3 +1,4 @@
+import { conversationSummariesTable, memoriesTable, type TSelectMemory } from "@bellaclaw/database";
 import type { TOption } from "@bellaclaw/shared";
 import {
   type AssistantMessage,
@@ -9,7 +10,6 @@ import { and, asc, eq, gt, isNotNull, lte } from "drizzle-orm";
 import { emptyUsage } from "../ai/llm";
 import { ERole } from "../ai/types";
 import { DatabaseConnector, type TDatabaseHandle } from "../database";
-import { conversationSummariesTable, memoriesTable, type TSelectMemory } from "../database/schema";
 import type { TAttachmentRef } from "../messaging/types";
 import { SAttachmentBlock, SConversationMessage, type TConversation } from "./types";
 

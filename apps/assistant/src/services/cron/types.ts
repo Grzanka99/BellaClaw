@@ -1,22 +1,5 @@
-import type { cronEngineJobsTable } from "../database/schema";
+import type { cronEngineJobsTable } from "@bellaclaw/database";
 import type { TCronJobRecord } from "../events/catalog";
-
-export enum ECronJobType {
-  Recurring = "recurring",
-  OneTime = "onetime",
-}
-
-export enum ECronJobStatus {
-  Active = "active",
-  Completed = "completed",
-  Cancelled = "cancelled",
-}
-
-export enum ECronFinishedReason {
-  Fired = "fired",
-  Unscheduled = "unscheduled",
-  Overwritten = "overwritten",
-}
 
 export type TJobContent =
   | { kind: "text"; text: string }

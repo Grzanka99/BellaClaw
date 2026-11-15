@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { ECronJobStatus, ECronJobType } from "../../cron/types";
+import { ECronJobStatus, ECronJobType } from "@bellaclaw/database";
 import { parseAutomationNames, parseCronContent, runCronJobOperation } from "./cron-content";
 
 describe("parseCronContent", () => {

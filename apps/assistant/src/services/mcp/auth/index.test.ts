@@ -2,9 +2,9 @@ import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { EEventType } from "@bellaclaw/database";
 import { auth } from "@modelcontextprotocol/sdk/client/auth.js";
 import { EventBus, type TEventDraft } from "../../events";
-import { EEventType } from "../../events/catalog";
 
 let directory: string;
 let oauthServer: ReturnType<typeof Bun.serve>;

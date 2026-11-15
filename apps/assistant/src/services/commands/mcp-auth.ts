@@ -1,4 +1,4 @@
-import { EEventType } from "../events/catalog";
+import { EEventType } from "@bellaclaw/database";
 import { getMcpAuthStatus } from "../mcp/auth";
 import type { TCommand } from "./types";
 

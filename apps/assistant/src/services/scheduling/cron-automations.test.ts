@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import type { TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
+import { ECronJobType } from "@bellaclaw/database";
 import type { AgentHarness } from "../ai/agent-harness";
 import { AutomationService, type TAutomation } from "../automation";
 import { EAutomationRunOutcome } from "../automation/runner";
-import { ECronJobType } from "../cron/types";
 import { DatabaseConnector } from "../database";
 import type { TAutomationRunReport, TCronFiredPayload } from "../events/catalog";
 import { testEventRequester } from "../events/test-utils";

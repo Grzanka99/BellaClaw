@@ -1,8 +1,8 @@
+import { eventDeliveriesTable, eventsTable } from "@bellaclaw/database";
 import { logger } from "@bellaclaw/shared";
 import { and, asc, eq } from "drizzle-orm";
 import type { LibSQLDatabase } from "drizzle-orm/libsql";
 import { DatabaseConnector } from "../src/services/database";
-import { eventDeliveriesTable, eventsTable } from "../src/services/database/schema";
 
 export function listDeadDeliveries(db: LibSQLDatabase) {
   return db

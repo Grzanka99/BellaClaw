@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { join, relative, resolve } from "node:path";
+import { EEventType } from "@bellaclaw/database";
 import { Glob } from "bun";
 import { setupAiAuth } from "../ai/auth";
 import { AuthorizationService } from "../authorization";
@@ -16,7 +17,7 @@ import { MessagingAdapter } from "../messaging";
 import { Notices } from "../notices";
 import { ScheduledDelivery } from "../scheduling/delivery";
 import { SettingsService } from "../settings";
-import { EEventKind, EEventType, EVENT_KINDS } from "./catalog";
+import { EEventKind, EVENT_KINDS } from "./catalog";
 import { ESubscriptionMode, EventBus } from "./index";
 
 const SERVICES = resolve(import.meta.dir, "..");

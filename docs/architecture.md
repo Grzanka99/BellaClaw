@@ -9,9 +9,10 @@ BellaClaw is a Bun workspace orchestrated by Turborepo:
 
 | Workspace | Ownership |
 | --- | --- |
-| `@bellaclaw/assistant` | Messaging, AI orchestration, authorization, scheduling, memory, settings, and the Turso/Drizzle database. |
+| `@bellaclaw/assistant` | Messaging, AI orchestration, authorization, scheduling, memory, settings, and the Turso database connection. |
 | `@bellaclaw/log-viewer` | Hono routes, query parsing, assets, and behavior-log rendering. |
 | `@bellaclaw/behavior-logs` | Behavior event types, SQLite schema, read/write access, and log CLI tools. |
+| `@bellaclaw/database` | Drizzle schema, the enums it stores, migrations, and drizzle-kit configs. |
 | `@bellaclaw/shared` | Primitives every workspace needs: `TOption`, `AsyncQueue`, the logger, and `REPOSITORY_ROOT`. |
 
 The apps do not import each other. Both depend on the behavior-log package and communicate through

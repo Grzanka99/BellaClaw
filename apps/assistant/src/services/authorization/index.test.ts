@@ -1,12 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { EEventType, eventsTable } from "@bellaclaw/database";
 import type { TOption } from "@bellaclaw/shared";
 import { asc, eq } from "drizzle-orm";
 import { Commands } from "../commands";
 import { DatabaseConnector } from "../database";
-import { eventsTable } from "../database/schema";
 import { resetEventTables, resetMessageAuthorizationsTable } from "../database/test-utils";
 import { EventBus } from "../events";
-import { EEventType } from "../events/catalog";
 import { EMessagePlatform } from "../messaging/types";
 import { AuthorizationService } from ".";
 import { EAuthorizationDecision, EAuthorizationStatus } from "./schema";

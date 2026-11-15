@@ -1,5 +1,5 @@
+import { EEventType } from "@bellaclaw/database";
 import { obj, str } from "@earendil-works/pi-schema";
-import { EEventType } from "../../../events/catalog";
 import { defineTool, requireChatId } from "../define-tool";
 import instructions from "./instructions.xml" with { type: "text" };
 
