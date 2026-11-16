@@ -15,12 +15,14 @@ services:
       - BELLACLAW_LOGS_MCP_URL=http://log-viewer:8989/mcp
       - SIGNAL_CLI_RPC_URL=http://signal-cli:8080
       - BELLACLAW_INTERNAL_API_HOSTNAME=0.0.0.0
+      - BELLACLAW_RELEASES_DIR=/srv
     depends_on:
       - ollama
       - log-viewer
-    command: ["bun", "run", "--cwd", "apps/assistant", "start"]
+    command: ["bun", "apps/assistant/scripts/supervisor.ts", "assistant"]
     volumes:
       - bellaclaw-data:/app-data
+      - bellaclaw-src:/srv
       - ./.secrets:/app/.secrets
     ports:
       - "127.0.0.1:3080:3080"
@@ -42,11 +44,13 @@ services:
       - BELLACLAW_LOG_DB_ROOT=/app-data
       - BELLACLAW_LOG_VIEWER_HOSTNAME=0.0.0.0
       - LOG_CHATID_HMAC_KEY=${LOG_CHATID_HMAC_KEY:-}
-    command: ["bun", "run", "--cwd", "apps/log-viewer", "start"]
+      - BELLACLAW_RELEASES_DIR=/srv
+    command: ["bun", "apps/assistant/scripts/supervisor.ts", "log-viewer"]
     ports:
       - "0.0.0.0:8989:8989"
     volumes:
       - bellaclaw-data:/app-data:ro
+      - bellaclaw-src:/srv:ro
 
   dashboard:
     image: bellaclaw:local
@@ -61,13 +65,15 @@ services:
       - BELLACLAW_INTERNAL_API_URL=http://bellaclaw:3081
       - BELLACLAW_DASHBOARD_HOSTNAME=0.0.0.0
       - BELLACLAW_DASHBOARD_DB_PATH=/dashboard-data/dashboard.db
+      - BELLACLAW_RELEASES_DIR=/srv
     depends_on:
       - bellaclaw
-    command: ["bun", "run", "--cwd", "apps/dashboard", "start"]
+    command: ["bun", "apps/assistant/scripts/supervisor.ts", "dashboard"]
     ports:
       - "127.0.0.1:8988:8988"
     volumes:
       - dashboard-data:/dashboard-data
+      - bellaclaw-src:/srv:ro
 
   signal-cli:
     image: docker.io/bbernhard/signal-cli-rest-api:0.100-rootless
@@ -84,6 +90,7 @@ services:
 
 volumes:
   bellaclaw-data:
+  bellaclaw-src:
   dashboard-data:
   ollama-data:
   signal-cli-data:

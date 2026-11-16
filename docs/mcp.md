@@ -13,7 +13,9 @@ MCP connections open when needed rather than occupying a permanent session for e
 
 To add your own profiles, copy the default file to `mcp.local.json`, edit it, and set
 `BELLACLAW_MCP_CONFIG=./mcp.local.json`; relative paths are resolved from the repository root.
-In Compose, mount `./mcp.local.json:/app/mcp.local.json:ro` into the assistant. Local profile
+In Compose, mount `./mcp.local.json:/app/mcp.local.json:ro` into the assistant and set
+`BELLACLAW_MCP_CONFIG=/app/mcp.local.json`: a self-updated release resolves a relative path from
+its own directory. Local profile
 files are excluded from Git and container builds. An absent selected file disables MCP.
 Configuration is read for each new delegation; an existing specialist keeps its current profile
 and connection until it finishes.
