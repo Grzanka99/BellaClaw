@@ -128,7 +128,7 @@ function createLogsMcpServer(reader: LogReader): McpServer {
               ],
               conversationalTurn: {
                 startsWith: { event: "message.received", component: "messaging" },
-                completesWith: { event: "handler.completed", component: "messaging" },
+                completesWith: { event: "handler.completed", component: "message-handler" },
               },
               cacheUsage:
                 "model.request.completed metadata contains cacheRead and inputTokens; the aggregate rate is 100 * sum(cacheRead) / sum(inputTokens)",
