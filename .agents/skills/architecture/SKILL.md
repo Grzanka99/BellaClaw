@@ -105,10 +105,15 @@ bus.subscribe({
 `request` and `waitFor` hold the caller's lane. The allowed waits form an acyclic graph, kept in
 `ALLOWED_WAITS` in `events/boundaries.test.ts`:
 
-- `conversation` → `cron`, `automations`, `settings`, `memory`, `calendar`, `ai-auth`
-- `scheduling` → `automations`, `memory`
+- `conversation` → `cron`, `automations`, `settings`, `memory`, `calendar`, `ai-auth`, `identity`:
+  a turn of an address held while the address or its account is being linked, on a hold lane of
+  its own (`link-hold|<chat key>`), bounded from the hold, then forwarded to the account's lane
+- `scheduling` → `automations`, `memory`, `identity`: a cron fire held while its address or its
+  account is being linked, bounded from the fire's time like a held message
 - `commands` → `mcp-auth`, `ai-auth`, `calendar`
 - `ai-auth` → `settings`
+- `authorization` → `identity`: a message held while its address or its account is being linked.
+  It waits on Identity's read model (`waitWhileLinking`), bounded from the message's arrival
 - `internal-api` → `settings`, `conversation`. An HTTP request is on no lane: it publishes the
   command and awaits the outcome through live subscriptions.
 
@@ -121,7 +126,8 @@ A call across services is allowed only when it changes no state:
 - Infrastructure: `DatabaseConnector`, `EventBus`, `AppLogger`, `startSpan`.
 - Cached read models: `SettingsService.getAll` (fed by `settings.changed`),
   `AuthorizationService.listAuthorizedChatIds` (fed by `authorization.changed`),
-  `IdentityService.resolve` and `listNoticeRecipients` (loaded from `identity_links`).
+  `IdentityService.resolve`, `linkedAccount`, `waitWhileLinking` and `listNoticeRecipients`
+  (loaded from `identity_links`, fed by `identity.link.started` and `identity.linked`).
 - Drivers: `LlmClient`, `EmbeddingClient`, `aiModels`, the Discord and Signal clients, `gws`.
 - The stateless engine: `AgentHarness.runMain`, `runScheduledTask`, `compactConversation`.
 - Live state an event cannot carry: `McpService.open`, `McpRunRegistry`.
@@ -132,7 +138,7 @@ A call across services is allowed only when it changes no state:
 Every other cross-service interaction is a message. The exact import list, with a reason per pair,
 is `ALLOWED` in `events/boundaries.test.ts`.
 
-Table owners: `memories`, `conversation_summaries` → Conversation · `facts`,
+Table owners: `memories`, `conversation_summaries`, `conversations` → Conversation · `facts`,
 `fact_distillation_state` → Memory · `cron_engine_jobs` → Cron · `automations`,
 `automation_drafts` → Automations · `user_configs` → Settings · `calendars` → Calendar ·
 `message_authorizations` → Authorization · `identity_links` → Identity · `events`, `event_deliveries` → EventBus.

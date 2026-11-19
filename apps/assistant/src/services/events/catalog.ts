@@ -11,6 +11,7 @@ import { z } from "zod";
 import { EAiProvider } from "../ai/types";
 import { EAuthorizationDecision, SAuthorizationState } from "../authorization/schema";
 import { EAutomationRunMode, EAutomationRunOutcome } from "../automation/runner";
+import { EIdentityLinkOwner } from "../identity/schema";
 import { EMessagePlatform, SAttachmentRef } from "../messaging/types";
 import { EConfigKey } from "../settings/schema";
 
@@ -405,6 +406,36 @@ const SConversationMessageDeleted = z
   .object({ chatId: z.string(), messageIds: z.array(z.number().int()) })
   .strict();
 
+const SIdentityLinkRequested = z
+  .object({
+    accountId: z.string().min(1),
+    channel: z.enum(EMessagePlatform),
+    address: z.string().min(1),
+  })
+  .strict();
+
+// an address linked to an account. chatKey: the address's own chat, its conversation and owner
+// key before the link; conversationKey and ownerKey: the account's Bella conversation and owner
+const SIdentityLinkKeys = {
+  accountId: z.string(),
+  channel: z.enum(EMessagePlatform),
+  address: z.string(),
+  chatKey: z.string(),
+  conversationKey: z.string(),
+  ownerKey: z.string(),
+};
+
+const SIdentityLinkStarted = z.object(SIdentityLinkKeys).strict();
+
+// owner: the service that settled, or moved its rows
+const SIdentityLinkProgress = z
+  .object({ ...SIdentityLinkKeys, owner: z.enum(EIdentityLinkOwner) })
+  .strict();
+
+const SIdentityLinked = z.object({ ...SIdentityLinkKeys, linkedAt: z.number().int() }).strict();
+
+export type TIdentityLinkKeys = z.infer<typeof SIdentityLinkStarted>;
+
 // errorCode: the handler's stable code for an expected failure, such as job-not-found
 const SCommandRejected = z
   .object({
@@ -500,6 +531,12 @@ export type TEventPayloads = {
     typeof SConversationMessageDeleteRequested
   >;
   [EEventType.ConversationMessageDeleted]: z.infer<typeof SConversationMessageDeleted>;
+  [EEventType.IdentityLinkRequested]: z.infer<typeof SIdentityLinkRequested>;
+  [EEventType.IdentityLinkStarted]: TIdentityLinkKeys;
+  [EEventType.IdentityLinkSettled]: z.infer<typeof SIdentityLinkProgress>;
+  [EEventType.IdentityLinkQuiet]: TIdentityLinkKeys;
+  [EEventType.IdentityLinkMoved]: z.infer<typeof SIdentityLinkProgress>;
+  [EEventType.IdentityLinked]: z.infer<typeof SIdentityLinked>;
   [EEventType.CommandRejected]: z.infer<typeof SCommandRejected>;
   [EEventType.EventDeadLettered]: z.infer<typeof SEventDeadLettered>;
   [EEventType.AppStarted]: z.infer<typeof SAppStarted>;
@@ -577,6 +614,12 @@ export const EVENT_SCHEMAS: { [K in EEventType]: z.ZodType<TEventPayloads[K]> } 
   [EEventType.CalendarEventDeleted]: SCalendarEventTarget,
   [EEventType.ConversationMessageDeleteRequested]: SConversationMessageDeleteRequested,
   [EEventType.ConversationMessageDeleted]: SConversationMessageDeleted,
+  [EEventType.IdentityLinkRequested]: SIdentityLinkRequested,
+  [EEventType.IdentityLinkStarted]: SIdentityLinkStarted,
+  [EEventType.IdentityLinkSettled]: SIdentityLinkProgress,
+  [EEventType.IdentityLinkQuiet]: SIdentityLinkStarted,
+  [EEventType.IdentityLinkMoved]: SIdentityLinkProgress,
+  [EEventType.IdentityLinked]: SIdentityLinked,
   [EEventType.CommandRejected]: SCommandRejected,
   [EEventType.EventDeadLettered]: SEventDeadLettered,
   [EEventType.AppStarted]: SAppStarted,
@@ -652,6 +695,12 @@ export const EVENT_KINDS: Record<EEventType, EEventKind> = {
   [EEventType.CalendarEventDeleted]: EEventKind.Event,
   [EEventType.ConversationMessageDeleteRequested]: EEventKind.Command,
   [EEventType.ConversationMessageDeleted]: EEventKind.Event,
+  [EEventType.IdentityLinkRequested]: EEventKind.Command,
+  [EEventType.IdentityLinkStarted]: EEventKind.Event,
+  [EEventType.IdentityLinkSettled]: EEventKind.Event,
+  [EEventType.IdentityLinkQuiet]: EEventKind.Event,
+  [EEventType.IdentityLinkMoved]: EEventKind.Event,
+  [EEventType.IdentityLinked]: EEventKind.Event,
   [EEventType.CommandRejected]: EEventKind.Event,
   [EEventType.EventDeadLettered]: EEventKind.Event,
   [EEventType.AppStarted]: EEventKind.Event,

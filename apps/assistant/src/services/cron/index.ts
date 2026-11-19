@@ -14,6 +14,7 @@ import { sanitizeErrorMessage } from "../app-logger/sanitizers";
 import { DatabaseConnector, type TDatabaseHandle, type TDatabaseTransaction } from "../database";
 import { ESubscriptionMode, EventBus, type TEventContext, type TEventDraft } from "../events";
 import { ERejectionCode, type TEvent } from "../events/catalog";
+import { EIdentityLinkOwner } from "../identity/schema";
 import { DefaultConfigRecord, EConfigKey } from "../settings/schema";
 import {
   CronSchedulerError,
@@ -90,6 +91,68 @@ export class CronScheduler {
       mode: ESubscriptionMode.Durable,
       backoffMs: COMMAND_BACKOFF_MS,
       handler: (event, ctx) => this.handleAutomationDeleted(event, ctx),
+    });
+    bus.subscribe({
+      consumer: "cron",
+      type: EEventType.IdentityLinkQuiet,
+      mode: ESubscriptionMode.Durable,
+      backoffMs: COMMAND_BACKOFF_MS,
+      handler: (event, ctx) => this.handleLinkStarted(event, ctx),
+    });
+  }
+
+  // NOTE: every job of the address goes to the account; an active one whose name an active job of
+  // the account already has is renamed. Timers find their job by id, so they keep running
+  private async handleLinkStarted(
+    event: TEvent<EEventType.IdentityLinkQuiet>,
+    ctx: TEventContext,
+  ): Promise<void> {
+    const { chatKey, ownerKey } = event.payload;
+
+    await ctx.complete(async (tx, emit) => {
+      const active = await tx
+        .select({ name: cronEngineJobsTable.name })
+        .from(cronEngineJobsTable)
+        .where(
+          and(
+            eq(cronEngineJobsTable.scope, ownerKey),
+            eq(cronEngineJobsTable.status, ECronJobStatus.Active),
+          ),
+        );
+      const taken = new Set(active.map((job) => job.name));
+      const moving = await tx
+        .select({
+          id: cronEngineJobsTable.id,
+          name: cronEngineJobsTable.name,
+          status: cronEngineJobsTable.status,
+        })
+        .from(cronEngineJobsTable)
+        .where(eq(cronEngineJobsTable.scope, chatKey))
+        .orderBy(asc(cronEngineJobsTable.id));
+
+      for (const job of moving) {
+        let name = job.name;
+
+        if (job.status === ECronJobStatus.Active) {
+          for (let suffix = 2; taken.has(name); suffix += 1) {
+            name = `${job.name} (${suffix})`;
+          }
+
+          taken.add(name);
+        }
+
+        await tx
+          .update(cronEngineJobsTable)
+          .set({ scope: ownerKey, name })
+          .where(eq(cronEngineJobsTable.id, job.id));
+      }
+
+      emit(
+        EEventType.IdentityLinkMoved,
+        { ...event.payload, owner: EIdentityLinkOwner.Cron },
+        undefined,
+        undefined,
+      );
     });
   }
 

@@ -11,6 +11,7 @@ import { summarizeAutomation } from "../ai/tools/automation-summary";
 import { DatabaseConnector, type TDatabaseHandle } from "../database";
 import { commandFailed, ESubscriptionMode, EventBus, type TEventContext } from "../events";
 import type { TEvent } from "../events/catalog";
+import { EIdentityLinkOwner } from "../identity/schema";
 import {
   createPausedReport,
   createReport,
@@ -130,6 +131,86 @@ export class AutomationService {
       mode: ESubscriptionMode.Durable,
       backoffMs: [],
       handler: (event, ctx) => this.handleRunRequested(event, ctx),
+    });
+    // NOTE: every automation and draft of the address goes to the account. A name the account
+    // already has, for an automation or a draft, is renamed, and a draft takes the new name of its
+    // automation, so saving it never overwrites another automation. Cron jobs refer to
+    // automations by id
+    bus.subscribe({
+      consumer: "automations",
+      type: EEventType.IdentityLinkQuiet,
+      mode: ESubscriptionMode.Durable,
+      backoffMs: [1_000, 5_000],
+      handler: async (event, ctx) => {
+        const { chatKey, ownerKey } = event.payload;
+
+        await ctx.complete(async (tx, emit) => {
+          const kept = await tx
+            .select({ name: automationsTable.name })
+            .from(automationsTable)
+            .where(eq(automationsTable.scope, ownerKey));
+          const keptDrafts = await tx
+            .select({ name: automationDraftsTable.name })
+            .from(automationDraftsTable)
+            .where(eq(automationDraftsTable.scope, ownerKey));
+          const taken = new Set([...kept, ...keptDrafts].map((row) => row.name));
+          // by the name under the address
+          const names = new Map<string, string>();
+          const moving = await tx
+            .select({ id: automationsTable.id, name: automationsTable.name })
+            .from(automationsTable)
+            .where(eq(automationsTable.scope, chatKey))
+            .orderBy(asc(automationsTable.id));
+
+          for (const automation of moving) {
+            let name = automation.name;
+
+            for (let suffix = 2; taken.has(name); suffix += 1) {
+              name = `${automation.name} (${suffix})`;
+            }
+
+            taken.add(name);
+            names.set(automation.name, name);
+            await tx
+              .update(automationsTable)
+              .set({ scope: ownerKey, name })
+              .where(eq(automationsTable.id, automation.id));
+          }
+
+          const drafts = await tx
+            .select({ id: automationDraftsTable.id, name: automationDraftsTable.name })
+            .from(automationDraftsTable)
+            .where(eq(automationDraftsTable.scope, chatKey))
+            .orderBy(asc(automationDraftsTable.id));
+
+          for (const draft of drafts) {
+            let name = names.get(draft.name);
+
+            if (name === undefined) {
+              name = draft.name;
+
+              for (let suffix = 2; taken.has(name); suffix += 1) {
+                name = `${draft.name} (${suffix})`;
+              }
+
+              taken.add(name);
+              names.set(draft.name, name);
+            }
+
+            await tx
+              .update(automationDraftsTable)
+              .set({ scope: ownerKey, name })
+              .where(eq(automationDraftsTable.id, draft.id));
+          }
+
+          emit(
+            EEventType.IdentityLinkMoved,
+            { ...event.payload, owner: EIdentityLinkOwner.Automations },
+            undefined,
+            undefined,
+          );
+        });
+      },
     });
   }
 

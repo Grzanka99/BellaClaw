@@ -13,9 +13,12 @@ import {
 } from "@bellaclaw/database";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { and, eq } from "drizzle-orm";
+import { z } from "zod";
 import { AgentHarness } from "../services/ai/agent-harness";
 import { DatabaseConnector } from "../services/database";
-import { ESubscriptionMode, EventBus } from "../services/events";
+import { ESubscriptionMode, EventBus, type TEventDraft } from "../services/events";
+import { EIdentityLinkOwner } from "../services/identity/schema";
+import { McpAuthCredentialStore } from "../services/mcp/auth/store";
 import { FactDistiller } from "../services/memory/distill";
 import { MessagingAdapter } from "../services/messaging";
 import { EMessagePlatform } from "../services/messaging/types";
@@ -31,10 +34,22 @@ enum ECrashPoint {
   Compaction = "compaction",
   // publishes test.noted, whose handler kills the process on every attempt
   Poison = "poison",
+  // after identity.link.started commits, before it is dispatched
+  LinkStarted = "link-started",
+  // after identity.link.quiet, the barrier's fact, commits, before it is dispatched
+  LinkQuiet = "link-quiet",
+  // inside Identity's transaction that would activate the link
+  LinkActivation = "link-activation",
   None = "none",
 }
 
+// after the identity.link.moved of an owner commits, before it is dispatched; for MCP auth, after
+// its credentials file is written, before the move's ack commits
+const LINK_MOVED_POINT = "link-moved-";
+
 const CRASH_CHAT_ID = "signal:+100";
+const CRASH_ACCOUNT_ID = "acct-crash";
+const SIdentityLinkMovedOwner = z.object({ owner: z.string() });
 
 const [directory, point, ...messages] = Bun.argv.slice(2);
 
@@ -137,7 +152,59 @@ Object.assign(bus, {
       kill();
     }
 
+    if (
+      point === ECrashPoint.LinkStarted &&
+      appended.some((row) => row.type === EEventType.IdentityLinkStarted)
+    ) {
+      kill();
+    }
+
+    if (
+      point === ECrashPoint.LinkQuiet &&
+      appended.some((row) => row.type === EEventType.IdentityLinkQuiet)
+    ) {
+      kill();
+    }
+
+    if (
+      appended.some(
+        (row) =>
+          row.type === EEventType.IdentityLinkMoved &&
+          point !== `${LINK_MOVED_POINT}${EIdentityLinkOwner.McpAuth}` &&
+          point ===
+            `${LINK_MOVED_POINT}${SIdentityLinkMovedOwner.safeParse(row.payload).data?.owner}`,
+      )
+    ) {
+      kill();
+    }
+
     afterCommit(appended);
+  },
+});
+// biome-ignore lint/complexity/useLiteralKeys: a private method, reached for the crash point
+const append = bus["append"].bind(bus);
+Object.assign(bus, {
+  append: (...args: Parameters<typeof append>) => {
+    if (
+      point === ECrashPoint.LinkActivation &&
+      args[1].some((draft: TEventDraft) => draft.type === EEventType.IdentityLinked)
+    ) {
+      kill();
+    }
+
+    return append(...args);
+  },
+});
+const moveAll = McpAuthCredentialStore.prototype.moveAll;
+Object.assign(McpAuthCredentialStore.prototype, {
+  moveAll: async function (this: McpAuthCredentialStore, from: string, to: string) {
+    const moved = await moveAll.call(this, from, to);
+
+    if (point === `${LINK_MOVED_POINT}${EIdentityLinkOwner.McpAuth}`) {
+      kill();
+    }
+
+    return moved;
   },
 });
 
@@ -175,6 +242,11 @@ if (point === ECrashPoint.Poison) {
   });
 }
 
+// the first boot of a link point runs one turn, then links its chat to an account
+if (point.startsWith("link-")) {
+  messages.push("hello");
+}
+
 for (const content of messages) {
   await bus.publish({
     type: EEventType.TurnRequested,
@@ -195,6 +267,18 @@ for (const content of messages) {
   });
   // one turn after the other, as a user would send them
   await bus.idle();
+}
+
+if (point.startsWith("link-")) {
+  await bus.publish({
+    type: EEventType.IdentityLinkRequested,
+    source: "crash",
+    key: CRASH_CHAT_ID,
+    trace,
+    payload: { accountId: CRASH_ACCOUNT_ID, channel: EMessagePlatform.Signal, address: "+100" },
+    causationId: undefined,
+    dedupeKey: undefined,
+  });
 }
 
 await bus.idle();

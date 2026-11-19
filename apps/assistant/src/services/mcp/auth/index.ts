@@ -10,6 +10,7 @@ import type {
 } from "@modelcontextprotocol/sdk/shared/auth.js";
 import type { FetchLike } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { commandFailed, ESubscriptionMode, EventBus } from "../../events";
+import { EIdentityLinkOwner } from "../../identity/schema";
 import { getMcpProfile, type TMcpProfile } from "../config";
 import { McpAuthCredentialStore } from "./store";
 
@@ -416,6 +417,46 @@ export function setupMcpAuth(): void {
         // live sessions still send the previous token
         emit(EEventType.McpAuthCredentialsChanged, { chatId, profileId }, undefined, undefined);
         emit(EEventType.McpAuthTokenSaved, { chatId, profileId }, undefined, undefined);
+      });
+    },
+  });
+  // NOTE: the account keeps its credentials when it has any; otherwise the address's move to it.
+  // The file is written before the ack, and a second run finds nothing left to move
+  bus.subscribe({
+    consumer: "mcp-auth",
+    type: EEventType.IdentityLinkQuiet,
+    mode: ESubscriptionMode.Durable,
+    backoffMs: [1_000, 5_000],
+    handler: async (event, ctx) => {
+      const { chatKey, ownerKey } = event.payload;
+      const from = `${encodeURIComponent(chatKey)}:`;
+      const moved = await credentialStore.moveAll(from, `${encodeURIComponent(ownerKey)}:`);
+      const profileIds = new Set<string>();
+
+      for (const key of moved) {
+        runtimeProviders.delete(key);
+        const rest = key.slice(from.length);
+        profileIds.add(rest.slice(0, rest.lastIndexOf(":")));
+      }
+
+      await ctx.complete(async (_tx, emit) => {
+        for (const profileId of profileIds) {
+          for (const chatId of [chatKey, ownerKey]) {
+            emit(
+              EEventType.McpAuthCredentialsChanged,
+              { chatId, profileId },
+              `${chatId}:${profileId}`,
+              undefined,
+            );
+          }
+        }
+
+        emit(
+          EEventType.IdentityLinkMoved,
+          { ...event.payload, owner: EIdentityLinkOwner.McpAuth },
+          undefined,
+          undefined,
+        );
       });
     },
   });

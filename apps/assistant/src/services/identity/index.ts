@@ -1,13 +1,24 @@
-import { identityLinksTable } from "@bellaclaw/database";
+import { EEventType, identityLinksTable } from "@bellaclaw/database";
 import type { TOption } from "@bellaclaw/shared";
+import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { DatabaseConnector } from "../database";
+import { ESubscriptionMode, EventBus } from "../events";
+import { ERejectionCode, type TIdentityLinkKeys } from "../events/catalog";
 import { createCanonicalChatKey, parseCanonicalChatKey } from "../messaging/chat-key";
 import type { EMessagePlatform } from "../messaging/types";
-import { EIdentityLinkState, SIdentityLink, type TIdentityLink } from "./schema";
+import {
+  ADDRESS_LINKED_ELSEWHERE,
+  EIdentityLinkOwner,
+  EIdentityLinkState,
+  SIdentityLink,
+  type TIdentityLink,
+} from "./schema";
 
 const ACCOUNT_OWNER_PREFIX = "account:";
 const BELLA_CONVERSATION_PREFIX = "bella:";
+// how long after its arrival a message or a cron fire waits for a link of its key to complete
+const LINK_HOLD_MS = 10 * 60_000;
 
 export type TChatAddress = {
   channel: EMessagePlatform;
@@ -21,12 +32,21 @@ export type TResolvedChat = {
   destination: TChatAddress;
 };
 
+// the account's Bella conversation and owner key
+export type TAccountKeys = {
+  conversationKey: string;
+  ownerKey: string;
+};
+
 export class IdentityService {
   private static _instance: TOption<IdentityService>;
   private database = DatabaseConnector.instance;
   // by the chat key of the linked address
   private links = new Map<string, TIdentityLink>();
   private loadPromise: TOption<Promise<void>>;
+  // re-checked on every change of the read model
+  private linkWaiters = new Set<() => void>();
+  private linkHoldMs = LINK_HOLD_MS;
 
   private constructor() {}
 
@@ -38,7 +58,169 @@ export class IdentityService {
     return IdentityService._instance;
   }
 
+  // NOTE: the read model has its own live consumer, so its update never waits behind a command or
+  // a move on Identity's lanes
   public setup(): Promise<void> {
+    const bus = EventBus.instance;
+
+    bus.subscribe({
+      consumer: "identity",
+      type: EEventType.IdentityLinkRequested,
+      mode: ESubscriptionMode.Durable,
+      backoffMs: [],
+      handler: async (event, ctx) => {
+        const { accountId, channel, address } = event.payload;
+        const chatKey = this.addressKey({ channel, address });
+        const keys: TIdentityLinkKeys = {
+          accountId,
+          channel,
+          address,
+          chatKey,
+          conversationKey: `${BELLA_CONVERSATION_PREFIX}${accountId}`,
+          ownerKey: `${ACCOUNT_OWNER_PREFIX}${accountId}`,
+        };
+
+        // NOTE: a repeated request for an active link of the same account leaves the row as it
+        // is and starts the moves again; they find nothing left to move
+        await ctx.complete(async (tx, emit) => {
+          const existing = await tx
+            .select({ accountId: identityLinksTable.accountId, state: identityLinksTable.state })
+            .from(identityLinksTable)
+            .where(
+              and(eq(identityLinksTable.channel, channel), eq(identityLinksTable.address, address)),
+            )
+            .get();
+
+          if (existing !== undefined && existing.accountId !== accountId) {
+            emit(
+              EEventType.CommandRejected,
+              {
+                commandType: event.type,
+                code: ERejectionCode.Invalid,
+                message: "The address is linked to another account",
+                errorCode: ADDRESS_LINKED_ELSEWHERE,
+              },
+              undefined,
+              undefined,
+            );
+            return;
+          }
+
+          // one cutover of an address at a time: a second would distill its transcript again
+          if (existing?.state === EIdentityLinkState.Migrating) {
+            emit(
+              EEventType.CommandRejected,
+              {
+                commandType: event.type,
+                code: ERejectionCode.Invalid,
+                message: "The address is already being linked",
+              },
+              undefined,
+              undefined,
+            );
+            return;
+          }
+
+          if (existing === undefined) {
+            await tx.insert(identityLinksTable).values({
+              channel,
+              address,
+              accountId,
+              state: EIdentityLinkState.Migrating,
+              linkedAt: new Date(),
+            });
+          }
+
+          // on the address's lanes, where Conversation's barrier waits behind the address's turns
+          emit(EEventType.IdentityLinkStarted, keys, undefined, chatKey);
+        });
+      },
+    });
+    bus.subscribe({
+      consumer: "identity",
+      type: EEventType.IdentityLinkMoved,
+      mode: ESubscriptionMode.Durable,
+      backoffMs: [1_000, 5_000],
+      handler: async (event, ctx) => {
+        const { owner, ...keys } = event.payload;
+
+        await ctx.complete(async (tx, emit) => {
+          const where = and(
+            eq(identityLinksTable.channel, keys.channel),
+            eq(identityLinksTable.address, keys.address),
+          );
+          const row = await tx.select().from(identityLinksTable).where(where).get();
+
+          if (row === undefined) {
+            throw new Error("identity.link.moved for an address with no link");
+          }
+
+          if (row.state === EIdentityLinkState.Active) {
+            return;
+          }
+
+          const movedOwners = [...new Set([...row.movedOwners, owner])];
+
+          if (!Object.values(EIdentityLinkOwner).every((name) => movedOwners.includes(name))) {
+            await tx.update(identityLinksTable).set({ movedOwners }).where(where);
+            return;
+          }
+
+          const linkedAt = new Date();
+          await tx
+            .update(identityLinksTable)
+            .set({ state: EIdentityLinkState.Active, linkedAt, movedOwners })
+            .where(where);
+          emit(
+            EEventType.IdentityLinked,
+            { ...keys, linkedAt: linkedAt.getTime() },
+            undefined,
+            undefined,
+          );
+        });
+      },
+    });
+    bus.subscribe({
+      consumer: "identity-cache",
+      type: EEventType.IdentityLinkStarted,
+      mode: ESubscriptionMode.Live,
+      backoffMs: [],
+      handler: async (event) => {
+        const { chatKey, channel, address, accountId } = event.payload;
+
+        // a repeated request does not take an active link back
+        if (this.links.get(chatKey)?.state !== EIdentityLinkState.Active) {
+          this.links.set(chatKey, {
+            channel,
+            address,
+            accountId,
+            state: EIdentityLinkState.Migrating,
+            linkedAt: new Date(event.occurredAt),
+          });
+        }
+
+        this.notifyLinkWaiters();
+      },
+    });
+    bus.subscribe({
+      consumer: "identity-cache",
+      type: EEventType.IdentityLinked,
+      mode: ESubscriptionMode.Live,
+      backoffMs: [],
+      handler: async (event) => {
+        const { chatKey, channel, address, accountId, linkedAt } = event.payload;
+
+        this.links.set(chatKey, {
+          channel,
+          address,
+          accountId,
+          state: EIdentityLinkState.Active,
+          linkedAt: new Date(linkedAt),
+        });
+        this.notifyLinkWaiters();
+      },
+    });
+
     return this.load();
   }
 
@@ -62,17 +244,23 @@ export class IdentityService {
     }
 
     if (accountId !== undefined) {
-      // links of the same instant order by address key
-      const first = this.activeLinks()
-        .filter((link) => link.accountId === accountId)
-        .sort((left, right) => {
-          const byTime = left.linkedAt.getTime() - right.linkedAt.getTime();
-          if (byTime !== 0) {
-            return byTime;
-          }
+      const links = [...this.links.values()].filter((link) => link.accountId === accountId);
+      let candidates = links.filter((link) => link.state === EIdentityLinkState.Active);
 
-          return this.addressKey(left).localeCompare(this.addressKey(right));
-        })[0];
+      // an account whose first link is still being made is reached at that address
+      if (candidates.length === 0) {
+        candidates = links;
+      }
+
+      // links of the same instant order by address key
+      const first = candidates.sort((left, right) => {
+        const byTime = left.linkedAt.getTime() - right.linkedAt.getTime();
+        if (byTime !== 0) {
+          return byTime;
+        }
+
+        return this.addressKey(left).localeCompare(this.addressKey(right));
+      })[0];
 
       if (first === undefined) {
         return undefined;
@@ -98,6 +286,53 @@ export class IdentityService {
     };
   }
 
+  // the account of an address that is linked or being linked; undefined for any other key
+  public async linkedAccount(key: string): Promise<TOption<TAccountKeys>> {
+    await this.load();
+    const link = this.links.get(key);
+
+    if (link === undefined) {
+      return undefined;
+    }
+
+    return {
+      conversationKey: `${BELLA_CONVERSATION_PREFIX}${link.accountId}`,
+      ownerKey: `${ACCOUNT_OWNER_PREFIX}${link.accountId}`,
+    };
+  }
+
+  // Resolves true once no link of the key's account is being made, false when the hold that counts
+  // from arrivedAt (epoch ms) ends first, so a retry or a restart does not extend it. key: an
+  // address's chat key or an account's owner key
+  public async waitWhileLinking(key: string, arrivedAt: number): Promise<boolean> {
+    await this.load();
+    const timeoutMs = arrivedAt + this.linkHoldMs - Date.now();
+
+    if (!this.isLinking(key)) {
+      return true;
+    }
+
+    if (timeoutMs <= 0) {
+      return false;
+    }
+
+    const { promise, resolve } = Promise.withResolvers<boolean>();
+    const finish = (linked: boolean) => {
+      clearTimeout(timer);
+      this.linkWaiters.delete(check);
+      resolve(linked);
+    };
+    const check = () => {
+      if (!this.isLinking(key)) {
+        finish(true);
+      }
+    };
+    const timer = setTimeout(() => finish(false), timeoutMs);
+    this.linkWaiters.add(check);
+
+    return promise;
+  }
+
   // the chat key of an address
   public addressKey(address: TChatAddress): string {
     return createCanonicalChatKey(address.channel, address.address);
@@ -117,6 +352,24 @@ export class IdentityService {
     }
 
     return recipients;
+  }
+
+  private isLinking(key: string): boolean {
+    let accountId = this.links.get(key)?.accountId;
+
+    if (key.startsWith(ACCOUNT_OWNER_PREFIX)) {
+      accountId = key.slice(ACCOUNT_OWNER_PREFIX.length);
+    }
+
+    return [...this.links.values()].some(
+      (link) => link.accountId === accountId && link.state === EIdentityLinkState.Migrating,
+    );
+  }
+
+  private notifyLinkWaiters(): void {
+    for (const check of [...this.linkWaiters]) {
+      check();
+    }
   }
 
   private activeLinks(): TIdentityLink[] {

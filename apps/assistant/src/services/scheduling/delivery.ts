@@ -58,10 +58,15 @@ export class ScheduledDelivery {
   }
 
   private async handleCronFire(event: TEvent<EEventType.CronFired>, ctx: TEventContext) {
-    const job = event.payload;
+    // NOTE: a fire for a scope that is being linked waits for the link on its own lane, bounded
+    // from the fire as an inbound message is, so it runs once, for the account
+    if (!(await IdentityService.instance.waitWhileLinking(event.payload.scope, event.occurredAt))) {
+      throw new Error("The link of this job's owner did not complete in time");
+    }
+
     // the scope is the job's owner; the delivery goes to the owner's conversation, and its text is
     // formatted for the channel that conversation is reached on
-    const resolved = await IdentityService.instance.resolve(job.scope);
+    const resolved = await IdentityService.instance.resolve(event.payload.scope);
     const trace: TBehaviorTraceContext = {
       ...event.trace,
       platform: resolved?.destination.channel,
@@ -71,11 +76,15 @@ export class ScheduledDelivery {
 
     if (resolved === undefined) {
       this.logger.warning(
-        `handleCronFire: job "${job.name}" has invalid scope "${job.scope}", skipping delivery`,
+        `handleCronFire: job "${event.payload.name}" has invalid scope "${event.payload.scope}", skipping delivery`,
       );
       span.fail("invalid scope", 0);
       return;
     }
+
+    // a fire queued under an address that is linked since runs, like the job's row, for the
+    // account: its automations, settings and tools are the account's
+    const job = { ...event.payload, scope: resolved.ownerKey };
 
     const conversationKey = resolved.conversationKey;
     const destination = resolved.destination;
@@ -83,6 +92,8 @@ export class ScheduledDelivery {
     let messages: TCronMessage[];
 
     if (job.content.kind === "task" || job.automationIds.length > 0) {
+      // NOTE: accepted risk: keyed by scope|name, so a run that outlasts its interval can overlap
+      // the next fire once when a link re-keys the job mid-run
       const previousEnd = this.lastRunEndedAt.get(event.key);
 
       // fired while the previous run of this job was still going

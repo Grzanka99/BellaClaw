@@ -9,6 +9,7 @@ import { ConversationStore } from "../conversation";
 import { EmbeddingClient } from "../embedding";
 import { commandFailed, ESubscriptionMode, EventBus, type TEventContext } from "../events";
 import { IdentityService } from "../identity";
+import { EIdentityLinkOwner } from "../identity/schema";
 import { SettingsService } from "../settings";
 import type { TConfigRecord } from "../settings/schema";
 import { Memory } from ".";
@@ -71,6 +72,13 @@ export class FactDistiller {
       backoffMs: [],
       handler: async (event) => {
         const { conversationKey, ownerKey } = event.payload;
+
+        // NOTE: an address that is linked or being linked is drained by its move, and its later
+        // rows in the account's conversation
+        if ((await IdentityService.instance.linkedAccount(conversationKey)) !== undefined) {
+          return;
+        }
+
         const settings = await SettingsService.instance.getAll(ownerKey);
 
         // NOTE: acked anyway: the checkpoint in fact_distillation_state makes the next drain
@@ -91,8 +99,10 @@ export class FactDistiller {
 
         try {
           const settings = await SettingsService.instance.getAll(ownerKey);
+          const linked = await IdentityService.instance.linkedAccount(conversationKey);
 
           if (
+            linked === undefined &&
             !(await this.drainLiveFactWindows(conversationKey, ownerKey, settings, event.trace))
           ) {
             throw new Error("Pending fact distillation failed");
@@ -111,6 +121,33 @@ export class FactDistiller {
 
         await ctx.complete(async (_tx, emit) => {
           emit(EEventType.MemoryFactsRefreshed, {}, undefined, undefined);
+        });
+      },
+    });
+    // NOTE: the address's facts move once its transcript is drained to its checkpoint, with the
+    // address's settings, which Settings moves only after Memory and Conversation. A failed drain
+    // fails the handler, so the move waits for its retry. The move runs on the account's lane,
+    // behind the drains of the account's turns
+    bus.subscribe({
+      consumer: "memory",
+      type: EEventType.IdentityLinkQuiet,
+      mode: ESubscriptionMode.Durable,
+      backoffMs: [1_000, 5_000, 30_000],
+      handler: async (event, ctx) => {
+        const { chatKey, conversationKey } = event.payload;
+        const settings = await SettingsService.instance.getAll(chatKey);
+
+        if (!(await this.drainLiveFactWindows(chatKey, chatKey, settings, event.trace))) {
+          throw new Error("The fact drain of the linked address failed");
+        }
+
+        await ctx.complete(async (_tx, emit) => {
+          emit(
+            EEventType.IdentityLinkSettled,
+            { ...event.payload, owner: EIdentityLinkOwner.Memory },
+            undefined,
+            conversationKey,
+          );
         });
       },
     });

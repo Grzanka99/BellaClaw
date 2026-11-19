@@ -11,6 +11,7 @@ import { IMAGE_MARKER, type TConversation } from "../conversation/types";
 import { ESubscriptionMode, EventBus, type TEventContext, type TEventRequester } from "../events";
 import { ERejectionCode, type TEvent, type TMessageOrigin } from "../events/catalog";
 import { IdentityService } from "../identity";
+import { EIdentityLinkOwner } from "../identity/schema";
 import { MessagingAdapter } from "../messaging";
 import { SettingsService } from "../settings";
 import { EConfigKey, type TConfigRecord } from "../settings/schema";
@@ -20,6 +21,8 @@ const INTERRUPTED_REPLY =
   "I was restarted while answering, so that reply is lost. Some actions may already be done. Check before asking again.";
 const INTERRUPTED_NOTICE =
   "System notice, not from the user: the previous turn was interrupted by a restart. Its tool calls may be partly applied. The next assistant message says so.";
+// the lane prefix of an address's turns held while its account is being linked
+const LINK_HOLD_PREFIX = "link-hold|";
 // one auth check per OAuth provider, each up to 30 s, then the provider switch
 const DIAGNOSE_TIMEOUT_MS = 120_000;
 
@@ -57,6 +60,67 @@ export class MessageHandler {
       mode: ESubscriptionMode.Durable,
       backoffMs: [1_000, 5_000, 30_000],
       handler: (event, ctx) => this.saveDeliveredMessage(event, ctx),
+    });
+    // NOTE: the barrier of a link. It passes the address's lane, behind the address's running or
+    // queued turn, then the account's Bella conversation's lane, behind that side's running turn,
+    // and only then lets the owners move, on the address's lanes
+    bus.subscribe({
+      consumer: "conversation",
+      type: EEventType.IdentityLinkStarted,
+      mode: ESubscriptionMode.Durable,
+      backoffMs: [1_000, 5_000],
+      handler: async (event, ctx) => {
+        await ctx.complete(async (_tx, emit) => {
+          emit(
+            EEventType.IdentityLinkSettled,
+            { ...event.payload, owner: EIdentityLinkOwner.Conversation },
+            undefined,
+            event.payload.conversationKey,
+          );
+        });
+      },
+    });
+    bus.subscribe({
+      consumer: "conversation",
+      type: EEventType.IdentityLinkSettled,
+      mode: ESubscriptionMode.Durable,
+      backoffMs: [1_000, 5_000],
+      handler: async (event, ctx) => {
+        const { owner, ...keys } = event.payload;
+
+        if (owner !== EIdentityLinkOwner.Conversation) {
+          return;
+        }
+
+        await ctx.complete(async (_tx, emit) => {
+          emit(EEventType.IdentityLinkQuiet, keys, undefined, keys.chatKey);
+        });
+      },
+    });
+    // NOTE: Conversation's move follows Memory's, on the Bella conversation's lane, so a message of
+    // the address forwarded there is stored before or after the move, never across it
+    bus.subscribe({
+      consumer: "conversation",
+      type: EEventType.IdentityLinkMoved,
+      mode: ESubscriptionMode.Durable,
+      backoffMs: [1_000, 5_000],
+      handler: async (event, ctx) => {
+        const { chatKey, conversationKey, ownerKey } = event.payload;
+
+        if (event.payload.owner !== EIdentityLinkOwner.Memory) {
+          return;
+        }
+
+        await ctx.complete(async (tx, emit) => {
+          await this.conversations.moveToBella(tx, chatKey, conversationKey, ownerKey);
+          emit(
+            EEventType.IdentityLinkMoved,
+            { ...event.payload, owner: EIdentityLinkOwner.Conversation },
+            undefined,
+            chatKey,
+          );
+        });
+      },
     });
     bus.subscribe({
       consumer: "conversation",
@@ -99,16 +163,28 @@ export class MessageHandler {
       return;
     }
 
-    // a message sent before its address was linked belongs to the account's Bella conversation
-    const resolved = await IdentityService.instance.resolve(event.payload.chatId);
-    const chatId = resolved?.conversationKey ?? event.payload.chatId;
+    // NOTE: a message for an address that is linked or being linked belongs to the account's Bella
+    // conversation. It is stored on that conversation's lane, which also moves the address's rows:
+    // under the address while its rows wait there to be moved, in the conversation after
+    const account = await IdentityService.instance.linkedAccount(event.payload.chatId);
+    let lane = event.payload.chatId;
+    let chatId = lane;
+
+    if (account !== undefined) {
+      lane = account.conversationKey;
+      chatId = account.conversationKey;
+
+      if (event.key === lane && (await this.conversations.holds(event.payload.chatId))) {
+        chatId = event.payload.chatId;
+      }
+    }
 
     // written on its conversation's lane only, so the row orders with that conversation's turns;
     // the forward and the ack commit together, and the emit's dedupe key keeps a redelivery
     // from forwarding twice
-    if (chatId !== event.key) {
+    if (lane !== event.key) {
       await ctx.complete(async (_tx, emit) => {
-        emit(EEventType.MessageSent, { ...event.payload, chatId }, undefined, chatId);
+        emit(EEventType.MessageSent, event.payload, undefined, lane);
       });
       return;
     }
@@ -138,13 +214,23 @@ export class MessageHandler {
     event: TEvent<EEventType.TurnRequested>,
     ctx: TEventContext,
   ): Promise<void> {
-    const { content, attachments, receivedAt, ...origin } = event.payload;
-    const { conversationKey, ownerKey, channel } = origin;
+    const { content, attachments, receivedAt, ...requested } = event.payload;
+    let origin: TMessageOrigin = requested;
     const trace = event.trace;
     const handleMessageStart = performance.now();
     this.logger.info("handleTurn: start");
     logHandlerStarted(trace, "message-handler");
     const span = startHandlerSpan(trace, "message-handler");
+
+    // NOTE: a turn of an address that is linked or being linked waits on a hold lane of its own
+    // until no link of the address's account is being made, then runs on the account's lane, in
+    // the account's Bella conversation, with the account's keys. The address's and the account's
+    // lanes stay free for the link's barrier and moves; the bound counts from the hold
+    const account = await IdentityService.instance.linkedAccount(requested.conversationKey);
+
+    if (account !== undefined && event.key === account.conversationKey) {
+      origin = { ...requested, ...account };
+    }
 
     // an earlier attempt died mid-run; the model must not answer twice
     if ((await ctx.findCaused(EEventType.TurnStarted, undefined)) !== undefined) {
@@ -166,6 +252,32 @@ export class MessageHandler {
       return;
     }
 
+    if (account !== undefined && event.key !== account.conversationKey) {
+      const holdKey = `${LINK_HOLD_PREFIX}${requested.conversationKey}`;
+      let lane = holdKey;
+
+      if (event.key === holdKey) {
+        if (
+          !(await IdentityService.instance.waitWhileLinking(
+            requested.conversationKey,
+            event.occurredAt,
+          ))
+        ) {
+          span.fail("link hold expired", 0);
+          throw new Error("The link of this address did not complete in time");
+        }
+
+        lane = account.conversationKey;
+      }
+
+      await ctx.complete(async (_tx, emit) => {
+        emit(EEventType.TurnRequested, event.payload, undefined, lane);
+      });
+      span.ok("forwarded", 0);
+      return;
+    }
+
+    const { conversationKey, ownerKey, channel } = origin;
     const settings = await SettingsService.instance.getAll(ownerKey);
     let persisted: TOption<TConversation>;
 

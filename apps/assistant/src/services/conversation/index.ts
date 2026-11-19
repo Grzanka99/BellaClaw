@@ -1,4 +1,9 @@
-import { conversationSummariesTable, memoriesTable, type TSelectMemory } from "@bellaclaw/database";
+import {
+  conversationSummariesTable,
+  conversationsTable,
+  memoriesTable,
+  type TSelectMemory,
+} from "@bellaclaw/database";
 import type { TOption } from "@bellaclaw/shared";
 import {
   type AssistantMessage,
@@ -50,6 +55,55 @@ export class ConversationStore {
         .orderBy(asc(memoriesTable.chatId));
       return rows.map((row) => row.chatId);
     });
+  }
+
+  // whether the chat still has transcript rows or a summary
+  public holds(chatId: string): Promise<boolean> {
+    return this.database.run(async (db) => {
+      const row = await db
+        .select({ id: memoriesTable.id })
+        .from(memoriesTable)
+        .where(eq(memoriesTable.chatId, chatId))
+        .limit(1)
+        .get();
+      const summary = await db
+        .select({ chatId: conversationSummariesTable.chatId })
+        .from(conversationSummariesTable)
+        .where(eq(conversationSummariesTable.chatId, chatId))
+        .get();
+      return row !== undefined || summary !== undefined;
+    });
+  }
+
+  // Moves a chat's transcript into an account's Bella conversation and lists that conversation
+  // in the registry. Rows keep their ids, so they fall into time order with the conversation's.
+  // The conversation keeps its own summary when it has one; otherwise the chat's becomes it
+  public async moveToBella(
+    db: TDatabaseHandle,
+    chatId: string,
+    conversationKey: string,
+    ownerKey: string,
+  ): Promise<void> {
+    await db.insert(conversationsTable).values({ conversationKey, ownerKey }).onConflictDoNothing();
+    const kept = await db
+      .select({ chatId: conversationSummariesTable.chatId })
+      .from(conversationSummariesTable)
+      .where(eq(conversationSummariesTable.chatId, conversationKey))
+      .get();
+    if (kept !== undefined) {
+      await db
+        .delete(conversationSummariesTable)
+        .where(eq(conversationSummariesTable.chatId, chatId));
+    } else {
+      await db
+        .update(conversationSummariesTable)
+        .set({ chatId: conversationKey })
+        .where(eq(conversationSummariesTable.chatId, chatId));
+    }
+    await db
+      .update(memoriesTable)
+      .set({ chatId: conversationKey })
+      .where(eq(memoriesTable.chatId, chatId));
   }
 
   public load(chatId: string): Promise<TOption<TConversation>> {

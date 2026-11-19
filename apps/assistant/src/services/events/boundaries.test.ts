@@ -73,7 +73,8 @@ const ALLOWED: Record<string, string> = {
   "memory -> identity": "IdentityService.resolve, a cached read model",
   "message-handler -> ai/agent-harness": "runMain and compactConversation, the stateless engine",
   "message-handler -> conversation": "the same component: Conversation's handler and its store",
-  "message-handler -> identity": "IdentityService.resolve, a cached read model",
+  "message-handler -> identity":
+    "IdentityService.linkedAccount and waitWhileLinking, a cached read model",
   "message-handler -> messaging":
     "fetchAttachment and deleteAttachment: driver calls, no stored state",
   "messaging -> identity": "IdentityService.resolve, a cached read model",
@@ -86,7 +87,7 @@ const ALLOWED: Record<string, string> = {
   "scheduling -> ai/llm": "driver",
   "scheduling -> automation": "getByIds read; failure limit constant",
   "scheduling -> automation/runner": "run-mode and outcome enums, timeout constant",
-  "scheduling -> identity": "IdentityService.resolve, a cached read model",
+  "scheduling -> identity": "IdentityService.resolve and waitWhileLinking, a cached read model",
   "settings -> ai/model-preferences": "pure helpers",
   "signal -> messaging": "registerTransport: boot wiring of the driver, no stored state",
   "signal -> identity": "IdentityService.resolve, a cached read model",
@@ -96,11 +97,15 @@ const ALLOWED: Record<string, string> = {
 // Who may wait on whom through request() or waitFor() (section 6). A cycle would hang a lane
 // until the timeout.
 const ALLOWED_WAITS: Record<string, string[]> = {
-  conversation: ["cron", "automations", "settings", "memory", "calendar", "ai-auth"],
-  // a scheduled task's search-memory tool refreshes the facts first
-  scheduling: ["automations", "memory"],
+  // a turn of an address is held on its own lane while the address or its account is being linked
+  conversation: ["cron", "automations", "settings", "memory", "calendar", "ai-auth", "identity"],
+  // a scheduled task's search-memory tool refreshes the facts first; a cron fire is held while
+  // its address or account is being linked
+  scheduling: ["automations", "memory", "identity"],
   commands: ["mcp-auth", "ai-auth", "calendar"],
   "ai-auth": ["settings"],
+  // a message held while its address or account is being linked
+  authorization: ["identity"],
   // an HTTP request, on no lane: it awaits the outcome through live subscriptions
   "internal-api": ["settings", "conversation"],
 };

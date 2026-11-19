@@ -184,6 +184,13 @@ export class AuthorizationService {
     // NOTE: a channel message arrives under the chat key of its address, which the gate
     // authorizes; an address linked to an account resolves to the account's Bella conversation
     const chatId = event.payload.conversationKey;
+
+    // NOTE: held on its own lane while the address or its account is being linked, so it is
+    // answered once, in the account's conversation; the bound counts from its arrival
+    if (!(await IdentityService.instance.waitWhileLinking(chatId, event.occurredAt))) {
+      throw new Error("The link of this address did not complete in time");
+    }
+
     const resolved = await IdentityService.instance.resolve(chatId);
     if (resolved === undefined) {
       throw new Error(`Unknown chat key ${chatId}`);

@@ -3,6 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { DatabaseConnector, type TDatabaseTransaction } from "../database";
 import { ESubscriptionMode, EventBus } from "../events";
 import { ERejectionCode } from "../events/catalog";
+import { EIdentityLinkOwner } from "../identity/schema";
 import {
   ConfigValidators,
   DefaultConfigRecord,
@@ -66,6 +67,69 @@ export class SettingsService {
 
           const record = await this.writeMany(tx, ownerKey, validation.updates);
           emit(EEventType.SettingsChanged, { ownerKey, record }, undefined, undefined);
+        });
+      },
+    });
+    // NOTE: the account keeps its settings when it has any; otherwise the address's move to it.
+    // They move after Conversation's move, which follows Memory's, so the fact drain of the
+    // address still reads the address's settings
+    bus.subscribe({
+      consumer: "settings",
+      type: EEventType.IdentityLinkMoved,
+      mode: ESubscriptionMode.Durable,
+      backoffMs: [1_000, 5_000],
+      handler: async (event, ctx) => {
+        const { chatKey, ownerKey } = event.payload;
+
+        if (event.payload.owner !== EIdentityLinkOwner.Conversation) {
+          return;
+        }
+
+        await ctx.complete(async (tx, emit) => {
+          const moving = await tx
+            .select()
+            .from(userConfigsTable)
+            .where(eq(userConfigsTable.ownerKey, chatKey));
+
+          if (moving.length > 0) {
+            const kept = await tx
+              .select()
+              .from(userConfigsTable)
+              .where(eq(userConfigsTable.ownerKey, ownerKey));
+
+            if (kept.length > 0) {
+              await tx.delete(userConfigsTable).where(eq(userConfigsTable.ownerKey, chatKey));
+            } else {
+              await tx
+                .update(userConfigsTable)
+                .set({ ownerKey })
+                .where(eq(userConfigsTable.ownerKey, chatKey));
+            }
+
+            const rows = await tx
+              .select()
+              .from(userConfigsTable)
+              .where(eq(userConfigsTable.ownerKey, ownerKey));
+            emit(
+              EEventType.SettingsChanged,
+              { ownerKey, record: this.createRecord(rows) },
+              ownerKey,
+              undefined,
+            );
+            emit(
+              EEventType.SettingsChanged,
+              { ownerKey: chatKey, record: { ...DefaultConfigRecord } },
+              chatKey,
+              undefined,
+            );
+          }
+
+          emit(
+            EEventType.IdentityLinkMoved,
+            { ...event.payload, owner: EIdentityLinkOwner.Settings },
+            undefined,
+            undefined,
+          );
         });
       },
     });

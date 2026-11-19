@@ -74,6 +74,12 @@ export const memoriesTable = sqliteTable(
   (table) => [index("memories_chat_id_idx").on(table.chatId, table.id)],
 );
 
+// the conversations of an account, with their owner
+export const conversationsTable = sqliteTable("conversations", {
+  conversationKey: text("conversationKey").primaryKey(),
+  ownerKey: text("ownerKey").notNull(),
+});
+
 export const conversationSummariesTable = sqliteTable("conversation_summaries", {
   chatId: text("chatId").primaryKey(),
   summary: text("summary").notNull(),
@@ -229,6 +235,11 @@ export const identityLinksTable = sqliteTable(
     accountId: text("accountId").notNull(),
     state: text("state").notNull(),
     linkedAt: integer("linkedAt", { mode: "timestamp_ms" }).notNull(),
+    // the owners that have moved the address's rows to the account
+    movedOwners: text("movedOwners", { mode: "json" })
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'[]'`),
   },
   (table) => [
     primaryKey({ columns: [table.channel, table.address] }),

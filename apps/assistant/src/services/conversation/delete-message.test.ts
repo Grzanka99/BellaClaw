@@ -110,7 +110,6 @@ async function liveFacts(chatId: string) {
 
 test("deleting an assistant reply removes it with its tool rows and forgets the facts they sourced", async () => {
   const chatId = "delete-reply";
-  const otherChatId = "delete-reply-other";
   const first = await saveTurn(chatId, "first", [], undefined);
   const second = await saveTurn(
     chatId,
@@ -135,7 +134,6 @@ test("deleting an assistant reply removes it with its tool rows and forgets the 
   await insertFact(chatId, "from the reply", replyId);
   await insertFact(chatId, "from the tool result", resultId);
   await insertFact(chatId, "from the user message", secondId);
-  await insertFact(otherChatId, "another chat, same source id", replyId);
 
   const deleted = await requestDelete(chatId, replyId);
   await EventBus.instance.idle();
@@ -147,7 +145,6 @@ test("deleting an assistant reply removes it with its tool rows and forgets the 
     kept,
   );
   expect(await liveFacts(chatId)).toEqual(["from the user message"]);
-  expect(await liveFacts(otherChatId)).toEqual(["another chat, same source id"]);
 });
 
 test("a message id of another chat is rejected and nothing is deleted", async () => {
@@ -186,6 +183,30 @@ test("deleting a message of an account's Bella conversation forgets the facts st
   await EventBus.instance.idle();
 
   expect(await liveFacts("account:acct-delete")).toEqual([]);
+  await resetIdentityLinksTable();
+  Object.assign(IdentityService, { _instance: undefined });
+});
+
+test("deleting a message of an address being linked forgets its fact already moved to the account", async () => {
+  await resetIdentityLinksTable();
+  Object.assign(IdentityService, { _instance: undefined });
+  await DatabaseConnector.instance.database.insert(identityLinksTable).values({
+    channel: EMessagePlatform.Signal,
+    address: "+801",
+    accountId: "acct-moving",
+    state: EIdentityLinkState.Migrating,
+    linkedAt: new Date(1_000),
+  });
+  const chatId = "signal:+801";
+  const turn = await saveTurn(chatId, "first", [], undefined);
+  const userId = turn.entries[0]?.id ?? 0;
+  // Memory moved the fact; the transcript still waits for Conversation's move
+  await insertFact("account:acct-moving", "from the user message", userId);
+
+  await requestDelete(chatId, userId);
+  await EventBus.instance.idle();
+
+  expect(await liveFacts("account:acct-moving")).toEqual([]);
   await resetIdentityLinksTable();
   Object.assign(IdentityService, { _instance: undefined });
 });

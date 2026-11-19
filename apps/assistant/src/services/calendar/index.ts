@@ -5,6 +5,7 @@ import { and, eq, ne } from "drizzle-orm";
 import { z } from "zod";
 import { DatabaseConnector, type TDatabaseTransaction } from "../database";
 import { commandFailed, ESubscriptionMode, EventBus, type TEventContext } from "../events";
+import { EIdentityLinkOwner } from "../identity/schema";
 import { calculateAvailability } from "./availability";
 import { GwsCalendarClient, type TCalendarProbe } from "./gws";
 import {
@@ -523,6 +524,40 @@ export class CalendarService {
 
         await ctx.complete(async (_tx, emit) => {
           emit(EEventType.CalendarEventDeleted, { chatId, eventId, scope }, undefined, undefined);
+        });
+      },
+    });
+
+    // NOTE: the account keeps its calendars when it has any; otherwise the address's move to it
+    EventBus.instance.subscribe({
+      consumer: "calendar",
+      type: EEventType.IdentityLinkQuiet,
+      mode: ESubscriptionMode.Durable,
+      backoffMs: [1_000, 5_000],
+      handler: async (event, ctx) => {
+        const { chatKey, ownerKey } = event.payload;
+
+        await ctx.complete(async (tx, emit) => {
+          const kept = await tx
+            .select({ calendarId: calendarsTable.calendarId })
+            .from(calendarsTable)
+            .where(eq(calendarsTable.userId, ownerKey));
+
+          if (kept.length > 0) {
+            await tx.delete(calendarsTable).where(eq(calendarsTable.userId, chatKey));
+          } else {
+            await tx
+              .update(calendarsTable)
+              .set({ userId: ownerKey })
+              .where(eq(calendarsTable.userId, chatKey));
+          }
+
+          emit(
+            EEventType.IdentityLinkMoved,
+            { ...event.payload, owner: EIdentityLinkOwner.Calendar },
+            undefined,
+            undefined,
+          );
         });
       },
     });

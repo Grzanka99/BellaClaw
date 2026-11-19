@@ -377,7 +377,25 @@ describe("IdentityService", () => {
       causationId: undefined,
       dedupeKey: undefined,
     });
-    await Bun.sleep(20);
+    // the old delivery is acked once its forward to the Bella conversation's lane commits
+    const deadline = Date.now() + 5_000;
+    while (true) {
+      const [old] = await DatabaseConnector.instance.database
+        .select({ status: eventDeliveriesTable.status })
+        .from(eventDeliveriesTable)
+        .innerJoin(eventsTable, eq(eventsTable.seq, eventDeliveriesTable.eventSeq))
+        .where(eq(eventsTable.key, "signal:+800"));
+
+      if (old?.status === "done") {
+        break;
+      }
+
+      if (Date.now() > deadline) {
+        throw new Error("The old message.sent was not acked");
+      }
+
+      await Bun.sleep(1);
+    }
     releaseTurn();
     await EventBus.instance.idle();
 

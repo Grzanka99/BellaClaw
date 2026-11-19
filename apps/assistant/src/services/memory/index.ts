@@ -14,7 +14,7 @@ import { DatabaseConnector, type TDatabaseTransaction } from "../database";
 import { EmbeddingClient } from "../embedding";
 import { commandFailed, ESubscriptionMode, EventBus, type TEventContext } from "../events";
 import type { TEvent } from "../events/catalog";
-import { IdentityService } from "../identity";
+import { EIdentityLinkOwner } from "../identity/schema";
 import {
   SPreparedFact,
   type TFact,
@@ -129,6 +129,17 @@ export class Memory {
         }
       },
     });
+    bus.subscribe({
+      consumer: "memory",
+      type: EEventType.IdentityLinkSettled,
+      mode: ESubscriptionMode.Durable,
+      backoffMs: [1_000, 5_000],
+      handler: async (event, ctx) => {
+        if (event.payload.owner === EIdentityLinkOwner.Memory) {
+          await this.moveLinkedFacts(event, ctx);
+        }
+      },
+    });
     // a deleted message takes the live facts it was the source of
     bus.subscribe({
       consumer: "memory",
@@ -137,33 +148,66 @@ export class Memory {
       backoffMs: [1_000, 5_000, 30_000],
       handler: async (event, ctx) => {
         const { messageIds } = event.payload;
-        // facts are stored under the owner of the conversation
-        const chatId =
-          (await IdentityService.instance.resolve(event.payload.chatId))?.ownerKey ??
-          event.payload.chatId;
 
+        // NOTE: found by source alone, since message ids are unique across chats, and forgotten
+        // under the owner key on each fact, which a link may have changed since the message
         await ctx.complete(async (tx, emit) => {
           const facts = await tx
-            .select({ id: factsTable.id })
+            .select({ id: factsTable.id, chatId: factsTable.chatId })
             .from(factsTable)
             .where(
               and(
-                eq(factsTable.chatId, chatId),
                 inArray(factsTable.sourceMessageId, messageIds),
                 isNull(factsTable.supersededBy),
                 isNull(factsTable.forgottenAt),
               ),
             );
+          const byOwner = Map.groupBy(facts, (fact) => fact.chatId);
 
-          if (facts.length === 0) {
-            return;
+          for (const [chatId, owned] of byOwner) {
+            const factIds = owned.map((fact) => fact.id);
+            await this.forgetFacts(tx, chatId, factIds);
+            emit(EEventType.MemoryFactsForgotten, { chatId, factIds }, chatId, undefined);
           }
-
-          const factIds = facts.map((fact) => fact.id);
-          await this.forgetFacts(tx, chatId, factIds);
-          emit(EEventType.MemoryFactsForgotten, { chatId, factIds }, undefined, undefined);
         });
       },
+    });
+  }
+
+  // NOTE: the address's facts join the account's; the account keeps its distillation checkpoint
+  // when it has one, otherwise the address's becomes it
+  private async moveLinkedFacts(
+    event: TEvent<EEventType.IdentityLinkSettled>,
+    ctx: TEventContext,
+  ): Promise<void> {
+    const { chatKey, conversationKey, ownerKey } = event.payload;
+
+    await ctx.complete(async (tx, emit) => {
+      await tx.update(factsTable).set({ chatId: ownerKey }).where(eq(factsTable.chatId, chatKey));
+      const kept = await tx
+        .select({ chatId: factDistillationStateTable.chatId })
+        .from(factDistillationStateTable)
+        .where(eq(factDistillationStateTable.chatId, conversationKey))
+        .get();
+
+      if (kept !== undefined) {
+        await tx
+          .delete(factDistillationStateTable)
+          .where(eq(factDistillationStateTable.chatId, chatKey));
+      } else {
+        await tx
+          .update(factDistillationStateTable)
+          .set({ chatId: conversationKey })
+          .where(eq(factDistillationStateTable.chatId, chatKey));
+      }
+
+      // on the account's lane, where Conversation's move follows
+      emit(
+        EEventType.IdentityLinkMoved,
+        { ...event.payload, owner: EIdentityLinkOwner.Memory },
+        undefined,
+        conversationKey,
+      );
     });
   }
 
