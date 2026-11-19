@@ -66,7 +66,7 @@ describe("behavior log MCP server", () => {
     logger.record({
       trace: { turnId: "turn-mcp", chatId, platform: "discord" },
       event: "handler.completed",
-      component: "messaging",
+      component: "message-handler",
     });
     await logger.close();
 
@@ -153,7 +153,7 @@ describe("behavior log MCP server", () => {
     logger.record({
       trace: { turnId: "before", chatId, platform: "discord" },
       event: "handler.completed",
-      component: "messaging",
+      component: "message-handler",
     });
     logger.record({
       trace: { turnId: "diagnostic", chatId, platform: "discord" },
@@ -174,7 +174,7 @@ describe("behavior log MCP server", () => {
     logger.record({
       trace: { turnId: "later", chatId, platform: "discord" },
       event: "handler.completed",
-      component: "messaging",
+      component: "message-handler",
     });
     await logger.close();
 

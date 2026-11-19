@@ -297,9 +297,15 @@ function createContext() {
 }
 
 function recordBoundary(logger: AppLogger, turnId: string, event: string) {
+  let component = "messaging";
+
+  if (event === "handler.completed") {
+    component = "message-handler";
+  }
+
   logger.record({
     trace: { turnId, chatId: "discord:diagnostic-chat", platform: "discord" },
     event,
-    component: "messaging",
+    component,
   });
 }

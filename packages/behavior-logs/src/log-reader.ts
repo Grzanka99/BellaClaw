@@ -408,9 +408,9 @@ export class LogReader {
           SELECT l.turnId,
             MIN(CASE WHEN l.event = 'message.received' AND l.component = 'messaging'
               THEN l.createdAt END) AS startedAtMs,
-            MAX(CASE WHEN l.event = 'handler.completed' AND l.component = 'messaging'
+            MAX(CASE WHEN l.event = 'handler.completed' AND l.component = 'message-handler'
               THEN l.createdAt END) AS completedAtMs,
-            MAX(CASE WHEN l.event = 'handler.completed' AND l.component = 'messaging'
+            MAX(CASE WHEN l.event = 'handler.completed' AND l.component = 'message-handler'
               THEN l.id END) AS completedId
           FROM app_event_logs l
           WHERE l.chatId = ? ${filter.sql}
