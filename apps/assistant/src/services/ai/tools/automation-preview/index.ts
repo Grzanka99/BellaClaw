@@ -47,7 +47,7 @@ export const automationPreview = defineTool({
   logSafe: ["success", "outputCapBytes"],
   privateErrors: true,
   execute: async (context, args) => {
-    const scope = requireChatId(context.chatId);
+    const scope = requireChatId(context.ownerKey);
     const previewed = await runAutomationOperation(() =>
       context.events.request(
         EEventType.AutomationPreviewRequested,

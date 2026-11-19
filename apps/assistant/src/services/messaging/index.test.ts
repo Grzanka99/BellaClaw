@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { DatabaseConnector } from "../database";
 import { resetEventTables } from "../database/test-utils";
 import { EventBus, type TEventDraft } from "../events";
+import { testMessageOrigin } from "../events/test-utils";
 import { MessagingAdapter } from ".";
 import { EMessagePlatform, readAttachment } from "./types";
 
@@ -79,6 +80,7 @@ describe("MessagingAdapter outbound", () => {
     expect((await sentEvents()).map((row) => row.payload)).toEqual([
       {
         chatId: "signal:+100",
+        channel: EMessagePlatform.Signal,
         sourceType: EEventType.NoticeReady,
         chars: 6,
         sentAt: expect.any(Number),
@@ -100,7 +102,10 @@ describe("MessagingAdapter outbound", () => {
     await bus.start();
     const reply = { ...notice(), type: EEventType.ReplyReady };
 
-    await bus.publish({ ...reply, payload: { chatId: "signal:+100", text: "Root reply" } });
+    await bus.publish({
+      ...reply,
+      payload: { ...testMessageOrigin("signal:+100", EMessagePlatform.Signal), text: "Root reply" },
+    });
     await bus.idle();
     expect(sendText).toHaveBeenCalledWith("+100", "Root reply");
 
@@ -108,7 +113,10 @@ describe("MessagingAdapter outbound", () => {
       throw new Error("offline");
     });
     await expect(
-      bus.publish({ ...reply, payload: { chatId: "signal:+100", text: "again" } }),
+      bus.publish({
+        ...reply,
+        payload: { ...testMessageOrigin("signal:+100", EMessagePlatform.Signal), text: "again" },
+      }),
     ).resolves.toBeUndefined();
     await bus.idle();
     expect((await deliveries()).map((row) => row.status)).toEqual(["done", "dead"]);

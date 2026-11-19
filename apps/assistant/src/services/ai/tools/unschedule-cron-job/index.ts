@@ -19,7 +19,7 @@ export const unscheduleCronJob = defineTool({
   logSafe: ["type", ["pattern", "cronPattern"], "nextRunAt", "timezone", "status"],
   privateErrors: true,
   execute: async (context, args) => {
-    const scope = requireChatId(context.chatId);
+    const scope = requireChatId(context.ownerKey);
 
     return runCronJobOperation(async () => {
       const cancelled = await context.events.request(

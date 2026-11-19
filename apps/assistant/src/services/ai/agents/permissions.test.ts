@@ -95,7 +95,8 @@ describe("agent permissions", () => {
         const tools = await harness.createTools({
           name,
           prompt: "test",
-          chatId: "discord:1",
+          conversationKey: "discord:1",
+          ownerKey: "discord:1",
           settings: DefaultConfigRecord,
           currentTimeContext: undefined,
           platform: undefined,
@@ -154,7 +155,8 @@ describe("agent permissions", () => {
       const configuredTools = await harness.createTools({
         name: EAgentName.Main,
         prompt: "test",
-        chatId: "discord:1",
+        conversationKey: "discord:1",
+        ownerKey: "discord:1",
         settings: DefaultConfigRecord,
         currentTimeContext: undefined,
         platform: undefined,

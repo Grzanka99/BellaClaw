@@ -17,7 +17,7 @@ export const automationDelete = defineTool({
   privateErrors: true,
   logSafe: [],
   execute: async (context, args) => {
-    const scope = requireChatId(context.chatId);
+    const scope = requireChatId(context.ownerKey);
     const deleted = await runAutomationOperation(() =>
       context.events.request(
         EEventType.AutomationDeleteRequested,

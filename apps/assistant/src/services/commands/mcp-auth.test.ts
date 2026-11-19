@@ -8,6 +8,7 @@ import { asc, eq } from "drizzle-orm";
 import { DatabaseConnector } from "../database";
 import { resetEventTables } from "../database/test-utils";
 import { EventBus } from "../events";
+import { testMessageOrigin } from "../events/test-utils";
 import { setupMcpAuth } from "../mcp/auth";
 import { EMessagePlatform } from "../messaging/types";
 import { Commands } from ".";
@@ -34,11 +35,10 @@ async function send(content: string) {
     key: chatId,
     trace: { turnId: "test:mcp-auth", chatId, platform: EMessagePlatform.Signal },
     payload: {
-      chatId,
+      ...testMessageOrigin(chatId, EMessagePlatform.Signal),
       content,
       attachments: [],
       receivedAt: Date.now(),
-      platform: EMessagePlatform.Signal,
     },
     causationId: undefined,
     dedupeKey: undefined,

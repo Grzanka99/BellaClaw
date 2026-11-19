@@ -218,6 +218,7 @@ export class Memory {
   public async rememberFact(
     tx: TDatabaseTransaction,
     chatId: string,
+    conversationKey: string,
     text: string,
     sourceMessage: string,
     embedding: number[],
@@ -244,7 +245,7 @@ export class Memory {
       .from(memoriesTable)
       .where(
         and(
-          eq(memoriesTable.chatId, chatId),
+          eq(memoriesTable.chatId, conversationKey),
           eq(memoriesTable.author, ERole.User),
           eq(memoriesTable.message, sourceMessage),
         ),
@@ -274,7 +275,7 @@ export class Memory {
     event: TEvent<EEventType.MemoryFactRememberRequested>,
     ctx: TEventContext,
   ): Promise<void> {
-    const { chatId, text, sourceMessage, supersedesFactIds } = event.payload;
+    const { chatId, conversationKey, text, sourceMessage, supersedesFactIds } = event.payload;
     const embedding = await EmbeddingClient.instance.embed(text);
 
     if (embedding === undefined) {
@@ -292,6 +293,7 @@ export class Memory {
         const fact = await this.rememberFact(
           tx,
           chatId,
+          conversationKey,
           text,
           sourceMessage,
           embedding,
@@ -510,7 +512,7 @@ export class Memory {
 
         const insertedFacts: TFact[] = [];
         for (const preparedFact of parsedFacts.data) {
-          insertedFacts.push(await insertFact(tx, args.chatId, preparedFact, now));
+          insertedFacts.push(await insertFact(tx, args.ownerKey, preparedFact, now));
         }
 
         return {

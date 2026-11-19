@@ -64,7 +64,12 @@ export class DiscordSingleton implements TMessageTransport {
         continue;
       }
 
-      attachments.push({ id: `${message.id}:${attachment.id}`, mimeType });
+      attachments.push({
+        id: `${message.id}:${attachment.id}`,
+        mimeType,
+        channel: EMessagePlatform.Discord,
+        sourceAddress: message.author.id,
+      });
     }
 
     if (message.content.trim().length === 0 && attachments.length === 0) {
@@ -80,12 +85,15 @@ export class DiscordSingleton implements TMessageTransport {
         source: "discord",
         key: chatId,
         trace: { turnId: createMessageTurnId(), chatId, platform: EMessagePlatform.Discord },
+        // the chat key is the conversation and the owner
         payload: {
-          chatId,
+          conversationKey: chatId,
+          ownerKey: chatId,
+          channel: EMessagePlatform.Discord,
+          replyAddress: message.author.id,
           content: message.content,
           attachments,
           receivedAt,
-          platform: EMessagePlatform.Discord,
         },
         causationId: undefined,
         dedupeKey: `discord:${message.id}`,
@@ -99,8 +107,8 @@ export class DiscordSingleton implements TMessageTransport {
     this.logger.info(`Logged in as ${c.user.tag}!`);
   }
 
-  public async sendText(chatId: string, text: string): Promise<void> {
-    const user = await this.client.users.fetch(chatId);
+  public async sendText(address: string, text: string): Promise<void> {
+    const user = await this.client.users.fetch(address);
 
     let remainingText = text;
 
@@ -119,7 +127,6 @@ export class DiscordSingleton implements TMessageTransport {
   }
 
   public async fetchAttachment(
-    chatId: string,
     ref: TAttachmentRef,
     maxBytes: number,
   ): Promise<TOption<Uint8Array>> {
@@ -128,7 +135,7 @@ export class DiscordSingleton implements TMessageTransport {
       throw new Error("Invalid Discord attachment reference");
     }
 
-    const user = await this.client.users.fetch(chatId);
+    const user = await this.client.users.fetch(ref.sourceAddress);
     const channel = await user.createDM();
     // NOTE: a cached message still carries the URL it arrived with, which expires
     const message = await channel.messages.fetch({ message: messageId, force: true });

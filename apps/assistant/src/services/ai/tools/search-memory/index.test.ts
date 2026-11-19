@@ -20,7 +20,8 @@ const originalMemory = MemoryWithInternals._instance;
 // answers memory.facts.refresh.requested at once
 const request = mock(async () => ({ payload: {} }));
 const context = {
-  chatId: "discord:1",
+  conversationKey: "discord:1",
+  ownerKey: "discord:1",
   settings: DefaultConfigRecord,
   trace: { turnId: "test", chatId: undefined, platform: undefined },
   events: { ...testEventRequester, request: request as unknown as TEventRequester["request"] },
@@ -35,8 +36,8 @@ afterEach(() => {
   MemoryWithInternals._instance = originalMemory;
 });
 
-function execute(chatId: string, args: unknown) {
-  return searchMemory.createAgentTool({ ...context, chatId }).execute("call", args);
+function execute(ownerKey: string, args: unknown) {
+  return searchMemory.createAgentTool({ ...context, ownerKey }).execute("call", args);
 }
 
 describe("search-memory", () => {
@@ -53,7 +54,7 @@ describe("search-memory", () => {
     );
   });
 
-  test("forwards the query, uses the default limit, and returns facts", async () => {
+  test("refreshes on the conversation lane, searches the owner's facts, and returns them", async () => {
     const vector = [0.1, 0.2];
     const facts = [
       {
@@ -73,10 +74,10 @@ describe("search-memory", () => {
 
     expect(request).toHaveBeenCalledWith(
       EEventType.MemoryFactsRefreshRequested,
-      {},
+      { ownerKey: "chat-1" },
       expect.objectContaining({
         outcome: EEventType.MemoryFactsRefreshed,
-        key: "chat-1",
+        key: "discord:1",
         timeoutMs: MEMORY_REQUEST_TIMEOUT_MS,
       }),
     );
@@ -125,7 +126,7 @@ describe("search-memory", () => {
   test("requires a chat owner before searching memory", async () => {
     const embedQuery = mock(async () => [0.1]);
     EmbeddingClientWithInternals._instance = { embedQuery };
-    const tool = searchMemory.createAgentTool({ ...context, chatId: undefined });
+    const tool = searchMemory.createAgentTool({ ...context, ownerKey: undefined });
 
     await expect(tool.execute("call", { query: "preferences" })).rejects.toThrow(
       "This tool requires a chat owner",

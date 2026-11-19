@@ -122,11 +122,13 @@ describe("DiscordSingleton", () => {
     expect(rows[0]?.platform).toBe(EMessagePlatform.Discord);
     expect(rows[0]?.turnId).toStartWith("msg:");
     expect(rows[0]?.payload).toEqual({
-      chatId: "discord:user-1",
+      conversationKey: "discord:user-1",
+      ownerKey: "discord:user-1",
+      channel: EMessagePlatform.Discord,
+      replyAddress: "user-1",
       content: "hello",
       attachments: [],
       receivedAt: expect.any(Number),
-      platform: EMessagePlatform.Discord,
     });
   });
 
@@ -155,11 +157,20 @@ describe("DiscordSingleton", () => {
     const rows = await DatabaseConnector.instance.database.select().from(eventsTable);
     expect(rows).toHaveLength(1);
     expect(rows[0]?.payload).toEqual({
-      chatId: "discord:user-1",
+      conversationKey: "discord:user-1",
+      ownerKey: "discord:user-1",
+      channel: EMessagePlatform.Discord,
+      replyAddress: "user-1",
       content: "",
-      attachments: [{ id: "message-1:att-1", mimeType: "image/png" }],
+      attachments: [
+        {
+          id: "message-1:att-1",
+          mimeType: "image/png",
+          channel: EMessagePlatform.Discord,
+          sourceAddress: "user-1",
+        },
+      ],
       receivedAt: expect.any(Number),
-      platform: EMessagePlatform.Discord,
     });
   });
 

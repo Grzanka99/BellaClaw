@@ -13,7 +13,7 @@ import type {
   TDeliveryTranscript,
   TEvent,
 } from "../events/catalog";
-import { parseCanonicalChatKey } from "../messaging/chat-key";
+import { resolveAddress } from "../messaging/chat-key";
 import type { EMessagePlatform } from "../messaging/types";
 import {
   createAutomationFailedNotices,
@@ -59,15 +59,16 @@ export class ScheduledDelivery {
 
   private async handleCronFire(event: TEvent<EEventType.CronFired>, ctx: TEventContext) {
     const job = event.payload;
-    const canonicalChatId = job.scope;
-    const parsedScope = parseCanonicalChatKey(canonicalChatId);
-    const trace: TBehaviorTraceContext = { ...event.trace, platform: parsedScope?.platform };
+    // the scope is the job's owner and the key of its conversation
+    const conversationKey = job.scope;
+    const destination = resolveAddress(conversationKey);
+    const trace: TBehaviorTraceContext = { ...event.trace, platform: destination?.channel };
     logHandlerStarted(trace, "cron-fire");
     const span = startHandlerSpan(trace, "cron-fire");
 
-    if (parsedScope === undefined) {
+    if (destination === undefined) {
       this.logger.warning(
-        `handleCronFire: job "${job.name}" has invalid scope "${canonicalChatId}", skipping delivery`,
+        `handleCronFire: job "${job.name}" has invalid scope "${conversationKey}", skipping delivery`,
       );
       span.fail("invalid scope", 0);
       return;
@@ -102,7 +103,7 @@ export class ScheduledDelivery {
       try {
         messages = await this.createCronMessages(
           job,
-          parsedScope.platform,
+          destination.channel,
           trace,
           span,
           interrupted,
@@ -112,7 +113,7 @@ export class ScheduledDelivery {
         this.lastRunEndedAt.set(event.key, Date.now());
       }
     } else {
-      messages = await this.createCronMessages(job, parsedScope.platform, trace, span, false, ctx);
+      messages = await this.createCronMessages(job, destination.channel, trace, span, false, ctx);
     }
 
     if (messages.length === 0) {
@@ -123,10 +124,10 @@ export class ScheduledDelivery {
       for (const [index, message] of messages.entries()) {
         emit(
           EEventType.DeliveryReady,
-          { chatId: canonicalChatId, text: message.text, transcript: message.transcript },
+          { chatId: conversationKey, text: message.text, transcript: message.transcript },
           String(index),
           // the chat lane, so the transcript append orders with the chat's turns
-          canonicalChatId,
+          conversationKey,
         );
       }
     });

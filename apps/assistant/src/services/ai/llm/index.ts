@@ -132,17 +132,13 @@ export class LlmClient {
     return headers;
   }
 
-  public createSessionId(
-    provider: string,
-    chatId: TOption<string>,
-    platform: TOption<string>,
-  ): string {
-    if (chatId === undefined) {
+  public createSessionId(provider: string, conversationKey: TOption<string>): string {
+    if (conversationKey === undefined) {
       return crypto.randomUUID();
     }
 
     return new Bun.CryptoHasher("sha256", this.resolveApiKey(provider))
-      .update(`${platform ?? "unknown"}:${chatId}`)
+      .update(conversationKey)
       .digest("hex");
   }
 
@@ -210,11 +206,7 @@ export class LlmClient {
     const requestSpan = startSpan(args.trace, "model.request.completed", "agent-harness");
     const completionSpan = startSpan(args.trace, "direct-completion.completed", "agent-harness");
     const modelConfig = await this.resolveModel(args.settings, args.purpose, args.signal);
-    const sessionId = this.createSessionId(
-      modelConfig.model.provider,
-      args.trace.chatId,
-      args.trace.platform,
-    );
+    const sessionId = this.createSessionId(modelConfig.model.provider, args.trace.chatId);
     const completionFields = {
       provider: modelConfig.model.provider,
       model: modelConfig.model.id,

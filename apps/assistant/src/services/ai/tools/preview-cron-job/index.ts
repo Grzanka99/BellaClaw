@@ -6,7 +6,7 @@ import { dryRunSavedAutomation } from "../../../automation/runner";
 import { CronScheduler } from "../../../cron";
 import type { TCronJob, TJobContent } from "../../../cron/types";
 import type { TCronFiredPayload } from "../../../events/catalog";
-import { parseCanonicalChatKey } from "../../../messaging/chat-key";
+import { resolveAddress } from "../../../messaging/chat-key";
 import { runCronJobAutomations } from "../../../scheduling/cron-automations";
 import { EConfigKey } from "../../../settings/schema";
 import { runAutomationOperation } from "../automation-errors";
@@ -41,7 +41,7 @@ export const previewCronJob = defineTool({
   logSafe: [],
   privateErrors: true,
   execute: async (context, args, signal) => {
-    const chatId = requireChatId(context.chatId);
+    const chatId = requireChatId(context.ownerKey);
     const timezone = context.settings[EConfigKey.AiInstructionsTimezone];
     const name = absentIfBlank(args.name);
     const taskPrompt = absentIfBlank(args.taskPrompt);
@@ -120,7 +120,8 @@ export const previewCronJob = defineTool({
 
     const result = await runCronJobAutomations(
       ctx,
-      parseCanonicalChatKey(chatId)?.platform,
+      // the channel the job would be delivered on
+      resolveAddress(chatId)?.channel,
       // Dry runs must not reach MCP servers, whose tools can have side effects.
       {
         runScheduledTask: (runArgs) => {

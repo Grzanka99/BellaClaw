@@ -5,7 +5,7 @@ import { createLogger, type TLogger } from "@bellaclaw/shared";
 import { startSpan } from "../app-logger/span";
 import { ESubscriptionMode, EventBus, type TEventContext } from "../events";
 import type { TDeliveryTranscript, TEvent } from "../events/catalog";
-import { parseCanonicalChatKey } from "./chat-key";
+import { resolveAddress, type TChatAddress } from "./chat-key";
 import type { EMessagePlatform, TAttachmentRef, TMessageTransport } from "./types";
 
 export class MessagingAdapter {
@@ -28,32 +28,21 @@ export class MessagingAdapter {
     this.transports.set(transport.platform, transport);
   }
 
-  public fetchAttachment(
-    chatId: string,
-    ref: TAttachmentRef,
-    maxBytes: number,
-  ): Promise<TOption<Uint8Array>> {
-    const owner = this.resolve(chatId);
-    return owner.transport.fetchAttachment(owner.chatId, ref, maxBytes);
+  public fetchAttachment(ref: TAttachmentRef, maxBytes: number): Promise<TOption<Uint8Array>> {
+    return this.transport(ref.channel).fetchAttachment(ref, maxBytes);
   }
 
-  public deleteAttachment(chatId: string, ref: TAttachmentRef): Promise<void> {
-    const owner = this.resolve(chatId);
-    return owner.transport.deleteAttachment(owner.chatId, ref);
+  public deleteAttachment(ref: TAttachmentRef): Promise<void> {
+    return this.transport(ref.channel).deleteAttachment(ref);
   }
 
-  private resolve(chatId: string): { transport: TMessageTransport; chatId: string } {
-    const owner = parseCanonicalChatKey(chatId);
-    if (owner === undefined) {
-      throw new Error("Unknown chat platform");
-    }
-
-    const transport = this.transports.get(owner.platform);
+  private transport(channel: EMessagePlatform): TMessageTransport {
+    const transport = this.transports.get(channel);
     if (transport === undefined) {
-      throw new Error(`No ${owner.platform} transport`);
+      throw new Error(`No ${channel} transport`);
     }
 
-    return { transport, chatId: owner.chatId };
+    return transport;
   }
 
   public setup(): void {
@@ -65,7 +54,14 @@ export class MessagingAdapter {
       mode: ESubscriptionMode.Durable,
       backoffMs: this.outboundBackoffMs,
       handler: (event, ctx) =>
-        this.send(event.payload.chatId, event.payload.text, event.payload.transcript, event, ctx),
+        this.send(
+          event.payload.conversationKey,
+          { channel: event.payload.channel, address: event.payload.replyAddress },
+          event.payload.text,
+          event.payload.transcript,
+          event,
+          ctx,
+        ),
     });
     bus.subscribe({
       consumer: "outbound",
@@ -73,7 +69,14 @@ export class MessagingAdapter {
       mode: ESubscriptionMode.Durable,
       backoffMs: this.outboundBackoffMs,
       handler: (event, ctx) =>
-        this.send(event.payload.chatId, event.payload.text, event.payload.transcript, event, ctx),
+        this.send(
+          event.payload.chatId,
+          resolveAddress(event.payload.chatId),
+          event.payload.text,
+          event.payload.transcript,
+          event,
+          ctx,
+        ),
     });
     bus.subscribe({
       consumer: "outbound",
@@ -81,29 +84,33 @@ export class MessagingAdapter {
       mode: ESubscriptionMode.Durable,
       backoffMs: this.outboundBackoffMs,
       handler: (event, ctx) =>
-        this.send(event.payload.chatId, event.payload.text, undefined, event, ctx),
+        this.send(
+          event.payload.chatId,
+          resolveAddress(event.payload.chatId),
+          event.payload.text,
+          undefined,
+          event,
+          ctx,
+        ),
     });
   }
 
+  // chatId: the conversation the message belongs to; destination: where it goes
   private async send(
     chatId: string,
+    destination: TOption<TChatAddress>,
     text: string,
     transcript: TOption<TDeliveryTranscript>,
     event: TEvent,
     ctx: TEventContext,
   ): Promise<void> {
-    const owner = parseCanonicalChatKey(chatId);
-    if (owner === undefined) {
+    if (destination === undefined) {
       throw new Error("Unknown chat platform");
     }
 
-    const transport = this.transports.get(owner.platform);
-    if (transport === undefined) {
-      // retried with the outbound backoff until the transport registers
-      throw new Error(`No ${owner.platform} transport`);
-    }
-
-    const failure = await this.sendText(transport, owner.chatId, text, event.trace);
+    // retried with the outbound backoff until the transport registers
+    const transport = this.transport(destination.channel);
+    const failure = await this.sendText(transport, destination.address, text, event.trace);
     if (failure !== undefined) {
       throw new Error(failure);
     }
@@ -111,7 +118,14 @@ export class MessagingAdapter {
     await ctx.complete(async (_tx, emit) => {
       emit(
         EEventType.MessageSent,
-        { chatId, sourceType: event.type, chars: text.length, sentAt: Date.now(), transcript },
+        {
+          chatId,
+          channel: destination.channel,
+          sourceType: event.type,
+          chars: text.length,
+          sentAt: Date.now(),
+          transcript,
+        },
         undefined,
         undefined,
       );

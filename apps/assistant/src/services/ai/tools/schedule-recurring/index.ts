@@ -53,7 +53,7 @@ export const scheduleRecurring = defineTool({
   privateErrors: true,
   execute: async (context, args) => {
     const { automations, ...validatedArgs } = validateScheduleRecurringArgs(args);
-    const scope = requireChatId(context.chatId);
+    const scope = requireChatId(context.ownerKey);
     const timezone = context.settings[EConfigKey.AiInstructionsTimezone];
     const automationIds = await runAutomationOperation(() =>
       AutomationService.instance.resolveNames(scope, automations),

@@ -9,7 +9,8 @@ import { SUpdateCalendarEventArgs, updateCalendarEvent, validateUpdateCalendarEv
 
 function contextWith(request: ReturnType<typeof mock>) {
   return {
-    chatId: "discord:1",
+    conversationKey: "discord:1",
+    ownerKey: "discord:1",
     settings: DefaultConfigRecord,
     trace: { turnId: "test", chatId: undefined, platform: undefined },
     events: { ...testEventRequester, request: request as unknown as TEventRequester["request"] },

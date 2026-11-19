@@ -20,7 +20,7 @@ export const automationRun = defineTool({
   logSafe: ["outcome", "paused"],
   privateErrors: true,
   execute: async (context, args) => {
-    const scope = requireChatId(context.chatId);
+    const scope = requireChatId(context.ownerKey);
     const automation = await AutomationService.instance.get(scope, args.name);
 
     if (automation === undefined) {

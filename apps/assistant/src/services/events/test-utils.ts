@@ -1,4 +1,5 @@
 import { EEventType } from "@bellaclaw/database";
+import type { EMessagePlatform } from "../messaging/types";
 import { ESubscriptionMode, EventBus, type TEventContext, type TEventRequester } from "./index";
 
 let requesters = 0;
@@ -47,3 +48,13 @@ export const testEventRequester: TEventRequester = {
   waitFor: (causationId, type, timeoutMs) =>
     withEventContext((ctx) => ctx.waitFor(causationId, type, timeoutMs)),
 };
+
+// the origin of a message: the chat key is the conversation and the owner
+export function testMessageOrigin(chatId: string, channel: EMessagePlatform) {
+  return {
+    conversationKey: chatId,
+    ownerKey: chatId,
+    channel,
+    replyAddress: chatId.slice(chatId.indexOf(":") + 1),
+  };
+}

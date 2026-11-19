@@ -1,7 +1,12 @@
 import type { TOption } from "@bellaclaw/shared";
 import { createLogger, type TLogger } from "@bellaclaw/shared";
 import { z } from "zod";
-import { readAttachment, SUPPORTED_IMAGE_TYPES, type TAttachmentRef } from "../messaging/types";
+import {
+  EMessagePlatform,
+  readAttachment,
+  SUPPORTED_IMAGE_TYPES,
+  type TAttachmentRef,
+} from "../messaging/types";
 
 const RECONNECT_DELAY_MS = 5000;
 
@@ -71,6 +76,15 @@ export function parseSignalReceiveMessage(raw: string): TOption<TSignalInboundMe
     return undefined;
   }
 
+  let sourceNumber = envelope.sourceNumber;
+  if (sourceNumber === null || sourceNumber === undefined || sourceNumber.trim().length === 0) {
+    sourceNumber = envelope.source;
+  }
+
+  if (sourceNumber === null || sourceNumber === undefined || sourceNumber.trim().length === 0) {
+    return undefined;
+  }
+
   const attachments: TAttachmentRef[] = [];
   for (const attachment of dataMessage.attachments ?? []) {
     const mimeType = attachment.contentType;
@@ -78,20 +92,16 @@ export function parseSignalReceiveMessage(raw: string): TOption<TSignalInboundMe
       continue;
     }
 
-    attachments.push({ id: attachment.id, mimeType });
+    attachments.push({
+      id: attachment.id,
+      mimeType,
+      channel: EMessagePlatform.Signal,
+      sourceAddress: sourceNumber,
+    });
   }
 
   const message = dataMessage.message ?? "";
   if (message.trim().length === 0 && attachments.length === 0) {
-    return undefined;
-  }
-
-  let sourceNumber = envelope.sourceNumber;
-  if (sourceNumber === null || sourceNumber === undefined || sourceNumber.trim().length === 0) {
-    sourceNumber = envelope.source;
-  }
-
-  if (sourceNumber === null || sourceNumber === undefined || sourceNumber.trim().length === 0) {
     return undefined;
   }
 

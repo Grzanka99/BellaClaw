@@ -8,7 +8,8 @@ import { automationGet } from ".";
 
 const source = "export default async () => ({ kind: 'silent' })";
 const tool = automationGet.createAgentTool({
-  chatId: "discord:1",
+  conversationKey: "discord:1",
+  ownerKey: "discord:1",
   settings: DefaultConfigRecord,
   trace: { turnId: "test", chatId: undefined, platform: undefined },
   events: testEventRequester,

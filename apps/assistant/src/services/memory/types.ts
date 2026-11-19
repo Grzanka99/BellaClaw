@@ -37,8 +37,11 @@ export type TLiveFactWindow = TFactWindow & {
   state: TFactDistillationState;
 };
 
+// chatId: the conversation whose transcript and checkpoint the window covers; ownerKey: whose
+// facts it writes
 export type TFactCommitArgs = {
   chatId: string;
+  ownerKey: string;
   expectedLastProcessedMessageId: number;
   lastProcessedMessageId: number;
   facts: TPreparedFact[];

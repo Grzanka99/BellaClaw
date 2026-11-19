@@ -56,7 +56,7 @@ export const getSettings = defineTool({
   mode: "parallel",
   logSafe: [["settings", "settingKeys"]],
   execute: async (context) => {
-    const settings = await SettingsService.instance.getAll(requireChatId(context.chatId));
+    const settings = await SettingsService.instance.getAll(requireChatId(context.ownerKey));
     await refreshAiModels(resolveAiProvider(settings), true);
 
     return { settings, aiRuntime: createAiRuntime(settings, true) };

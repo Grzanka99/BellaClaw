@@ -12,6 +12,8 @@ import {
 import { asc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/libsql";
 import { migrate } from "drizzle-orm/libsql/migrator";
+import { testMessageOrigin } from "./services/events/test-utils";
+import { EMessagePlatform } from "./services/messaging/types";
 
 test.each([
   "SIGINT",
@@ -174,7 +176,9 @@ describe("crash recovery", () => {
       .select()
       .from(eventsTable)
       .where(eq(eventsTable.type, EEventType.TurnFailed));
-    expect(failed.map((row) => row.payload)).toEqual([{ chatId, reason: "interrupted" }]);
+    expect(failed.map((row) => row.payload)).toEqual([
+      { ...testMessageOrigin(chatId, EMessagePlatform.Signal), reason: "interrupted" },
+    ]);
     expect(await pending()).toEqual([]);
   }, 30_000);
 

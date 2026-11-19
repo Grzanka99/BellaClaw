@@ -15,6 +15,7 @@ import { DatabaseConnector } from "../database";
 import { resetEventTables } from "../database/test-utils";
 import { EventBus } from "../events";
 import type { TCronFiredPayload } from "../events/catalog";
+import { testMessageOrigin } from "../events/test-utils";
 import { Memory } from "../memory";
 import { MessageHandler } from "../message-handler";
 import { MessagingAdapter } from "../messaging";
@@ -124,11 +125,10 @@ function setupConversationHandler(chatId: string) {
       key: chatId,
       trace: { ...TEST_TRACE, chatId },
       payload: {
-        chatId,
+        ...testMessageOrigin(chatId, EMessagePlatform.Signal),
         content: "Hello",
         attachments: [],
         receivedAt: Date.now(),
-        platform: EMessagePlatform.Signal,
       },
       causationId: undefined,
       dedupeKey: undefined,
@@ -372,6 +372,7 @@ describe("ScheduledDelivery", () => {
     expect(save).toHaveBeenCalledWith(
       expect.anything(),
       "signal:+100",
+      EMessagePlatform.Signal,
       "[CRON REMINDER daily]: Take a break.",
       expect.stringContaining('reminder "daily" fired at'),
       expect.any(Number),
@@ -434,6 +435,7 @@ describe("ScheduledDelivery", () => {
     expect(save).toHaveBeenCalledWith(
       expect.anything(),
       "signal:+100",
+      EMessagePlatform.Signal,
       "[CRON TASK daily]: Briefing unavailable.",
       expect.stringContaining('scheduled task "daily" ran at'),
       expect.any(Number),
@@ -535,6 +537,7 @@ describe("ScheduledDelivery", () => {
       expect(save).toHaveBeenCalledWith(
         expect.anything(),
         scope,
+        EMessagePlatform.Signal,
         "[CRON TASK daily]: Tram at 7:10\n\nBus at 7:05",
         expect.stringContaining("text output of its automations, sent as written"),
         expect.any(Number),
@@ -683,6 +686,7 @@ describe("ScheduledDelivery", () => {
       expect(save).toHaveBeenCalledWith(
         expect.anything(),
         scope,
+        EMessagePlatform.Signal,
         "[CRON TASK daily]: Your briefing.",
         expect.stringContaining("It also used the outputs of the job's automations."),
         expect.any(Number),
@@ -708,6 +712,7 @@ describe("ScheduledDelivery", () => {
       expect(save).toHaveBeenCalledWith(
         expect.anything(),
         scope,
+        EMessagePlatform.Signal,
         expect.stringMatching(/^\[CRON TASK daily\]: Automation "broken" failed/),
         expect.stringContaining("had an automation fail"),
         expect.any(Number),
@@ -770,6 +775,7 @@ describe("ScheduledDelivery", () => {
       expect(save).toHaveBeenCalledWith(
         expect.anything(),
         scope,
+        EMessagePlatform.Signal,
         expect.stringMatching(/^\[CRON TASK daily\]: Automation "broken" was paused/),
         expect.stringContaining("paused a failing automation"),
         expect.any(Number),

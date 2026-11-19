@@ -112,7 +112,8 @@ export class AgentHarness {
   public async compactConversation(
     state: TConversation,
     settings: TConfigRecord,
-    chatId: string,
+    conversationKey: string,
+    ownerKey: string,
     platform: TAgentRunArgs["platform"],
     trace: TBehaviorTraceContext,
     events: TAgentRunArgs["events"],
@@ -121,7 +122,8 @@ export class AgentHarness {
     const args = {
       name: EAgentName.Main,
       settings,
-      chatId,
+      conversationKey,
+      ownerKey,
       platform,
       prompt: "",
       currentTimeContext: undefined,
@@ -140,7 +142,7 @@ export class AgentHarness {
         ).length) /
         4,
     );
-    const sessionId = this.llm.createSessionId(config.model.provider, chatId, platform);
+    const sessionId = this.llm.createSessionId(config.model.provider, conversationKey);
     const model = {
       ...config.model,
       headers: {
@@ -175,11 +177,7 @@ export class AgentHarness {
       purpose: agentDefinition.purpose,
     });
     let requestSpan: TOption<TBehaviorSpan>;
-    const sessionId = this.llm.createSessionId(
-      modelConfig.model.provider,
-      args.chatId,
-      args.platform,
-    );
+    const sessionId = this.llm.createSessionId(modelConfig.model.provider, args.conversationKey);
 
     const toolSpans = new Map<string, TBehaviorSpan>();
     const toolLogPolicies = new Map<string, TToolLogPolicy>(
@@ -392,8 +390,8 @@ export class AgentHarness {
         if (args.currentTimeContext !== undefined) {
           prompt = `${args.currentTimeContext}\n\n${prompt}`;
         }
-        if (args.name === EAgentName.Main && args.chatId !== undefined) {
-          const pendingRuns = McpRunRegistry.instance.list(args.chatId);
+        if (args.name === EAgentName.Main && args.conversationKey !== undefined) {
+          const pendingRuns = McpRunRegistry.instance.list(args.conversationKey);
           if (pendingRuns.length > 0) {
             prompt += `\n\nPending MCP runs awaiting this user's response:\n${JSON.stringify(pendingRuns)}`;
           }
@@ -625,7 +623,8 @@ export class AgentHarness {
 
   private async createTools(args: TAgentRunArgs & { delegationCount: TOption<() => void> }) {
     const context: TToolExecutionContext = {
-      chatId: args.chatId,
+      conversationKey: args.conversationKey,
+      ownerKey: args.ownerKey,
       settings: args.settings,
       trace: args.trace,
       verifySettings: (settings, purposes) => {
@@ -771,7 +770,9 @@ export class AgentHarness {
           if (profile === undefined) {
             throw new Error(`Unknown MCP profile: ${parsed.profileId}`);
           }
-          const chatId = this.requireMcpChatId(args.chatId);
+          // credentials belong to the owner, pending runs to the conversation
+          const ownerKey = this.requireMcpChatId(args.ownerKey);
+          const conversationKey = this.requireMcpChatId(args.conversationKey);
           const controller = new AbortController();
           const abort = () => controller.abort();
           signal?.addEventListener("abort", abort, { once: true });
@@ -785,7 +786,7 @@ export class AgentHarness {
           };
           try {
             const session = await McpService.instance.open({
-              chatId,
+              chatId: ownerKey,
               profileId: profile.id,
               turnId: args.trace.turnId,
               signal: controller.signal,
@@ -797,8 +798,7 @@ export class AgentHarness {
                 return this.sampleMcp(
                   params,
                   args.settings,
-                  args.chatId,
-                  args.platform,
+                  args.conversationKey,
                   args.trace,
                   toolCallId,
                   sampleCount,
@@ -808,7 +808,7 @@ export class AgentHarness {
               elicit: (params, requestSignal) => forwardElicitation(params, requestSignal),
             });
             const status = await McpRunRegistry.instance.start({
-              chatId,
+              chatId: conversationKey,
               profileId: profile.id,
               inputTimeoutMs: profile.inputTimeoutMs,
               controller,
@@ -850,7 +850,7 @@ export class AgentHarness {
         execute: async (_toolCallId, parameters, signal) => {
           const parsed = validateToolArguments(resumeSchema, parameters);
           const status = await McpRunRegistry.instance.resume(
-            this.requireMcpChatId(args.chatId),
+            this.requireMcpChatId(args.conversationKey),
             parsed.runId,
             { action: parsed.action, content: parsed.content },
             signal,
@@ -866,7 +866,10 @@ export class AgentHarness {
         executionMode: SEQUENTIAL,
         execute: async (_toolCallId, parameters) => {
           const parsed = validateToolArguments(cancelSchema, parameters);
-          await McpRunRegistry.instance.cancel(this.requireMcpChatId(args.chatId), parsed.runId);
+          await McpRunRegistry.instance.cancel(
+            this.requireMcpChatId(args.conversationKey),
+            parsed.runId,
+          );
           return {
             content: [{ type: "text", text: "MCP run cancelled" }],
             details: { status: "cancelled", runId: parsed.runId },
@@ -875,7 +878,10 @@ export class AgentHarness {
       },
     ];
     if (profiles.length === 0) {
-      if (args.chatId === undefined || McpRunRegistry.instance.list(args.chatId).length === 0) {
+      if (
+        args.conversationKey === undefined ||
+        McpRunRegistry.instance.list(args.conversationKey).length === 0
+      ) {
         return [];
       }
       return tools.slice(1);
@@ -907,8 +913,7 @@ export class AgentHarness {
   private async sampleMcp(
     params: CreateMessageRequest["params"],
     settings: TConfigRecord,
-    chatId: TAgentRunArgs["chatId"],
-    platform: TAgentRunArgs["platform"],
+    conversationKey: TAgentRunArgs["conversationKey"],
     trace: TBehaviorTraceContext,
     parentToolCallId: string,
     iteration: number,
@@ -924,7 +929,7 @@ export class AgentHarness {
     );
     const request = createMcpSamplingRequest(params, modelConfig.model);
     const span = startSpan(trace, "model.request.completed", "agent-harness");
-    const sessionId = this.llm.createSessionId(modelConfig.model.provider, chatId, platform);
+    const sessionId = this.llm.createSessionId(modelConfig.model.provider, conversationKey);
     const result = await this.llm.complete(
       modelConfig,
       request.context,

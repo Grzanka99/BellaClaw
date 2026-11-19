@@ -28,13 +28,23 @@ const STranscript = z.object({ text: z.string(), notice: z.string() }).strict();
 
 export type TDeliveryTranscript = z.infer<typeof STranscript>;
 
+// a message's conversation, its owner, and the channel and address it came from and its reply
+// goes to. Only channel drivers and Outbound read the address
+const SMessageOrigin = {
+  conversationKey: z.string(),
+  ownerKey: z.string(),
+  channel: z.enum(EMessagePlatform),
+  replyAddress: z.string(),
+};
+
+export type TMessageOrigin = z.infer<z.ZodObject<typeof SMessageOrigin>>;
+
 const SInboundMessage = z
   .object({
-    chatId: z.string(),
+    ...SMessageOrigin,
     content: z.string(),
     attachments: z.array(SAttachmentRef),
     receivedAt: z.number().int(),
-    platform: z.enum(EMessagePlatform),
   })
   .strict();
 
@@ -48,24 +58,23 @@ const SMessageRejected = z
 
 const STurnRequested = z
   .object({
-    chatId: z.string(),
+    ...SMessageOrigin,
     content: z.string(),
     attachments: z.array(SAttachmentRef),
     receivedAt: z.number().int(),
-    platform: z.enum(EMessagePlatform),
   })
   .strict();
 
-const STurnStarted = z.object({ chatId: z.string(), userMessageId: z.number().int() }).strict();
+const STurnStarted = z.object({ ...SMessageOrigin, userMessageId: z.number().int() }).strict();
 
-const STurnCompleted = z.object({ chatId: z.string(), userMessageId: z.number().int() }).strict();
+const STurnCompleted = z.object({ ...SMessageOrigin, userMessageId: z.number().int() }).strict();
 
 const STurnFailed = z
-  .object({ chatId: z.string(), reason: z.enum(["interrupted", "no_final_response", "error"]) })
+  .object({ ...SMessageOrigin, reason: z.enum(["interrupted", "no_final_response", "error"]) })
   .strict();
 
 const SReplyReady = z
-  .object({ chatId: z.string(), text: z.string(), transcript: STranscript.optional() })
+  .object({ ...SMessageOrigin, text: z.string(), transcript: STranscript.optional() })
   .strict();
 
 const SNoticeReady = z.object({ chatId: z.string(), text: z.string() }).strict();
@@ -74,9 +83,11 @@ const SDeliveryReady = z
   .object({ chatId: z.string(), text: z.string(), transcript: STranscript })
   .strict();
 
+// channel: where the message went, stored on its transcript rows
 const SMessageSent = z
   .object({
     chatId: z.string(),
+    channel: z.enum(EMessagePlatform),
     sourceType: z.string(),
     chars: z.number().int(),
     sentAt: z.number().int(),
@@ -290,12 +301,16 @@ const SAiAuthDiagnoseRequested = z.object({ chatId: z.string(), providerId: z.st
 // problem: the reply for the failed turn, when the provider needs a new login
 const SAiAuthDiagnosed = z.object({ problem: z.string().optional() }).strict();
 
-// the chat is the event key
-const SMemoryFactsRefresh = z.object({}).strict();
+// the conversation is the event key; ownerKey: whose settings and facts the drain uses
+const SMemoryFactsRefreshRequested = z.object({ ownerKey: z.string() }).strict();
 
+const SMemoryFactsRefreshed = z.object({}).strict();
+
+// chatId: the owner the fact is stored under; conversationKey: the transcript holding its source
 const SMemoryFactRememberRequested = z
   .object({
     chatId: z.string(),
+    conversationKey: z.string(),
     text: z.string(),
     sourceMessage: z.string(),
     supersedesFactIds: z.array(z.number().int()),
@@ -463,8 +478,8 @@ export type TEventPayloads = {
   [EEventType.AiAuthLoggedOut]: z.infer<typeof SAiAuthLogoutRequested>;
   [EEventType.AiAuthDiagnoseRequested]: z.infer<typeof SAiAuthDiagnoseRequested>;
   [EEventType.AiAuthDiagnosed]: z.infer<typeof SAiAuthDiagnosed>;
-  [EEventType.MemoryFactsRefreshRequested]: z.infer<typeof SMemoryFactsRefresh>;
-  [EEventType.MemoryFactsRefreshed]: z.infer<typeof SMemoryFactsRefresh>;
+  [EEventType.MemoryFactsRefreshRequested]: z.infer<typeof SMemoryFactsRefreshRequested>;
+  [EEventType.MemoryFactsRefreshed]: z.infer<typeof SMemoryFactsRefreshed>;
   [EEventType.MemoryFactRememberRequested]: z.infer<typeof SMemoryFactRememberRequested>;
   [EEventType.MemoryFactRemembered]: z.infer<typeof SMemoryFactRemembered>;
   [EEventType.MemoryFactsForgetRequested]: z.infer<typeof SMemoryFacts>;
@@ -542,8 +557,8 @@ export const EVENT_SCHEMAS: { [K in EEventType]: z.ZodType<TEventPayloads[K]> } 
   [EEventType.AiAuthLoggedOut]: SAiAuthLogoutRequested,
   [EEventType.AiAuthDiagnoseRequested]: SAiAuthDiagnoseRequested,
   [EEventType.AiAuthDiagnosed]: SAiAuthDiagnosed,
-  [EEventType.MemoryFactsRefreshRequested]: SMemoryFactsRefresh,
-  [EEventType.MemoryFactsRefreshed]: SMemoryFactsRefresh,
+  [EEventType.MemoryFactsRefreshRequested]: SMemoryFactsRefreshRequested,
+  [EEventType.MemoryFactsRefreshed]: SMemoryFactsRefreshed,
   [EEventType.MemoryFactRememberRequested]: SMemoryFactRememberRequested,
   [EEventType.MemoryFactRemembered]: SMemoryFactRemembered,
   [EEventType.MemoryFactsForgetRequested]: SMemoryFacts,

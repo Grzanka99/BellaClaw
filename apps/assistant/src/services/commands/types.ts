@@ -8,6 +8,12 @@ export type TCommand = {
   name: string;
   description: string;
   usage: string;
-  // ctx: the context of the message.authorized delivery that runs the command
-  handler: (chatId: string, args: string, ctx: TEventContext) => Promise<TCommandResult>;
+  // chatId: the owner key; ctx: the context of the message.authorized delivery that runs the
+  // command; conversationKey: the chat the command came from
+  handler: (
+    chatId: string,
+    args: string,
+    ctx: TEventContext,
+    conversationKey: string,
+  ) => Promise<TCommandResult>;
 };

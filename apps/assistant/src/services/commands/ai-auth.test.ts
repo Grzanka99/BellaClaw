@@ -12,6 +12,7 @@ import { DatabaseConnector } from "../database";
 import { resetEventTables, resetUserConfigsTable } from "../database/test-utils";
 import { ESubscriptionMode, EventBus } from "../events";
 import type { TEvent } from "../events/catalog";
+import { testMessageOrigin } from "../events/test-utils";
 import { EMessagePlatform } from "../messaging/types";
 import { SettingsService } from "../settings";
 import { EConfigKey } from "../settings/schema";
@@ -39,19 +40,18 @@ async function send(chatId: string, content: string) {
     key: chatId,
     trace: { turnId: "test:ai-auth", chatId, platform: EMessagePlatform.Discord },
     payload: {
-      chatId,
+      ...testMessageOrigin(chatId, EMessagePlatform.Discord),
       content,
       attachments: [],
       receivedAt: Date.now(),
-      platform: EMessagePlatform.Discord,
     },
     causationId: undefined,
     dedupeKey: undefined,
   });
   await bus.idle();
   return (await rowsOf(EEventType.ReplyReady))
-    .map((row) => row.payload as { chatId: string; text: string })
-    .filter((payload) => payload.chatId === chatId)
+    .map((row) => row.payload as { conversationKey: string; text: string })
+    .filter((payload) => payload.conversationKey === chatId)
     .map((payload) => payload.text);
 }
 

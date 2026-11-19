@@ -8,6 +8,7 @@ import { ConversationStore } from "../conversation";
 import { DatabaseConnector } from "../database";
 import { resetEventTables } from "../database/test-utils";
 import { EventBus, type TEventContext } from "../events";
+import { EMessagePlatform } from "../messaging/types";
 import { SettingsService } from "../settings";
 import { DefaultConfigRecord } from "../settings/schema";
 import { Memory } from ".";
@@ -43,6 +44,7 @@ function makeMemory(id: number, author: ERole, message: string): TSelectMemory {
   return {
     id,
     chatId: "chat-comet",
+    channel: EMessagePlatform.Signal,
     author,
     message,
     modelMessage: null,
@@ -199,12 +201,14 @@ describe("FactDistiller", () => {
     await expect(
       distiller.processWindow({
         window,
+        ownerKey: "chat-comet",
         settings: DefaultConfigRecord,
         trace: TEST_TRACE,
       }),
     ).resolves.toBeUndefined();
     expect(internals.memory.commitLiveFactWindow).toHaveBeenCalledWith({
       chatId: "chat-comet",
+      ownerKey: "chat-comet",
       expectedLastProcessedMessageId: 10,
       lastProcessedMessageId: 11,
       facts: [
@@ -216,6 +220,27 @@ describe("FactDistiller", () => {
         },
       ],
     });
+  });
+
+  test("checkpoints the conversation's window and looks up and writes the owner's facts", async () => {
+    const { distiller, internals } = setupDistiller();
+    internals.ai.completeText = mock(
+      async () => '{"facts":[{"text":"The user attends on Tuesdays.","sourceMessageId":11}]}',
+    );
+    const vector = makeEmbedding(0.25);
+    internals.embedding.embedMany = mock(async () => [vector]);
+
+    await distiller.processWindow({
+      window: makeWindow(),
+      ownerKey: "owner-comet",
+      settings: DefaultConfigRecord,
+      trace: TEST_TRACE,
+    });
+
+    expect(internals.memory.findLiveFactCandidates).toHaveBeenCalledWith("owner-comet", vector);
+    expect(internals.memory.commitLiveFactWindow).toHaveBeenCalledWith(
+      expect.objectContaining({ chatId: "chat-comet", ownerKey: "owner-comet" }),
+    );
   });
 
   test.each([
@@ -254,6 +279,7 @@ describe("FactDistiller", () => {
     await expect(
       distiller.processWindow({
         window: makeWindow(),
+        ownerKey: "chat-comet",
         settings: DefaultConfigRecord,
         trace: TEST_TRACE,
       }),
@@ -262,6 +288,7 @@ describe("FactDistiller", () => {
     expect(internals.memory.findLiveFactCandidates).not.toHaveBeenCalled();
     expect(commit).toHaveBeenCalledWith({
       chatId: "chat-comet",
+      ownerKey: "chat-comet",
       expectedLastProcessedMessageId: 10,
       lastProcessedMessageId: 12,
       facts: [],
@@ -286,6 +313,7 @@ describe("FactDistiller", () => {
     await expect(
       distiller.processWindow({
         window: makeWindow(),
+        ownerKey: "chat-comet",
         settings: DefaultConfigRecord,
         trace: TEST_TRACE,
       }),
@@ -307,12 +335,14 @@ describe("FactDistiller", () => {
     await expect(
       distiller.processWindow({
         window: makeWindow(),
+        ownerKey: "chat-comet",
         settings: DefaultConfigRecord,
         trace: TEST_TRACE,
       }),
     ).resolves.toBeUndefined();
     expect(commit).toHaveBeenCalledWith({
       chatId: "chat-comet",
+      ownerKey: "chat-comet",
       expectedLastProcessedMessageId: 10,
       lastProcessedMessageId: 12,
       facts: [],
@@ -328,6 +358,7 @@ describe("FactDistiller", () => {
     await expect(
       distiller.processWindow({
         window: makeWindow(),
+        ownerKey: "chat-comet",
         settings: DefaultConfigRecord,
         trace: TEST_TRACE,
       }),
@@ -347,6 +378,7 @@ describe("FactDistiller", () => {
     await expect(
       distiller.processWindow({
         window: makeWindow(),
+        ownerKey: "chat-comet",
         settings: DefaultConfigRecord,
         trace: TEST_TRACE,
       }),
@@ -369,6 +401,7 @@ describe("FactDistiller", () => {
     await expect(
       distiller.processWindow({
         window: makeWindow(),
+        ownerKey: "chat-comet",
         settings: DefaultConfigRecord,
         trace: TEST_TRACE,
       }),
@@ -377,6 +410,7 @@ describe("FactDistiller", () => {
     expect(internals.memory.findLiveFactCandidates).toHaveBeenCalledWith("chat-comet", vector);
     expect(commit).toHaveBeenCalledWith({
       chatId: "chat-comet",
+      ownerKey: "chat-comet",
       expectedLastProcessedMessageId: 10,
       lastProcessedMessageId: 12,
       facts: [
@@ -417,6 +451,7 @@ describe("FactDistiller", () => {
     const first = await ConversationStore.instance.saveUserMessage(
       DatabaseConnector.instance.database,
       chatId,
+      EMessagePlatform.Signal,
       ERole.User,
       firstText,
       new Date(),
@@ -424,6 +459,7 @@ describe("FactDistiller", () => {
     const second = await ConversationStore.instance.saveUserMessage(
       DatabaseConnector.instance.database,
       chatId,
+      EMessagePlatform.Signal,
       ERole.User,
       secondText,
       new Date(),
@@ -443,6 +479,7 @@ describe("FactDistiller", () => {
     await expect(
       distiller.processWindow({
         window: await memory.loadLiveFactWindow(chatId),
+        ownerKey: chatId,
         settings: DefaultConfigRecord,
         trace: TEST_TRACE,
       }),
@@ -486,6 +523,7 @@ describe("FactDistiller", () => {
     await expect(
       distiller.processWindow({
         window: makeWindow(),
+        ownerKey: "chat-comet",
         settings: DefaultConfigRecord,
         trace: TEST_TRACE,
       }),
@@ -527,6 +565,7 @@ describe("FactDistiller", () => {
     await expect(
       distiller.processWindow({
         window: makeWindow(),
+        ownerKey: "chat-comet",
         settings: DefaultConfigRecord,
         trace: TEST_TRACE,
       }),
@@ -558,6 +597,7 @@ describe("FactDistiller", () => {
     await expect(
       distiller.processWindow({
         window: makeWindow(),
+        ownerKey: "chat-comet",
         settings: DefaultConfigRecord,
         trace: TEST_TRACE,
       }),
@@ -593,6 +633,7 @@ describe("FactDistiller", () => {
     await expect(
       distiller.processWindow({
         window: makeWindow(),
+        ownerKey: "chat-comet",
         settings: DefaultConfigRecord,
         trace: TEST_TRACE,
       }),
@@ -623,6 +664,7 @@ describe("FactDistiller", () => {
     await expect(
       distiller.processWindow({
         window: makeWindow(),
+        ownerKey: "chat-comet",
         settings: DefaultConfigRecord,
         trace: TEST_TRACE,
       }),

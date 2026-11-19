@@ -30,7 +30,7 @@ export const findCalendarAvailability = defineTool({
   mode: "parallel",
   logSafe: [],
   execute: async (context, args, signal) => {
-    const userId = requireChatId(context.chatId);
+    const userId = requireChatId(context.ownerKey);
     validateListCalendarEventsArgs(args);
     return CalendarService.instance.findAvailability({
       ...args,

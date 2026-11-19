@@ -8,6 +8,7 @@ import {
   fauxToolCall,
   type Message,
 } from "@earendil-works/pi-ai";
+import { EMessagePlatform } from "../messaging/types";
 import { compactConversation } from "./compaction";
 import { attachmentBlock, type TConversation } from "./types";
 
@@ -58,7 +59,12 @@ describe("conversation compaction", () => {
 
   test("counts stored images toward the trigger", async () => {
     const { state, models, model, faux } = fixture();
-    const image = attachmentBlock({ id: "photo", mimeType: "image/png" });
+    const image = attachmentBlock({
+      id: "photo",
+      mimeType: "image/png",
+      channel: EMessagePlatform.Signal,
+      sourceAddress: "+100",
+    });
     state.entries = Array.from({ length: 50 }, (_, index) => ({
       id: index + 1,
       message: { role: "user", content: [image], timestamp: index + 2 },

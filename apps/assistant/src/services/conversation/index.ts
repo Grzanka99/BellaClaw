@@ -10,7 +10,7 @@ import { and, asc, desc, eq, gt, inArray, isNotNull, lt, lte } from "drizzle-orm
 import { emptyUsage } from "../ai/llm";
 import { ERole } from "../ai/types";
 import { DatabaseConnector, type TDatabaseHandle } from "../database";
-import type { TAttachmentRef } from "../messaging/types";
+import type { EMessagePlatform, TAttachmentRef } from "../messaging/types";
 import { SAttachmentBlock, SConversationMessage, type TConversation } from "./types";
 
 // NOTE: platform files of the images older than this many compactions are deleted
@@ -30,13 +30,14 @@ export class ConversationStore {
   public saveUserMessage(
     db: TDatabaseHandle,
     chatId: string,
+    channel: EMessagePlatform,
     author: ERole,
     message: string,
     createdAt: Date,
   ): Promise<TSelectMemory> {
     return db
       .insert(memoriesTable)
-      .values({ chatId, author, message, createdAt })
+      .values({ chatId, channel, author, message, createdAt })
       .returning()
       .get();
   }
@@ -93,6 +94,7 @@ export class ConversationStore {
   public async saveTurn(
     db: TDatabaseHandle,
     chatId: string,
+    channel: EMessagePlatform,
     messages: Message[],
     userMessageId: number,
     previous: TOption<TConversation>,
@@ -125,6 +127,7 @@ export class ConversationStore {
         .insert(memoriesTable)
         .values({
           chatId,
+          channel,
           kind,
           author: message.role,
           message: text,
@@ -146,6 +149,7 @@ export class ConversationStore {
   public async saveDeliveredMessage(
     db: TDatabaseHandle,
     chatId: string,
+    channel: EMessagePlatform,
     text: string,
     notice: string,
     deliveredAt: number,
@@ -166,6 +170,7 @@ export class ConversationStore {
     // NOTE: the caller's transaction keeps the notice and the delivery together
     await db.insert(memoriesTable).values({
       chatId,
+      channel,
       kind: "tool",
       author: ERole.User,
       message: notice,
@@ -174,6 +179,7 @@ export class ConversationStore {
     });
     await db.insert(memoriesTable).values({
       chatId,
+      channel,
       kind: "message",
       author: ERole.Assistant,
       message: text,

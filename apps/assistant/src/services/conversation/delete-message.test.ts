@@ -10,6 +10,7 @@ import { ERejectionCode } from "../events/catalog";
 import { withEventContext } from "../events/test-utils";
 import { Memory } from "../memory";
 import { MessageHandler } from "../message-handler";
+import { EMessagePlatform } from "../messaging/types";
 import { ConversationStore } from ".";
 import type { TConversation } from "./types";
 
@@ -52,12 +53,20 @@ async function saveTurn(
 ) {
   const db = DatabaseConnector.instance.database;
   const store = ConversationStore.instance;
-  const source = await store.saveUserMessage(db, chatId, ERole.User, text, new Date());
+  const source = await store.saveUserMessage(
+    db,
+    chatId,
+    EMessagePlatform.Signal,
+    ERole.User,
+    text,
+    new Date(),
+  );
   const history = previous?.entries.map((entry) => entry.message) ?? [];
 
   return store.saveTurn(
     db,
     chatId,
+    EMessagePlatform.Signal,
     [
       ...history,
       { role: "user", content: text, timestamp: source.createdAt.getTime() },

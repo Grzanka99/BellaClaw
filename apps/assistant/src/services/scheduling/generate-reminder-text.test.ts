@@ -156,7 +156,8 @@ describe("generateScheduledTaskText", () => {
         toolCallCount: 2,
       }),
     );
-    expect(args?.chatId).toBe("signal:+100");
+    expect(args?.conversationKey).toBe("signal:+100");
+    expect(args?.ownerKey).toBe("signal:+100");
     expect(args?.platform).toBe(EMessagePlatform.Signal);
     expect(args?.settings).toBe(ownerSettings);
     expect(args?.events).toBe(testEventRequester);

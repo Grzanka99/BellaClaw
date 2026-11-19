@@ -12,7 +12,10 @@ import type { EAgentName } from "../agents";
 export type TAgentRunArgs = {
   name: EAgentName;
   prompt: string;
-  chatId: TOption<string>;
+  // the transcript, its lane and the model session
+  conversationKey: TOption<string>;
+  // whose settings, calendars, jobs and credentials the tools use
+  ownerKey: TOption<string>;
   settings: TConfigRecord;
   currentTimeContext: TOption<string>;
   platform: TOption<EMessagePlatform>;

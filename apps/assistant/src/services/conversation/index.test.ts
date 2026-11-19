@@ -5,6 +5,7 @@ import { and, desc, eq } from "drizzle-orm";
 import { ERole } from "../ai/types";
 import { DatabaseConnector } from "../database";
 import { Memory } from "../memory";
+import { EMessagePlatform } from "../messaging/types";
 import { ConversationStore } from ".";
 import { attachmentBlock, type TConversation } from "./types";
 
@@ -23,6 +24,7 @@ test("replays native messages after restart; compaction preserves fact source hi
   const source = await store.saveUserMessage(
     DatabaseConnector.instance.database,
     chatId,
+    EMessagePlatform.Signal,
     ERole.User,
     "Check calendar",
     new Date(),
@@ -49,6 +51,7 @@ test("replays native messages after restart; compaction preserves fact source hi
   const persisted = await store.saveTurn(
     DatabaseConnector.instance.database,
     chatId,
+    EMessagePlatform.Signal,
     messages,
     source.id,
     undefined,
@@ -75,6 +78,7 @@ test("appends later turns, skips rows without replay and reloads the retained ta
   await store.saveUserMessage(
     DatabaseConnector.instance.database,
     chatId,
+    EMessagePlatform.Signal,
     ERole.User,
     "failed turn",
     new Date(),
@@ -85,6 +89,7 @@ test("appends later turns, skips rows without replay and reloads the retained ta
     const source = await store.saveUserMessage(
       DatabaseConnector.instance.database,
       chatId,
+      EMessagePlatform.Signal,
       ERole.User,
       text,
       new Date(),
@@ -96,6 +101,7 @@ test("appends later turns, skips rows without replay and reloads the retained ta
     state = await store.saveTurn(
       DatabaseConnector.instance.database,
       chatId,
+      EMessagePlatform.Signal,
       [
         ...history,
         { role: "user", content: text, timestamp: source.createdAt.getTime() },
@@ -136,6 +142,7 @@ test("a missing user row fails the turn", async () => {
     store.saveTurn(
       DatabaseConnector.instance.database,
       chatId,
+      EMessagePlatform.Signal,
       [{ role: "user", content: "missing", timestamp: 2 }, fauxAssistantMessage("answer")],
       999999,
       undefined,
@@ -151,6 +158,7 @@ test("a scheduled delivery replays after a scheduler notice the model cannot mer
   await store.saveDeliveredMessage(
     DatabaseConnector.instance.database,
     chatId,
+    EMessagePlatform.Signal,
     "[CRON REMINDER oven]: Check the oven.",
     'Scheduler notice, not from the user: reminder "oven" fired at 2026-11-10T16:06:00.000Z.',
     deliveredAt,
@@ -170,11 +178,24 @@ test("after three kept compactions, saveSummary returns the images of the droppe
   const db = DatabaseConnector.instance.database;
   const ids: number[] = [];
   for (const name of ["a", "b", "c", "d"]) {
-    const row = await store.saveUserMessage(db, chatId, ERole.User, "[Image]", new Date());
-    const ref = { id: name, mimeType: "image/png" };
+    const row = await store.saveUserMessage(
+      db,
+      chatId,
+      EMessagePlatform.Signal,
+      ERole.User,
+      "[Image]",
+      new Date(),
+    );
+    const ref = {
+      id: name,
+      mimeType: "image/png",
+      channel: EMessagePlatform.Signal,
+      sourceAddress: "+100",
+    };
     await store.saveTurn(
       db,
       chatId,
+      EMessagePlatform.Signal,
       [{ role: "user", content: [attachmentBlock(ref)], timestamp: 1 }],
       row.id,
       undefined,

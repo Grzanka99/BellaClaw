@@ -6,6 +6,7 @@ import { Commands } from "../commands";
 import { DatabaseConnector } from "../database";
 import { resetEventTables, resetMessageAuthorizationsTable } from "../database/test-utils";
 import { EventBus } from "../events";
+import { testMessageOrigin } from "../events/test-utils";
 import { EMessagePlatform } from "../messaging/types";
 import { AuthorizationService } from ".";
 import { EAuthorizationDecision, EAuthorizationStatus } from "./schema";
@@ -114,11 +115,10 @@ describe("authorization consumer", () => {
       key: chatId,
       trace: { turnId: "test:auth", chatId, platform: EMessagePlatform.Signal },
       payload: {
-        chatId,
+        ...testMessageOrigin(chatId, EMessagePlatform.Signal),
         content,
         attachments: [],
         receivedAt: 1,
-        platform: EMessagePlatform.Signal,
       },
       causationId: undefined,
       dedupeKey,
@@ -157,15 +157,15 @@ describe("authorization consumer", () => {
     await receive("signal:+200", "open-sesame", undefined);
     await receive("signal:+200", "open-sesame", undefined);
     expect(await payloadsOf(EEventType.ReplyReady)).toEqual([
-      { chatId: "signal:+200", text: "Activated." },
-      { chatId: "signal:+200", text: "Already activated." },
+      { ...testMessageOrigin("signal:+200", EMessagePlatform.Signal), text: "Activated." },
+      { ...testMessageOrigin("signal:+200", EMessagePlatform.Signal), text: "Already activated." },
     ]);
     expect(await AuthorizationService.instance.listAuthorizedChatIds()).toContain("signal:+200");
     expect(await payloadsOf(EEventType.MessageAuthorized)).toEqual([]);
 
     await receive("signal:+200", "hello", undefined);
     expect(await payloadsOf(EEventType.TurnRequested)).toEqual([
-      expect.objectContaining({ chatId: "signal:+200", content: "hello" }),
+      expect.objectContaining({ conversationKey: "signal:+200", content: "hello" }),
     ]);
     expect(await payloadsOf(EEventType.AuthorizationChanged)).toEqual([
       { chatId: "signal:+200", status: EAuthorizationStatus.Pending, failedAttempts: 1 },

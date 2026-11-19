@@ -144,7 +144,8 @@ export async function generateScheduledTaskText(
     const result = await ai.runScheduledTask({
       prompt,
       currentTimeContext: `Scheduled firing context JSON:\n${JSON.stringify(createFiringContext(new Date(ctx.nextRunAt), timezone))}`,
-      chatId: ctx.scope,
+      conversationKey: ctx.scope,
+      ownerKey: ctx.scope,
       settings,
       platform,
       trace,

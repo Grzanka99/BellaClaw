@@ -31,7 +31,8 @@ export const rememberMemory = defineTool({
   mode: "sequential",
   logSafe: [],
   execute: async (context, args) => {
-    const chatId = requireChatId(context.chatId);
+    const conversationKey = requireChatId(context.conversationKey);
+    const chatId = requireChatId(context.ownerKey);
     const fact = args.fact.trim();
     if (fact.length === 0) {
       throw new Error("Memory fact must not be blank");
@@ -42,6 +43,7 @@ export const rememberMemory = defineTool({
         EEventType.MemoryFactRememberRequested,
         {
           chatId,
+          conversationKey,
           text: fact,
           sourceMessage: args.sourceMessage,
           supersedesFactIds: args.supersedesFactIds,
@@ -49,7 +51,7 @@ export const rememberMemory = defineTool({
         {
           outcome: EEventType.MemoryFactRemembered,
           step: undefined,
-          key: chatId,
+          key: conversationKey,
           timeoutMs: MEMORY_REQUEST_TIMEOUT_MS,
         },
       );

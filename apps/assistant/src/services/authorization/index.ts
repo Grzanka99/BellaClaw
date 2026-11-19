@@ -179,7 +179,10 @@ export class AuthorizationService {
     event: TEvent<EEventType.MessageReceived>,
     ctx: TEventContext,
   ): Promise<void> {
-    const { chatId, content } = event.payload;
+    const { conversationKey, ownerKey, channel, replyAddress, content } = event.payload;
+    const origin = { conversationKey, ownerKey, channel, replyAddress };
+    // NOTE: a chat is authorized under its conversation key
+    const chatId = conversationKey;
 
     const result = await ctx.complete(async (tx, emit) => {
       const result = await this.authorize(tx, chatId, content);
@@ -194,12 +197,17 @@ export class AuthorizationService {
       }
 
       if (result.decision === EAuthorizationDecision.Activated) {
-        emit(EEventType.ReplyReady, { chatId, text: "Activated." }, undefined, undefined);
+        emit(EEventType.ReplyReady, { ...origin, text: "Activated." }, undefined, undefined);
         return result;
       }
 
       if (result.decision === EAuthorizationDecision.AlreadyActivated) {
-        emit(EEventType.ReplyReady, { chatId, text: "Already activated." }, undefined, undefined);
+        emit(
+          EEventType.ReplyReady,
+          { ...origin, text: "Already activated." },
+          undefined,
+          undefined,
+        );
         return result;
       }
 
@@ -215,7 +223,7 @@ export class AuthorizationService {
     if (result.decision === EAuthorizationDecision.Allow) {
       logMessageReceived(
         event.trace,
-        event.payload.platform,
+        channel,
         content.length,
         event.payload.attachments.map((attachment) => attachment.mimeType),
       );

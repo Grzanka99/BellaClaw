@@ -73,7 +73,7 @@ export const updateCronJob = defineTool({
   logSafe: ["fireAt", "type", ["pattern", "cronPattern"], "nextRunAt", "timezone", "status"],
   privateErrors: true,
   execute: async (context, parsedArgs) => {
-    const chatId = requireChatId(context.chatId);
+    const chatId = requireChatId(context.ownerKey);
     const validatedArgs = validateUpdateCronJobArgs(parsedArgs);
     const existing = await CronScheduler.instance.get(validatedArgs.name, chatId);
 

@@ -9,9 +9,8 @@ import { startSpan } from "../app-logger/span";
 import { ConversationStore } from "../conversation";
 import { IMAGE_MARKER, type TConversation } from "../conversation/types";
 import { ESubscriptionMode, EventBus, type TEventContext, type TEventRequester } from "../events";
-import { ERejectionCode, type TEvent } from "../events/catalog";
+import { ERejectionCode, type TEvent, type TMessageOrigin } from "../events/catalog";
 import { MessagingAdapter } from "../messaging";
-import type { EMessagePlatform } from "../messaging/types";
 import { SettingsService } from "../settings";
 import { EConfigKey, type TConfigRecord } from "../settings/schema";
 
@@ -106,6 +105,7 @@ export class MessageHandler {
         this.conversations.saveDeliveredMessage(
           tx,
           event.payload.chatId,
+          event.payload.channel,
           transcript.text,
           transcript.notice,
           event.payload.sentAt,
@@ -123,7 +123,8 @@ export class MessageHandler {
     event: TEvent<EEventType.TurnRequested>,
     ctx: TEventContext,
   ): Promise<void> {
-    const { chatId, content, attachments, receivedAt, platform } = event.payload;
+    const { content, attachments, receivedAt, ...origin } = event.payload;
+    const { conversationKey, ownerKey, channel } = origin;
     const trace = event.trace;
     const handleMessageStart = performance.now();
     this.logger.info("handleTurn: start");
@@ -137,26 +138,26 @@ export class MessageHandler {
         emit(
           EEventType.ReplyReady,
           {
-            chatId,
+            ...origin,
             text: INTERRUPTED_REPLY,
             transcript: { text: INTERRUPTED_REPLY, notice: INTERRUPTED_NOTICE },
           },
           undefined,
           undefined,
         );
-        emit(EEventType.TurnFailed, { chatId, reason: "interrupted" }, undefined, undefined);
+        emit(EEventType.TurnFailed, { ...origin, reason: "interrupted" }, undefined, undefined);
       });
       span.fail("interrupted", INTERRUPTED_REPLY.length);
       return;
     }
 
-    const settings = await SettingsService.instance.getAll(chatId);
+    const settings = await SettingsService.instance.getAll(ownerKey);
     let persisted: TOption<TConversation>;
 
     try {
-      let conversation = await this.conversations.load(chatId);
+      let conversation = await this.conversations.load(conversationKey);
       if (conversation !== undefined) {
-        conversation = await this.compact(chatId, conversation, settings, platform, trace, ctx);
+        conversation = await this.compact(origin, conversation, settings, trace, ctx);
       }
 
       const storedText = [content, ...attachments.map(() => IMAGE_MARKER)]
@@ -169,12 +170,13 @@ export class MessageHandler {
         savedMessage = await ctx.transact(async (tx, emit) => {
           const row = await this.conversations.saveUserMessage(
             tx,
-            chatId,
+            conversationKey,
+            channel,
             ERole.User,
             storedText,
             new Date(receivedAt),
           );
-          emit(EEventType.TurnStarted, { chatId, userMessageId: row.id }, undefined, undefined);
+          emit(EEventType.TurnStarted, { ...origin, userMessageId: row.id }, undefined, undefined);
           return row;
         });
       } catch (error) {
@@ -190,13 +192,13 @@ export class MessageHandler {
         conversation,
         images: {
           refs: attachments,
-          fetch: (ref, maxBytes) =>
-            MessagingAdapter.instance.fetchAttachment(chatId, ref, maxBytes),
+          fetch: (ref, maxBytes) => MessagingAdapter.instance.fetchAttachment(ref, maxBytes),
         },
         currentTimeContext: createCurrentTimeContext(settings, savedMessage.createdAt),
-        chatId,
+        conversationKey,
+        ownerKey,
         settings,
-        platform,
+        platform: channel,
         trace,
         events: ctx,
         signal: undefined,
@@ -212,7 +214,7 @@ export class MessageHandler {
         let fallback = FAILED_REPLY;
         const diagnosed = await ctx.request(
           EEventType.AiAuthDiagnoseRequested,
-          { chatId, providerId: settings[EConfigKey.AiProvider] },
+          { chatId: ownerKey, providerId: settings[EConfigKey.AiProvider] },
           {
             outcome: EEventType.AiAuthDiagnosed,
             step: undefined,
@@ -226,10 +228,10 @@ export class MessageHandler {
         }
 
         await ctx.complete(async (_tx, emit) => {
-          emit(EEventType.ReplyReady, { chatId, text: fallback }, undefined, undefined);
+          emit(EEventType.ReplyReady, { ...origin, text: fallback }, undefined, undefined);
           emit(
             EEventType.TurnFailed,
-            { chatId, reason: "no_final_response" },
+            { ...origin, reason: "no_final_response" },
             undefined,
             undefined,
           );
@@ -244,19 +246,20 @@ export class MessageHandler {
         persisted = await ctx.complete(async (tx, emit) => {
           const state = await this.conversations.saveTurn(
             tx,
-            chatId,
+            conversationKey,
+            channel,
             aiRes.messages,
             savedMessage.id,
             conversation,
           );
 
           if (text.trim().length > 0) {
-            emit(EEventType.ReplyReady, { chatId, text }, undefined, undefined);
+            emit(EEventType.ReplyReady, { ...origin, text }, undefined, undefined);
           }
 
           emit(
             EEventType.TurnCompleted,
-            { chatId, userMessageId: savedMessage.id },
+            { ...origin, userMessageId: savedMessage.id },
             undefined,
             undefined,
           );
@@ -276,8 +279,8 @@ export class MessageHandler {
     } catch (error) {
       this.logger.error(`handleTurn: failed: ${String(error)}`);
       await ctx.complete(async (_tx, emit) => {
-        emit(EEventType.ReplyReady, { chatId, text: FAILED_REPLY }, "failed", undefined);
-        emit(EEventType.TurnFailed, { chatId, reason: "error" }, undefined, undefined);
+        emit(EEventType.ReplyReady, { ...origin, text: FAILED_REPLY }, "failed", undefined);
+        emit(EEventType.TurnFailed, { ...origin, reason: "error" }, undefined, undefined);
       });
       span.fail("failed", 0, String(error));
       return;
@@ -289,14 +292,13 @@ export class MessageHandler {
 
     // acked; the chat lane is still held, so the next turn waits for compaction.
     // compact() reports its own failures
-    await this.compact(chatId, persisted, settings, platform, trace, ctx);
+    await this.compact(origin, persisted, settings, trace, ctx);
   }
 
   private async compact(
-    chatId: string,
+    origin: TMessageOrigin,
     state: TConversation,
     settings: TConfigRecord,
-    platform: TOption<EMessagePlatform>,
     trace: TBehaviorTraceContext,
     events: TEventRequester,
   ): Promise<TConversation> {
@@ -305,18 +307,19 @@ export class MessageHandler {
       const result = await this.ai.compactConversation(
         state,
         settings,
-        chatId,
-        platform,
+        origin.conversationKey,
+        origin.ownerKey,
+        origin.channel,
         trace,
         events,
       );
       if (result === undefined) {
         return state;
       }
-      const unused = await this.conversations.saveSummary(chatId, result.state);
+      const unused = await this.conversations.saveSummary(origin.conversationKey, result.state);
       for (const ref of unused) {
         try {
-          await MessagingAdapter.instance.deleteAttachment(chatId, ref);
+          await MessagingAdapter.instance.deleteAttachment(ref);
         } catch (error) {
           this.logger.warning(`Attachment delete failed: ${String(error)}`);
         }

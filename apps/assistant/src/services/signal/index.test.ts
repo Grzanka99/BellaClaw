@@ -5,6 +5,7 @@ import { DatabaseConnector } from "../database";
 import { resetEventTables } from "../database/test-utils";
 import { EventBus } from "../events";
 import type { TEventPayloads } from "../events/catalog";
+import { testMessageOrigin } from "../events/test-utils";
 import { MessagingAdapter } from "../messaging";
 import { EMessagePlatform } from "../messaging/types";
 import { SignalClient } from "./client";
@@ -163,11 +164,13 @@ describe("SignalSingleton", () => {
     expect(rows[0]?.platform).toBe(EMessagePlatform.Signal);
     expect(rows[0]?.turnId).toStartWith("msg:");
     expect(rows[0]?.payload).toEqual({
-      chatId: "signal:+200",
+      conversationKey: "signal:+200",
+      ownerKey: "signal:+200",
+      channel: EMessagePlatform.Signal,
+      replyAddress: "+200",
       content: "hello",
       attachments: [],
       receivedAt: expect.any(Number),
-      platform: EMessagePlatform.Signal,
     });
   });
 
@@ -249,29 +252,27 @@ describe("SignalSingleton", () => {
 
     try {
       await publish(EEventType.TurnRequested, "signal:+200", {
-        chatId: "signal:+200",
+        ...testMessageOrigin("signal:+200", EMessagePlatform.Signal),
         content: "hello",
         attachments: [],
         receivedAt: 1,
-        platform: EMessagePlatform.Signal,
       });
       await publish(EEventType.TurnRequested, "discord:+200", {
-        chatId: "discord:+200",
+        ...testMessageOrigin("discord:+200", EMessagePlatform.Discord),
         content: "hello",
         attachments: [],
         receivedAt: 1,
-        platform: EMessagePlatform.Discord,
       });
       await bus.idle();
       expect(showTyping.mock.calls).toEqual([["+200"]]);
       expect(hideTyping).not.toHaveBeenCalled();
 
       await publish(EEventType.TurnCompleted, "signal:+200", {
-        chatId: "signal:+200",
+        ...testMessageOrigin("signal:+200", EMessagePlatform.Signal),
         userMessageId: 1,
       });
       await publish(EEventType.TurnFailed, "signal:+200", {
-        chatId: "signal:+200",
+        ...testMessageOrigin("signal:+200", EMessagePlatform.Signal),
         reason: "error",
       });
       await publish(EEventType.EventDeadLettered, "signal:+200", {

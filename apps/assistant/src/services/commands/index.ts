@@ -29,6 +29,7 @@ export function formatCommandList(): string {
 
 export async function runCommand(
   chatId: string,
+  conversationKey: string,
   content: string,
   ctx: TEventContext,
 ): Promise<TOption<TCommandResult>> {
@@ -56,7 +57,7 @@ export async function runCommand(
     return undefined;
   }
 
-  return command.handler(chatId, args, ctx);
+  return command.handler(chatId, args, ctx, conversationKey);
 }
 
 export class Commands {
@@ -86,12 +87,14 @@ export class Commands {
     event: TEvent<EEventType.MessageAuthorized>,
     ctx: TEventContext,
   ): Promise<void> {
-    const { chatId, content, attachments, receivedAt, platform } = event.payload;
-    const result = await runCommand(chatId, content, ctx);
+    const { content, attachments, receivedAt, ...origin } = event.payload;
+    // NOTE: commands act for the owner: its calendars, credentials and logins; a check of the
+    // chat's activation uses the conversation key
+    const result = await runCommand(origin.ownerKey, origin.conversationKey, content, ctx);
 
     await ctx.complete(async (_tx, emit) => {
       if (typeof result === "string") {
-        emit(EEventType.ReplyReady, { chatId, text: result }, undefined, undefined);
+        emit(EEventType.ReplyReady, { ...origin, text: result }, undefined, undefined);
         return;
       }
 
@@ -104,7 +107,7 @@ export class Commands {
 
       emit(
         EEventType.TurnRequested,
-        { chatId, content: prompt, attachments: images, receivedAt, platform },
+        { ...origin, content: prompt, attachments: images, receivedAt },
         undefined,
         undefined,
       );

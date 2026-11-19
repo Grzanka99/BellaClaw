@@ -38,3 +38,19 @@ export function parseCanonicalChatKey(value: string): TOption<TCanonicalChatKey>
 
   return undefined;
 }
+
+export type TChatAddress = {
+  channel: EMessagePlatform;
+  address: string;
+};
+
+// NOTE: the one place that turns a chat key into the address it is reached at. A chat key names
+// its channel and address
+export function resolveAddress(conversationKey: string): TOption<TChatAddress> {
+  const parsed = parseCanonicalChatKey(conversationKey);
+  if (parsed === undefined) {
+    return undefined;
+  }
+
+  return { channel: parsed.platform, address: parsed.chatId };
+}
