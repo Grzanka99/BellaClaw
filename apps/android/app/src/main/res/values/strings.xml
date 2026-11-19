@@ -1,0 +1,70 @@
+<resources>
+    <string name="app_name">BellaClaw</string>
+    <string name="bellaclaw_name">BellaClaw</string>
+
+    <string name="action_back">Back</string>
+    <string name="action_new_chat">New chat</string>
+    <string name="action_send">Send</string>
+    <string name="action_attach_image">Attach image</string>
+    <string name="action_remove_image">Remove image</string>
+    <string name="action_choose_model">Model for this chat</string>
+    <string name="action_done">Done</string>
+    <string name="action_save">Save</string>
+    <string name="action_reset_default">Reset to default</string>
+
+    <string name="home_title">Home</string>
+    <string name="home_chats">Chats</string>
+    <string name="new_chat_title">New chat</string>
+
+    <string name="composer_hint_bellaclaw">Message BellaClaw</string>
+    <string name="composer_hint_chat">Ask anything</string>
+    <string name="attached_image">Attached image</string>
+    <string name="typing">Typing</string>
+    <string name="day_today">Today</string>
+    <string name="day_yesterday">Yesterday</string>
+
+    <string name="picker_title">Model for this chat</string>
+    <string name="label_provider">Provider</string>
+    <string name="label_model">Model</string>
+    <string name="label_effort">Effort</string>
+    <string name="effort_low">Low</string>
+    <string name="effort_medium">Medium</string>
+    <string name="effort_high">High</string>
+
+    <string name="settings_title">Settings</string>
+    <string name="settings_app">App</string>
+    <string name="models_title">Models</string>
+    <string name="models_summary">%1$s · %2$s</string>
+    <string name="models_roles">Roles</string>
+    <string name="models_custom">Custom</string>
+    <string name="model_and_effort">%1$s · %2$s</string>
+    <string name="role_utility">Utility</string>
+    <string name="role_main">Main</string>
+    <string name="role_specialist">Specialist</string>
+    <string name="role_specialist_accurate">Specialist Accurate</string>
+    <string name="role_scheduled_task">Scheduled Task</string>
+
+    <string name="personality_title">Personality</string>
+    <string name="personality_summary_shared">BellaClaw\'s personality is used in chats too</string>
+    <string name="personality_summary_separate">Chats use their own personality</string>
+    <string name="personality_bellaclaw_label">BellaClaw\'s personality</string>
+    <string name="personality_use_in_chats">Use BellaClaw\'s personality in chats</string>
+    <string name="personality_use_in_chats_on">Quick chats start from BellaClaw\'s personality</string>
+    <string name="personality_use_in_chats_off">Off: chats use only the text below</string>
+    <string name="personality_chats_label">Chats personality</string>
+    <string name="personality_chats_placeholder">Empty = plain assistant, no personality</string>
+    <string name="personality_chats_help_on">Added after BellaClaw\'s personality. Optional.</string>
+    <string name="personality_chats_help_off">Replaces BellaClaw\'s personality in chats. Optional.</string>
+
+    <string name="theme_title">Theme</string>
+    <string name="theme_mode">Mode</string>
+    <string name="theme_system">System</string>
+    <string name="theme_light">Light</string>
+    <string name="theme_dark">Dark</string>
+    <string name="theme_summary_dynamic">%1$s · Dynamic color</string>
+    <string name="theme_dynamic_color">Dynamic color</string>
+    <string name="theme_dynamic_color_summary">Colors from your wallpaper</string>
+
+    <string name="notifications_title">Notifications</string>
+    <string name="notifications_summary">Open Android notification settings</string>
+</resources>
