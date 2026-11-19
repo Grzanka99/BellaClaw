@@ -7,6 +7,7 @@ import { sanitizeErrorMessage } from "../../app-logger/sanitizers";
 import { AuthorizationService } from "../../authorization";
 import { commandFailed, ESubscriptionMode, EventBus, type TEventContext } from "../../events";
 import type { TEvent, TEventPayloads } from "../../events/catalog";
+import { IdentityService } from "../../identity";
 import { SettingsService } from "../../settings";
 import { EConfigKey } from "../../settings/schema";
 import { aiCredentials, aiModels } from "../providers/registry";
@@ -116,11 +117,19 @@ export async function describeAiAuthProblem(
 // Refreshes every OAuth credential and sends one alert to all chats when logins break.
 // Stays silent while any provider is connected: a chat on a broken one is switched to it.
 export async function checkAiOAuth(models: Models = aiModels): Promise<void> {
-  const chatIds = await AuthorizationService.instance.listAuthorizedChatIds();
+  // the recipients of the alert
+  const chatIds = await IdentityService.instance.listNoticeRecipients(
+    await AuthorizationService.instance.listAuthorizedChatIds(),
+  );
   const selectedProviders = new Set<string>();
 
   for (const chatId of chatIds) {
-    const settings = await SettingsService.instance.getAll(chatId);
+    const resolved = await IdentityService.instance.resolve(chatId);
+    if (resolved === undefined) {
+      throw new Error(`Unknown chat key ${chatId}`);
+    }
+
+    const settings = await SettingsService.instance.getAll(resolved.ownerKey);
     selectedProviders.add(settings[EConfigKey.AiProvider]);
   }
 

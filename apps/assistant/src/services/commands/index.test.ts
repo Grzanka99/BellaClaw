@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { EEventType, eventsTable } from "@bellaclaw/database";
+import { verifyDashboardLinkToken } from "@bellaclaw/shared";
 import { asc, eq } from "drizzle-orm";
 import { AuthorizationService } from "../authorization";
 import { DatabaseConnector } from "../database";
@@ -136,6 +137,27 @@ describe("commands consumer", () => {
       ).toBe("Updating requires BELLACLAW_ACTIVATION_TOKEN and an activated chat.");
     } finally {
       activated.mockRestore();
+    }
+  });
+
+  test("!dashboard signs the address the command came from, not the owner", async () => {
+    const originalUrl = Bun.env.BELLACLAW_DASHBOARD_PUBLIC_URL;
+    const originalSecret = Bun.env.BELLACLAW_DASHBOARD_SECRET;
+    Bun.env.BELLACLAW_DASHBOARD_PUBLIC_URL = "https://dashboard.test";
+    Bun.env.BELLACLAW_DASHBOARD_SECRET = "dashboard-secret";
+
+    try {
+      const reply = await withEventContext((ctx) =>
+        runCommand("account:acct-1", "signal:+100", "!dashboard", ctx),
+      );
+      const token = String(reply).match(/token=([^\s]+)/)?.[1] ?? "";
+
+      expect(verifyDashboardLinkToken("dashboard-secret", token, Date.now())?.chatId).toBe(
+        "signal:+100",
+      );
+    } finally {
+      Bun.env.BELLACLAW_DASHBOARD_PUBLIC_URL = originalUrl;
+      Bun.env.BELLACLAW_DASHBOARD_SECRET = originalSecret;
     }
   });
 

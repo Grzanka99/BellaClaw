@@ -120,7 +120,8 @@ A call across services is allowed only when it changes no state:
 
 - Infrastructure: `DatabaseConnector`, `EventBus`, `AppLogger`, `startSpan`.
 - Cached read models: `SettingsService.getAll` (fed by `settings.changed`),
-  `AuthorizationService.listAuthorizedChatIds` (fed by `authorization.changed`).
+  `AuthorizationService.listAuthorizedChatIds` (fed by `authorization.changed`),
+  `IdentityService.resolve` and `listNoticeRecipients` (loaded from `identity_links`).
 - Drivers: `LlmClient`, `EmbeddingClient`, `aiModels`, the Discord and Signal clients, `gws`.
 - The stateless engine: `AgentHarness.runMain`, `runScheduledTask`, `compactConversation`.
 - Live state an event cannot carry: `McpService.open`, `McpRunRegistry`.
@@ -134,7 +135,7 @@ is `ALLOWED` in `events/boundaries.test.ts`.
 Table owners: `memories`, `conversation_summaries` → Conversation · `facts`,
 `fact_distillation_state` → Memory · `cron_engine_jobs` → Cron · `automations`,
 `automation_drafts` → Automations · `user_configs` → Settings · `calendars` → Calendar ·
-`message_authorizations` → Authorization · `events`, `event_deliveries` → EventBus.
+`message_authorizations` → Authorization · `identity_links` → Identity · `events`, `event_deliveries` → EventBus.
 
 ## Adding a fact or command
 

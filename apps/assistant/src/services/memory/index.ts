@@ -14,6 +14,7 @@ import { DatabaseConnector, type TDatabaseTransaction } from "../database";
 import { EmbeddingClient } from "../embedding";
 import { commandFailed, ESubscriptionMode, EventBus, type TEventContext } from "../events";
 import type { TEvent } from "../events/catalog";
+import { IdentityService } from "../identity";
 import {
   SPreparedFact,
   type TFact,
@@ -135,7 +136,11 @@ export class Memory {
       mode: ESubscriptionMode.Durable,
       backoffMs: [1_000, 5_000, 30_000],
       handler: async (event, ctx) => {
-        const { chatId, messageIds } = event.payload;
+        const { messageIds } = event.payload;
+        // facts are stored under the owner of the conversation
+        const chatId =
+          (await IdentityService.instance.resolve(event.payload.chatId))?.ownerKey ??
+          event.payload.chatId;
 
         await ctx.complete(async (tx, emit) => {
           const facts = await tx

@@ -1,13 +1,20 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import type { TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
-import { EEventType, eventsTable, type TSelectMemory } from "@bellaclaw/database";
+import {
+  EEventType,
+  eventsTable,
+  identityLinksTable,
+  type TSelectMemory,
+} from "@bellaclaw/database";
 import { eq } from "drizzle-orm";
 import { LlmClient, LlmResponseError } from "../ai/llm";
 import { EModelPurpose, ERole } from "../ai/types";
 import { ConversationStore } from "../conversation";
 import { DatabaseConnector } from "../database";
-import { resetEventTables } from "../database/test-utils";
+import { resetEventTables, resetIdentityLinksTable } from "../database/test-utils";
 import { EventBus, type TEventContext } from "../events";
+import { IdentityService } from "../identity";
+import { EIdentityLinkState } from "../identity/schema";
 import { EMessagePlatform } from "../messaging/types";
 import { SettingsService } from "../settings";
 import { DefaultConfigRecord } from "../settings/schema";
@@ -710,6 +717,44 @@ describe("FactDistiller", () => {
     } finally {
       await bus.stop();
     }
+  });
+
+  test("a boot fact drain of an account's Bella conversation drains it for the account", async () => {
+    await resetIdentityLinksTable();
+    Object.assign(IdentityService, { _instance: undefined });
+    await DatabaseConnector.instance.database.insert(identityLinksTable).values({
+      channel: EMessagePlatform.Signal,
+      address: "+900",
+      accountId: "acct-boot",
+      state: EIdentityLinkState.Active,
+      linkedAt: new Date(1_000),
+    });
+    const { distiller, internals } = setupDistiller();
+    internals.conversations.findChatIds = mock(async () => ["bella:acct-boot", "signal:+901"]);
+    const emitted: unknown[] = [];
+    const ctx = {
+      transact: async (work: (tx: unknown, emit: (...args: unknown[]) => void) => Promise<void>) =>
+        work(undefined, (...args) => emitted.push(args)),
+    } as unknown as TEventContext;
+
+    await distiller.scheduleFactDrainForAllChats(ctx);
+
+    expect(emitted).toEqual([
+      [
+        EEventType.MemoryFactsRefreshRequested,
+        { ownerKey: "account:acct-boot" },
+        "bella:acct-boot",
+        "bella:acct-boot",
+      ],
+      [
+        EEventType.MemoryFactsRefreshRequested,
+        { ownerKey: "signal:+901" },
+        "signal:+901",
+        "signal:+901",
+      ],
+    ]);
+    await resetIdentityLinksTable();
+    Object.assign(IdentityService, { _instance: undefined });
   });
 
   test("a boot fact drain sweep never rejects when chat discovery fails", async () => {

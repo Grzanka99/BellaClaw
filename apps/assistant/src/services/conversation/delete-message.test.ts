@@ -1,13 +1,15 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { EEventType, factsTable, memoriesTable } from "@bellaclaw/database";
+import { EEventType, factsTable, identityLinksTable, memoriesTable } from "@bellaclaw/database";
 import { fauxAssistantMessage, fauxToolCall, type Message } from "@earendil-works/pi-ai";
 import { and, asc, eq, isNull } from "drizzle-orm";
 import { ERole } from "../ai/types";
 import { DatabaseConnector } from "../database";
-import { resetEventTables } from "../database/test-utils";
+import { resetEventTables, resetIdentityLinksTable } from "../database/test-utils";
 import { CommandRejectedError, EventBus } from "../events";
 import { ERejectionCode } from "../events/catalog";
 import { withEventContext } from "../events/test-utils";
+import { IdentityService } from "../identity";
+import { EIdentityLinkState } from "../identity/schema";
 import { Memory } from "../memory";
 import { MessageHandler } from "../message-handler";
 import { EMessagePlatform } from "../messaging/types";
@@ -163,4 +165,27 @@ test("a message id of another chat is rejected and nothing is deleted", async ()
   }
 
   expect([await rowIds(chatId), await rowIds(otherChatId)]).toEqual(before);
+});
+
+test("deleting a message of an account's Bella conversation forgets the facts stored under the account", async () => {
+  await resetIdentityLinksTable();
+  Object.assign(IdentityService, { _instance: undefined });
+  await DatabaseConnector.instance.database.insert(identityLinksTable).values({
+    channel: EMessagePlatform.Signal,
+    address: "+800",
+    accountId: "acct-delete",
+    state: EIdentityLinkState.Active,
+    linkedAt: new Date(1_000),
+  });
+  const chatId = "bella:acct-delete";
+  const turn = await saveTurn(chatId, "first", [], undefined);
+  const replyId = turn.entries[1]?.id ?? 0;
+  await insertFact("account:acct-delete", "from the reply", replyId);
+
+  await requestDelete(chatId, replyId);
+  await EventBus.instance.idle();
+
+  expect(await liveFacts("account:acct-delete")).toEqual([]);
+  await resetIdentityLinksTable();
+  Object.assign(IdentityService, { _instance: undefined });
 });

@@ -5,7 +5,7 @@ import { createLogger, type TLogger } from "@bellaclaw/shared";
 import { startSpan } from "../app-logger/span";
 import { ESubscriptionMode, EventBus, type TEventContext } from "../events";
 import type { TDeliveryTranscript, TEvent } from "../events/catalog";
-import { resolveAddress, type TChatAddress } from "./chat-key";
+import { IdentityService, type TChatAddress } from "../identity";
 import type { EMessagePlatform, TAttachmentRef, TMessageTransport } from "./types";
 
 export class MessagingAdapter {
@@ -71,7 +71,7 @@ export class MessagingAdapter {
       handler: (event, ctx) =>
         this.send(
           event.payload.chatId,
-          resolveAddress(event.payload.chatId),
+          undefined,
           event.payload.text,
           event.payload.transcript,
           event,
@@ -84,26 +84,24 @@ export class MessagingAdapter {
       mode: ESubscriptionMode.Durable,
       backoffMs: this.outboundBackoffMs,
       handler: (event, ctx) =>
-        this.send(
-          event.payload.chatId,
-          resolveAddress(event.payload.chatId),
-          event.payload.text,
-          undefined,
-          event,
-          ctx,
-        ),
+        this.send(event.payload.chatId, undefined, event.payload.text, undefined, event, ctx),
     });
   }
 
-  // chatId: the conversation the message belongs to; destination: where it goes
+  // key: the conversation the message belongs to, possibly the old key of a linked address;
+  // origin: where a reply goes. A message without one goes where Identity resolves the key
   private async send(
-    chatId: string,
-    destination: TOption<TChatAddress>,
+    key: string,
+    origin: TOption<TChatAddress>,
     text: string,
     transcript: TOption<TDeliveryTranscript>,
     event: TEvent,
     ctx: TEventContext,
   ): Promise<void> {
+    const resolved = await IdentityService.instance.resolve(key);
+    const chatId = resolved?.conversationKey ?? key;
+    const destination = origin ?? resolved?.destination;
+
     if (destination === undefined) {
       throw new Error("Unknown chat platform");
     }
@@ -127,7 +125,8 @@ export class MessagingAdapter {
           transcript,
         },
         undefined,
-        undefined,
+        // the conversation's lane, so the transcript append orders with its turns
+        chatId,
       );
     });
   }

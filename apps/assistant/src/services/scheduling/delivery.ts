@@ -13,7 +13,7 @@ import type {
   TDeliveryTranscript,
   TEvent,
 } from "../events/catalog";
-import { resolveAddress } from "../messaging/chat-key";
+import { IdentityService } from "../identity";
 import type { EMessagePlatform } from "../messaging/types";
 import {
   createAutomationFailedNotices,
@@ -59,20 +59,26 @@ export class ScheduledDelivery {
 
   private async handleCronFire(event: TEvent<EEventType.CronFired>, ctx: TEventContext) {
     const job = event.payload;
-    // the scope is the job's owner and the key of its conversation
-    const conversationKey = job.scope;
-    const destination = resolveAddress(conversationKey);
-    const trace: TBehaviorTraceContext = { ...event.trace, platform: destination?.channel };
+    // the scope is the job's owner; the delivery goes to the owner's conversation, and its text is
+    // formatted for the channel that conversation is reached on
+    const resolved = await IdentityService.instance.resolve(job.scope);
+    const trace: TBehaviorTraceContext = {
+      ...event.trace,
+      platform: resolved?.destination.channel,
+    };
     logHandlerStarted(trace, "cron-fire");
     const span = startHandlerSpan(trace, "cron-fire");
 
-    if (destination === undefined) {
+    if (resolved === undefined) {
       this.logger.warning(
-        `handleCronFire: job "${job.name}" has invalid scope "${conversationKey}", skipping delivery`,
+        `handleCronFire: job "${job.name}" has invalid scope "${job.scope}", skipping delivery`,
       );
       span.fail("invalid scope", 0);
       return;
     }
+
+    const conversationKey = resolved.conversationKey;
+    const destination = resolved.destination;
 
     let messages: TCronMessage[];
 
@@ -103,6 +109,7 @@ export class ScheduledDelivery {
       try {
         messages = await this.createCronMessages(
           job,
+          conversationKey,
           destination.channel,
           trace,
           span,
@@ -113,7 +120,15 @@ export class ScheduledDelivery {
         this.lastRunEndedAt.set(event.key, Date.now());
       }
     } else {
-      messages = await this.createCronMessages(job, destination.channel, trace, span, false, ctx);
+      messages = await this.createCronMessages(
+        job,
+        conversationKey,
+        destination.channel,
+        trace,
+        span,
+        false,
+        ctx,
+      );
     }
 
     if (messages.length === 0) {
@@ -135,6 +150,7 @@ export class ScheduledDelivery {
 
   private async createCronMessages(
     job: TCronFiredPayload,
+    conversationKey: string,
     platform: EMessagePlatform,
     trace: TBehaviorTraceContext,
     span: THandlerSpan,
@@ -161,6 +177,7 @@ export class ScheduledDelivery {
       try {
         result = await runCronJobAutomations(
           job,
+          conversationKey,
           platform,
           this.ai,
           ctx,
@@ -235,7 +252,14 @@ export class ScheduledDelivery {
         return messages;
       }
     } else if (job.content.kind === "task") {
-      const taskResult = await generateScheduledTaskText(job, platform, this.ai, ctx, trace);
+      const taskResult = await generateScheduledTaskText(
+        job,
+        conversationKey,
+        platform,
+        this.ai,
+        ctx,
+        trace,
+      );
       text = taskResult.text;
       memoryPrefix = "CRON TASK";
       toolCallCount = taskResult.toolCallCount;

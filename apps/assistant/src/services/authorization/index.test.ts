@@ -1,12 +1,18 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { EEventType, eventsTable } from "@bellaclaw/database";
+import { EEventType, eventsTable, identityLinksTable } from "@bellaclaw/database";
 import type { TOption } from "@bellaclaw/shared";
 import { asc, eq } from "drizzle-orm";
 import { Commands } from "../commands";
 import { DatabaseConnector } from "../database";
-import { resetEventTables, resetMessageAuthorizationsTable } from "../database/test-utils";
+import {
+  resetEventTables,
+  resetIdentityLinksTable,
+  resetMessageAuthorizationsTable,
+} from "../database/test-utils";
 import { EventBus } from "../events";
 import { testMessageOrigin } from "../events/test-utils";
+import { IdentityService } from "../identity";
+import { EIdentityLinkState } from "../identity/schema";
 import { EMessagePlatform } from "../messaging/types";
 import { AuthorizationService } from ".";
 import { EAuthorizationDecision, EAuthorizationStatus } from "./schema";
@@ -171,5 +177,36 @@ describe("authorization consumer", () => {
       { chatId: "signal:+200", status: EAuthorizationStatus.Pending, failedAttempts: 1 },
       { chatId: "signal:+200", status: EAuthorizationStatus.Authorized, failedAttempts: 0 },
     ]);
+  });
+
+  test("the activation replies of a linked address run on its Bella conversation's lane", async () => {
+    await resetIdentityLinksTable();
+    await DatabaseConnector.instance.database.insert(identityLinksTable).values({
+      channel: EMessagePlatform.Signal,
+      address: "+300",
+      accountId: "acct-1",
+      state: EIdentityLinkState.Active,
+      linkedAt: new Date(1_000),
+    });
+    Object.assign(IdentityService, { _instance: undefined });
+
+    try {
+      await receive("signal:+300", "open-sesame", undefined);
+      await receive("signal:+300", "open-sesame", undefined);
+    } finally {
+      await resetIdentityLinksTable();
+      Object.assign(IdentityService, { _instance: undefined });
+    }
+
+    const replies = await DatabaseConnector.instance.database
+      .select()
+      .from(eventsTable)
+      .where(eq(eventsTable.type, EEventType.ReplyReady))
+      .orderBy(asc(eventsTable.seq));
+    const reply = {
+      key: "bella:acct-1",
+      payload: expect.objectContaining({ conversationKey: "bella:acct-1" }),
+    };
+    expect(replies.map((row) => ({ key: row.key, payload: row.payload }))).toEqual([reply, reply]);
   });
 });

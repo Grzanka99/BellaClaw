@@ -10,6 +10,7 @@ import { ConversationStore } from "../conversation";
 import { IMAGE_MARKER, type TConversation } from "../conversation/types";
 import { ESubscriptionMode, EventBus, type TEventContext, type TEventRequester } from "../events";
 import { ERejectionCode, type TEvent, type TMessageOrigin } from "../events/catalog";
+import { IdentityService } from "../identity";
 import { MessagingAdapter } from "../messaging";
 import { SettingsService } from "../settings";
 import { EConfigKey, type TConfigRecord } from "../settings/schema";
@@ -98,13 +99,27 @@ export class MessageHandler {
       return;
     }
 
+    // a message sent before its address was linked belongs to the account's Bella conversation
+    const resolved = await IdentityService.instance.resolve(event.payload.chatId);
+    const chatId = resolved?.conversationKey ?? event.payload.chatId;
+
+    // written on its conversation's lane only, so the row orders with that conversation's turns;
+    // the forward and the ack commit together, and the emit's dedupe key keeps a redelivery
+    // from forwarding twice
+    if (chatId !== event.key) {
+      await ctx.complete(async (_tx, emit) => {
+        emit(EEventType.MessageSent, { ...event.payload, chatId }, undefined, chatId);
+      });
+      return;
+    }
+
     const span = startMemorySaveSpan(event.trace, ERole.Assistant, transcript.text.length);
     let failure: TOption<string>;
     try {
       await ctx.complete((tx) =>
         this.conversations.saveDeliveredMessage(
           tx,
-          event.payload.chatId,
+          chatId,
           event.payload.channel,
           transcript.text,
           transcript.notice,

@@ -7,6 +7,7 @@ import { z } from "zod";
 import { DatabaseConnector, type TDatabaseHandle } from "../database";
 import { ESubscriptionMode, EventBus, type TEventContext } from "../events";
 import type { TEvent } from "../events/catalog";
+import { IdentityService } from "../identity";
 import {
   EAuthorizationDecision,
   EAuthorizationStatus,
@@ -179,10 +180,17 @@ export class AuthorizationService {
     event: TEvent<EEventType.MessageReceived>,
     ctx: TEventContext,
   ): Promise<void> {
-    const { conversationKey, ownerKey, channel, replyAddress, content } = event.payload;
+    const { channel, replyAddress, content } = event.payload;
+    // NOTE: a channel message arrives under the chat key of its address, which the gate
+    // authorizes; an address linked to an account resolves to the account's Bella conversation
+    const chatId = event.payload.conversationKey;
+    const resolved = await IdentityService.instance.resolve(chatId);
+    if (resolved === undefined) {
+      throw new Error(`Unknown chat key ${chatId}`);
+    }
+
+    const { conversationKey, ownerKey } = resolved;
     const origin = { conversationKey, ownerKey, channel, replyAddress };
-    // NOTE: a chat is authorized under its conversation key
-    const chatId = conversationKey;
 
     const result = await ctx.complete(async (tx, emit) => {
       const result = await this.authorize(tx, chatId, content);
@@ -192,12 +200,18 @@ export class AuthorizationService {
       }
 
       if (result.decision === EAuthorizationDecision.Allow) {
-        emit(EEventType.MessageAuthorized, event.payload, undefined, undefined);
+        // on the conversation's lane
+        emit(
+          EEventType.MessageAuthorized,
+          { ...event.payload, ...origin },
+          undefined,
+          conversationKey,
+        );
         return result;
       }
 
       if (result.decision === EAuthorizationDecision.Activated) {
-        emit(EEventType.ReplyReady, { ...origin, text: "Activated." }, undefined, undefined);
+        emit(EEventType.ReplyReady, { ...origin, text: "Activated." }, undefined, conversationKey);
         return result;
       }
 
@@ -206,7 +220,7 @@ export class AuthorizationService {
           EEventType.ReplyReady,
           { ...origin, text: "Already activated." },
           undefined,
-          undefined,
+          conversationKey,
         );
         return result;
       }

@@ -29,7 +29,7 @@ describe("transcript channel backfill", () => {
     await rm(directory, { recursive: true, force: true });
   });
 
-  // migrates to the schema before the channel column
+  // migrates to the schema before the channel column, leaving out every later migration too
   async function migrateBeforeChannel() {
     const folder = join(directory, "migrations");
     await cp(MIGRATIONS_FOLDER, folder, { recursive: true });
@@ -37,7 +37,10 @@ describe("transcript channel backfill", () => {
     const journal = JSON.parse(await readFile(journalPath, "utf8")) as {
       entries: { tag: string }[];
     };
-    journal.entries = journal.entries.filter((entry) => entry.tag !== CHANNEL_MIGRATION);
+    journal.entries = journal.entries.slice(
+      0,
+      journal.entries.findIndex((entry) => entry.tag === CHANNEL_MIGRATION),
+    );
     await writeFile(journalPath, JSON.stringify(journal));
     await migrate(db, { migrationsFolder: folder });
   }

@@ -1,11 +1,13 @@
 import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
-import { EEventType, eventsTable } from "@bellaclaw/database";
+import { EEventType, eventsTable, identityLinksTable } from "@bellaclaw/database";
 import { eq } from "drizzle-orm";
 import { AuthorizationService } from "../authorization";
 import { DatabaseConnector } from "../database";
-import { resetEventTables } from "../database/test-utils";
+import { resetEventTables, resetIdentityLinksTable } from "../database/test-utils";
 import { EventBus, type TEventDraft } from "../events";
 import type { TEventPayloads } from "../events/catalog";
+import { IdentityService } from "../identity";
+import { EIdentityLinkState } from "../identity/schema";
 import { MessagingAdapter } from "../messaging";
 import { EMessagePlatform } from "../messaging/types";
 import { Notices } from ".";
@@ -137,6 +139,41 @@ describe("Notices", () => {
     expect(sendText.mock.calls).toEqual([
       ["+100", "Connected openai-codex. It is now this chat's AI provider."],
       ["+100", "Login for opencode-go failed: Error: denied"],
+    ]);
+  });
+
+  test("a notice to a linked account goes to its Bella conversation, on that conversation's lane", async () => {
+    await resetIdentityLinksTable();
+    await DatabaseConnector.instance.database.insert(identityLinksTable).values({
+      channel: EMessagePlatform.Signal,
+      address: "+300",
+      accountId: "acct-1",
+      state: EIdentityLinkState.Active,
+      linkedAt: new Date(1_000),
+    });
+    Object.assign(IdentityService, { _instance: undefined });
+
+    try {
+      await bus.publish(
+        draft(EEventType.AiAuthLoginFailed, "account:acct-1", {
+          chatId: "account:acct-1",
+          providerId: "opencode-go",
+          error: "Error: denied",
+        }),
+      );
+      await bus.idle();
+    } finally {
+      await resetIdentityLinksTable();
+      Object.assign(IdentityService, { _instance: undefined });
+    }
+
+    expect(sendText.mock.calls).toEqual([["+300", "Login for opencode-go failed: Error: denied"]]);
+    const notices = await DatabaseConnector.instance.database
+      .select()
+      .from(eventsTable)
+      .where(eq(eventsTable.type, EEventType.NoticeReady));
+    expect(notices.map((row) => ({ key: row.key, payload: row.payload }))).toEqual([
+      { key: "bella:acct-1", payload: expect.objectContaining({ chatId: "bella:acct-1" }) },
     ]);
   });
 

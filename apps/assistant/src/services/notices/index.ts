@@ -4,6 +4,7 @@ import { z } from "zod";
 import { AuthorizationService } from "../authorization";
 import { ESubscriptionMode, EventBus, type TEventContext } from "../events";
 import { EEventKind, EVENT_KINDS } from "../events/catalog";
+import { IdentityService } from "../identity";
 
 const DEAD_LETTER_NOTICE = "Something I was doing failed and was dropped. Try again.";
 // a notice for these would loop
@@ -98,16 +99,14 @@ export class Notices {
 
         const chatId = event.trace.chatId;
 
-        // an event of no chat, such as a global one, goes to every authorized chat
+        // an event of no chat, such as a global one, goes to every recipient of a global notice
         if (chatId === undefined) {
           await this.notifyAll(ctx, DEAD_LETTER_NOTICE);
           return;
         }
 
-        // on the chat's lane, not on the dead event's scope or job lane
-        await ctx.complete(async (_tx, emit) => {
-          emit(EEventType.NoticeReady, { chatId, text: DEAD_LETTER_NOTICE }, undefined, chatId);
-        });
+        // on the conversation's lane, not on the dead event's scope or job lane
+        await this.notify(ctx, chatId, DEAD_LETTER_NOTICE);
       },
     });
   }
@@ -120,7 +119,9 @@ export class Notices {
       return;
     }
 
-    const chatIds = await AuthorizationService.instance.listAuthorizedChatIds();
+    const chatIds = await IdentityService.instance.listNoticeRecipients(
+      await AuthorizationService.instance.listAuthorizedChatIds(),
+    );
 
     await EventBus.instance.transact(async (_tx, emit) => {
       for (const chatId of chatIds) {
@@ -138,7 +139,9 @@ export class Notices {
   }
 
   private async notifyAll(ctx: TEventContext, text: string): Promise<void> {
-    const chatIds = await AuthorizationService.instance.listAuthorizedChatIds();
+    const chatIds = await IdentityService.instance.listNoticeRecipients(
+      await AuthorizationService.instance.listAuthorizedChatIds(),
+    );
 
     await ctx.complete(async (_tx, emit) => {
       for (const chatId of chatIds) {
@@ -147,9 +150,14 @@ export class Notices {
     });
   }
 
-  private async notify(ctx: TEventContext, chatId: string, text: string): Promise<void> {
+  // recipient: an owner, conversation or address key; the notice goes to its conversation, on
+  // that conversation's lane
+  private async notify(ctx: TEventContext, recipient: string, text: string): Promise<void> {
+    const chatId =
+      (await IdentityService.instance.resolve(recipient))?.conversationKey ?? recipient;
+
     await ctx.complete(async (_tx, emit) => {
-      emit(EEventType.NoticeReady, { chatId, text }, undefined, undefined);
+      emit(EEventType.NoticeReady, { chatId, text }, undefined, chatId);
     });
   }
 }

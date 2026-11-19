@@ -141,6 +141,7 @@ describe("generateScheduledTaskText", () => {
       context({
         content: { kind: "task", prompt: "Prepare a briefing.", fallback: "Briefing unavailable." },
       }),
+      "signal:+100",
       EMessagePlatform.Signal,
       { runScheduledTask },
       testEventRequester,
@@ -174,6 +175,7 @@ describe("generateScheduledTaskText", () => {
       (
         await generateScheduledTaskText(
           task,
+          "signal:+100",
           EMessagePlatform.Signal,
           {
             runScheduledTask: mock(async () => ({
@@ -192,6 +194,7 @@ describe("generateScheduledTaskText", () => {
       (
         await generateScheduledTaskText(
           task,
+          "signal:+100",
           EMessagePlatform.Signal,
           {
             runScheduledTask: mock(async () => {

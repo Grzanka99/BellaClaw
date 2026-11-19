@@ -2,6 +2,7 @@ import { EEventType } from "@bellaclaw/database";
 import type { TOption } from "@bellaclaw/shared";
 import { ESubscriptionMode, EventBus, type TEventContext } from "../events";
 import type { TEvent } from "../events/catalog";
+import { IdentityService } from "../identity";
 import { aiAuthCommand } from "./ai-auth";
 import { calendarAddReadCommand, calendarAddWriteCommand } from "./calendar-add";
 import { dashboardCommand } from "./dashboard";
@@ -29,7 +30,7 @@ export function formatCommandList(): string {
 
 export async function runCommand(
   chatId: string,
-  conversationKey: string,
+  addressKey: string,
   content: string,
   ctx: TEventContext,
 ): Promise<TOption<TCommandResult>> {
@@ -57,7 +58,7 @@ export async function runCommand(
     return undefined;
   }
 
-  return command.handler(chatId, args, ctx, conversationKey);
+  return command.handler(chatId, args, ctx, addressKey);
 }
 
 export class Commands {
@@ -88,9 +89,17 @@ export class Commands {
     ctx: TEventContext,
   ): Promise<void> {
     const { content, attachments, receivedAt, ...origin } = event.payload;
-    // NOTE: commands act for the owner: its calendars, credentials and logins; a check of the
-    // chat's activation uses the conversation key
-    const result = await runCommand(origin.ownerKey, origin.conversationKey, content, ctx);
+    // NOTE: commands act for the owner: its calendars, credentials and logins; activation is
+    // per address
+    const result = await runCommand(
+      origin.ownerKey,
+      IdentityService.instance.addressKey({
+        channel: origin.channel,
+        address: origin.replyAddress,
+      }),
+      content,
+      ctx,
+    );
 
     await ctx.complete(async (_tx, emit) => {
       if (typeof result === "string") {

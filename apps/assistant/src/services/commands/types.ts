@@ -9,11 +9,11 @@ export type TCommand = {
   description: string;
   usage: string;
   // chatId: the owner key; ctx: the context of the message.authorized delivery that runs the
-  // command; conversationKey: the chat the command came from
+  // command; addressKey: the chat key of the address the command came from, which is activated
   handler: (
     chatId: string,
     args: string,
     ctx: TEventContext,
-    conversationKey: string,
+    addressKey: string,
   ) => Promise<TCommandResult>;
 };

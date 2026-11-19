@@ -55,3 +55,13 @@ export async function resetEventTables() {
   await db.run(sql`DELETE FROM events`);
   await db.run(sql`DELETE FROM sqlite_sequence WHERE name = 'events'`);
 }
+
+export async function resetIdentityLinksTable() {
+  if (Bun.env.BELLACLAW_DATABASE_MODE !== "test" && Bun.env.NODE_ENV !== "test") {
+    throw new Error("resetIdentityLinksTable can only run in test database mode");
+  }
+
+  const db = DatabaseConnector.instance.database;
+
+  await db.run(sql`DELETE FROM identity_links`);
+}

@@ -3,8 +3,9 @@ import { EEventType } from "@bellaclaw/database";
 import type { TOption } from "@bellaclaw/shared";
 import { createLogger, type TLogger } from "@bellaclaw/shared";
 import { ESubscriptionMode, EventBus } from "../events";
+import { IdentityService, type TChatAddress } from "../identity";
 import { MessagingAdapter } from "../messaging";
-import { createCanonicalChatKey, resolveAddress, type TChatAddress } from "../messaging/chat-key";
+import { createCanonicalChatKey } from "../messaging/chat-key";
 import { EMessagePlatform, type TAttachmentRef, type TMessageTransport } from "../messaging/types";
 import { SignalClient, type TSignalInboundMessage } from "./client";
 
@@ -71,12 +72,13 @@ export class SignalSingleton implements TMessageTransport {
       type: EEventType.EventDeadLettered,
       mode: ESubscriptionMode.Live,
       backoffMs: [],
-      handler: (event) => {
+      handler: async (event) => {
         if (event.trace.chatId === undefined) {
-          return Promise.resolve();
+          return;
         }
 
-        return this.setTyping(resolveAddress(event.trace.chatId), false);
+        const resolved = await IdentityService.instance.resolve(event.trace.chatId);
+        await this.setTyping(resolved?.destination, false);
       },
     });
 

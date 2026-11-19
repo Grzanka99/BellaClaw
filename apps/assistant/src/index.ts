@@ -9,6 +9,7 @@ import { Commands } from "./services/commands";
 import { CronScheduler } from "./services/cron";
 import { DiscordSingleton } from "./services/discord";
 import { EventBus } from "./services/events";
+import { IdentityService } from "./services/identity";
 import {
   setupInternalApi,
   startInternalApiServer,
@@ -66,6 +67,7 @@ async function init(): Promise<void> {
     if (Bun.env.BELLACLAW_MCP_PUBLIC_URL?.trim()) {
       startMcpAuthServer();
     }
+    await IdentityService.instance.setup();
     await AuthorizationService.instance.setup();
     await Promise.all([
       CalendarService.instance.setup(),

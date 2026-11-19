@@ -8,6 +8,7 @@ import { AutomationService } from "../automation";
 import { CalendarService } from "../calendar";
 import { Commands } from "../commands";
 import { CronScheduler } from "../cron";
+import { IdentityService } from "../identity";
 import { setupInternalApi } from "../internal-api";
 import { McpService } from "../mcp";
 import { setupMcpAuth } from "../mcp/auth";
@@ -43,18 +44,21 @@ const ALLOWED: Record<string, string> = {
   "ai -> mcp/runs": "McpRunRegistry: live abort controllers and resolvers",
   "ai -> mcp/sampling": "pure request and result mappers",
   "ai -> memory": "Memory.searchFacts read; request timeout and error constants",
-  "ai -> messaging/chat-key": "pure functions",
+  "ai -> identity": "IdentityService.resolve, a cached read model",
   "ai -> scheduling/cron-automations": "preview dry runs",
   "automation -> ai/tools/automation-summary": "pure mapper",
   "commands -> ai/auth": "status reads",
   "commands -> authorization": "listAuthorizedChatIds, a cached read model",
+  "commands -> identity": "IdentityService.addressKey, a pure function",
   "commands -> mcp": "status read: lists a profile's prompts",
   "commands -> mcp/auth": "status read",
   "commands -> mcp/config": "profile config reads",
+  "authorization -> identity": "IdentityService.resolve, a cached read model",
   "conversation -> ai/instructions/compaction.xml": "prompt text",
   "conversation -> ai/llm": "driver helper",
   "discord -> messaging": "registerTransport: boot wiring of the driver, no stored state",
   "discord -> messaging/chat-key": "pure functions",
+  "identity -> messaging/chat-key": "pure functions",
   "events -> automation/runner": "enums the catalog payloads use",
   "internal-api -> ai/llm": "driver",
   "internal-api -> ai/model-preferences": "pure helpers",
@@ -66,11 +70,15 @@ const ALLOWED: Record<string, string> = {
   "memory -> ai/llm": "driver",
   "memory -> conversation": "ConversationStore.findChatIds read",
   "memory -> embedding": "driver",
+  "memory -> identity": "IdentityService.resolve, a cached read model",
   "message-handler -> ai/agent-harness": "runMain and compactConversation, the stateless engine",
   "message-handler -> conversation": "the same component: Conversation's handler and its store",
+  "message-handler -> identity": "IdentityService.resolve, a cached read model",
   "message-handler -> messaging":
     "fetchAttachment and deleteAttachment: driver calls, no stored state",
+  "messaging -> identity": "IdentityService.resolve, a cached read model",
   "notices -> authorization": "listAuthorizedChatIds, a cached read model",
+  "notices -> identity": "listNoticeRecipients, a cached read model",
   "scheduling -> ai/agent-harness": "runScheduledTask, the stateless engine",
   "scheduling -> ai/instructions/base-system.xml": "prompt text",
   "scheduling -> ai/instructions/platform": "pure prompt helper",
@@ -78,9 +86,10 @@ const ALLOWED: Record<string, string> = {
   "scheduling -> ai/llm": "driver",
   "scheduling -> automation": "getByIds read; failure limit constant",
   "scheduling -> automation/runner": "run-mode and outcome enums, timeout constant",
-  "scheduling -> messaging/chat-key": "pure functions",
+  "scheduling -> identity": "IdentityService.resolve, a cached read model",
   "settings -> ai/model-preferences": "pure helpers",
   "signal -> messaging": "registerTransport: boot wiring of the driver, no stored state",
+  "signal -> identity": "IdentityService.resolve, a cached read model",
   "signal -> messaging/chat-key": "pure functions",
 };
 
@@ -250,6 +259,7 @@ describe("boundaries", () => {
       setupMcpAuth();
       McpService.instance.setup();
       setupInternalApi();
+      await IdentityService.instance.setup();
       await AuthorizationService.instance.setup();
       await CalendarService.instance.setup();
     });
@@ -280,6 +290,7 @@ describe("boundaries", () => {
         "setupMcpAuth",
         "McpService.setup",
         "setupInternalApi",
+        "IdentityService.setup",
         "AuthorizationService.setup",
         "CalendarService.setup",
       ]);

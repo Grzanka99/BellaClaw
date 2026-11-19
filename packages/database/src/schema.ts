@@ -220,6 +220,22 @@ export const messageAuthorizationsTable = sqliteTable(
   ],
 );
 
+// an address (channel and address) linked to an account; the account id is opaque
+export const identityLinksTable = sqliteTable(
+  "identity_links",
+  {
+    channel: text("channel").notNull(),
+    address: text("address").notNull(),
+    accountId: text("accountId").notNull(),
+    state: text("state").notNull(),
+    linkedAt: integer("linkedAt", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.channel, table.address] }),
+    check("identity_links_state_check", sql`${table.state} in ('migrating', 'active')`),
+  ],
+);
+
 export const eventsTable = sqliteTable(
   "events",
   {

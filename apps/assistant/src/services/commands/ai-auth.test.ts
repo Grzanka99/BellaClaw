@@ -194,3 +194,44 @@ test("refuses chats that are not activated", async () => {
   expect(await rowsOf(EEventType.AiAuthLoginRequested)).toEqual([]);
   expect(await rowsOf(EEventType.AiAuthLogoutRequested)).toEqual([]);
 });
+
+test("a linked address logs in for its account, checked by the address's activation", async () => {
+  await bus.publish({
+    type: EEventType.MessageAuthorized,
+    source: "test",
+    key: "bella:acct-1",
+    trace: { turnId: "test:ai-auth", chatId: "discord:1", platform: EMessagePlatform.Discord },
+    payload: {
+      conversationKey: "bella:acct-1",
+      ownerKey: "account:acct-1",
+      channel: EMessagePlatform.Discord,
+      replyAddress: "1",
+      content: "!ai-auth login openai-codex",
+      attachments: [],
+      receivedAt: Date.now(),
+    },
+    causationId: undefined,
+    dedupeKey: undefined,
+  });
+  await bus.idle();
+
+  expect((await rowsOf(EEventType.ReplyReady)).map((row) => row.payload)).toEqual([
+    expect.objectContaining({
+      conversationKey: "bella:acct-1",
+      text: "Open https://example.test/device and enter code ABCD-EFGH to connect openai-codex.",
+    }),
+  ]);
+
+  approve();
+  const event = await completed;
+  await bus.idle();
+
+  expect(event.payload).toEqual({
+    chatId: "account:acct-1",
+    providerId: "openai-codex",
+    selected: true,
+  });
+  expect((await SettingsService.instance.getAll("account:acct-1"))[EConfigKey.AiProvider]).toBe(
+    EAiProvider.OpenaiCodex,
+  );
+});

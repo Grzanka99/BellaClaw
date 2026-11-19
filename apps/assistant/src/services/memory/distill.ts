@@ -8,6 +8,7 @@ import { EModelPurpose, ERole } from "../ai/types";
 import { ConversationStore } from "../conversation";
 import { EmbeddingClient } from "../embedding";
 import { commandFailed, ESubscriptionMode, EventBus, type TEventContext } from "../events";
+import { IdentityService } from "../identity";
 import { SettingsService } from "../settings";
 import type { TConfigRecord } from "../settings/schema";
 import { Memory } from ".";
@@ -126,14 +127,19 @@ export class FactDistiller {
   // very first recall after a deploy answers from an unpopulated store. Catching up is best-effort
   // and must never fail boot — messaging works fine against a partially distilled store.
   // NOTE: one refresh command per chat puts each catch-up drain on that chat's memory lane; no one
-  // waits for their outcome. A stored transcript's owner key is its conversation key
+  // waits for their outcome. Identity names the owner of each stored transcript
   public async scheduleFactDrainForAllChats(ctx: TEventContext): Promise<void> {
     try {
       const chatIds = await this.conversations.findChatIds();
+      const owners = new Map<string, string>();
+
+      for (const chatId of chatIds) {
+        owners.set(chatId, (await IdentityService.instance.resolve(chatId))?.ownerKey ?? chatId);
+      }
 
       await ctx.transact(async (_tx, emit) => {
-        for (const chatId of chatIds) {
-          emit(EEventType.MemoryFactsRefreshRequested, { ownerKey: chatId }, chatId, chatId);
+        for (const [chatId, ownerKey] of owners) {
+          emit(EEventType.MemoryFactsRefreshRequested, { ownerKey }, chatId, chatId);
         }
       });
     } catch (error) {
