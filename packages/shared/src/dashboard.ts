@@ -174,6 +174,21 @@ export const SDashboardError = z.object({ error: z.string(), code: z.string().op
 
 export type TDashboardError = z.infer<typeof SDashboardError>;
 
+// POST /internal/activation-code/check body: a code a person typed to register
+export const SDashboardActivationCheckRequest = z.object({ code: z.string() }).strict();
+
+export type TDashboardActivationCheckRequest = z.infer<typeof SDashboardActivationCheckRequest>;
+
+// POST /internal/activation-code/check response. unset: no activation code is configured, so no
+// code is right
+export const SDashboardActivationCheck = z.object({
+  result: z.enum(["valid", "invalid", "unset"]),
+});
+
+export type TDashboardActivationCheck = z.infer<typeof SDashboardActivationCheck>;
+
+export const DASHBOARD_ACTIVATION_CHECK_PATH = "/internal/activation-code/check";
+
 export const DASHBOARD_LINKS_PATH = "/internal/links";
 
 export function dashboardChatLinkPath(chatKey: string): string {

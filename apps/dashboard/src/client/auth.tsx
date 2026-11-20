@@ -202,3 +202,51 @@ export function LinkLoginCard({ token, username, onAuthenticated }: TLinkLoginCa
     </section>
   );
 }
+
+type TAppLinkCardProps = {
+  // a link of the chat that sent !app
+  token: string;
+};
+
+// the Android app's package
+const APP_PACKAGE = "one.scary.bellaclaw";
+
+// NOTE: the page of !app. The app's deep link carries the server URL and the link. "Open in app"
+// is an Android intent link that names the app's package, so no other app that claims the scheme
+// receives the link. The code to copy is the plain deep link, for a phone where the button does
+// not open the app.
+export function AppLinkCard({ token }: TAppLinkCardProps) {
+  const [copied, setCopied] = useState(false);
+  const query = `server=${encodeURIComponent(location.origin)}&token=${encodeURIComponent(token)}`;
+  const code = `bellaclaw://login?${query}`;
+  const openLink = `intent://login?${query}#Intent;scheme=bellaclaw;package=${APP_PACKAGE};end`;
+
+  async function copy() {
+    await navigator.clipboard.writeText(code);
+    setCopied(true);
+  }
+
+  let copyLabel = "Copy code";
+
+  if (copied) {
+    copyLabel = "Copied";
+  }
+
+  return (
+    <section class="card">
+      <h1>BellaClaw app</h1>
+      <p class="muted">Sign in to the app with this chat. The link works once, for 10 minutes.</p>
+      <a class="button" href={openLink}>
+        Open in app
+      </a>
+      <p class="muted">Or copy this code and paste it on the app's sign-in screen.</p>
+      <label class="field">
+        <span>Code</span>
+        <input value={code} readonly />
+      </label>
+      <button class="button outline" type="button" onClick={copy}>
+        {copyLabel}
+      </button>
+    </section>
+  );
+}

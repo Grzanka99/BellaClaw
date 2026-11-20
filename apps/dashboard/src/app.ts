@@ -13,9 +13,15 @@ import { createMiddleware } from "hono/factory";
 import type { CookieOptions } from "hono/utils/cookie";
 import { z } from "zod";
 import { ACCOUNT_HEADER } from "./account-header";
-import { type AccountStore, SESSION_TTL_MS, type TAccount } from "./account-store";
+import {
+  type AccountStore,
+  SESSION_TTL_MS,
+  type TAccount,
+  type TSessionKind,
+} from "./account-store";
 import type {
   TApiError,
+  TAppSessionResponse,
   TLinkCheckResponse,
   TLinkConfirmRequest,
   TLinkLoginRequest,
@@ -31,6 +37,8 @@ import { buildFactGraph } from "./fact-graph";
 import type { TInternalApi, TInternalApiResult } from "./internal-api";
 
 export const SESSION_COOKIE = "bellaclaw_dashboard_session";
+// "app" on a request that starts a session asks for a bearer token instead of the cookie
+export const CLIENT_HEADER = "X-BellaClaw-Client";
 
 const SESSION_COOKIE_OPTIONS: CookieOptions = {
   httpOnly: true,
@@ -42,6 +50,10 @@ const SESSION_COOKIE_OPTIONS: CookieOptions = {
 const MESSAGES_PAGE_SIZE = 50;
 const MAX_LOGIN_FAILURES = 5;
 const LOGIN_LOCK_MS = 15 * 60 * 1000;
+// wrong activation codes, counted for every registration together: an anonymous registration has
+// nothing else to count by
+const MAX_ACTIVATION_FAILURES = 5;
+const ACTIVATION_LOCK_MS = 15 * 60 * 1000;
 const INVALID_LINK = "The link is invalid, expired or already used";
 const LINKED_ELSEWHERE = "This chat is linked to another account";
 const WRONG_CREDENTIALS = "Wrong username or password";
@@ -53,13 +65,22 @@ const SNewPassword = z
   .string()
   .min(10, "Password must be at least 10 characters")
   .max(256, "Password must be at most 256 characters");
-const SRegisterBody: z.ZodType<TRegisterRequest> = z.object({
-  token: z.string(),
-  username: z
-    .string()
-    .regex(/^[A-Za-z0-9_.-]{3,32}$/, "Username must be 3 to 32 characters: letters, digits, _ . -"),
-  password: SNewPassword,
-});
+const SRegisterBody: z.ZodType<TRegisterRequest> = z
+  .object({
+    token: z.string().optional(),
+    activationCode: z.string().optional(),
+    username: z
+      .string()
+      .regex(
+        /^[A-Za-z0-9_.-]{3,32}$/,
+        "Username must be 3 to 32 characters: letters, digits, _ . -",
+      ),
+    password: SNewPassword,
+  })
+  .refine(
+    (body) => (body.token === undefined) !== (body.activationCode === undefined),
+    "Send either a link token or an activation code",
+  );
 const SLinkLoginBody: z.ZodType<TLinkLoginRequest> = z.object({
   token: z.string(),
   password: SNewPassword.optional(),
@@ -109,6 +130,18 @@ function invalidBody(error: z.ZodError): TApiError {
   return { error: error.issues[0]?.message ?? "Invalid request" };
 }
 
+// the token of an Authorization header of the Bearer scheme
+function bearerToken(c: Context): TOption<string> {
+  return /^Bearer (\S+)$/i.exec(c.req.header("Authorization") ?? "")?.[1];
+}
+
+// NOTE: a request of the app carries a bearer token or the client header, and never uses the
+// cookie. A browser sends neither header across sites without a preflight, which the dashboard
+// does not answer, so app requests are exempt from the Origin rule.
+function isAppRequest(c: Context): boolean {
+  return bearerToken(c) !== undefined || c.req.header(CLIENT_HEADER) === "app";
+}
+
 export function createApp({
   config,
   store,
@@ -121,6 +154,9 @@ export function createApp({
   const dummyPasswordHash = Bun.password.hash(randomBytes(16).toString("hex"));
   // login attempts since the last success, by lowercase username
   const loginAttempts = new Map<string, { count: number; lastAt: number }>();
+  // registrations with a wrong activation code, counted until ACTIVATION_LOCK_MS pass with no
+  // attempt
+  const activationFailures = { count: 0, lastAt: 0 };
 
   // now: epoch ms. Consumes nothing.
   function findUnusedLink(token: string, now: number): TOption<TDashboardLinkToken> {
@@ -134,7 +170,8 @@ export function createApp({
   }
 
   // NOTE: the account is read first, so a failed read starts no session. verifiedHash: the password
-  // hash a login verified; when the stored hash is another one by then, the login is refused.
+  // hash a login verified; when the stored hash is another one by then, the login is refused. An
+  // app request gets a bearer token in the answer, the web client the cookie.
   async function startSession(
     c: Context,
     account: TAccount,
@@ -152,6 +189,14 @@ export function createApp({
       store.findCredentials(account.username)?.passwordHash !== verifiedHash
     ) {
       return c.json<TApiError>({ error: WRONG_CREDENTIALS }, 401);
+    }
+
+    if (isAppRequest(c)) {
+      return c.json<TAppSessionResponse>({
+        username: account.username,
+        chats: result.data.links,
+        token: store.createAppSession(account.id, Date.now()),
+      });
     }
 
     setCookie(
@@ -204,7 +249,26 @@ export function createApp({
     return c.json<TApiError>({ error: result.error }, result.status);
   }
 
+  // NOTE: an app request is served by its bearer token alone, and names no account: the account
+  // header guards pages of the browser, which share one cookie
   const requireSession = createMiddleware<TEnv>(async (c, next) => {
+    if (isAppRequest(c)) {
+      const bearer = bearerToken(c);
+      let appAccount: TOption<TAccount>;
+
+      if (bearer !== undefined) {
+        appAccount = store.findAppSession(bearer);
+      }
+
+      if (appAccount === undefined) {
+        return c.json<TApiError>({ error: "Unauthorized" }, 401);
+      }
+
+      c.set("account", appAccount);
+      await next();
+      return;
+    }
+
     const token = getCookie(c, SESSION_COOKIE);
     let account: TOption<TAccount>;
 
@@ -240,7 +304,7 @@ export function createApp({
   app.use(async (c, next) => {
     const reads = c.req.method === "GET" || c.req.method === "HEAD";
 
-    if (!reads && c.req.header("Origin") !== config.publicOrigin) {
+    if (!reads && !isAppRequest(c) && c.req.header("Origin") !== config.publicOrigin) {
       return c.json<TApiError>({ error: "Forbidden" }, 403);
     }
 
@@ -325,10 +389,24 @@ export function createApp({
       passwordHash = await Bun.password.hash(body.data.password);
     }
 
-    const session = store.redeemLoginLink(account.id, link, passwordHash, Date.now());
+    let kind: TSessionKind = "cookie";
+
+    if (isAppRequest(c)) {
+      kind = "bearer";
+    }
+
+    const session = store.redeemLoginLink(account.id, link, passwordHash, kind, Date.now());
 
     if (session === undefined) {
       return c.json<TApiError>({ error: INVALID_LINK }, 400);
+    }
+
+    if (kind === "bearer") {
+      return c.json<TAppSessionResponse>({
+        username: account.username,
+        chats: described.data.links,
+        token: session,
+      });
     }
 
     setCookie(c, SESSION_COOKIE, session, SESSION_COOKIE_OPTIONS);
@@ -336,9 +414,10 @@ export function createApp({
     return c.json<TMeResponse>({ username: account.username, chats: described.data.links });
   });
 
-  // NOTE: the account and the use of its link commit first and the link request follows, so a link
-  // never names an account that does not exist. A failed request leaves the account, which logs in
-  // with its password.
+  // NOTE: a registration proves itself with a link of an unlinked chat, or with the activation
+  // code, which only the assistant knows; an account of a code has no chat. The account and the
+  // use of its link commit first and the link request follows, so a link never names an account
+  // that does not exist. A failed request leaves the account, which logs in with its password.
   app.post("/api/register", async (c) => {
     const body = await parseBody(c.req.raw, SRegisterBody);
 
@@ -346,21 +425,63 @@ export function createApp({
       return c.json(invalidBody(body.error), 400);
     }
 
-    // nothing is hashed or created without a usable link of an unlinked chat
-    const link = findUnusedLink(body.data.token, Date.now());
+    const { token, activationCode } = body.data;
+    let link: TOption<TDashboardLinkToken>;
 
-    if (link === undefined) {
-      return c.json<TApiError>({ error: INVALID_LINK }, 400);
-    }
+    // nothing is hashed or created without a right code or a usable link of an unlinked chat
+    if (activationCode !== undefined) {
+      const now = Date.now();
 
-    const linked = await findLinkedAccountId(link.chatId);
+      if (now - activationFailures.lastAt >= ACTIVATION_LOCK_MS) {
+        activationFailures.count = 0;
+      }
 
-    if ("error" in linked) {
-      return c.json<TApiError>({ error: linked.error }, linked.status);
-    }
+      if (activationFailures.count >= MAX_ACTIVATION_FAILURES) {
+        return c.json<TApiError>(
+          { error: "Too many wrong activation codes. Try again in 15 minutes" },
+          429,
+        );
+      }
 
-    if (linked.data !== undefined) {
-      return c.json<TApiError>({ error: LINKED_ELSEWHERE }, 409);
+      // NOTE: counted before the check, so parallel guesses cannot outrun the limit
+      activationFailures.count += 1;
+      activationFailures.lastAt = now;
+      const check = await internalApi.checkActivationCode(activationCode);
+
+      // only a wrong code stays counted
+      if ("error" in check || check.data.result !== "invalid") {
+        activationFailures.count -= 1;
+      }
+
+      if ("error" in check) {
+        return c.json<TApiError>({ error: check.error }, check.status);
+      }
+
+      if (check.data.result === "unset") {
+        return c.json<TApiError>({ error: "Registration with an activation code is closed" }, 403);
+      }
+
+      if (check.data.result === "invalid") {
+        return c.json<TApiError>({ error: "Wrong activation code" }, 400);
+      }
+    } else {
+      if (token !== undefined) {
+        link = findUnusedLink(token, Date.now());
+      }
+
+      if (link === undefined) {
+        return c.json<TApiError>({ error: INVALID_LINK }, 400);
+      }
+
+      const linked = await findLinkedAccountId(link.chatId);
+
+      if ("error" in linked) {
+        return c.json<TApiError>({ error: linked.error }, linked.status);
+      }
+
+      if (linked.data !== undefined) {
+        return c.json<TApiError>({ error: LINKED_ELSEWHERE }, 409);
+      }
     }
 
     const registration = store.createAccount(
@@ -378,10 +499,12 @@ export function createApp({
       return c.json<TApiError>({ error: INVALID_LINK }, 400);
     }
 
-    const requested = await internalApi.requestLink(registration.account.publicId, link.chatId);
+    if (link !== undefined) {
+      const requested = await internalApi.requestLink(registration.account.publicId, link.chatId);
 
-    if ("error" in requested) {
-      return linkFailed(c, requested);
+      if ("error" in requested) {
+        return linkFailed(c, requested);
+      }
     }
 
     return startSession(c, registration.account, undefined);
@@ -513,6 +636,16 @@ export function createApp({
   });
 
   app.post("/api/logout", (c) => {
+    if (isAppRequest(c)) {
+      const bearer = bearerToken(c);
+
+      if (bearer !== undefined) {
+        store.deleteAppSession(bearer);
+      }
+
+      return c.json<TLogoutResponse>({ ok: true });
+    }
+
     const token = getCookie(c, SESSION_COOKIE);
 
     if (token !== undefined) {

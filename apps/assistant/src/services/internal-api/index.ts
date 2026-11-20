@@ -2,14 +2,17 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { createSystemTurnId, type TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
 import { EEventType } from "@bellaclaw/database";
 import {
+  DASHBOARD_ACTIVATION_CHECK_PATH,
   DASHBOARD_LINKS_PATH,
   dashboardAccountMessagePath,
   dashboardAccountModelPath,
   dashboardAccountPath,
   dashboardChatLinkPath,
+  SDashboardActivationCheckRequest,
   SDashboardLinkRequest,
   SDashboardModelUpdate,
   type TDashboardAccount,
+  type TDashboardActivationCheck,
   type TDashboardChatLink,
   type TDashboardError,
   type TDashboardLinkStarted,
@@ -34,6 +37,7 @@ import {
 } from "../ai/tools/update-settings/ai-settings";
 import { EAiProvider, EModelPurpose, SAiProvider } from "../ai/types";
 import { sanitizeErrorMessage } from "../app-logger/sanitizers";
+import { AuthorizationService } from "../authorization";
 import { CommandRejectedError, ESubscriptionMode, EventBus } from "../events";
 import type { TEventPayloads } from "../events/catalog";
 import { IdentityService, type TAccountKeys } from "../identity";
@@ -250,7 +254,8 @@ export async function handleInternalApiRequest(
   }
 
   const { pathname } = new URL(request.url);
-  // ["", "internal", "links"], ["", "internal", "links", chatKey],
+  // ["", "internal", "activation-code", "check"], ["", "internal", "links"],
+  // ["", "internal", "links", chatKey],
   // ["", "internal", "accounts", accountId], ["", "internal", "accounts", accountId, "model"] or
   // ["", "internal", "accounts", accountId, "messages", messageId]
   const segments = pathname.split("/");
@@ -263,6 +268,7 @@ export async function handleInternalApiRequest(
     // a malformed escape is an unknown route
   }
 
+  const activationRoute = request.method === "POST" && pathname === DASHBOARD_ACTIVATION_CHECK_PATH;
   const linkRequestRoute = request.method === "POST" && pathname === DASHBOARD_LINKS_PATH;
   const chatLinkRoute =
     request.method === "GET" && key.length > 0 && pathname === dashboardChatLinkPath(key);
@@ -278,11 +284,38 @@ export async function handleInternalApiRequest(
     Number.isSafeInteger(messageId) &&
     pathname === dashboardAccountMessagePath(key, messageId);
 
-  if (!linkRequestRoute && !chatLinkRoute && !accountRoute && !modelRoute && !messageDeleteRoute) {
+  if (
+    !activationRoute &&
+    !linkRequestRoute &&
+    !chatLinkRoute &&
+    !accountRoute &&
+    !modelRoute &&
+    !messageDeleteRoute
+  ) {
     return errorResponse("Not found", 404, undefined);
   }
 
   try {
+    // a read: checking a code changes nothing, so no command is published
+    if (activationRoute) {
+      const check = SDashboardActivationCheckRequest.safeParse(await request.json());
+
+      if (!check.success) {
+        throw new Error("Invalid activation code check");
+      }
+
+      const matches = AuthorizationService.instance.matchesActivationToken(check.data.code);
+      const body: TDashboardActivationCheck = { result: "unset" };
+
+      if (matches === true) {
+        body.result = "valid";
+      } else if (matches === false) {
+        body.result = "invalid";
+      }
+
+      return Response.json(body);
+    }
+
     if (linkRequestRoute) {
       return Response.json(await requestLink(await request.json()));
     }

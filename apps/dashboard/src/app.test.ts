@@ -1,12 +1,12 @@
 import { Database } from "bun:sqlite";
-import { expect, test } from "bun:test";
+import { expect, setSystemTime, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createDashboardLinkToken } from "@bellaclaw/shared";
 import { ACCOUNT_HEADER } from "./account-header";
 import { AccountStore } from "./account-store";
-import { createApp } from "./app";
+import { CLIENT_HEADER, createApp } from "./app";
 import { createFakeAssistant } from "./test-utils";
 
 const ORIGIN = "https://dashboard.test";
@@ -53,6 +53,26 @@ function createTestApp(path = ":memory:") {
     return app.request(path, { method, headers, body: JSON.stringify(body) });
   }
 
+  // a request of the app: no Origin and no cookie unless headers has one; the bearer token, or the
+  // client header that asks for one
+  function sendApp(
+    method: string,
+    path: string,
+    body?: unknown,
+    bearer?: string,
+    headers: Record<string, string> = {},
+  ) {
+    const appHeaders = new Headers(headers);
+
+    if (bearer !== undefined) {
+      appHeaders.set("Authorization", `Bearer ${bearer}`);
+    } else {
+      appHeaders.set(CLIENT_HEADER, "app");
+    }
+
+    return app.request(path, { method, headers: appHeaders, body: JSON.stringify(body) });
+  }
+
   function cookieOf(response: Response) {
     return response.headers.get("Set-Cookie")?.split(";")[0] ?? "";
   }
@@ -75,7 +95,7 @@ function createTestApp(path = ":memory:") {
     return { cookie: cookieOf(response), publicId: store.findCredentials(username)?.publicId };
   }
 
-  return { send, register, token, cookieOf, reads, assistant, store };
+  return { app, send, sendApp, register, token, cookieOf, reads, assistant, store };
 }
 
 test("registering sends a link request for the new account and uses the token once", async () => {
@@ -592,4 +612,250 @@ test("an account route naming another account than the session's is refused; one
 
   expect((await send("POST", "/api/logout", undefined, alice.cookie, "alice")).status).toBe(200);
   expect((await send("GET", "/api/me", undefined, alice.cookie)).status).toBe(401);
+});
+
+test("the app registers with the activation code and gets a bearer session for an account with no chat", async () => {
+  const { sendApp, assistant, store } = createTestApp();
+
+  const registered = await sendApp("POST", "/api/register", {
+    username: "alice",
+    password: PASSWORD,
+    activationCode: " open-sesame ",
+  });
+  expect(registered.status).toBe(200);
+  expect(registered.headers.get("Set-Cookie")).toBeNull();
+  const body = await registered.json();
+  expect(body).toEqual({ username: "alice", chats: [], token: expect.any(String) });
+  expect(assistant.requests).toEqual([]);
+
+  const me = await sendApp("GET", "/api/me", undefined, body.token);
+  expect(await me.json()).toEqual({ username: "alice", chats: [] });
+
+  // a token and a code together, or neither, is no registration
+  for (const proof of [{}, { token: "x", activationCode: "open-sesame" }]) {
+    const refused = await sendApp("POST", "/api/register", {
+      username: "bob",
+      password: PASSWORD,
+      ...proof,
+    });
+    expect(refused.status).toBe(400);
+  }
+
+  expect(store.findCredentials("bob")).toBeUndefined();
+});
+
+test("the app's registration is refused with a wrong code, after too many wrong codes, and with no code configured", async () => {
+  const { sendApp, assistant, store } = createTestApp();
+  const register = (username: string, activationCode: string) =>
+    sendApp("POST", "/api/register", { username, password: PASSWORD, activationCode });
+
+  try {
+    const wrong = await register("alice", "open-sesam");
+    expect(wrong.status).toBe(400);
+    expect(await wrong.json()).toEqual({ error: "Wrong activation code" });
+
+    // a right code in between counts no failure
+    expect((await register("bob", "open-sesame")).status).toBe(200);
+
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      expect((await register("alice", `guess-${attempt}`)).status).toBe(400);
+    }
+
+    // five wrong codes close registration by code for everyone, even with the right one, and the
+    // assistant is not asked
+    const checks = assistant.codeChecks.length;
+    const locked = await register("carol", "open-sesame");
+    expect(locked.status).toBe(429);
+    expect(assistant.codeChecks).toHaveLength(checks);
+    expect(store.findCredentials("carol")).toBeUndefined();
+
+    setSystemTime(new Date(Date.now() + 15 * 60 * 1000));
+    expect((await register("carol", "open-sesame")).status).toBe(200);
+
+    assistant.state.activationCode = undefined;
+    const closed = await register("dave", "open-sesame");
+    expect(closed.status).toBe(403);
+    expect(await closed.json()).toEqual({
+      error: "Registration with an activation code is closed",
+    });
+    expect(store.findCredentials("dave")).toBeUndefined();
+    expect(store.findCredentials("alice")).toBeUndefined();
+
+    // an attempt with no code configured counts no failure
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      expect((await register("dave", "open-sesame")).status).toBe(403);
+    }
+  } finally {
+    setSystemTime();
+  }
+});
+
+test("the app logs in by password and gets a bearer token, which stops working after logout", async () => {
+  const { send, sendApp, register } = createTestApp();
+  const alice = await register("alice", "signal:+100");
+
+  const wrongPassword = await sendApp("POST", "/api/login", {
+    username: "alice",
+    password: "not the password",
+  });
+  const unknownUser = await sendApp("POST", "/api/login", {
+    username: "nobody",
+    password: PASSWORD,
+  });
+  expect(wrongPassword.status).toBe(401);
+  expect(unknownUser.status).toBe(401);
+  expect(await wrongPassword.json()).toEqual(await unknownUser.json());
+
+  const loggedIn = await sendApp("POST", "/api/login", { username: "alice", password: PASSWORD });
+  expect(loggedIn.status).toBe(200);
+  expect(loggedIn.headers.get("Set-Cookie")).toBeNull();
+  const { token, ...me } = await loggedIn.json();
+  expect(me).toEqual({
+    username: "alice",
+    chats: [{ chatKey: "signal:+100", state: "active", linkedAt: 1_000 }],
+  });
+
+  expect((await sendApp("GET", "/api/me", undefined, token)).status).toBe(200);
+  expect(await (await sendApp("POST", "/api/logout", undefined, token)).json()).toEqual({
+    ok: true,
+  });
+  expect((await sendApp("GET", "/api/me", undefined, token)).status).toBe(401);
+  // the web session lives on
+  expect((await send("GET", "/api/me", undefined, alice.cookie)).status).toBe(200);
+});
+
+test("a link logs the app into the account of a linked chat, optionally with a new password that ends every other session", async () => {
+  const { send, sendApp, register, token, assistant } = createTestApp();
+  const alice = await register("alice", "signal:+100");
+  const before = (
+    await (await sendApp("POST", "/api/login", { username: "alice", password: PASSWORD })).json()
+  ).token;
+  const link = token("signal:+100");
+
+  expect(await (await sendApp("POST", "/api/link/check", { token: link })).json()).toEqual({
+    valid: true,
+    chatKey: "signal:+100",
+    username: "alice",
+  });
+
+  const plain = await sendApp("POST", "/api/link/login", { token: token("signal:+100") });
+  expect(plain.status).toBe(200);
+  expect(plain.headers.get("Set-Cookie")).toBeNull();
+  const plainToken = (await plain.json()).token;
+  expect((await sendApp("GET", "/api/me", undefined, before)).status).toBe(200);
+
+  const reset = await sendApp("POST", "/api/link/login", {
+    token: link,
+    password: "a brand new password",
+  });
+  expect(reset.status).toBe(200);
+  const { token: resetToken, username } = await reset.json();
+  expect(username).toBe("alice");
+  expect((await sendApp("POST", "/api/link/login", { token: link })).status).toBe(400);
+
+  expect((await sendApp("GET", "/api/me", undefined, resetToken)).status).toBe(200);
+  expect((await sendApp("GET", "/api/me", undefined, before)).status).toBe(401);
+  expect((await sendApp("GET", "/api/me", undefined, plainToken)).status).toBe(401);
+  expect((await send("GET", "/api/me", undefined, alice.cookie)).status).toBe(401);
+  expect(
+    (
+      await sendApp("POST", "/api/login", {
+        username: "alice",
+        password: "a brand new password",
+      })
+    ).status,
+  ).toBe(200);
+  expect(assistant.requests).toHaveLength(1);
+});
+
+test("a link of an unlinked chat registers the app's account with that chat, or links it to the signed-in account", async () => {
+  const { sendApp, token, assistant, store } = createTestApp();
+
+  const registered = await sendApp("POST", "/api/register", {
+    token: token("signal:+200"),
+    username: "bob",
+    password: PASSWORD,
+  });
+  expect(registered.status).toBe(200);
+  const bob = await registered.json();
+  expect(bob.chats).toEqual([{ chatKey: "signal:+200", state: "migrating", linkedAt: 1_000 }]);
+  const bobId = store.findCredentials("bob")?.publicId ?? "";
+
+  const linked = await sendApp("POST", "/api/link", { token: token("signal:+300") }, bob.token);
+  expect(linked.status).toBe(200);
+  expect((await linked.json()).chats.map((chat: { chatKey: string }) => chat.chatKey)).toEqual([
+    "signal:+200",
+    "signal:+300",
+  ]);
+
+  // a password login with a link links the chat too
+  const loggedIn = await sendApp("POST", "/api/login", {
+    username: "bob",
+    password: PASSWORD,
+    token: token("discord:400"),
+  });
+  expect(loggedIn.status).toBe(200);
+  expect(typeof (await loggedIn.json()).token).toBe("string");
+  expect(assistant.requests).toEqual([
+    { accountId: bobId, chatKey: "signal:+200" },
+    { accountId: bobId, chatKey: "signal:+300" },
+    { accountId: bobId, chatKey: "discord:400" },
+  ]);
+});
+
+test("every account route serves the bearer token without Origin, for its own account only", async () => {
+  const { app, send, sendApp, register, reads, assistant } = createTestApp();
+  const alice = await register("alice", "signal:+100");
+  const bob = await register("bob", "signal:+200");
+  const bearerOf = async (username: string) =>
+    (await (await sendApp("POST", "/api/login", { username, password: PASSWORD })).json()).token;
+  const aliceToken = await bearerOf("alice");
+  const bobToken = await bearerOf("bob");
+  const routes = [
+    ["GET", "/api/me"],
+    ["GET", "/api/messages"],
+    ["GET", "/api/facts"],
+    ["GET", "/api/model"],
+    ["PUT", "/api/model"],
+    ["DELETE", "/api/messages/1"],
+    ["POST", "/api/link"],
+  ] as const;
+
+  // an app request never uses the cookie, and a wrong token is no session
+  for (const [method, path] of routes) {
+    expect((await sendApp(method, path, {}, undefined, { Cookie: alice.cookie })).status).toBe(401);
+    expect((await sendApp(method, path, {}, "not-a-session")).status).toBe(401);
+    expect((await sendApp(method, path, {}, alice.cookie.split("=")[1])).status).toBe(401);
+  }
+
+  expect(reads).toEqual([]);
+  assistant.calls.length = 0;
+
+  for (const [method, path] of routes) {
+    // the account header guards browser pages only
+    const response = await sendApp(method, path, {}, aliceToken, { [ACCOUNT_HEADER]: "bob" });
+    expect(response.status).not.toBe(401);
+    expect(response.status).not.toBe(403);
+    expect(response.status).not.toBe(409);
+  }
+
+  expect(reads).toEqual([`bella:${alice.publicId}`, `account:${alice.publicId}`]);
+  expect(assistant.calls.every((call) => call.accountId === alice.publicId)).toBe(true);
+
+  reads.length = 0;
+  await sendApp("GET", "/api/messages", undefined, bobToken);
+  expect(reads).toEqual([`bella:${bob.publicId}`]);
+  expect(await (await sendApp("GET", "/api/me", undefined, bobToken)).json()).toEqual({
+    username: "bob",
+    chats: [{ chatKey: "signal:+200", state: "active", linkedAt: 1_000 }],
+  });
+
+  // a cookie request keeps the Origin rule
+  const noOrigin = await app.request("/api/model", {
+    method: "PUT",
+    headers: { Cookie: alice.cookie },
+    body: "{}",
+  });
+  expect(noOrigin.status).toBe(403);
+  expect((await send("PUT", "/api/model", {}, alice.cookie)).status).not.toBe(403);
 });

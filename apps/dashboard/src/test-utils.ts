@@ -2,16 +2,22 @@ import {
   ADDRESS_LINKED_ELSEWHERE,
   type TDashboardChatLink,
   type TDashboardLinkState,
+  type TOption,
 } from "@bellaclaw/shared";
 import type { TInternalApi } from "./internal-api";
 
 // An in-memory stand-in for the assistant's internal API, for tests. links: by chat key.
+// activationCode: the configured code, undefined for none; codeChecks: every code checked.
 // unreachableCalls: how many next requestLink, getChatLink or getAccount calls answer 502. Links are made active by activate().
 export function createFakeAssistant() {
   const links = new Map<string, { accountId: string; state: TDashboardLinkState }>();
   const requests: { accountId: string; chatKey: string }[] = [];
   const calls: { method: string; accountId: string }[] = [];
-  const state = { unreachableCalls: 0 };
+  const state: { unreachableCalls: number; activationCode: TOption<string> } = {
+    unreachableCalls: 0,
+    activationCode: "open-sesame",
+  };
+  const codeChecks: string[] = [];
   const unavailable = { error: "The assistant is unavailable", status: 502 as const };
 
   function reachable(): boolean {
@@ -24,6 +30,19 @@ export function createFakeAssistant() {
   }
 
   const internalApi: TInternalApi = {
+    checkActivationCode: async (code) => {
+      codeChecks.push(code);
+
+      if (state.activationCode === undefined) {
+        return { data: { result: "unset" } };
+      }
+
+      if (code.trim() === state.activationCode) {
+        return { data: { result: "valid" } };
+      }
+
+      return { data: { result: "invalid" } };
+    },
     requestLink: async (accountId, chatKey) => {
       if (!reachable()) {
         return unavailable;
@@ -98,6 +117,7 @@ export function createFakeAssistant() {
     links,
     requests,
     calls,
+    codeChecks,
     state,
     activate(chatKey: string) {
       const link = links.get(chatKey);

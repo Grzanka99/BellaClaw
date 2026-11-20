@@ -4,6 +4,7 @@ import { ADDRESS_LINKED_ELSEWHERE } from "@bellaclaw/shared";
 import { eq } from "drizzle-orm";
 import { LlmClient } from "../ai/llm";
 import { EAiProvider } from "../ai/types";
+import { AuthorizationService } from "../authorization";
 import { DatabaseConnector } from "../database";
 import { resetEventTables, resetIdentityLinksTable } from "../database/test-utils";
 import { ESubscriptionMode, EventBus } from "../events";
@@ -157,6 +158,47 @@ describe("internal API", () => {
         { chatKey: "signal:+200", state: "migrating", linkedAt: 2_000 },
       ],
     });
+  });
+
+  test("an account with no link answers its keys and no links", async () => {
+    await link("+100", "acct-1", EIdentityLinkState.Active, 1_000);
+    await start();
+
+    const response = await send("GET", "/internal/accounts/acct-2");
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      conversationKey: "bella:acct-2",
+      ownerKey: "account:acct-2",
+      links: [],
+    });
+  });
+
+  test("an activation code check answers valid, invalid, or unset with no code configured, and publishes nothing", async () => {
+    const original = Bun.env.BELLACLAW_ACTIVATION_TOKEN;
+    await start();
+
+    try {
+      Bun.env.BELLACLAW_ACTIVATION_TOKEN = "open-sesame";
+      Object.assign(AuthorizationService, { _instance: undefined });
+      const check = async (code: unknown) =>
+        (await send("POST", "/internal/activation-code/check", { code })).json();
+
+      expect(await check(" open-sesame ")).toEqual({ result: "valid" });
+      expect(await check("open-sesam")).toEqual({ result: "invalid" });
+      expect(await check("")).toEqual({ result: "invalid" });
+      expect((await send("POST", "/internal/activation-code/check", {})).status).toBe(400);
+
+      Bun.env.BELLACLAW_ACTIVATION_TOKEN = "  ";
+      Object.assign(AuthorizationService, { _instance: undefined });
+      expect(await check("open-sesame")).toEqual({ result: "unset" });
+      expect(await check("")).toEqual({ result: "unset" });
+
+      await EventBus.instance.idle();
+      expect(await DatabaseConnector.instance.database.select().from(eventsTable)).toEqual([]);
+    } finally {
+      Bun.env.BELLACLAW_ACTIVATION_TOKEN = original;
+      Object.assign(AuthorizationService, { _instance: undefined });
+    }
   });
 
   test("model settings are read and changed under the account's owner key, traced in its Bella conversation", async () => {

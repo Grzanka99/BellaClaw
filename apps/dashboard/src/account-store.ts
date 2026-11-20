@@ -10,6 +10,10 @@ export type TAccount = { id: number; publicId: string; username: string };
 // the new account, or why none was created
 export type TRegistration = { account: TAccount } | { failure: "usernameTaken" | "linkUsed" };
 
+// cookie: a session of the web client, which ends SESSION_TTL_MS after its last request; bearer: a
+// session of the app, which lasts until logout or a new password
+export type TSessionKind = "cookie" | "bearer";
+
 // a row of account_chats: its chat, and its account's row id and public id
 export type TImportRow = { chatId: string; accountId: number; publicId: string };
 
@@ -22,7 +26,7 @@ function createPublicId(): string {
   return randomBytes(16).toString("base64url");
 }
 
-// Accounts, sessions and used link tokens. Every `now` is epoch ms.
+// Accounts, sessions of both kinds and used link tokens. Every `now` is epoch ms.
 export class AccountStore {
   private db: Database;
 
@@ -41,6 +45,11 @@ export class AccountStore {
         tokenHash TEXT PRIMARY KEY,
         accountId INTEGER NOT NULL,
         expiresAt INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS app_sessions (
+        tokenHash TEXT PRIMARY KEY,
+        accountId INTEGER NOT NULL,
+        createdAt INTEGER NOT NULL
       );
       CREATE TABLE IF NOT EXISTS used_link_tokens (
         nonce TEXT PRIMARY KEY,
@@ -84,15 +93,16 @@ export class AccountStore {
     );
   }
 
-  // Creates the account and uses up its link in one transaction, so a failure consumes nothing.
+  // Creates the account and uses up its link, when it has one, in one transaction, so a failure
+  // consumes nothing. Without a link the account has no chat until one is linked.
   public createAccount(
     username: string,
     passwordHash: string,
-    link: TDashboardLinkToken,
+    link: TOption<TDashboardLinkToken>,
     now: number,
   ): TRegistration {
     return this.db.transaction((): TRegistration => {
-      if (link.expiresAt <= now || this.isLinkUsed(link.nonce)) {
+      if (link !== undefined && (link.expiresAt <= now || this.isLinkUsed(link.nonce))) {
         return { failure: "linkUsed" };
       }
 
@@ -108,7 +118,10 @@ export class AccountStore {
           )
           .run(username, passwordHash, now, publicId).lastInsertRowid,
       );
-      this.useLink(link, now);
+
+      if (link !== undefined) {
+        this.useLink(link, now);
+      }
 
       return { account: { id, publicId, username } };
     })();
@@ -124,12 +137,13 @@ export class AccountStore {
   }
 
   // Uses up the link, sets the password hash when one is given (ending the account's other
-  // sessions), and returns a new session token, all in one transaction. Undefined, with nothing changed, when the link was already used or has
-  // expired.
+  // sessions of both kinds), and returns a new session token of the kind, all in one transaction.
+  // Undefined, with nothing changed, when the link was already used or has expired.
   public redeemLoginLink(
     accountId: number,
     link: TDashboardLinkToken,
     passwordHash: TOption<string>,
+    kind: TSessionKind,
     now: number,
   ): TOption<string> {
     return this.db.transaction((): TOption<string> => {
@@ -142,6 +156,11 @@ export class AccountStore {
           .query("UPDATE accounts SET passwordHash = ? WHERE id = ?")
           .run(passwordHash, accountId);
         this.db.query("DELETE FROM sessions WHERE accountId = ?").run(accountId);
+        this.db.query("DELETE FROM app_sessions WHERE accountId = ?").run(accountId);
+      }
+
+      if (kind === "bearer") {
+        return this.createAppSession(accountId, now);
       }
 
       return this.createSession(accountId, now);
@@ -249,6 +268,34 @@ export class AccountStore {
 
   public deleteSession(token: string): void {
     this.db.query("DELETE FROM sessions WHERE tokenHash = ?").run(hashSessionToken(token));
+  }
+
+  // Returns the bearer token of a new app session, which has no expiry.
+  public createAppSession(accountId: number, now: number): string {
+    const token = randomBytes(32).toString("base64url");
+
+    this.db
+      .query("INSERT INTO app_sessions (tokenHash, accountId, createdAt) VALUES (?, ?, ?)")
+      .run(hashSessionToken(token), accountId, now);
+
+    return token;
+  }
+
+  // The account of an app session that has not been ended.
+  public findAppSession(token: string): TOption<TAccount> {
+    return (
+      this.db
+        .query<TAccount, [string]>(
+          `SELECT accounts.id, accounts.publicId, accounts.username FROM app_sessions
+           JOIN accounts ON accounts.id = app_sessions.accountId
+           WHERE app_sessions.tokenHash = ?`,
+        )
+        .get(hashSessionToken(token)) ?? undefined
+    );
+  }
+
+  public deleteAppSession(token: string): void {
+    this.db.query("DELETE FROM app_sessions WHERE tokenHash = ?").run(hashSessionToken(token));
   }
 
   private hasImportTable(): boolean {

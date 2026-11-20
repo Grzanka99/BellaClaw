@@ -63,6 +63,7 @@ const ALLOWED: Record<string, string> = {
   "identity -> messaging/chat-key": "pure functions",
   "events -> automation/runner": "enums the catalog payloads use",
   "internal-api -> ai/llm": "driver",
+  "internal-api -> authorization": "matchesActivationToken, a read of the configured code",
   "internal-api -> ai/model-preferences": "pure helpers",
   "internal-api -> ai/providers/registry": "driver: the model catalog",
   "internal-api -> ai/tools/get-settings": "resolveAiProvider, a pure helper",

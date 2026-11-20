@@ -1,17 +1,21 @@
 import {
   createLogger,
+  DASHBOARD_ACTIVATION_CHECK_PATH,
   DASHBOARD_LINKS_PATH,
   dashboardAccountMessagePath,
   dashboardAccountModelPath,
   dashboardAccountPath,
   dashboardChatLinkPath,
   SDashboardAccount,
+  SDashboardActivationCheck,
   SDashboardChatLink,
   SDashboardError,
   SDashboardLinkStarted,
   SDashboardMessageDeleted,
   SDashboardModelState,
   type TDashboardAccount,
+  type TDashboardActivationCheck,
+  type TDashboardActivationCheckRequest,
   type TDashboardChatLink,
   type TDashboardLinkRequest,
   type TDashboardLinkStarted,
@@ -37,6 +41,8 @@ export type TInternalApiResult<T> =
 
 // accountId: an account's public id; chatKey: an address, as a link token carries it
 export type TInternalApi = {
+  // code: what a person typed to register; the assistant holds the activation code
+  checkActivationCode(code: string): Promise<TInternalApiResult<TDashboardActivationCheck>>;
   requestLink(
     accountId: string,
     chatKey: string,
@@ -60,7 +66,7 @@ export function createInternalApi(baseUrl: string, secret: string): TInternalApi
     method: string,
     path: string,
     schema: z.ZodType<T>,
-    body: TOption<TDashboardModelUpdate | TDashboardLinkRequest>,
+    body: TOption<TDashboardModelUpdate | TDashboardLinkRequest | TDashboardActivationCheckRequest>,
   ): Promise<TInternalApiResult<T>> {
     let status: number;
     let payload: unknown;
@@ -102,6 +108,8 @@ export function createInternalApi(baseUrl: string, secret: string): TInternalApi
   }
 
   return {
+    checkActivationCode: (code) =>
+      call("POST", DASHBOARD_ACTIVATION_CHECK_PATH, SDashboardActivationCheck, { code }),
     requestLink: (accountId, chatKey) =>
       call("POST", DASHBOARD_LINKS_PATH, SDashboardLinkStarted, { accountId, chatKey }),
     getChatLink: (chatKey) =>

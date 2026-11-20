@@ -94,7 +94,7 @@ bun run embeddings:rebuild
 | `SIGNAL_ENABLED` | `false` | Enables Signal when set to `true`. |
 | `SIGNAL_PHONE_NUMBER` | — | Signal account phone number. Required when Signal is enabled. |
 | `SIGNAL_CLI_RPC_URL` | — | `signal-cli-rest-api` URL. Required when Signal is enabled. |
-| `BELLACLAW_ACTIVATION_TOKEN` | — | Shared activation token. Blank disables the gate. |
+| `BELLACLAW_ACTIVATION_TOKEN` | — | Shared activation token. Blank disables the gate and closes registration by code in the app. |
 | `BELLACLAW_AUTO_UPDATE` | `false` | `true` checks `main` daily and updates the Compose deployment. See [Deployment](deployment.md#self-update). |
 
 See [Messaging](messaging.md) for setup steps.
@@ -128,7 +128,7 @@ See [Behavior Logs](behavior-logs.md).
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `BELLACLAW_DASHBOARD_PUBLIC_URL` | — | Public HTTPS origin of the dashboard. Builds the `!dashboard` link and is checked against `Origin`. |
+| `BELLACLAW_DASHBOARD_PUBLIC_URL` | — | Public HTTPS origin of the dashboard. Builds the `!dashboard` and `!app` links and is checked against the browser's `Origin`. |
 | `BELLACLAW_DASHBOARD_SECRET` | — | Shared secret. Signs link tokens and authenticates the dashboard to the assistant's internal listener. |
 | `BELLACLAW_DASHBOARD_HOSTNAME` | `127.0.0.1` | Dashboard bind address. Compose sets `0.0.0.0` inside the container. |
 | `BELLACLAW_DASHBOARD_PORT` | `8988` | Dashboard listen port. |

@@ -5,7 +5,7 @@ import type { TEvent } from "../events/catalog";
 import { IdentityService } from "../identity";
 import { aiAuthCommand } from "./ai-auth";
 import { calendarAddReadCommand, calendarAddWriteCommand } from "./calendar-add";
-import { dashboardCommand } from "./dashboard";
+import { appCommand, dashboardCommand } from "./dashboard";
 import { mcpAuthCommand } from "./mcp-auth";
 import { mcpPromptCommand, mcpPromptsCommand } from "./mcp-prompts";
 import { COMMAND_PREFIX, type TCommand, type TCommandResult } from "./types";
@@ -20,6 +20,7 @@ const REGISTERED_COMMANDS: TCommand[] = [
   aiAuthCommand,
   updateCommand,
   dashboardCommand,
+  appCommand,
 ];
 
 export function formatCommandList(): string {

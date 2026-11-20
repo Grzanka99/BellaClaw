@@ -28,11 +28,11 @@ test("every path that uses a token refuses an expired one", () => {
   }
 
   expect(
-    store.redeemLoginLink(registration.account.id, { ...LINK, nonce: "c" }, "new", 1_000),
+    store.redeemLoginLink(registration.account.id, { ...LINK, nonce: "c" }, "new", "cookie", 1_000),
   ).toBeUndefined();
   expect(store.findCredentials("bob")?.passwordHash).toBe("x");
   expect(
-    store.redeemLoginLink(registration.account.id, { ...LINK, nonce: "c" }, "new", 999),
+    store.redeemLoginLink(registration.account.id, { ...LINK, nonce: "c" }, "new", "cookie", 999),
   ).toBeString();
   expect(store.findCredentials("bob")?.passwordHash).toBe("new");
 });

@@ -1,3 +1,4 @@
+import { createHash, timingSafeEqual } from "node:crypto";
 import { AppLogger, EBehaviorLogLevel, type TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
 import { EEventType, messageAuthorizationsTable } from "@bellaclaw/database";
 import type { TOption } from "@bellaclaw/shared";
@@ -78,6 +79,18 @@ export class AuthorizationService {
     return [...this.cache.values()]
       .filter((state) => state.status === EAuthorizationStatus.Authorized)
       .map((state) => state.chatId);
+  }
+
+  // Whether the code, trimmed as a chat message is, is the activation token; undefined when none is
+  // configured. Digests have one length, so the comparison is constant-time for any code.
+  public matchesActivationToken(code: string): TOption<boolean> {
+    if (this.activationToken === undefined) {
+      return undefined;
+    }
+
+    const digest = (value: string) => createHash("sha256").update(value).digest();
+
+    return timingSafeEqual(digest(code.trim()), digest(this.activationToken));
   }
 
   // NOTE: a chat that is not authorized in the cache is read from the handle, so the decision

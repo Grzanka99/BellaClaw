@@ -126,7 +126,8 @@ A call across services is allowed only when it changes no state:
 
 - Infrastructure: `DatabaseConnector`, `EventBus`, `AppLogger`, `startSpan`.
 - Cached read models: `SettingsService.getAll` (fed by `settings.changed`),
-  `AuthorizationService.listAuthorizedChatIds` (fed by `authorization.changed`),
+  `AuthorizationService.listAuthorizedChatIds` (fed by `authorization.changed`) and
+  `matchesActivationToken` (the configured code, for the dashboard's registration),
   `IdentityService.resolve`, `linkedAccount`, `link`, `account`, `waitWhileLinking` and
   `listNoticeRecipients`
   (loaded from `identity_links`, fed by `identity.link.started` and `identity.linked`).

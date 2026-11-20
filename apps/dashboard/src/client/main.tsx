@@ -3,13 +3,15 @@ import type { TOption } from "@bellaclaw/shared";
 import { render, useEffect, useState } from "hono/jsx/dom";
 import type { TLinkCheckResponse, TMeResponse } from "../api-types";
 import { api, showAccount } from "./api";
-import { AuthCard, LinkLoginCard } from "./auth";
+import { AppLinkCard, AuthCard, LinkLoginCard } from "./auth";
 import { Dashboard } from "./dashboard";
 
 type TView =
   | { name: "loading" }
   | { name: "failed"; message: string }
   | { name: "invalidLink" }
+  // token: the link of the !app page, which the app redeems
+  | { name: "appLink"; token: string }
   // token: the link that the registration or login redeems
   | { name: "auth"; token: TOption<string> }
   // token: a link of a chat linked to the account of username, which logs into it
@@ -33,7 +35,7 @@ function App() {
     let token: TOption<string>;
     let chatKey = "";
 
-    if (location.pathname === "/link") {
+    if (location.pathname === "/link" || location.pathname === "/app") {
       token = new URLSearchParams(location.search).get("token") ?? "";
       const check = await api<TLinkCheckResponse>("POST", "/api/link/check", { token });
 
@@ -44,6 +46,11 @@ function App() {
 
       if (!check.data.valid) {
         setView({ name: "invalidLink" });
+        return;
+      }
+
+      if (location.pathname === "/app") {
+        setView({ name: "appLink", token });
         return;
       }
 
@@ -160,11 +167,18 @@ function App() {
       </p>
     );
   } else if (view.name === "invalidLink") {
+    // the command that issues a link of the page's kind
+    let command = "!dashboard";
+
+    if (location.pathname === "/app") {
+      command = "!app";
+    }
+
     card = (
       <section class="card">
         <h1>This link no longer works</h1>
         <p class="muted">
-          It has expired or was already used. Send <code>!dashboard</code> to the bot to get a new
+          It has expired or was already used. Send <code>{command}</code> to the bot to get a new
           one.
         </p>
         <a class="button outline" href="/">
@@ -172,6 +186,8 @@ function App() {
         </a>
       </section>
     );
+  } else if (view.name === "appLink") {
+    card = <AppLinkCard token={view.token} />;
   } else if (view.name === "auth") {
     card = <AuthCard token={view.token} onAuthenticated={showMain} />;
   } else if (view.name === "linkLogin") {

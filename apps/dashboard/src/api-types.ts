@@ -28,8 +28,13 @@ export type TLinkCheckResponse =
 // POST /api/link/login body: a link of a linked chat, and an optional new password
 export type TLinkLoginRequest = { token: string; password?: string };
 
-// POST /api/register body
-export type TRegisterRequest = { token: string; username: string; password: string };
+// POST /api/register body: either a link of an unlinked chat (token) or the activation code
+export type TRegisterRequest = {
+  username: string;
+  password: string;
+  token?: string;
+  activationCode?: string;
+};
 
 // POST /api/login body; a token is redeemed with the login
 export type TLoginRequest = { username: string; password: string; token?: string };
@@ -40,6 +45,10 @@ export type TLinkedChat = { chatKey: string; state: TDashboardLinkState; linkedA
 // GET /api/me answer, and the answer of register, login, link login and link. chats: oldest link
 // first
 export type TMeResponse = { username: string; chats: TLinkedChat[] };
+
+// the answer of register, login and link login to the app (a request with a bearer token or the
+// client header "app"): the account and the bearer token of its new session
+export type TAppSessionResponse = TMeResponse & { token: string };
 
 // POST /api/logout answer
 export type TLogoutResponse = { ok: true };

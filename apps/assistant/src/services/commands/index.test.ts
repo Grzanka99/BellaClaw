@@ -174,6 +174,36 @@ describe("commands consumer", () => {
     }
   });
 
+  test("!app answers confidentially with the dashboard's app page, signed for the address", async () => {
+    const originalUrl = Bun.env.BELLACLAW_DASHBOARD_PUBLIC_URL;
+    const originalSecret = Bun.env.BELLACLAW_DASHBOARD_SECRET;
+    Bun.env.BELLACLAW_DASHBOARD_PUBLIC_URL = "https://dashboard.test/";
+    Bun.env.BELLACLAW_DASHBOARD_SECRET = "dashboard-secret";
+
+    try {
+      const reply = await withEventContext((ctx) =>
+        runCommand("account:acct-1", "signal:+100", "!app", ctx),
+      );
+      let text = "";
+      if (typeof reply === "object" && "confidential" in reply) {
+        text = reply.confidential;
+      }
+      const token = text.match(/^https:\/\/dashboard\.test\/app\?token=([^\s]+)\n/)?.[1] ?? "";
+
+      expect(verifyDashboardLinkToken("dashboard-secret", token, Date.now())?.chatId).toBe(
+        "signal:+100",
+      );
+
+      Bun.env.BELLACLAW_DASHBOARD_SECRET = "";
+      expect(
+        await withEventContext((ctx) => runCommand("account:acct-1", "signal:+100", "!app", ctx)),
+      ).toBe("The dashboard is not configured.");
+    } finally {
+      Bun.env.BELLACLAW_DASHBOARD_PUBLIC_URL = originalUrl;
+      Bun.env.BELLACLAW_DASHBOARD_SECRET = originalSecret;
+    }
+  });
+
   test("an MCP prompt command becomes turn.requested keyed by the chat with its trace", async () => {
     const configPath = join(directory, "mcp.json");
     await Bun.write(
