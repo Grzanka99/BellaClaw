@@ -20,6 +20,13 @@ export enum ECronFinishedReason {
   Overwritten = "overwritten",
 }
 
+// bella: an account's Bella conversation, or the chat of an unlinked address; plain: a plain chat
+// of the app, with no memory
+export enum EConversationKind {
+  Bella = "bella",
+  Plain = "plain",
+}
+
 export enum EEventType {
   MessageReceived = "message.received",
   MessageAuthorized = "message.authorized",
@@ -89,6 +96,10 @@ export enum EEventType {
   ConversationMessageDeleted = "conversation.message.deleted",
   ConversationSummariesFused = "conversation.summaries.fused",
   ConversationChanged = "conversation.changed",
+  ConversationCreateRequested = "conversation.create.requested",
+  ConversationCreated = "conversation.created",
+  ConversationDeleteRequested = "conversation.delete.requested",
+  ConversationDeleted = "conversation.deleted",
   IdentityLinkRequested = "identity.link.requested",
   IdentityLinkStarted = "identity.link.started",
   IdentityLinkSettled = "identity.link.settled",

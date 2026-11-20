@@ -1,6 +1,7 @@
 import type { TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
 import {
   EAutomationStatus,
+  EConversationKind,
   ECronFinishedReason,
   ECronJobStatus,
   ECronJobType,
@@ -8,6 +9,7 @@ import {
 } from "@bellaclaw/database";
 import type { TOption } from "@bellaclaw/shared";
 import { z } from "zod";
+import { SThinkingLevel } from "../ai/model-preferences";
 import { EAiProvider } from "../ai/types";
 import { EAuthorizationDecision, SAuthorizationState } from "../authorization/schema";
 import { EAutomationRunMode, EAutomationRunOutcome } from "../automation/runner";
@@ -49,42 +51,48 @@ export type TDisplay = z.infer<typeof SDisplay>;
 
 // a message's conversation, its owner, and the channel and address it came from and its reply
 // goes to. Only channel drivers and Outbound read the address
-const SMessageOrigin = {
+const SMessageAddress = {
   conversationKey: z.string(),
   ownerKey: z.string(),
   channel: z.enum(EMessagePlatform),
   replyAddress: z.string(),
 };
 
+// kind: the conversation's kind, set by Authorization; a plain chat runs the plain agent and has
+// no memory
+const SMessageOrigin = {
+  ...SMessageAddress,
+  kind: z.enum(EConversationKind),
+};
+
 export type TMessageOrigin = z.infer<z.ZodObject<typeof SMessageOrigin>>;
 
-const SInboundMessage = z
-  .object({
-    ...SMessageOrigin,
-    content: z.string(),
-    attachments: z.array(SAttachmentRef),
-    receivedAt: z.number().int(),
-    // the id the sending client gave the message, stored on its transcript row
-    clientMessageId: z.string().optional(),
-  })
+// what the app chose for this turn of a plain chat; it applies to this turn only
+const SModelChoice = z
+  .object({ provider: z.enum(EAiProvider), model: z.string().min(1), effort: SThinkingLevel })
   .strict();
+
+export type TModelChoice = z.infer<typeof SModelChoice>;
+
+const SInboundContent = {
+  content: z.string(),
+  attachments: z.array(SAttachmentRef),
+  receivedAt: z.number().int(),
+  // the id the sending client gave the message, stored on its transcript row
+  clientMessageId: z.string().optional(),
+  // a plain chat's message only: the model its turn runs on instead of the owner's settings
+  model: SModelChoice.optional(),
+};
+
+const SMessageReceived = z.object({ ...SMessageAddress, ...SInboundContent }).strict();
+
+const SInboundMessage = z.object({ ...SMessageOrigin, ...SInboundContent }).strict();
 
 const SMessageRejected = z
   .object({
     chatId: z.string(),
     decision: z.enum([EAuthorizationDecision.FailedAttempt, EAuthorizationDecision.Locked]),
     failedAttempts: z.number().int(),
-  })
-  .strict();
-
-const STurnRequested = z
-  .object({
-    ...SMessageOrigin,
-    content: z.string(),
-    attachments: z.array(SAttachmentRef),
-    receivedAt: z.number().int(),
-    // the id the sending client gave the message, stored on its transcript row
-    clientMessageId: z.string().optional(),
   })
   .strict();
 
@@ -494,6 +502,28 @@ const SConversationChanged = z
   })
   .strict();
 
+// a plain chat for the owner, an account's owner key; Conversation builds its key
+const SConversationCreateRequested = z.object({ ownerKey: z.string() }).strict();
+
+// createdAt: epoch ms
+const SConversationCreated = z
+  .object({
+    conversationKey: z.string(),
+    ownerKey: z.string(),
+    kind: z.enum(EConversationKind),
+    createdAt: z.number().int(),
+  })
+  .strict();
+
+// a plain chat of the owner, with its transcript, summary and registry entry
+const SConversationDeleteRequested = z
+  .object({ conversationKey: z.string(), ownerKey: z.string() })
+  .strict();
+
+const SConversationDeleted = z
+  .object({ conversationKey: z.string(), ownerKey: z.string() })
+  .strict();
+
 // errorCode: the handler's stable code for an expected failure, such as job-not-found
 const SCommandRejected = z
   .object({
@@ -521,11 +551,11 @@ const STestSecret = z.object({ secret: z.string() }).strict();
 const STestRequested = z.object({ text: z.string() }).strict();
 
 export type TEventPayloads = {
-  [EEventType.MessageReceived]: z.infer<typeof SInboundMessage>;
+  [EEventType.MessageReceived]: z.infer<typeof SMessageReceived>;
   [EEventType.MessageAuthorized]: z.infer<typeof SInboundMessage>;
   [EEventType.MessageRejected]: z.infer<typeof SMessageRejected>;
   [EEventType.AuthorizationChanged]: z.infer<typeof SAuthorizationState>;
-  [EEventType.TurnRequested]: z.infer<typeof STurnRequested>;
+  [EEventType.TurnRequested]: z.infer<typeof SInboundMessage>;
   [EEventType.TurnStarted]: z.infer<typeof STurnStarted>;
   [EEventType.TurnCompleted]: z.infer<typeof STurnCompleted>;
   [EEventType.TurnFailed]: z.infer<typeof STurnFailed>;
@@ -597,6 +627,10 @@ export type TEventPayloads = {
   [EEventType.IdentityLinked]: z.infer<typeof SIdentityLinked>;
   [EEventType.ConversationSummariesFused]: TFusedSummary;
   [EEventType.ConversationChanged]: z.infer<typeof SConversationChanged>;
+  [EEventType.ConversationCreateRequested]: z.infer<typeof SConversationCreateRequested>;
+  [EEventType.ConversationCreated]: z.infer<typeof SConversationCreated>;
+  [EEventType.ConversationDeleteRequested]: z.infer<typeof SConversationDeleteRequested>;
+  [EEventType.ConversationDeleted]: z.infer<typeof SConversationDeleted>;
   [EEventType.CommandRejected]: z.infer<typeof SCommandRejected>;
   [EEventType.EventDeadLettered]: z.infer<typeof SEventDeadLettered>;
   [EEventType.AppStarted]: z.infer<typeof SAppStarted>;
@@ -608,11 +642,11 @@ export type TEventPayloads = {
 // The mapped type ties each schema to its payload type, so a handler gets a typed payload
 // without a cast.
 export const EVENT_SCHEMAS: { [K in EEventType]: z.ZodType<TEventPayloads[K]> } = {
-  [EEventType.MessageReceived]: SInboundMessage,
+  [EEventType.MessageReceived]: SMessageReceived,
   [EEventType.MessageAuthorized]: SInboundMessage,
   [EEventType.MessageRejected]: SMessageRejected,
   [EEventType.AuthorizationChanged]: SAuthorizationState,
-  [EEventType.TurnRequested]: STurnRequested,
+  [EEventType.TurnRequested]: SInboundMessage,
   [EEventType.TurnStarted]: STurnStarted,
   [EEventType.TurnCompleted]: STurnCompleted,
   [EEventType.TurnFailed]: STurnFailed,
@@ -682,6 +716,10 @@ export const EVENT_SCHEMAS: { [K in EEventType]: z.ZodType<TEventPayloads[K]> } 
   [EEventType.IdentityLinked]: SIdentityLinked,
   [EEventType.ConversationSummariesFused]: SConversationSummariesFused,
   [EEventType.ConversationChanged]: SConversationChanged,
+  [EEventType.ConversationCreateRequested]: SConversationCreateRequested,
+  [EEventType.ConversationCreated]: SConversationCreated,
+  [EEventType.ConversationDeleteRequested]: SConversationDeleteRequested,
+  [EEventType.ConversationDeleted]: SConversationDeleted,
   [EEventType.CommandRejected]: SCommandRejected,
   [EEventType.EventDeadLettered]: SEventDeadLettered,
   [EEventType.AppStarted]: SAppStarted,
@@ -765,6 +803,10 @@ export const EVENT_KINDS: Record<EEventType, EEventKind> = {
   [EEventType.IdentityLinked]: EEventKind.Event,
   [EEventType.ConversationSummariesFused]: EEventKind.Event,
   [EEventType.ConversationChanged]: EEventKind.Event,
+  [EEventType.ConversationCreateRequested]: EEventKind.Command,
+  [EEventType.ConversationCreated]: EEventKind.Event,
+  [EEventType.ConversationDeleteRequested]: EEventKind.Command,
+  [EEventType.ConversationDeleted]: EEventKind.Event,
   [EEventType.CommandRejected]: EEventKind.Event,
   [EEventType.EventDeadLettered]: EEventKind.Event,
   [EEventType.AppStarted]: EEventKind.Event,

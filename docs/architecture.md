@@ -38,10 +38,13 @@ Requesters are conversation tools, slash commands, scheduling and the internal A
    `app`, keyed by its conversation, with the app's message id as the dedupe key.
 2. Authorization decides activation and lockout, then publishes `message.authorized`. An app
    message skips the activation gate and passes only when the conversation belongs to the account
-   the dashboard verified.
-3. Commands answers a `!command` with `reply.ready`, or publishes `turn.requested`.
+   the dashboard verified; it leaves with the conversation's kind from the registry (Bella or
+   plain).
+3. Commands answers a `!command` with `reply.ready`, or publishes `turn.requested`. In a plain
+   chat a `!` message is text for the model.
 4. Conversation runs the turn on the chat's lane: it saves the user message with a `turn.started`
-   checkpoint, runs Main with the structured replay, and commits the turn with `reply.ready` and
+   checkpoint, runs Main (the plain agent in a plain chat, on the model the app's message named)
+   with the structured replay, and commits the turn with `reply.ready` and
    `turn.completed`. Tool writes go out as commands to their owning service. Compaction runs after
    the reply is committed, and the chat's next turn starts only after it finishes.
 5. Outbound sends the reply and records `message.sent`; for the app it has nothing to send and
@@ -51,7 +54,8 @@ Requesters are conversation tools, slash commands, scheduling and the internal A
    replayed to the model; a confidential reply, such as a login link, is not stored. Every
    transcript change emits `conversation.changed` with the conversation's new revision and the
    revision of its latest change that was not an append (`rewriteRevision`), below which a client
-   reloads instead of fetching by cursor. Memory distills facts from `turn.completed`. The live
+   reloads instead of fetching by cursor. Memory distills facts from `turn.completed`, except a
+   plain chat's, and its boot catch-up skips plain chats. The live
    consumer `app-stream` turns `conversation.changed` and the turn facts of account conversations
    into nudges and typing on the dashboard's stream (see `docs/dashboard.md`).
 6. After a restart, unfinished deliveries replay. A turn that was interrupted mid-model gets one
@@ -72,6 +76,17 @@ Main can use web tools and delegate to:
 | Settings | Read and update per-chat settings. |
 | Scheduling | Create, update, list, and remove reminders or recurring tasks. |
 | Automations | Write, preview, save, run, pause, and delete automation scripts. |
+
+A plain chat of the app runs the plain agent instead: web tools and the MCP profiles open to plain
+chats (those that set `plainChats: true`; `vault` and `logs` stay closed), no specialists, so no
+memory, calendar, scheduling, settings or automations. Conversation creates and deletes plain chats
+(`conversation.create.requested`, `conversation.delete.requested`); a delete removes the chat's
+transcript, summary and registry entry, and `app-stream` tells the app with `deleted`. A plain
+chat's turn runs on the provider the app's message names: Main on its model and effort,
+compaction on its model, and every other purpose on that provider's saved preference for it, else
+its default. When the turn starts, the provider's catalog must still list the model, with the
+effort, else the turn fails with a reply saying the model is no longer available instead of running
+on another model.
 
 Specialists receive only role-specific tools and cannot delegate again. Scheduling can dry-run a
 job with automations, which starts a scheduled-task agent run without MCP tools. Only the Memory

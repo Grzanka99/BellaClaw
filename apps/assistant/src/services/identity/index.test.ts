@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import {
+  EConversationKind,
   ECronJobType,
   EEventType,
   eventDeliveriesTable,
@@ -21,7 +22,7 @@ import {
   resetMessageAuthorizationsTable,
 } from "../database/test-utils";
 import { EventBus } from "../events";
-import { testMessageOrigin } from "../events/test-utils";
+import { testMessageAddress } from "../events/test-utils";
 import { MessageHandler } from "../message-handler";
 import { MessagingAdapter } from "../messaging";
 import { EMessagePlatform } from "../messaging/types";
@@ -145,7 +146,7 @@ describe("IdentityService", () => {
       key: "signal:+200",
       trace: { turnId: "test:linked", chatId: "signal:+200", platform: EMessagePlatform.Signal },
       payload: {
-        ...testMessageOrigin("signal:+200", EMessagePlatform.Signal),
+        ...testMessageAddress("signal:+200", EMessagePlatform.Signal),
         content: "Hello",
         attachments: [],
         receivedAt: Date.now(),
@@ -350,6 +351,7 @@ describe("IdentityService", () => {
         ownerKey: "account:acct-6",
         channel: EMessagePlatform.Signal,
         replyAddress: "+800",
+        kind: EConversationKind.Bella,
         content: "Hello",
         attachments: [],
         receivedAt: Date.now(),

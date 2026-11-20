@@ -1,8 +1,11 @@
 import type { TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
-import { EEventType, type TSelectMemory } from "@bellaclaw/database";
+import { EConversationKind, EEventType, type TSelectMemory } from "@bellaclaw/database";
 import type { TOption } from "@bellaclaw/shared";
-import { createLogger } from "@bellaclaw/shared";
+import { CONVERSATION_NOT_FOUND, createLogger } from "@bellaclaw/shared";
 import { AgentHarness } from "../ai/agent-harness";
+import type { TMainAgentRunResult } from "../ai/agent-harness/types";
+import type { TLlmModelConfig } from "../ai/llm";
+import { checkAiModelChoice, EAiModelChoiceProblem } from "../ai/providers/registry";
 import { ERole } from "../ai/types";
 import { logHandlerStarted, startHandlerSpan, startMemorySaveSpan } from "../app-logger/operations";
 import { startSpan } from "../app-logger/span";
@@ -118,6 +121,58 @@ export class MessageHandler {
         }
       },
     });
+    // NOTE: on the requester's lane; the new chat has no turn yet
+    bus.subscribe({
+      consumer: "conversation",
+      type: EEventType.ConversationCreateRequested,
+      mode: ESubscriptionMode.Durable,
+      backoffMs: [],
+      handler: async (event, ctx) => {
+        const { ownerKey } = event.payload;
+        const conversationKey = IdentityService.instance.plainConversationKey(ownerKey);
+
+        await ctx.complete(async (tx, emit) => {
+          const createdAt = Date.now();
+          await this.conversations.createPlain(tx, conversationKey, ownerKey, createdAt);
+          emit(
+            EEventType.ConversationCreated,
+            { conversationKey, ownerKey, kind: EConversationKind.Plain, createdAt },
+            undefined,
+            undefined,
+          );
+        });
+      },
+    });
+    // NOTE: on the chat's lane, behind its queued turns; a turn or a reply that reaches the lane
+    // after the delete finds the chat unlisted and stores nothing
+    bus.subscribe({
+      consumer: "conversation",
+      type: EEventType.ConversationDeleteRequested,
+      mode: ESubscriptionMode.Durable,
+      backoffMs: [],
+      handler: async (event, ctx) => {
+        const { conversationKey, ownerKey } = event.payload;
+
+        await ctx.complete(async (tx, emit) => {
+          if (!(await this.conversations.deletePlain(tx, conversationKey, ownerKey))) {
+            emit(
+              EEventType.CommandRejected,
+              {
+                commandType: event.type,
+                code: ERejectionCode.Invalid,
+                message: "No such plain chat",
+                errorCode: CONVERSATION_NOT_FOUND,
+              },
+              undefined,
+              undefined,
+            );
+            return;
+          }
+
+          emit(EEventType.ConversationDeleted, { conversationKey, ownerKey }, undefined, undefined);
+        });
+      },
+    });
     bus.subscribe({
       consumer: "conversation",
       type: EEventType.ConversationMessageDeleteRequested,
@@ -184,6 +239,7 @@ export class MessageHandler {
           event.trace,
           ctx,
           true,
+          undefined,
         );
 
         if (result === undefined) {
@@ -261,6 +317,15 @@ export class MessageHandler {
       return;
     }
 
+    // a deleted plain chat keeps no row
+    if (
+      IdentityService.instance.isPlainConversation(chatId) &&
+      !(await this.conversations.listed(chatId))
+    ) {
+      this.logger.warning("A message for a deleted plain chat is not stored");
+      return;
+    }
+
     // an address whose rows still wait to be moved is not linked yet, so it resolves to itself
     let ownerKey = chatId;
     const resolved = await IdentityService.instance.resolve(chatId);
@@ -308,7 +373,8 @@ export class MessageHandler {
     event: TEvent<EEventType.TurnRequested>,
     ctx: TEventContext,
   ): Promise<void> {
-    const { content, attachments, receivedAt, clientMessageId, ...requested } = event.payload;
+    const { content, attachments, receivedAt, clientMessageId, model, ...requested } =
+      event.payload;
     let origin: TMessageOrigin = requested;
     const trace = event.trace;
     const handleMessageStart = performance.now();
@@ -371,14 +437,48 @@ export class MessageHandler {
       return;
     }
 
-    const { conversationKey, ownerKey, channel } = origin;
-    const settings = await SettingsService.instance.getAll(ownerKey);
+    const { conversationKey, ownerKey, channel, kind } = origin;
+
+    // a turn that reaches the lane after its plain chat was deleted
+    if (kind === EConversationKind.Plain && !(await this.conversations.listed(conversationKey))) {
+      this.logger.warning("handleTurn: the plain chat is deleted, the turn does not run");
+      span.fail("conversation deleted", 0);
+      return;
+    }
+
+    let settings = await SettingsService.instance.getAll(ownerKey);
+
+    // NOTE: a plain chat's turn runs on the provider its message carried, for this turn only. The
+    // turn may start long after the send was checked, so the choice is checked again: when the
+    // catalog no longer lists the model or the model no longer supports the effort, the turn
+    // stores the user's message and fails with a reply saying so, without compaction or a model
+    // run on another model. Otherwise the config the check answers is the one the plain agent runs
+    // on and the compaction summary uses, without resolving the choice again; every other purpose,
+    // such as the MCP specialist's, uses that provider's saved preference for its purpose, else
+    // the provider's default
+    let unavailable: TOption<string>;
+    let chosen: TOption<TLlmModelConfig>;
+
+    if (model !== undefined) {
+      const checked = await checkAiModelChoice(model.provider, model.model, model.effort);
+
+      if (checked === EAiModelChoiceProblem.ModelUnavailable) {
+        unavailable = `The model ${model.model} is no longer available from ${model.provider}. Choose another model and send again.`;
+      } else if (checked === EAiModelChoiceProblem.EffortUnsupported) {
+        unavailable = `The model ${model.model} no longer supports the effort ${model.effort}. Choose another effort and send again.`;
+      } else {
+        chosen = checked;
+      }
+
+      settings = { ...settings, [EConfigKey.AiProvider]: model.provider };
+    }
+
     let persisted: TOption<TConversation>;
 
     try {
       let conversation = await this.conversations.load(conversationKey);
-      if (conversation !== undefined) {
-        conversation = await this.compact(origin, conversation, settings, trace, ctx);
+      if (conversation !== undefined && unavailable === undefined) {
+        conversation = await this.compact(origin, conversation, settings, chosen, trace, ctx);
       }
 
       const storedText = [content, ...attachments.map(() => IMAGE_MARKER)]
@@ -410,7 +510,7 @@ export class MessageHandler {
       }
 
       const chatStart = performance.now();
-      const aiRes = await this.ai.runMain({
+      const run: Parameters<AgentHarness["runMain"]>[0] = {
         prompt: content,
         conversation,
         images: {
@@ -425,29 +525,46 @@ export class MessageHandler {
         trace,
         events: ctx,
         signal: undefined,
-      });
+        model: chosen,
+      };
+      let aiRes: TOption<TMainAgentRunResult>;
+
+      if (unavailable !== undefined) {
+        this.logger.warning(`handleTurn: the chosen model cannot run: ${unavailable}`);
+      } else if (kind === EConversationKind.Plain) {
+        aiRes = await this.ai.runPlain(run);
+      } else {
+        aiRes = await this.ai.runMain(run);
+      }
+
       this.logger.info(
         `handleTurn: AI chat completed (${(performance.now() - chatStart).toFixed(0)}ms)`,
       );
 
-      const text = aiRes.text;
-
-      if (text === undefined) {
+      if (aiRes === undefined || aiRes.text === undefined) {
         this.logger.warning("handleTurn: AI returned no final response");
         let fallback = FAILED_REPLY;
-        const diagnosed = await ctx.request(
-          EEventType.AiAuthDiagnoseRequested,
-          { chatId: ownerKey, providerId: settings[EConfigKey.AiProvider] },
-          {
-            outcome: EEventType.AiAuthDiagnosed,
-            step: undefined,
-            key: undefined,
-            timeoutMs: DIAGNOSE_TIMEOUT_MS,
-          },
-        );
 
-        if (diagnosed.payload.problem !== undefined) {
-          fallback = diagnosed.payload.problem;
+        // NOTE: a plain chat's provider comes from its message, so the diagnosis, which switches
+        // the owner's provider, is not requested; the app learns at send time that a provider
+        // cannot be used
+        if (unavailable !== undefined) {
+          fallback = unavailable;
+        } else if (kind !== EConversationKind.Plain) {
+          const diagnosed = await ctx.request(
+            EEventType.AiAuthDiagnoseRequested,
+            { chatId: ownerKey, providerId: settings[EConfigKey.AiProvider] },
+            {
+              outcome: EEventType.AiAuthDiagnosed,
+              step: undefined,
+              key: undefined,
+              timeoutMs: DIAGNOSE_TIMEOUT_MS,
+            },
+          );
+
+          if (diagnosed.payload.problem !== undefined) {
+            fallback = diagnosed.payload.problem;
+          }
         }
 
         await ctx.complete(async (_tx, emit) => {
@@ -467,6 +584,8 @@ export class MessageHandler {
         span.fail("missing final response", fallback.length);
         return;
       }
+
+      const text = aiRes.text;
 
       const turnSpan = startMemorySaveSpan(trace, ERole.Assistant, text.length);
       let turnFailure: TOption<string>;
@@ -526,7 +645,7 @@ export class MessageHandler {
 
     // acked; the chat lane is still held, so the next turn waits for compaction.
     // compact() reports its own failures
-    await this.compact(origin, persisted, settings, trace, ctx);
+    await this.compact(origin, persisted, settings, chosen, trace, ctx);
   }
 
   // the revision and the fact commit with the transcript change they report; rewrite: the change
@@ -557,6 +676,7 @@ export class MessageHandler {
     origin: TMessageOrigin,
     state: TConversation,
     settings: TConfigRecord,
+    model: TOption<TLlmModelConfig>,
     trace: TBehaviorTraceContext,
     events: TEventRequester,
   ): Promise<TConversation> {
@@ -571,6 +691,7 @@ export class MessageHandler {
         trace,
         events,
         false,
+        model,
       );
       if (result === undefined) {
         return state;

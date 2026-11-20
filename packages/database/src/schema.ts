@@ -11,6 +11,7 @@ import {
 } from "drizzle-orm/sqlite-core";
 import type {
   EAutomationStatus,
+  EConversationKind,
   ECronFinishedReason,
   ECronJobStatus,
   ECronJobType,
@@ -80,12 +81,17 @@ export const memoriesTable = sqliteTable(
 
 // the conversations with their owner; revision: raised on every change of the transcript;
 // rewriteRevision: the revision of the latest change that was not an append (a delete, or rows
-// moved in by a merge)
+// moved in by a merge); kind: an account's Bella conversation or an unlinked chat (bella), or a
+// plain chat, listed from its creation; title: a plain chat's title, none until one is written;
+// createdAt: when a plain chat was created, none for the others
 export const conversationsTable = sqliteTable("conversations", {
   conversationKey: text("conversationKey").primaryKey(),
   ownerKey: text("ownerKey").notNull(),
   revision: integer("revision").notNull().default(0),
   rewriteRevision: integer("rewriteRevision").notNull().default(0),
+  kind: text("kind").$type<EConversationKind>().notNull().default(sql`'bella'`),
+  title: text("title"),
+  createdAt: integer("createdAt", { mode: "timestamp_ms" }),
 });
 
 export const conversationSummariesTable = sqliteTable("conversation_summaries", {

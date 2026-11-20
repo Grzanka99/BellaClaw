@@ -1,10 +1,12 @@
 import {
   factsTable,
   findOwnedConversation,
+  listConversations,
   listHistory,
   memoriesTable,
   type THistoryCursor,
   type THistoryMessage,
+  type TListedConversation,
   type TOwnedConversation,
 } from "@bellaclaw/database";
 import type { TOption } from "@bellaclaw/shared";
@@ -28,6 +30,11 @@ export type TChatReader = {
     conversationKey: string,
     account: { conversationKey: string; ownerKey: string },
   ): Promise<TOption<TOwnedConversation>>;
+  // the account's conversations for the app's home: its Bella conversation, then its plain chats
+  listConversations(account: {
+    conversationKey: string;
+    ownerKey: string;
+  }): Promise<TListedConversation[]>;
   // what the app shows of a conversation, oldest first
   listHistory(
     conversationKey: string,
@@ -82,6 +89,8 @@ export function createChatReader(url: string, authToken: string): TChatReader {
 
     findConversation: (conversationKey, account) =>
       findOwnedConversation(db, conversationKey, account),
+
+    listConversations: (account) => listConversations(db, account),
 
     listHistory: (conversationKey, cursor, limit) =>
       listHistory(db, conversationKey, cursor, limit),

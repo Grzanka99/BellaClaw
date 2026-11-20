@@ -37,7 +37,7 @@ import { DatabaseConnector } from "../database";
 import { resetEventTables, resetIdentityLinksTable } from "../database/test-utils";
 import { CommandRejectedError, ESubscriptionMode, EventBus, type TEventContext } from "../events";
 import type { TEvent } from "../events/catalog";
-import { testEventRequester, testMessageOrigin } from "../events/test-utils";
+import { testEventRequester, testMessageAddress, testMessageOrigin } from "../events/test-utils";
 import { setupMcpAuth } from "../mcp/auth";
 import { Memory } from "../memory";
 import { FactDistiller } from "../memory/distill";
@@ -176,7 +176,7 @@ function stubFusion(failures: number) {
       summary: state.summary,
       mark: state.summarizedThroughId,
       entryIds: state.entries.map((entry) => entry.id),
-      force: rest.at(-1),
+      force: rest[6],
     });
     if (inputs.length <= failures) {
       throw new Error("The model is unavailable");
@@ -363,7 +363,7 @@ describe("linking an address to an account", () => {
     ).toBe("Europe/Warsaw");
     // the merge is one change of the Bella conversation, which moves rows in, so it is also its
     // rewriteRevision; the address leaves the registry
-    expect(await database().select().from(conversationsTable)).toEqual([
+    expect(await database().select().from(conversationsTable)).toMatchObject([
       {
         conversationKey: "bella:acct-9",
         ownerKey: "account:acct-9",
@@ -437,7 +437,7 @@ describe("linking an address to an account", () => {
     expect(await database().select().from(identityLinksTable)).toMatchObject([
       { address: "+980", accountId: "acct-13", state: EIdentityLinkState.Active },
     ]);
-    expect(await database().select().from(conversationsTable)).toEqual([
+    expect(await database().select().from(conversationsTable)).toMatchObject([
       {
         conversationKey: "bella:acct-13",
         ownerKey: "account:acct-13",
@@ -495,7 +495,7 @@ describe("linking an address to an account", () => {
     // the memory move still waits, so the link has not merged anything yet
     await changed.promise;
 
-    expect(await database().select().from(conversationsTable)).toEqual([
+    expect(await database().select().from(conversationsTable)).toMatchObject([
       {
         conversationKey: "bella:acct-14",
         ownerKey: "account:acct-14",
@@ -507,7 +507,7 @@ describe("linking an address to an account", () => {
     release.resolve();
     await EventBus.instance.idle();
 
-    expect(await database().select().from(conversationsTable)).toEqual([
+    expect(await database().select().from(conversationsTable)).toMatchObject([
       {
         conversationKey: "bella:acct-14",
         ownerKey: "account:acct-14",
@@ -637,7 +637,7 @@ describe("linking an address to an account", () => {
     expect(Object.keys(await Bun.file(credentialsPath).json())).toEqual([
       "account%3Aacct-10:notes:first",
     ]);
-    expect(await database().select().from(conversationsTable)).toEqual([
+    expect(await database().select().from(conversationsTable)).toMatchObject([
       {
         conversationKey: "bella:acct-10",
         ownerKey: "account:acct-10",
@@ -1178,7 +1178,7 @@ describe("linking an address to an account", () => {
         key: "signal:+940",
         trace: { turnId: `test:${content}`, chatId: "signal:+940", platform: undefined },
         payload: {
-          ...testMessageOrigin("signal:+940", EMessagePlatform.Signal),
+          ...testMessageAddress("signal:+940", EMessagePlatform.Signal),
           content,
           attachments: [],
           receivedAt: Date.now(),
@@ -1284,7 +1284,7 @@ describe("linking an address to an account", () => {
       key: "signal:+950",
       trace: { turnId: "test:held", chatId: "signal:+950", platform: undefined },
       payload: {
-        ...testMessageOrigin("signal:+950", EMessagePlatform.Signal),
+        ...testMessageAddress("signal:+950", EMessagePlatform.Signal),
         content: "Hello",
         attachments: [],
         receivedAt: Date.now(),

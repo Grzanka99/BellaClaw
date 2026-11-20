@@ -305,7 +305,7 @@ describe("crash recovery", () => {
     for (const row of moved.filter((row) => row.kind === "display")) {
       expect(row.message).toContain("AI login needed");
     }
-    expect(await db.select().from(conversationsTable)).toEqual([
+    expect(await db.select().from(conversationsTable)).toMatchObject([
       {
         conversationKey: "bella:acct-crash",
         ownerKey: "account:acct-crash",

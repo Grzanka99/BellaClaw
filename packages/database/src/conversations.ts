@@ -1,12 +1,23 @@
 import type { TOption } from "@bellaclaw/shared";
 import { and, asc, desc, eq, gt, inArray, lt } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
+import { EConversationKind } from "./enums";
 import { conversationsTable, memoriesTable } from "./schema";
 
 // the assistant's handle or transaction, or the dashboard's read-only connection
 type TReadHandle = Pick<BaseSQLiteDatabase<"async", unknown>, "select">;
 
 export type TOwnedConversation = { revision: number; rewriteRevision: number };
+
+// a conversation as the app's home lists it. title: a plain chat's, once written; createdAt: when
+// a plain chat was created, epoch ms; lastMessage: its newest row the app shows
+export type TListedConversation = TOwnedConversation & {
+  conversationKey: string;
+  kind: EConversationKind;
+  title: TOption<string>;
+  createdAt: TOption<number>;
+  lastMessage: TOption<THistoryMessage>;
+};
 
 // after: the rows above the id, for an append; before: the rows below it, for an older page
 export type THistoryCursor = { direction: "after" | "before"; id: number };
@@ -59,6 +70,74 @@ export async function findOwnedConversation(
   return { revision: row.revision, rewriteRevision: row.rewriteRevision };
 }
 
+// The kind of a conversation the registry lists, Bella for one it does not list yet: a plain chat
+// is listed from its creation. Check ownership first
+export async function findConversationKind(
+  db: TReadHandle,
+  conversationKey: string,
+): Promise<EConversationKind> {
+  const row = await db
+    .select({ kind: conversationsTable.kind })
+    .from(conversationsTable)
+    .where(eq(conversationsTable.conversationKey, conversationKey))
+    .get();
+
+  return row?.kind ?? EConversationKind.Bella;
+}
+
+// The account's conversations for the app's home: its Bella conversation first, then its plain
+// chats, the latest active first (by their newest row, else their creation)
+export async function listConversations(
+  db: TReadHandle,
+  account: { conversationKey: string; ownerKey: string },
+): Promise<TListedConversation[]> {
+  const bella = await findOwnedConversation(db, account.conversationKey, account);
+
+  if (bella === undefined) {
+    throw new Error("The account's Bella conversation belongs to another owner");
+  }
+
+  const rows = await db
+    .select()
+    .from(conversationsTable)
+    .where(
+      and(
+        eq(conversationsTable.ownerKey, account.ownerKey),
+        eq(conversationsTable.kind, EConversationKind.Plain),
+      ),
+    );
+  const plain: TListedConversation[] = [];
+
+  for (const row of rows) {
+    const [lastMessage] = await listHistory(db, row.conversationKey, undefined, 1);
+    plain.push({
+      conversationKey: row.conversationKey,
+      kind: row.kind,
+      revision: row.revision,
+      rewriteRevision: row.rewriteRevision,
+      title: row.title ?? undefined,
+      createdAt: row.createdAt?.getTime(),
+      lastMessage,
+    });
+  }
+
+  const activeAt = (chat: TListedConversation) =>
+    chat.lastMessage?.createdAt ?? chat.createdAt ?? 0;
+  const [bellaLast] = await listHistory(db, account.conversationKey, undefined, 1);
+
+  return [
+    {
+      conversationKey: account.conversationKey,
+      kind: EConversationKind.Bella,
+      ...bella,
+      title: undefined,
+      createdAt: undefined,
+      lastMessage: bellaLast,
+    },
+    ...plain.sort((left, right) => activeAt(right) - activeAt(left)),
+  ];
+}
+
 // What the app shows of a conversation: its user and assistant messages and display rows, never
 // tool rows, oldest first. Without a cursor, the newest rows. Check ownership first
 export async function listHistory(
@@ -109,7 +188,7 @@ export async function listHistory(
         kind: row.kind,
         channel: row.channel,
         text: row.message,
-        createdAt: row.createdAt.getTime(),
+        createdAt: row.createdAt?.getTime(),
         clientMessageId: row.clientMessageId ?? undefined,
       });
     }

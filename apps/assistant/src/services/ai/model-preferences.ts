@@ -2,7 +2,7 @@ import type { TOption } from "@bellaclaw/shared";
 import { z } from "zod";
 import { EAiProvider, EModelPurpose } from "./types";
 
-const SThinkingLevel = z.enum(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
+export const SThinkingLevel = z.enum(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 const SAiServiceTier = z.enum(["flex", "priority"]);
 
 const SAiModelPreference = z

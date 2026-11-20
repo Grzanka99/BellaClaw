@@ -122,6 +122,16 @@ export function createFakeAssistant() {
 
       return { data: { clientMessageId: message.clientMessageId } };
     },
+    createConversation: async (accountId) => {
+      calls.push({ method: "createConversation", accountId });
+
+      return { data: { conversationKey: `plain:${accountId}:${calls.length}`, createdAt: 1_000 } };
+    },
+    deleteConversation: async (accountId, conversationKey) => {
+      calls.push({ method: "deleteConversation", accountId });
+
+      return { data: { conversationKey } };
+    },
     openStream: async (signal) => {
       const body = new ReadableStream<Uint8Array>({
         start(controller) {

@@ -4,6 +4,8 @@ import {
   DASHBOARD_LINKS_PATH,
   DASHBOARD_STREAM_PATH,
   dashboardAccountConversationMessagesPath,
+  dashboardAccountConversationPath,
+  dashboardAccountConversationsPath,
   dashboardAccountMessagePath,
   dashboardAccountModelPath,
   dashboardAccountPath,
@@ -12,6 +14,8 @@ import {
   SDashboardActivationCheck,
   SDashboardAppMessageAccepted,
   SDashboardChatLink,
+  SDashboardConversationCreated,
+  SDashboardConversationDeleted,
   SDashboardError,
   SDashboardLinkStarted,
   SDashboardMessageDeleted,
@@ -22,6 +26,8 @@ import {
   type TDashboardAppMessage,
   type TDashboardAppMessageAccepted,
   type TDashboardChatLink,
+  type TDashboardConversationCreated,
+  type TDashboardConversationDeleted,
   type TDashboardLinkRequest,
   type TDashboardLinkStarted,
   type TDashboardMessageDeleted,
@@ -70,6 +76,13 @@ export type TInternalApi = {
     conversationKey: string,
     message: TDashboardAppMessage,
   ): Promise<TInternalApiResult<TDashboardAppMessageAccepted>>;
+  // a new plain chat of the account
+  createConversation(accountId: string): Promise<TInternalApiResult<TDashboardConversationCreated>>;
+  // a plain chat of the account with its history; 404 for any other conversation
+  deleteConversation(
+    accountId: string,
+    conversationKey: string,
+  ): Promise<TInternalApiResult<TDashboardConversationDeleted>>;
   // the assistant's live stream for every account, lines of JSON, open until either side closes
   // it; signal closes it
   openStream(signal: AbortSignal): Promise<TInternalApiResult<ReadableStream<Uint8Array>>>;
@@ -153,6 +166,20 @@ export function createInternalApi(baseUrl: string, secret: string): TInternalApi
         dashboardAccountConversationMessagesPath(accountId, conversationKey),
         SDashboardAppMessageAccepted,
         message,
+      ),
+    createConversation: (accountId) =>
+      call(
+        "POST",
+        dashboardAccountConversationsPath(accountId),
+        SDashboardConversationCreated,
+        undefined,
+      ),
+    deleteConversation: (accountId, conversationKey) =>
+      call(
+        "DELETE",
+        dashboardAccountConversationPath(accountId, conversationKey),
+        SDashboardConversationDeleted,
+        undefined,
       ),
     // NOTE: no timeout: the stream stays open, and the assistant's keep-alives hold it
     openStream: async (signal) => {

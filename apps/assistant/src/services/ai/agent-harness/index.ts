@@ -54,7 +54,7 @@ import { AGENTS, EAgentName } from "../agents";
 import baseInstructions from "../instructions/base-system.xml" with { type: "text" };
 import { createPlatformInstructions } from "../instructions/platform";
 import { readXmlAndInjectConfig } from "../instructions/read-xml-and-inject-config";
-import { emptyUsage, LlmClient } from "../llm";
+import { emptyUsage, LlmClient, type TLlmModelConfig } from "../llm";
 import { aiModels } from "../providers/registry";
 import { type TToolExecutionContext, validateToolArguments } from "../tools/define-tool";
 import { EModelPurpose } from "../types";
@@ -98,6 +98,26 @@ export class AgentHarness {
     });
   }
 
+  // a plain chat's turn: the plain agent, with Main's root delegation limit
+  public async runPlain(
+    args: Omit<TAgentRunArgs, "name" | "parentToolCallId">,
+  ): Promise<TMainAgentRunResult> {
+    let delegationCount = 0;
+
+    return this.run({
+      ...args,
+      name: EAgentName.Plain,
+      parentToolCallId: undefined,
+      delegationCount: () => {
+        delegationCount += 1;
+
+        if (delegationCount > 30) {
+          throw new Error("Root delegation limit reached");
+        }
+      },
+    });
+  }
+
   public async runScheduledTask(
     args: Omit<TAgentRunArgs, "name" | "parentToolCallId">,
   ): Promise<TAgentRunResult> {
@@ -118,8 +138,13 @@ export class AgentHarness {
     trace: TBehaviorTraceContext,
     events: TAgentRunArgs["events"],
     force: boolean,
+    // the model the summary runs on instead of the one the settings resolve to
+    selected: TOption<TLlmModelConfig>,
   ) {
-    const config = await this.llm.resolveModel(settings, AGENTS[EAgentName.Main].purpose);
+    let config = selected;
+    if (config === undefined) {
+      config = await this.llm.resolveModel(settings, AGENTS[EAgentName.Main].purpose);
+    }
     let fallbackConfig = config;
     // a forced compaction that fails on the selected model runs on the provider's default one
     if (force) {
@@ -165,11 +190,14 @@ export class AgentHarness {
     args: TAgentRunArgs & { delegationCount: TOption<() => void> },
   ): Promise<TMainAgentRunResult> {
     const agentDefinition = AGENTS[args.name];
-    const modelConfig = await this.llm.resolveModel(
-      args.settings,
-      agentDefinition.purpose,
-      args.signal,
-    );
+    let modelConfig = args.model;
+    if (modelConfig === undefined) {
+      modelConfig = await this.llm.resolveModel(
+        args.settings,
+        agentDefinition.purpose,
+        args.signal,
+      );
+    }
     const tools = await this.createTools(args);
     const systemPrompt = await this.createSystemPrompt(args);
     let iterations = 0;
@@ -398,7 +426,10 @@ export class AgentHarness {
         if (args.currentTimeContext !== undefined) {
           prompt = `${args.currentTimeContext}\n\n${prompt}`;
         }
-        if (args.name === EAgentName.Main && args.conversationKey !== undefined) {
+        if (
+          (args.name === EAgentName.Main || args.name === EAgentName.Plain) &&
+          args.conversationKey !== undefined
+        ) {
           const pendingRuns = McpRunRegistry.instance.list(args.conversationKey);
           if (pendingRuns.length > 0) {
             prompt += `\n\nPending MCP runs awaiting this user's response:\n${JSON.stringify(pendingRuns)}`;
@@ -593,11 +624,16 @@ export class AgentHarness {
 
   private async createSystemPrompt(args: TAgentRunArgs): Promise<string> {
     const agentDefinition = AGENTS[args.name];
-    const parts = [
-      baseInstructions,
+    const instructions = [
       agentDefinition.instructions,
       ...agentDefinition.tools.map((tool) => tool.instructions),
-    ].map((instructions) => readXmlAndInjectConfig(instructions, args.settings));
+    ];
+
+    if (agentDefinition.base) {
+      instructions.unshift(baseInstructions);
+    }
+
+    const parts = instructions.map((xml) => readXmlAndInjectConfig(xml, args.settings));
 
     if (args.mcp !== undefined) {
       parts.push(
@@ -706,6 +742,7 @@ export class AgentHarness {
             parentToolCallId: toolCallId,
             delegationCount: undefined,
             signal: delegationSignal,
+            model: undefined,
           });
 
           if (result.text === undefined || result.text.trim().length === 0) {
@@ -734,6 +771,9 @@ export class AgentHarness {
       profiles = await loadMcpProfiles();
     } catch (error) {
       this.logger.warning(`MCP delegation disabled: ${String(error)}`);
+    }
+    if (args.name === EAgentName.Plain) {
+      profiles = profiles.filter((profile) => profile.plainChats);
     }
     const profileSummary = profiles
       .map((profile) => `${profile.id}: ${profile.description}`)
@@ -771,7 +811,7 @@ export class AgentHarness {
         executionMode: SEQUENTIAL,
         execute: async (toolCallId, parameters, signal) => {
           const parsed = validateToolArguments(delegateSchema, parameters);
-          if (args.name === EAgentName.Main) {
+          if (args.name === EAgentName.Main || args.name === EAgentName.Plain) {
             args.delegationCount?.();
           }
           const profile = profiles.find((candidate) => candidate.id === parsed.profileId);
@@ -833,6 +873,7 @@ export class AgentHarness {
                   signal: AbortSignal.any([runSignal, session.signal]),
                   delegationCount: undefined,
                   mcp: { profile: session.profile, tools: session.tools },
+                  model: undefined,
                 });
                 // Main gets the answer, not the specialist transcript.
                 return {

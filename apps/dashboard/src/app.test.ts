@@ -3,7 +3,12 @@ import { expect, setSystemTime, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { conversationsTable, MIGRATIONS_FOLDER, memoriesTable } from "@bellaclaw/database";
+import {
+  conversationsTable,
+  EConversationKind,
+  MIGRATIONS_FOLDER,
+  memoriesTable,
+} from "@bellaclaw/database";
 import { createDashboardLinkToken } from "@bellaclaw/shared";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/libsql";
@@ -42,6 +47,7 @@ function createTestApp(path = ":memory:", reader?: TChatReader, streamSilenceMs 
         return [];
       },
       findConversation: async () => undefined,
+      listConversations: async () => [],
       listHistory: async () => [],
     },
     internalApi: assistant.internalApi,
@@ -927,10 +933,29 @@ async function createAssistantDatabase() {
       });
   }
 
+  // a plain chat as the assistant lists it on creation, and its removal with its rows
+  function createPlain(conversationKey: string, ownerKey: string) {
+    return db.insert(conversationsTable).values({
+      conversationKey,
+      ownerKey,
+      kind: EConversationKind.Plain,
+      createdAt: new Date(500),
+    });
+  }
+
+  async function removeConversation(conversationKey: string) {
+    await db.delete(memoriesTable).where(eq(memoriesTable.chatId, conversationKey));
+    await db
+      .delete(conversationsTable)
+      .where(eq(conversationsTable.conversationKey, conversationKey));
+  }
+
   return {
     reader: createChatReader(url, ""),
     insertRow,
     setRevision,
+    createPlain,
+    removeConversation,
     deleteRow: (id: number) => db.delete(memoriesTable).where(eq(memoriesTable.id, id)),
     remove: () => rm(dir, { recursive: true, force: true }),
   };
@@ -1120,6 +1145,132 @@ test("another account's conversation is answered like one that does not exist, f
     expect((await sendApp("POST", path, message, "not-a-session")).status).toBe(401);
   } finally {
     await database.remove();
+  }
+});
+
+test("the app creates a plain chat, lists it, sends with a model, reads the reply, deletes it and gets 404 after; another account's plain chat does not exist for it", async () => {
+  const database = await createAssistantDatabase();
+
+  try {
+    const { sendApp, assistant, store } = createTestApp(":memory:", database.reader);
+    const alice = await registerApp(sendApp, store, "alice");
+    const bob = await registerApp(sendApp, store, "bob");
+    const chat = `plain:${alice.publicId}:chat-1`;
+    const deleted: string[] = [];
+    // the assistant's side: Conversation lists the chat, and deletes it with its rows
+    assistant.internalApi.createConversation = async (accountId) => {
+      await database.createPlain(chat, `account:${accountId}`);
+      return { data: { conversationKey: chat, createdAt: 500 } };
+    };
+    assistant.internalApi.deleteConversation = async (_accountId, conversationKey) => {
+      deleted.push(conversationKey);
+      await database.removeConversation(conversationKey);
+      return { data: { conversationKey } };
+    };
+
+    const created = await sendApp("POST", "/api/conversations", undefined, alice.token);
+    expect([created.status, await created.json()]).toEqual([
+      200,
+      { conversationKey: chat, createdAt: 500 },
+    ]);
+    const list = async (token: string) =>
+      (await (await sendApp("GET", "/api/conversations", undefined, token)).json()).conversations;
+    expect(await list(alice.token)).toEqual([
+      {
+        conversationKey: `bella:${alice.publicId}`,
+        kind: "bella",
+        revision: 0,
+        rewriteRevision: 0,
+      },
+      { conversationKey: chat, kind: "plain", revision: 0, rewriteRevision: 0, createdAt: 500 },
+    ]);
+
+    const path = `/api/conversations/${encodeURIComponent(chat)}/messages`;
+    const model = { provider: "openrouter", model: "openai/gpt-5", effort: "low" as const };
+    const message = { clientMessageId: "m-1", text: "Hello", model };
+    const sent = await sendApp("POST", path, message, alice.token);
+    expect([sent.status, await sent.json()]).toEqual([200, { clientMessageId: "m-1" }]);
+    expect(assistant.sends).toEqual([
+      { accountId: alice.publicId, conversationKey: chat, message },
+    ]);
+    const badEffort = { ...message, model: { ...model, effort: "loud" } };
+    expect((await sendApp("POST", path, badEffort, alice.token)).status).toBe(400);
+
+    // the assistant stores the turn and its reply
+    await database.insertRow(chat, "user", "message", "Hello", "m-1");
+    const reply = await database.insertRow(chat, "assistant", "message", "Hi from the model");
+    await database.setRevision(chat, `account:${alice.publicId}`, 2, 0);
+    const history = await (await sendApp("GET", path, undefined, alice.token)).json();
+    expect(history.revision).toBe(2);
+    expect(history.messages.map((row: { text: string }) => row.text)).toEqual([
+      "Hello",
+      "Hi from the model",
+    ]);
+    expect((await list(alice.token))[1]).toMatchObject({
+      conversationKey: chat,
+      kind: "plain",
+      lastMessage: { id: reply.id, text: "Hi from the model" },
+    });
+
+    // another account: reading, sending and deleting answer like a chat that does not exist
+    const chatPath = `/api/conversations/${encodeURIComponent(chat)}`;
+    const answers: [number, unknown][] = [];
+
+    for (const response of [
+      await sendApp("GET", path, undefined, bob.token),
+      await sendApp("POST", path, { ...message, clientMessageId: "m-2" }, bob.token),
+      await sendApp("DELETE", chatPath, undefined, bob.token),
+    ]) {
+      answers.push([response.status, await response.json()]);
+    }
+
+    expect(answers).toEqual(Array(3).fill([404, { error: "Not found" }]));
+    expect(assistant.sends).toHaveLength(1);
+    expect(deleted).toEqual([]);
+    expect((await list(bob.token)).map((row: { kind: string }) => row.kind)).toEqual(["bella"]);
+
+    const removed = await sendApp("DELETE", chatPath, undefined, alice.token);
+    expect([removed.status, await removed.json()]).toEqual([200, { conversationKey: chat }]);
+    expect(deleted).toEqual([chat]);
+
+    // gone: history, sends and a second delete are 404, and the list holds only Bella
+    for (const response of [
+      await sendApp("GET", path, undefined, alice.token),
+      await sendApp("POST", path, { ...message, clientMessageId: "m-3" }, alice.token),
+      await sendApp("DELETE", chatPath, undefined, alice.token),
+    ]) {
+      expect([response.status, await response.json()]).toEqual([404, { error: "Not found" }]);
+    }
+
+    expect((await list(alice.token)).map((row: { kind: string }) => row.kind)).toEqual(["bella"]);
+    expect((await sendApp("POST", "/api/conversations", undefined, "not-a-session")).status).toBe(
+      401,
+    );
+  } finally {
+    await database.remove();
+  }
+});
+
+test("a deleted plain chat reaches the phone's stream", async () => {
+  const following = new AbortController();
+
+  try {
+    const { sendApp, assistant, store, liveStream } = createTestApp();
+    const alice = await registerApp(sendApp, store, "alice");
+    const follow = liveStream.follow(following.signal);
+    await waitUntil(() => assistant.streams.length === 1);
+    const stream = await openAppStream(sendApp, alice.token);
+    expect(await stream.drain()).toEqual([{ type: "check" }]);
+
+    const conversationKey = `plain:${alice.publicId}:chat-1`;
+    assistant.push({ type: "deleted", accountId: alice.publicId, conversationKey });
+    expect(await stream.drain()).toEqual([{ type: "deleted", conversationKey }]);
+
+    await stream.close();
+    following.abort();
+    await follow;
+  } finally {
+    following.abort();
   }
 });
 

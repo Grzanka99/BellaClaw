@@ -4,12 +4,20 @@ import {
   createSystemTurnId,
   type TBehaviorTraceContext,
 } from "@bellaclaw/behavior-logs";
-import { EEventType, findOwnedConversation } from "@bellaclaw/database";
 import {
+  EConversationKind,
+  EEventType,
+  findConversationKind,
+  findOwnedConversation,
+} from "@bellaclaw/database";
+import {
+  CONVERSATION_NOT_FOUND,
   DASHBOARD_ACTIVATION_CHECK_PATH,
   DASHBOARD_LINKS_PATH,
   DASHBOARD_STREAM_PATH,
   dashboardAccountConversationMessagesPath,
+  dashboardAccountConversationPath,
+  dashboardAccountConversationsPath,
   dashboardAccountMessagePath,
   dashboardAccountModelPath,
   dashboardAccountPath,
@@ -22,18 +30,25 @@ import {
   type TDashboardActivationCheck,
   type TDashboardAppMessageAccepted,
   type TDashboardChatLink,
+  type TDashboardConversationCreated,
+  type TDashboardConversationDeleted,
   type TDashboardError,
   type TDashboardLinkStarted,
   type TDashboardMessageDeleted,
+  type TDashboardModelChoice,
   type TDashboardModelState,
   type TOption,
 } from "@bellaclaw/shared";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { z } from "zod";
+import { findAiLoginProblem } from "../ai/auth";
 import { LlmClient } from "../ai/llm";
 import { decodeAiModelPreferences } from "../ai/model-preferences";
 import {
   aiModels,
+  checkAiModelChoice,
+  EAiModelChoiceProblem,
+  getAiApiKey,
   getAiModelConfigs,
   refreshAiModels,
   supportsAiServiceTier,
@@ -49,7 +64,7 @@ import { AppStream } from "../app-stream";
 import { AuthorizationService } from "../authorization";
 import { DatabaseConnector } from "../database";
 import { CommandRejectedError, ESubscriptionMode, EventBus } from "../events";
-import type { TEventPayloads } from "../events/catalog";
+import type { TEventPayloads, TModelChoice } from "../events/catalog";
 import { IdentityService, type TAccountKeys } from "../identity";
 import { parseCanonicalChatKey } from "../messaging/chat-key";
 import { EMessagePlatform } from "../messaging/types";
@@ -74,6 +89,8 @@ const STREAM_KEEP_ALIVE_MS = 25_000;
 const pendingUpdates = new Map<string, PromiseWithResolvers<TConfigRecord>>();
 const pendingDeletes = new Map<string, PromiseWithResolvers<number[]>>();
 const pendingLinks = new Map<string, PromiseWithResolvers<void>>();
+const pendingCreates = new Map<string, PromiseWithResolvers<TDashboardConversationCreated>>();
+const pendingConversationDeletes = new Map<string, PromiseWithResolvers<void>>();
 let server: TOption<ReturnType<typeof Bun.serve>>;
 
 // NOTE: a request is no bus handler, so it has no ctx.request. It publishes the command under a
@@ -110,6 +127,25 @@ export function setupInternalApi(): void {
   });
   bus.subscribe({
     consumer: "internal-api",
+    type: EEventType.ConversationCreated,
+    mode: ESubscriptionMode.Live,
+    backoffMs: [],
+    handler: async (event) => {
+      const { conversationKey, createdAt } = event.payload;
+      pendingCreates.get(event.trace.turnId)?.resolve({ conversationKey, createdAt });
+    },
+  });
+  bus.subscribe({
+    consumer: "internal-api",
+    type: EEventType.ConversationDeleted,
+    mode: ESubscriptionMode.Live,
+    backoffMs: [],
+    handler: async (event) => {
+      pendingConversationDeletes.get(event.trace.turnId)?.resolve();
+    },
+  });
+  bus.subscribe({
+    consumer: "internal-api",
     type: EEventType.CommandRejected,
     mode: ESubscriptionMode.Live,
     backoffMs: [],
@@ -119,6 +155,8 @@ export function setupInternalApi(): void {
       pendingUpdates.get(event.trace.turnId)?.reject(error);
       pendingDeletes.get(event.trace.turnId)?.reject(error);
       pendingLinks.get(event.trace.turnId)?.reject(error);
+      pendingCreates.get(event.trace.turnId)?.reject(error);
+      pendingConversationDeletes.get(event.trace.turnId)?.reject(error);
     },
   });
 }
@@ -219,6 +257,37 @@ async function updateModel(
   );
 }
 
+// A plain chat's model as the app chose it, checked against what the server offers: a provider of
+// its own that is usable now (its API key is set, its OAuth login is connected), a model that
+// provider lists, an effort the model supports
+async function checkModelChoice(choice: TDashboardModelChoice): Promise<TModelChoice> {
+  const provider = SAiProvider.safeParse(choice.provider);
+
+  if (!provider.success) {
+    throw new Error(`Unknown AI provider: ${choice.provider}`);
+  }
+
+  // throws for a provider whose API key is missing
+  getAiApiKey(provider.data);
+  const loginProblem = await findAiLoginProblem(provider.data);
+
+  if (loginProblem !== undefined) {
+    throw new Error(loginProblem);
+  }
+
+  const problem = await checkAiModelChoice(provider.data, choice.model, choice.effort);
+
+  if (problem === EAiModelChoiceProblem.ModelUnavailable) {
+    throw new Error(`Model "${choice.model}" is not available from provider "${provider.data}"`);
+  }
+
+  if (problem === EAiModelChoiceProblem.EffortUnsupported) {
+    throw new Error(`Effort ${choice.effort} is unsupported by ${choice.model}`);
+  }
+
+  return { provider: provider.data, model: choice.model, effort: choice.effort };
+}
+
 // publishes identity.link.requested and answers once the cutover began; it does not wait for
 // identity.linked
 async function requestLink(body: unknown): Promise<TDashboardLinkStarted> {
@@ -304,6 +373,8 @@ export async function handleInternalApiRequest(
   // ["", "internal", "links", chatKey],
   // ["", "internal", "accounts", accountId], ["", "internal", "accounts", accountId, "model"] or
   // ["", "internal", "accounts", accountId, "messages", messageId] or
+  // ["", "internal", "accounts", accountId, "conversations"] or
+  // ["", "internal", "accounts", accountId, "conversations", conversationKey] or
   // ["", "internal", "accounts", accountId, "conversations", conversationKey, "messages"]
   const segments = pathname.split("/");
   const messageId = Number(segments[5]);
@@ -338,6 +409,15 @@ export async function handleInternalApiRequest(
     key.length > 0 &&
     conversationKey.length > 0 &&
     pathname === dashboardAccountConversationMessagesPath(key, conversationKey);
+  const conversationCreateRoute =
+    request.method === "POST" &&
+    key.length > 0 &&
+    pathname === dashboardAccountConversationsPath(key);
+  const conversationDeleteRoute =
+    request.method === "DELETE" &&
+    key.length > 0 &&
+    conversationKey.length > 0 &&
+    pathname === dashboardAccountConversationPath(key, conversationKey);
 
   if (
     !activationRoute &&
@@ -347,7 +427,9 @@ export async function handleInternalApiRequest(
     !accountRoute &&
     !modelRoute &&
     !messageDeleteRoute &&
-    !appMessageRoute
+    !appMessageRoute &&
+    !conversationCreateRoute &&
+    !conversationDeleteRoute
   ) {
     return errorResponse("Not found", 404, undefined);
   }
@@ -410,13 +492,18 @@ export async function handleInternalApiRequest(
 
     // NOTE: the send answers once message.received is stored and waits for no outcome. The client's
     // id is the dedupe key, so a repeated send stores nothing and answers the same. Authorization
-    // checks the ownership again before the message reaches a turn
+    // checks the ownership again before the message reaches a turn. A plain chat's send carries
+    // its model, checked here; the Bella conversation runs on the account's settings
     if (appMessageRoute) {
-      const owned = await DatabaseConnector.instance.run((db) =>
-        findOwnedConversation(db, conversationKey, account),
-      );
+      const kind = await DatabaseConnector.instance.run(async (db) => {
+        if ((await findOwnedConversation(db, conversationKey, account)) === undefined) {
+          return undefined;
+        }
 
-      if (owned === undefined) {
+        return findConversationKind(db, conversationKey);
+      });
+
+      if (kind === undefined) {
         return errorResponse("Not found", 404, undefined);
       }
 
@@ -427,6 +514,27 @@ export async function handleInternalApiRequest(
       }
 
       const { clientMessageId, text } = message.data;
+      const dedupeKey = `app:${conversationKey}:${clientMessageId}`;
+      const body: TDashboardAppMessageAccepted = { clientMessageId };
+
+      // NOTE: a repeated send is the stored message, answered before the model check: its provider
+      // may have become unusable since
+      if (await EventBus.instance.holds(dedupeKey)) {
+        return Response.json(body);
+      }
+
+      let model: TOption<TModelChoice>;
+
+      if (kind === EConversationKind.Plain) {
+        if (message.data.model === undefined) {
+          throw new Error("A message to a plain chat names its model");
+        }
+
+        model = await checkModelChoice(message.data.model);
+      } else if (message.data.model !== undefined) {
+        throw new Error("The Bella conversation runs on the account's model settings");
+      }
+
       await EventBus.instance.publish({
         type: EEventType.MessageReceived,
         source: "internal-api",
@@ -446,11 +554,65 @@ export async function handleInternalApiRequest(
           attachments: [],
           receivedAt: Date.now(),
           clientMessageId,
+          model,
         },
         causationId: undefined,
-        dedupeKey: `app:${conversationKey}:${clientMessageId}`,
+        dedupeKey,
       });
-      const body: TDashboardAppMessageAccepted = { clientMessageId };
+
+      return Response.json(body);
+    }
+
+    if (conversationCreateRoute) {
+      const body: TDashboardConversationCreated = await requestOutcome(
+        pendingCreates,
+        { turnId: createSystemTurnId(), chatId: account.conversationKey, platform: undefined },
+        account.ownerKey,
+        EEventType.ConversationCreateRequested,
+        { ownerKey: account.ownerKey },
+        COMMAND_TIMEOUT_MS,
+        "Creating the chat timed out",
+      );
+
+      return Response.json(body);
+    }
+
+    // NOTE: on the chat's lane, behind its running turn. Only a listed plain chat of the account
+    // reaches the lane; Conversation checks the owner and the kind again in the delete's
+    // transaction
+    if (conversationDeleteRoute) {
+      const kind = await DatabaseConnector.instance.run(async (db) => {
+        if ((await findOwnedConversation(db, conversationKey, account)) === undefined) {
+          return undefined;
+        }
+
+        return findConversationKind(db, conversationKey);
+      });
+
+      if (kind !== EConversationKind.Plain) {
+        return errorResponse("Not found", 404, undefined);
+      }
+
+      try {
+        await requestOutcome(
+          pendingConversationDeletes,
+          { turnId: createSystemTurnId(), chatId: conversationKey, platform: undefined },
+          conversationKey,
+          EEventType.ConversationDeleteRequested,
+          { conversationKey, ownerKey: account.ownerKey },
+          DELETE_TIMEOUT_MS,
+          // the command stays queued on the lane
+          "The assistant is busy with this chat. The chat is deleted once it finishes.",
+        );
+      } catch (error) {
+        if (error instanceof CommandRejectedError && error.errorCode === CONVERSATION_NOT_FOUND) {
+          return errorResponse("Not found", 404, undefined);
+        }
+
+        throw error;
+      }
+
+      const body: TDashboardConversationDeleted = { conversationKey };
 
       return Response.json(body);
     }

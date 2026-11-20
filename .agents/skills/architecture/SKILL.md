@@ -116,7 +116,8 @@ bus.subscribe({
 - `authorization` → `identity`: a message held while its address or its account is being linked.
   It waits on Identity's read model (`waitWhileLinking`), bounded from the message's arrival
 - `internal-api` → `settings`, `conversation`, `identity`. An HTTP request is on no lane: it publishes the
-  command and awaits the outcome through live subscriptions. An app send publishes
+  command (a settings update, a message delete, a plain chat's create or delete, a link) and
+  awaits the outcome through live subscriptions. An app send publishes
   `message.received` (channel `app`, the client's message id as the dedupe key) and waits for
   nothing. Its stream (`/internal/stream`) forwards what `AppStream.listen` hears.
 
@@ -134,15 +135,30 @@ A call across services is allowed only when it changes no state:
   `waitWhileLinking` and `listNoticeRecipients`
   (loaded from `identity_links`, fed by `identity.link.started` and `identity.linked`).
 - Drivers: `LlmClient`, `EmbeddingClient`, `aiModels`, the Discord and Signal clients, `gws`.
-- The stateless engine: `AgentHarness.runMain`, `runScheduledTask`, `compactConversation`.
+- The stateless engine: `AgentHarness.runMain`, `runPlain`, `runScheduledTask`,
+  `compactConversation`.
 - Live state an event cannot carry: `McpService.open`, `McpRunRegistry`, `AppStream.listen`
   (the dashboard's open streams).
 - Reads, including reads that prepare a command (`AutomationService.resolveNames`,
   `CronScheduler.get`), dry runs, status slash commands, and pure functions such as
-  `parseCanonicalChatKey` and `IdentityService.accountIdOf`.
+  `parseCanonicalChatKey` and `IdentityService.accountIdOf`, `plainConversationKey` and
+  `isPlainConversation`.
 
 Every other cross-service interaction is a message. The exact import list, with a reason per pair,
 is `ALLOWED` in `events/boundaries.test.ts`.
+
+Conversation also owns the plain chats of the app: `conversation.create.requested` (an owner key)
+lists a new one under the account, with a key Identity builds (`plain:<accountId>:<id>`), and
+answers `conversation.created`; `conversation.delete.requested` on the chat's lane removes its
+transcript, summary and registry entry and answers `conversation.deleted` (or `command.rejected`
+with `conversation-not-found`). The delete emits `conversation.deleted`, which `app-stream` turns
+into `deleted`. A turn or a reply that reaches a deleted plain chat's lane stores nothing.
+`message.authorized` and the turn facts carry the conversation's `kind`, which Authorization sets:
+Bella for a channel message, the registry's kind for an app message. A plain chat's message also carries the app's `model`
+(provider, model, effort), which the internal API checks against the server's catalog and the
+provider's API key or login, and the turn lays over the owner's settings; a failed plain-chat
+turn answers the failure reply without `ai.auth.diagnose`, which would switch the owner's provider; Commands passes its `!` messages to the turn, and Memory
+neither distils its turns nor drains it at boot.
 
 Table owners: `memories`, `conversation_summaries`, `conversations` → Conversation · `facts`,
 `fact_distillation_state` → Memory · `cron_engine_jobs` → Cron · `automations`,
@@ -156,9 +172,9 @@ carries it: a client synced at or above it fetches by cursor, below it reloads. 
 of a sent reply, notice or delivery from `message.sent`; a reply with neither `transcript` nor
 `display` is not stored, which keeps a confidential one out of history.
 
-The live consumer `app-stream` turns `conversation.changed` and `turn.requested`,
-`turn.started`, `turn.completed`, `turn.failed` and `event.dead_lettered` of an account's
-conversations into nudges and typing for the dashboard's one stream, tagged with the account id.
+The live consumer `app-stream` turns `conversation.changed`, `conversation.deleted` and
+`turn.requested`, `turn.started`, `turn.completed`, `turn.failed` and `event.dead_lettered` of an
+account's conversations into nudges, deletes and typing for the dashboard's one stream, tagged with the account id.
 Typing goes on at `turn.requested` and again at `turn.started`, which carries the keys the turn
 runs under: a turn queued behind another starts after that one's typing off. Nothing replays: the
 app compares revisions on every connect. Its handlers do not await before sending, so a

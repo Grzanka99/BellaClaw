@@ -391,6 +391,18 @@ export class EventBus {
     });
   }
 
+  // whether an event published under the dedupe key is stored
+  public async holds(dedupeKey: string): Promise<boolean> {
+    const [row] = await DatabaseConnector.instance.run((db) =>
+      db
+        .select({ seq: eventsTable.seq })
+        .from(eventsTable)
+        .where(eq(eventsTable.dedupeKey, dedupeKey)),
+    );
+
+    return row !== undefined;
+  }
+
   // resolves when every lane is empty; for tests
   public async idle(): Promise<void> {
     while (this.inFlight.size > 0) {

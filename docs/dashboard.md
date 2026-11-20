@@ -110,9 +110,18 @@ Ways in:
 
 Conversations:
 
-- `GET /api/conversations`: the account's Bella conversation:
-  `conversationKey`, `kind: "bella"`, `revision` and `rewriteRevision`. An account with no message
-  yet has revision 0.
+- `GET /api/conversations`: the account's Bella conversation first (`kind: "bella"`), then its
+  plain chats (`kind: "plain"`), the latest active first: by their newest row, else their
+  creation. Each has `conversationKey`, `kind`, `revision` and `rewriteRevision`; `lastMessage`,
+  the newest row the app shows (as in history), once there is one; a plain chat also has
+  `createdAt` (epoch ms) and, once written, `title`. An account with no message yet has
+  revision 0.
+- `POST /api/conversations`: creates a plain chat and answers `{ conversationKey, createdAt }`.
+  The chat is listed at once, empty, at revision 0. The assistant builds the key.
+- `DELETE /api/conversations/:conversationKey`: deletes a plain chat with its history and summary,
+  and answers `{ conversationKey }`. The Bella conversation cannot be deleted and answers 404 at
+  once, like a conversation of another account. The delete waits behind a turn the chat is
+  running.
 - `GET /api/conversations/:conversationKey/messages`: the rows the app shows, oldest first, with
   `revision` and `rewriteRevision`. Messages and display rows (commands and their replies,
   notices, failure replies), never tool rows; each has `id`, `author`, `kind`, `channel`, `text`,
@@ -121,8 +130,19 @@ Conversations:
   newest one the app has, `nextAfter` names the next page. A client synced at or above
   `rewriteRevision` fetches with `after`; below it, a delete or a merged history changed rows it
   shows, and it reloads.
-- `POST /api/conversations/:conversationKey/messages` with `clientMessageId` and `text`: answers
-  `{ clientMessageId }` once the assistant stored the message, before the reply. A repeated send
+- `POST /api/conversations/:conversationKey/messages` with `clientMessageId`, `text` and, for a
+  plain chat only, `model: { provider, model, effort }`: answers `{ clientMessageId }` once the
+  assistant stored the message, before the reply. The model applies to this turn of the plain
+  chat only: the turn runs on its provider, Main on its model and effort, compaction on its model,
+  and every other purpose, such as the MCP specialist's, on that provider's saved preference for
+  it, else the provider's default. The assistant answers 400 for a plain chat's send without
+  `model`, for a provider it does not offer or cannot use now (its API key is missing, its login
+  is not connected or expired; the error names the reason), a model that provider does not list
+  or an effort the model does not support, and for a `model` sent to the
+  Bella conversation, which runs on the account's model settings. A failed turn of a plain chat
+  answers the plain failure reply and leaves the account's provider as it is. A turn whose model
+  the provider no longer lists when it starts, or whose effort the model no longer supports, runs
+  no model, not even another one: it fails with a reply saying so. A repeated send
   with the same id is the same message and is answered the same, for as long as the assistant
   keeps the message's event: 30 days. A client that still holds a pending send after that looks
   for its `clientMessageId` in history before sending again. The reply appears in history.
@@ -133,7 +153,8 @@ Live stream, while the app is in the foreground:
   compare revisions now and stop showing typing; `changed`: `conversationKey`, `revision` and
   `rewriteRevision` of a conversation whose transcript changed; `typing`: `conversationKey` and
   `typing`, on when a turn of the conversation is requested and again when it starts running, and
-  off when it completes, fails or is dropped, whatever channel its message came from. A comment line every 25 seconds keeps an idle
+  off when it completes, fails or is dropped, whatever channel its message came from; `deleted`:
+  `conversationKey` of a plain chat that is gone. A comment line every 25 seconds keeps an idle
   stream open. After a `changed` the app fetches history. The stream belongs to the session that
   opened it: once that session ends (logout, a new password, expiry) the stream closes at its next
   event or keep-alive. An account holds four streams at most: a fifth ends its oldest.
@@ -145,8 +166,13 @@ Live stream, while the app is in the foreground:
   stream, connects again after 2 seconds, and sends `check` again once it is back.
 
 A conversation of another account answers `404 { "error": "Not found" }`, exactly like one that
-does not exist. The dashboard checks ownership in the assistant's conversation registry
-(`findOwnedConversation` in `@bellaclaw/database`); the assistant checks it again on a send.
+does not exist, for reading, sending and deleting. The dashboard checks ownership in the
+assistant's conversation registry (`findOwnedConversation` in `@bellaclaw/database`); the
+assistant checks it again on a send and a delete.
+
+A plain chat is a side conversation of the app: web tools and MCP tools (the profiles that set
+`plainChats: true`; `vault` and `logs` stay closed), no memory, reminders, schedules, calendars, automations or settings, and `!` messages
+are plain text there. It speaks with Bella's persona.
 
 ## Tabs
 

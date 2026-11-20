@@ -1,4 +1,4 @@
-import { EEventType } from "@bellaclaw/database";
+import { EConversationKind, EEventType } from "@bellaclaw/database";
 import type { EMessagePlatform } from "../messaging/types";
 import { ESubscriptionMode, EventBus, type TEventContext, type TEventRequester } from "./index";
 
@@ -49,12 +49,17 @@ export const testEventRequester: TEventRequester = {
     withEventContext((ctx) => ctx.waitFor(causationId, type, timeoutMs)),
 };
 
-// the origin of a message: the chat key is the conversation and the owner
-export function testMessageOrigin(chatId: string, channel: EMessagePlatform) {
+// the address of a received message: the chat key is the conversation and the owner
+export function testMessageAddress(chatId: string, channel: EMessagePlatform) {
   return {
     conversationKey: chatId,
     ownerKey: chatId,
     channel,
     replyAddress: chatId.slice(chatId.indexOf(":") + 1),
   };
+}
+
+// the origin of an authorized message: its address and its Bella conversation's kind
+export function testMessageOrigin(chatId: string, channel: EMessagePlatform) {
+  return { ...testMessageAddress(chatId, channel), kind: EConversationKind.Bella };
 }

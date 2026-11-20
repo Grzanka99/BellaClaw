@@ -6,6 +6,7 @@ import { appendFileSync } from "node:fs";
 import { join } from "node:path";
 import { AppLogger } from "@bellaclaw/behavior-logs";
 import {
+  EConversationKind,
   EEventType,
   eventDeliveriesTable,
   eventsTable,
@@ -282,6 +283,7 @@ for (const content of messages) {
       ownerKey: CRASH_CHAT_ID,
       channel: EMessagePlatform.Signal,
       replyAddress: "+100",
+      kind: EConversationKind.Bella,
       content,
       attachments: [],
       receivedAt: Date.now(),

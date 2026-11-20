@@ -8,6 +8,7 @@ import type { TMcpProfile } from "../../mcp/config";
 import type { EMessagePlatform, TAttachmentRef } from "../../messaging/types";
 import type { TConfigRecord } from "../../settings/schema";
 import type { EAgentName } from "../agents";
+import type { TLlmModelConfig } from "../llm";
 
 export type TAgentRunArgs = {
   name: EAgentName;
@@ -30,6 +31,8 @@ export type TAgentRunArgs = {
   mcp?: { profile: TMcpProfile; tools: AgentTool[] };
   /** Dry runs must not reach MCP servers, whose tools can have side effects. */
   withoutMcp?: boolean;
+  /** The model the root agent runs on instead of the one its settings resolve to. */
+  model?: TLlmModelConfig;
 };
 
 export type TTurnImages = {

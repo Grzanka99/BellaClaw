@@ -1,8 +1,11 @@
 export {
+  findConversationKind,
   findOwnedConversation,
+  listConversations,
   listHistory,
   type THistoryCursor,
   type THistoryMessage,
+  type TListedConversation,
   type TOwnedConversation,
 } from "./conversations";
 export * from "./enums";

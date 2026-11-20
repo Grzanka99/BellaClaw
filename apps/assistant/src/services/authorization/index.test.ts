@@ -10,7 +10,7 @@ import {
   resetMessageAuthorizationsTable,
 } from "../database/test-utils";
 import { EventBus } from "../events";
-import { testMessageOrigin } from "../events/test-utils";
+import { testMessageAddress, testMessageOrigin } from "../events/test-utils";
 import { IdentityService } from "../identity";
 import { EIdentityLinkState } from "../identity/schema";
 import { EMessagePlatform } from "../messaging/types";
@@ -121,7 +121,7 @@ describe("authorization consumer", () => {
       key: chatId,
       trace: { turnId: "test:auth", chatId, platform: EMessagePlatform.Signal },
       payload: {
-        ...testMessageOrigin(chatId, EMessagePlatform.Signal),
+        ...testMessageAddress(chatId, EMessagePlatform.Signal),
         content,
         attachments: [],
         receivedAt: 1,

@@ -79,11 +79,9 @@ export async function getAiAuthState(
   }
 }
 
-// Returns the reply for a failed chat turn when the provider needs a new login.
-// Switches the chat to another connected OAuth provider when one exists.
-export async function describeAiAuthProblem(
-  ctx: Pick<TEventContext, "request">,
-  chatId: string,
+// Names why an OAuth provider needs a new login: its login expired or it is not connected.
+// Undefined for a connected provider, one whose check failed, or a provider without OAuth.
+export async function findAiLoginProblem(
   provider: string,
   models: Models = aiModels,
 ): Promise<TOption<string>> {
@@ -94,13 +92,30 @@ export async function describeAiAuthProblem(
   }
 
   const state = await getAiAuthState(providerId, models);
-  let problem: string;
 
   if (state === EAiAuthState.LoginExpired) {
-    problem = `The ${providerId} login has expired.`;
-  } else if (state === EAiAuthState.NotConnected) {
-    problem = `${providerId} is not connected.`;
-  } else {
+    return `The ${providerId} login has expired.`;
+  }
+
+  if (state === EAiAuthState.NotConnected) {
+    return `${providerId} is not connected.`;
+  }
+
+  return undefined;
+}
+
+// Returns the reply for a failed chat turn when the provider needs a new login.
+// Switches the chat to another connected OAuth provider when one exists.
+export async function describeAiAuthProblem(
+  ctx: Pick<TEventContext, "request">,
+  chatId: string,
+  provider: string,
+  models: Models = aiModels,
+): Promise<TOption<string>> {
+  const providerId = findAiOAuthProvider(provider);
+  const problem = await findAiLoginProblem(provider, models);
+
+  if (providerId === undefined || problem === undefined) {
     return undefined;
   }
 

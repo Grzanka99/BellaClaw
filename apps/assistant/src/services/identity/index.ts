@@ -16,6 +16,8 @@ import {
 
 const ACCOUNT_OWNER_PREFIX = "account:";
 const BELLA_CONVERSATION_PREFIX = "bella:";
+// plain:<accountId>:<id>, a plain chat of the account
+const PLAIN_CONVERSATION_PREFIX = "plain:";
 // how long after its arrival a message or a cron fire waits for a link of its key to complete
 const LINK_HOLD_MS = 10 * 60_000;
 
@@ -224,12 +226,23 @@ export class IdentityService {
   }
 
   // NOTE: the one place that builds and reads account keys and turns a chat key into an address.
-  // key: an account's owner key or Bella conversation key, or a chat key. An address with an
-  // active link means the account's Bella conversation; any other chat key means its own chat.
-  // An account's destination is its oldest active link, else the link being made, else the app
+  // key: an account's owner key or Bella conversation key, a plain chat's key, or a chat key. An
+  // address with an active link means the account's Bella conversation; any other chat key means
+  // its own chat. An account's destination is its oldest active link, else the link being made,
+  // else the app. A plain chat is its own conversation, of the app only
   public async resolve(key: string): Promise<TOption<TResolvedChat>> {
     await this.load();
     let accountId: TOption<string>;
+
+    if (key.startsWith(PLAIN_CONVERSATION_PREFIX)) {
+      accountId = key.slice(PLAIN_CONVERSATION_PREFIX.length, key.lastIndexOf(":"));
+
+      return {
+        conversationKey: key,
+        ownerKey: `${ACCOUNT_OWNER_PREFIX}${accountId}`,
+        destination: { channel: EMessagePlatform.App, address: accountId },
+      };
+    }
 
     if (key.startsWith(ACCOUNT_OWNER_PREFIX)) {
       accountId = key.slice(ACCOUNT_OWNER_PREFIX.length);
@@ -364,6 +377,22 @@ export class IdentityService {
     }
 
     return ownerKey.slice(ACCOUNT_OWNER_PREFIX.length);
+  }
+
+  // a new plain chat's key, unique to it; ownerKey: an account's owner key
+  public plainConversationKey(ownerKey: string): string {
+    const accountId = this.accountIdOf(ownerKey);
+
+    if (accountId === undefined) {
+      throw new Error(`Unknown owner key ${ownerKey}`);
+    }
+
+    return `${PLAIN_CONVERSATION_PREFIX}${accountId}:${crypto.randomUUID()}`;
+  }
+
+  // whether the key is a plain chat's, listed or deleted
+  public isPlainConversation(key: string): boolean {
+    return key.startsWith(PLAIN_CONVERSATION_PREFIX);
   }
 
   // the chat key of an address

@@ -1,6 +1,12 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { AppLogger, EBehaviorLogLevel, type TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
-import { EEventType, findOwnedConversation, messageAuthorizationsTable } from "@bellaclaw/database";
+import {
+  EConversationKind,
+  EEventType,
+  findConversationKind,
+  findOwnedConversation,
+  messageAuthorizationsTable,
+} from "@bellaclaw/database";
 import type { TOption } from "@bellaclaw/shared";
 import { createLogger, type TLogger } from "@bellaclaw/shared";
 import { eq } from "drizzle-orm";
@@ -217,7 +223,14 @@ export class AuthorizationService {
     }
 
     const { conversationKey, ownerKey } = resolved;
-    const origin = { conversationKey, ownerKey, channel, replyAddress };
+    // a channel message reaches only a Bella conversation or the chat of an unlinked address
+    const origin = {
+      conversationKey,
+      ownerKey,
+      channel,
+      replyAddress,
+      kind: EConversationKind.Bella,
+    };
 
     const result = await ctx.complete(async (tx, emit) => {
       const result = await this.authorize(tx, chatId, content);
@@ -279,8 +292,8 @@ export class AuthorizationService {
   // NOTE: an app message is sent by the account the dashboard verified, as its owner key, under
   // the conversation key the app named. The session stands for the activation gate; the message
   // passes only when the conversation belongs to that account, and is dropped alike for a
-  // conversation of another account and one that does not exist. Held like a channel message
-  // while the account is being linked
+  // conversation of another account and one that does not exist. It leaves with the kind the
+  // registry names. Held like a channel message while the account is being linked
   private async authorizeAppMessage(
     event: TEvent<EEventType.MessageReceived>,
     ctx: TEventContext,
@@ -301,8 +314,9 @@ export class AuthorizationService {
         return false;
       }
 
+      const kind = await findConversationKind(tx, conversationKey);
       // on the conversation's lane
-      emit(EEventType.MessageAuthorized, event.payload, undefined, conversationKey);
+      emit(EEventType.MessageAuthorized, { ...event.payload, kind }, undefined, conversationKey);
       return true;
     });
 

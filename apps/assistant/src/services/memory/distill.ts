@@ -1,5 +1,5 @@
 import type { TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
-import { EEventType, type TSelectMemory } from "@bellaclaw/database";
+import { EConversationKind, EEventType, type TSelectMemory } from "@bellaclaw/database";
 import type { TOption } from "@bellaclaw/shared";
 import { createLogger } from "@bellaclaw/shared";
 import { z } from "zod";
@@ -71,7 +71,12 @@ export class FactDistiller {
       mode: ESubscriptionMode.Durable,
       backoffMs: [],
       handler: async (event) => {
-        const { conversationKey, ownerKey } = event.payload;
+        const { conversationKey, ownerKey, kind } = event.payload;
+
+        // NOTE: a plain chat has no memory; the boot catch-up skips it too
+        if (kind === EConversationKind.Plain) {
+          return;
+        }
 
         // NOTE: an address that is linked or being linked is drained by its move, and its later
         // rows in the account's conversation

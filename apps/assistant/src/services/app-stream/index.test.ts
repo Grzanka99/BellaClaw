@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, expect, mock, test } from "bun:test";
-import { EEventType, identityLinksTable, listHistory } from "@bellaclaw/database";
+import {
+  EConversationKind,
+  EEventType,
+  identityLinksTable,
+  listHistory,
+} from "@bellaclaw/database";
 import {
   DASHBOARD_STREAM_PATH,
   dashboardAccountConversationMessagesPath,
@@ -243,7 +248,11 @@ test("a turn started under an account streams typing on even when its request ca
   const address = `+${Date.now()}`;
   const chatKey = `signal:${address}`;
   const trace = { turnId: `test:${chatKey}`, chatId: chatKey, platform: EMessagePlatform.Signal };
-  const origin = { channel: EMessagePlatform.Signal, replyAddress: address };
+  const origin = {
+    channel: EMessagePlatform.Signal,
+    replyAddress: address,
+    kind: EConversationKind.Bella,
+  };
 
   // as during a link: requested under the address's owner, started under the account
   await EventBus.instance.publish({

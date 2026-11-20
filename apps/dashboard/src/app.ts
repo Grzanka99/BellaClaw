@@ -25,6 +25,8 @@ import type {
   TApiError,
   TAppSessionResponse,
   TAppStreamEvent,
+  TConversationCreatedResponse,
+  TConversationDeletedResponse,
   TConversationsResponse,
   THistoryResponse,
   TLinkCheckResponse,
@@ -772,16 +774,43 @@ export function createApp({
       return c.json<TApiError>({ error: account.error }, account.status);
     }
 
-    const { conversationKey } = account.data;
-    const revisions = await reader.findConversation(conversationKey, account.data);
+    return c.json<TConversationsResponse>({
+      conversations: await reader.listConversations(account.data),
+    });
+  });
 
-    if (revisions === undefined) {
-      throw new Error("Unknown conversation");
+  // a new plain chat of the signed-in account; the assistant builds its key
+  app.post("/api/conversations", requireSession, async (c) => {
+    const result = await internalApi.createConversation(c.var.account.publicId);
+
+    if ("error" in result) {
+      return c.json<TApiError>({ error: result.error }, result.status);
     }
 
-    return c.json<TConversationsResponse>({
-      conversations: [{ conversationKey, kind: "bella", ...revisions }],
-    });
+    return c.json<TConversationCreatedResponse>(result.data);
+  });
+
+  // NOTE: only a plain chat is deleted; the assistant answers 404 for the Bella conversation, as
+  // for a conversation of another account
+  app.delete("/api/conversations/:conversationKey", requireSession, async (c) => {
+    const conversationKey = c.req.param("conversationKey");
+    const owned = await findConversation(c, conversationKey);
+
+    if ("error" in owned) {
+      return c.json<TApiError>({ error: owned.error }, owned.status);
+    }
+
+    if (owned.data === undefined) {
+      return c.json<TApiError>({ error: "Not found" }, 404);
+    }
+
+    const result = await internalApi.deleteConversation(c.var.account.publicId, conversationKey);
+
+    if ("error" in result) {
+      return c.json<TApiError>({ error: result.error }, result.status);
+    }
+
+    return c.json<TConversationDeletedResponse>(result.data);
   });
 
   app.get("/api/conversations/:conversationKey/messages", requireSession, async (c) => {

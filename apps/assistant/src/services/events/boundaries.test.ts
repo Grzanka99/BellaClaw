@@ -65,6 +65,8 @@ const ALLOWED: Record<string, string> = {
   "discord -> identity": "IdentityService.resolve for a message's trace, a cached read model",
   "identity -> messaging/chat-key": "pure functions",
   "events -> automation/runner": "enums the catalog payloads use",
+  "events -> ai/model-preferences": "the effort enum the catalog payloads use",
+  "internal-api -> ai/auth": "findAiLoginProblem, a read of a provider's login state",
   "internal-api -> ai/llm": "driver",
   "internal-api -> authorization": "matchesActivationToken, a read of the configured code",
   "internal-api -> ai/model-preferences": "pure helpers",
@@ -81,10 +83,13 @@ const ALLOWED: Record<string, string> = {
   "memory -> conversation": "ConversationStore.findChatIds read",
   "memory -> embedding": "driver",
   "memory -> identity": "IdentityService.resolve, a cached read model",
-  "message-handler -> ai/agent-harness": "runMain and compactConversation, the stateless engine",
+  "message-handler -> ai/agent-harness":
+    "runMain, runPlain and compactConversation, the stateless engine",
+  "message-handler -> ai/providers/registry":
+    "checkAiModelChoice: the model catalog, a plain chat's model for its turn",
   "message-handler -> conversation": "the same component: Conversation's handler and its store",
   "message-handler -> identity":
-    "IdentityService.linkedAccount and waitWhileLinking, a cached read model",
+    "IdentityService.linkedAccount and waitWhileLinking, a cached read model; plainConversationKey, isPlainConversation and accountIdOf, pure functions",
   "message-handler -> messaging":
     "fetchAttachment and deleteAttachment: driver calls, no stored state",
   "messaging -> identity": "IdentityService.resolve, a cached read model",

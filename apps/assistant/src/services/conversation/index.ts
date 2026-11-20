@@ -1,6 +1,7 @@
 import {
   conversationSummariesTable,
   conversationsTable,
+  EConversationKind,
   memoriesTable,
   type TSelectMemory,
 } from "@bellaclaw/database";
@@ -11,7 +12,21 @@ import {
   type Message,
   type UserMessage,
 } from "@earendil-works/pi-ai";
-import { and, asc, desc, eq, gt, inArray, isNotNull, lt, lte, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  lte,
+  ne,
+  or,
+  sql,
+} from "drizzle-orm";
 import { emptyUsage } from "../ai/llm";
 import { ERole } from "../ai/types";
 import { DatabaseConnector, type TDatabaseHandle } from "../database";
@@ -82,14 +97,76 @@ export class ConversationStore {
       .get();
   }
 
+  // the conversations with transcript rows whose facts Memory distils: every one but plain chats
   public findChatIds(): Promise<string[]> {
     return this.database.run(async (db) => {
       const rows = await db
         .selectDistinct({ chatId: memoriesTable.chatId })
         .from(memoriesTable)
+        .leftJoin(conversationsTable, eq(conversationsTable.conversationKey, memoriesTable.chatId))
+        .where(
+          or(isNull(conversationsTable.kind), ne(conversationsTable.kind, EConversationKind.Plain)),
+        )
         .orderBy(asc(memoriesTable.chatId));
       return rows.map((row) => row.chatId);
     });
+  }
+
+  // lists a new plain chat of the owner; createdAt: epoch ms
+  public async createPlain(
+    db: TDatabaseHandle,
+    conversationKey: string,
+    ownerKey: string,
+    createdAt: number,
+  ): Promise<void> {
+    await db.insert(conversationsTable).values({
+      conversationKey,
+      ownerKey,
+      kind: EConversationKind.Plain,
+      createdAt: new Date(createdAt),
+    });
+  }
+
+  // whether the registry lists the conversation; a plain chat is listed from its creation to its
+  // deletion
+  public listed(conversationKey: string): Promise<boolean> {
+    return this.database.run(async (db) => {
+      const row = await db
+        .select({ conversationKey: conversationsTable.conversationKey })
+        .from(conversationsTable)
+        .where(eq(conversationsTable.conversationKey, conversationKey))
+        .get();
+      return row !== undefined;
+    });
+  }
+
+  // Deletes a plain chat of the owner: its transcript rows, its summary and its registry entry.
+  // Returns false, deleting nothing, for a conversation that is no plain chat of this owner
+  public async deletePlain(
+    db: TDatabaseHandle,
+    conversationKey: string,
+    ownerKey: string,
+  ): Promise<boolean> {
+    const deleted = await db
+      .delete(conversationsTable)
+      .where(
+        and(
+          eq(conversationsTable.conversationKey, conversationKey),
+          eq(conversationsTable.ownerKey, ownerKey),
+          eq(conversationsTable.kind, EConversationKind.Plain),
+        ),
+      )
+      .returning({ conversationKey: conversationsTable.conversationKey });
+
+    if (deleted.length === 0) {
+      return false;
+    }
+
+    await db.delete(memoriesTable).where(eq(memoriesTable.chatId, conversationKey));
+    await db
+      .delete(conversationSummariesTable)
+      .where(eq(conversationSummariesTable.chatId, conversationKey));
+    return true;
   }
 
   // whether the chat still has transcript rows or a summary

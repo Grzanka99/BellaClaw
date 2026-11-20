@@ -44,6 +44,22 @@ export class AppStream {
       },
     });
 
+    // a deleted plain chat: open clients drop it; one that was not open finds it gone from the list
+    bus.subscribe({
+      consumer: "app-stream",
+      type: EEventType.ConversationDeleted,
+      mode: ESubscriptionMode.Live,
+      backoffMs: [],
+      handler: async (event) => {
+        const { conversationKey, ownerKey } = event.payload;
+        const accountId = IdentityService.instance.accountIdOf(ownerKey);
+
+        if (accountId !== undefined) {
+          this.send({ type: "deleted", accountId, conversationKey });
+        }
+      },
+    });
+
     const turnTypingEvents: [
       (
         | EEventType.TurnRequested

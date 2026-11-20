@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, type Mock, spyOn, test } from "bun:test";
-import { EEventType, eventsTable } from "@bellaclaw/database";
+import { EConversationKind, EEventType, eventsTable } from "@bellaclaw/database";
 import type { TOption } from "@bellaclaw/shared";
 import { createProvider, type Provider } from "@earendil-works/pi-ai";
 import { openAICodexResponsesApi } from "@earendil-works/pi-ai/api/openai-codex-responses.lazy";
@@ -210,6 +210,7 @@ test("a linked address logs in for its account, checked by the address's activat
       ownerKey: "account:acct-1",
       channel: EMessagePlatform.Discord,
       replyAddress: "1",
+      kind: EConversationKind.Bella,
       content: "!ai-auth login openai-codex",
       attachments: [],
       receivedAt: Date.now(),

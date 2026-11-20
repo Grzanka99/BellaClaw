@@ -1,4 +1,4 @@
-import { EEventType } from "@bellaclaw/database";
+import { EConversationKind, EEventType } from "@bellaclaw/database";
 import type { TOption } from "@bellaclaw/shared";
 import { ESubscriptionMode, EventBus, type TEventContext } from "../events";
 import type { TEvent } from "../events/catalog";
@@ -89,18 +89,22 @@ export class Commands {
     event: TEvent<EEventType.MessageAuthorized>,
     ctx: TEventContext,
   ): Promise<void> {
-    const { content, attachments, receivedAt, clientMessageId, ...origin } = event.payload;
+    const { content, attachments, receivedAt, clientMessageId, model, ...origin } = event.payload;
+    let result: TOption<TCommandResult>;
+
     // NOTE: commands act for the owner: its calendars, credentials and logins; activation is
-    // per address
-    const result = await runCommand(
-      origin.ownerKey,
-      IdentityService.instance.addressKey({
-        channel: origin.channel,
-        address: origin.replyAddress,
-      }),
-      content,
-      ctx,
-    );
+    // per address. A plain chat has none: its "!" messages are text for the model
+    if (origin.kind === EConversationKind.Bella) {
+      result = await runCommand(
+        origin.ownerKey,
+        IdentityService.instance.addressKey({
+          channel: origin.channel,
+          address: origin.replyAddress,
+        }),
+        content,
+        ctx,
+      );
+    }
 
     await ctx.complete(async (_tx, emit) => {
       if (typeof result === "string") {
@@ -131,7 +135,7 @@ export class Commands {
 
       emit(
         EEventType.TurnRequested,
-        { ...origin, content: prompt, attachments: images, receivedAt, clientMessageId },
+        { ...origin, content: prompt, attachments: images, receivedAt, clientMessageId, model },
         undefined,
         undefined,
       );

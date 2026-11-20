@@ -1,16 +1,22 @@
 // The JSON shapes of the dashboard's HTTP API, for the browser. Types only: import with
 // `import type`, so no server code reaches the client bundle.
-import type { THistoryMessage } from "@bellaclaw/database";
-import type { TDashboardLinkState, TDashboardMessageDeleted } from "@bellaclaw/shared";
+import type { THistoryMessage, TListedConversation } from "@bellaclaw/database";
+import type {
+  TDashboardConversationCreated,
+  TDashboardConversationDeleted,
+  TDashboardLinkState,
+  TDashboardMessageDeleted,
+} from "@bellaclaw/shared";
 
 // a row the app shows: a message, or a display row (a command with its reply, a notice, a failure
 // reply). channel: where it came in or went out; clientMessageId: the id the app gave a message it
 // sent; createdAt: epoch ms
 export type { THistoryMessage } from "@bellaclaw/database";
-// POST /api/conversations/:conversationKey/messages body and answer
+// POST /api/conversations/:conversationKey/messages body and answer; model: a plain chat's model
 export type {
   TDashboardAppMessage,
   TDashboardAppMessageAccepted,
+  TDashboardModelChoice,
   TDashboardModelState,
   TDashboardModelUpdate,
   TDashboardReasoningEffort,
@@ -81,14 +87,20 @@ export type TMessageDeletedResponse = TDashboardMessageDeleted;
 // the rows after its newest by cursor; one below it reloads
 export type TConversationRevision = { revision: number; rewriteRevision: number };
 
-// kind bella: the account's Bella conversation
-export type TConversationSummary = TConversationRevision & {
-  conversationKey: string;
-  kind: "bella";
-};
+// kind bella: the account's Bella conversation; plain: a plain chat. title: a plain chat's, absent
+// until one is written; createdAt: when a plain chat was created, epoch ms; lastMessage: the
+// newest row the app shows, absent while there is none
+export type TConversationSummary = TListedConversation;
 
-// GET /api/conversations answer: the account's conversations
+// GET /api/conversations answer: the account's Bella conversation first, then its plain chats, the
+// latest active first (by their newest row, else their creation)
 export type TConversationsResponse = { conversations: TConversationSummary[] };
+
+// POST /api/conversations answer: a new plain chat, listed and empty, at revision 0
+export type TConversationCreatedResponse = TDashboardConversationCreated;
+
+// DELETE /api/conversations/:conversationKey answer: the plain chat is gone with its history
+export type TConversationDeletedResponse = TDashboardConversationDeleted;
 
 // GET /api/conversations/:conversationKey/messages answer, oldest first: the newest rows, the rows
 // below `before`, or the rows above `after`. nextBefore: the `before` of the older page, when one
@@ -104,11 +116,13 @@ export type THistoryResponse = TConversationRevision & {
 // GET /api/stream server-sent events, data as JSON, each of the signed-in account only. check:
 // compare revisions now, sent on connect and whenever the edge's stream to the assistant opens or
 // drops, and stop showing typing; changed: the conversation's transcript changed; typing: a turn of
-// the conversation started (true) or ended (false)
+// the conversation started (true) or ended (false); deleted: the plain chat is gone. A client that
+// missed a delete finds the chat gone from the list
 export type TAppStreamEvent =
   | { type: "check" }
   | ({ type: "changed"; conversationKey: string } & TConversationRevision)
-  | { type: "typing"; conversationKey: string; typing: boolean };
+  | { type: "typing"; conversationKey: string; typing: boolean }
+  | { type: "deleted"; conversationKey: string };
 
 // createdAt: epoch ms
 export type TFactNode = { id: number; text: string; createdAt: number };

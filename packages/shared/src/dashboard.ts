@@ -128,13 +128,27 @@ export const SDashboardMessageDeleted = z.object({ deletedMessageIds: z.array(z.
 
 export type TDashboardMessageDeleted = z.infer<typeof SDashboardMessageDeleted>;
 
+// the model a plain chat's turn runs on, which the app keeps per chat. provider: one of the model
+// state's `providers`; model: one of that provider's models; effort: one the model supports
+export const SDashboardModelChoice = z
+  .object({
+    provider: z.string().min(1),
+    model: z.string().min(1),
+    effort: SDashboardReasoningEffort,
+  })
+  .strict();
+
+export type TDashboardModelChoice = z.infer<typeof SDashboardModelChoice>;
+
 // POST /internal/accounts/:accountId/conversations/:conversationKey/messages body: a message the
 // app sends. clientMessageId: the app's id of the message; a second send with the same id in the
-// same conversation is the same message
+// same conversation is the same message. model: required for a plain chat, refused for the Bella
+// conversation, which runs on the account's settings
 export const SDashboardAppMessage = z
   .object({
     clientMessageId: z.string().min(1).max(128),
     text: z.string().refine((text) => text.trim().length > 0, "The message is empty"),
+    model: SDashboardModelChoice.optional(),
   })
   .strict();
 
@@ -145,6 +159,24 @@ export type TDashboardAppMessage = z.infer<typeof SDashboardAppMessage>;
 export const SDashboardAppMessageAccepted = z.object({ clientMessageId: z.string() });
 
 export type TDashboardAppMessageAccepted = z.infer<typeof SDashboardAppMessageAccepted>;
+
+// POST /internal/accounts/:accountId/conversations response: the new plain chat, listed and
+// empty. createdAt: epoch ms
+export const SDashboardConversationCreated = z.object({
+  conversationKey: z.string(),
+  createdAt: z.number().int(),
+});
+
+export type TDashboardConversationCreated = z.infer<typeof SDashboardConversationCreated>;
+
+// DELETE /internal/accounts/:accountId/conversations/:conversationKey response: the plain chat is
+// gone with its transcript
+export const SDashboardConversationDeleted = z.object({ conversationKey: z.string() });
+
+export type TDashboardConversationDeleted = z.infer<typeof SDashboardConversationDeleted>;
+
+// the rejection code of a delete of a conversation that is no plain chat of the account
+export const CONVERSATION_NOT_FOUND = "conversation-not-found";
 
 // the rejection code of a link request for an address another account owns
 export const ADDRESS_LINKED_ELSEWHERE = "address-linked-elsewhere";
@@ -209,7 +241,7 @@ export type TDashboardActivationCheck = z.infer<typeof SDashboardActivationCheck
 // GET /internal/stream: one line of JSON per event, for every account, live from the assistant;
 // an empty line keeps an idle connection open. accountId: the account the event belongs to.
 // changed: the conversation's transcript changed, with its revisions; typing: a turn of the
-// conversation started (true) or ended (false). Nothing replays
+// conversation started (true) or ended (false); deleted: the plain chat is gone. Nothing replays
 export const SDashboardStreamEvent = z.discriminatedUnion("type", [
   z
     .object({
@@ -227,6 +259,9 @@ export const SDashboardStreamEvent = z.discriminatedUnion("type", [
       conversationKey: z.string(),
       typing: z.boolean(),
     })
+    .strict(),
+  z
+    .object({ type: z.literal("deleted"), accountId: z.string(), conversationKey: z.string() })
     .strict(),
 ]);
 
@@ -252,6 +287,17 @@ export function dashboardAccountModelPath(accountId: string): string {
 
 export function dashboardAccountMessagePath(accountId: string, messageId: number): string {
   return `${dashboardAccountPath(accountId)}/messages/${messageId}`;
+}
+
+export function dashboardAccountConversationsPath(accountId: string): string {
+  return `${dashboardAccountPath(accountId)}/conversations`;
+}
+
+export function dashboardAccountConversationPath(
+  accountId: string,
+  conversationKey: string,
+): string {
+  return `${dashboardAccountConversationsPath(accountId)}/${encodeURIComponent(conversationKey)}`;
 }
 
 export function dashboardAccountConversationMessagesPath(
