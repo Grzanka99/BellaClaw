@@ -127,7 +127,9 @@ Notifications (when the assistant has an FCM credential, see
   the payload encrypted for that one device with RFC 8291 (`aes128gcm`, one record), base64url.
   Nothing else in the message is readable.
 - The payload, once decrypted, is UTF-8 JSON (`SAppPush` in `@bellaclaw/shared`):
-  `{ conversationKey, messageId, revision, text, truncated }`. `messageId` is the row's `id` in
+  `{ conversationKey, kind, messageId, revision, text, truncated }`. `kind` is the conversation's
+  kind as the conversation list names it (`bella` or `plain`), so an app started by the push picks
+  the notification channel and the chat to open without a fetch. `messageId` is the row's `id` in
   history and `revision` the conversation's revision with it. `text` is the row's text; when the
   whole payload would exceed 2,800 bytes, `text` is its longest start that fits, cut between
   Unicode code points, and `truncated` is `true`. The app then fetches history as on a

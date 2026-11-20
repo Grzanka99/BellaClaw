@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   appDevicesTable,
+  conversationsTable,
   EConversationKind,
   EEventType,
   eventDeliveriesTable,
@@ -32,6 +33,7 @@ import { AppChannel, appPush } from ".";
 import { encryptWebPush } from "./web-push";
 
 const BELLA = "bella:acct-1";
+const PLAIN = "plain:acct-1:push-test";
 const OWNER = "account:acct-1";
 const PROJECT = "test-project";
 const ACCESS_TOKEN = "fake-access-token";
@@ -143,16 +145,17 @@ describe("Web Push encryption", () => {
 
 describe("appPush", () => {
   test("a text that fits is whole; a long one is cut between characters to fit", () => {
-    expect(appPush(BELLA, 7, 3, 'Short "reply"\n')).toEqual({
+    expect(appPush(BELLA, EConversationKind.Bella, 7, 3, 'Short "reply"\n')).toEqual({
       conversationKey: BELLA,
+      kind: "bella",
       messageId: 7,
       revision: 3,
       text: 'Short "reply"\n',
       truncated: false,
     });
 
-    const long = `${"a".repeat(2_700)}${"😀".repeat(100)}`;
-    const cut = appPush(BELLA, 7, 3, long);
+    const long = `${"a".repeat(2_650)}${"😀".repeat(100)}`;
+    const cut = appPush(BELLA, EConversationKind.Bella, 7, 3, long);
     const size = Buffer.byteLength(JSON.stringify(cut));
 
     expect(cut.truncated).toBe(true);
@@ -407,7 +410,10 @@ describe("AppChannel push", () => {
     await DatabaseConnector.instance.database.delete(appDevicesTable);
     await DatabaseConnector.instance.database
       .delete(memoriesTable)
-      .where(eq(memoriesTable.chatId, BELLA));
+      .where(inArray(memoriesTable.chatId, [BELLA, PLAIN]));
+    await DatabaseConnector.instance.database
+      .delete(conversationsTable)
+      .where(eq(conversationsTable.conversationKey, PLAIN));
     await DatabaseConnector.instance.database.insert(identityLinksTable).values({
       channel: EMessagePlatform.Signal,
       address: "+100",
@@ -451,6 +457,7 @@ describe("AppChannel push", () => {
     expect(await pushesOf(phone)).toEqual([
       {
         conversationKey: BELLA,
+        kind: "bella",
         messageId: row?.id ?? 0,
         revision: Number(Reflect.get(revision as object, "revision")),
         text: "Here is your answer",
@@ -492,6 +499,46 @@ describe("AppChannel push", () => {
     expect(long.startsWith(push?.text ?? "x")).toBe(true);
     expect(Buffer.byteLength(JSON.stringify(push))).toBeLessThanOrEqual(APP_PUSH_MAX_BYTES);
     expect(row?.message).toBe(long);
+  });
+
+  test("a row of a plain chat rings with the plain kind", async () => {
+    await start("Unused");
+    const phone = await createDevice();
+    await register("phone-1", "fcm-token-1", phone);
+    await DatabaseConnector.instance.database.insert(conversationsTable).values({
+      conversationKey: PLAIN,
+      ownerKey: OWNER,
+      kind: EConversationKind.Plain,
+      createdAt: new Date(1_000),
+    });
+    const row = await DatabaseConnector.instance.database
+      .insert(memoriesTable)
+      .values({
+        chatId: PLAIN,
+        channel: EMessagePlatform.App,
+        author: "assistant",
+        message: "Plain reply",
+        createdAt: new Date(2_000),
+      })
+      .returning()
+      .get();
+
+    await publish(
+      EEventType.ConversationChanged,
+      {
+        conversationKey: PLAIN,
+        ownerKey: OWNER,
+        revision: 1,
+        rewriteRevision: 0,
+        messageId: row.id,
+      },
+      "plain-reply",
+    );
+    await EventBus.instance.idle();
+
+    expect((await pushesOf(phone)).map((push) => [push.conversationKey, push.kind])).toEqual([
+      [PLAIN, "plain"],
+    ]);
   });
 
   test("nothing rings while the stream is open, for a reply to a Signal message, or for a confidential reply", async () => {

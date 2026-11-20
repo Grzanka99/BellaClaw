@@ -3,6 +3,7 @@ import { join } from "node:path";
 import {
   appDevicesTable,
   appMediaTable,
+  type EConversationKind,
   EEventType,
   findOwnedConversation,
 } from "@bellaclaw/database";
@@ -58,11 +59,12 @@ export function imageTypeOf(data: Uint8Array): TOption<string> {
 // of it, cut between code points, that does
 export function appPush(
   conversationKey: string,
+  kind: EConversationKind,
   messageId: number,
   revision: number,
   text: string,
 ): TAppPush {
-  const push = { conversationKey, messageId, revision, text, truncated: false };
+  const push = { conversationKey, kind, messageId, revision, text, truncated: false };
 
   if (Buffer.byteLength(JSON.stringify(push)) <= APP_PUSH_MAX_BYTES) {
     return push;
@@ -183,7 +185,7 @@ export class AppChannel implements TAttachmentStore {
           db.select().from(appDevicesTable).where(eq(appDevicesTable.accountId, accountId)),
         );
         const plaintext = JSON.stringify(
-          appPush(conversationKey, messageId, revision, message.message),
+          appPush(conversationKey, message.kind, messageId, revision, message.message),
         );
         const gone: string[] = [];
         let failure: TOption<string>;

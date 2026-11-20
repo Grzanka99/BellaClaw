@@ -2,6 +2,7 @@ import {
   conversationSummariesTable,
   conversationsTable,
   EConversationKind,
+  findConversationKind,
   memoriesTable,
   type TSelectMemory,
 } from "@bellaclaw/database";
@@ -149,18 +150,25 @@ export class ConversationStore {
     });
   }
 
-  // The channel and text of one row of the chat; undefined once it is deleted
+  // The channel and text of one row of the chat, with the chat's kind; undefined when the chat has
+  // no such row
   public findMessage(
     chatId: string,
     messageId: number,
-  ): Promise<TOption<Pick<TSelectMemory, "channel" | "message">>> {
-    return this.database.run((db) =>
-      db
+  ): Promise<TOption<Pick<TSelectMemory, "channel" | "message"> & { kind: EConversationKind }>> {
+    return this.database.run(async (db) => {
+      const message = await db
         .select({ channel: memoriesTable.channel, message: memoriesTable.message })
         .from(memoriesTable)
         .where(and(eq(memoriesTable.id, messageId), eq(memoriesTable.chatId, chatId)))
-        .get(),
-    );
+        .get();
+
+      if (message === undefined) {
+        return undefined;
+      }
+
+      return { ...message, kind: await findConversationKind(db, chatId) };
+    });
   }
 
   // A turn's exchange in an untitled plain chat, for its title: the turn's user message and the

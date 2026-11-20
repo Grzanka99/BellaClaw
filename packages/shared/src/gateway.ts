@@ -408,12 +408,14 @@ export const SGatewayStreamEvent = z.discriminatedUnion("type", [
 export type TGatewayStreamEvent = z.infer<typeof SGatewayStreamEvent>;
 
 // The plaintext of a push, before it is encrypted for one device (RFC 8291): a new row of a
-// conversation, for a notification shown without a fetch. revision: the conversation's revision
-// with the row; text: the row's text, or its start when truncated, and the app fetches the row by
+// conversation, for a notification shown without a fetch. kind: the conversation's, as the
+// conversation list names it (EConversationKind); revision: the conversation's revision with the
+// row; text: the row's text, or its start when truncated, and the app fetches the row by
 // messageId. Its JSON stays within APP_PUSH_MAX_BYTES, so the encrypted message fits FCM's data
 export const SAppPush = z
   .object({
     conversationKey: z.string(),
+    kind: z.enum(["bella", "plain"]),
     messageId: z.number().int(),
     revision: z.number().int(),
     text: z.string(),
