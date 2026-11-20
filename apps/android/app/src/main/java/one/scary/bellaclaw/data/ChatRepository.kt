@@ -2,8 +2,6 @@ package one.scary.bellaclaw.data
 
 import java.io.File
 import java.time.Clock
-import java.util.UUID
-import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -17,18 +15,12 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import one.scary.bellaclaw.data.local.ChatStore
 import one.scary.bellaclaw.data.local.ImageCache
 import one.scary.bellaclaw.data.local.PickedImages
 import one.scary.bellaclaw.data.local.LocalChats
 import one.scary.bellaclaw.data.remote.ApiClient
-import one.scary.bellaclaw.data.remote.ApiResult
 import one.scary.bellaclaw.data.remote.ConversationBody
-import one.scary.bellaclaw.data.remote.EmptyBody
-import one.scary.bellaclaw.data.remote.ModelBody
-import one.scary.bellaclaw.data.remote.SendBody
 import one.scary.bellaclaw.model.AppPush
 import one.scary.bellaclaw.model.BELLACLAW_CHAT_ID
 import one.scary.bellaclaw.model.BellaClawChat
@@ -41,7 +33,6 @@ import one.scary.bellaclaw.model.ModelChoice
 import one.scary.bellaclaw.model.ModelRole
 import one.scary.bellaclaw.model.PickedImage
 import one.scary.bellaclaw.model.PlainChat
-import one.scary.bellaclaw.model.SendState
 import one.scary.bellaclaw.model.Session
 import one.scary.bellaclaw.model.SettingsSnapshot
 
@@ -71,9 +62,9 @@ class ChatRepository(
     private val sync = ChatSync(api, state, scope, retryMillis, MAX_RETRY_MILLIS)
     private val stream = ChatStream(api, state, sync, scope, chatStore::forget, clock, retryMillis, MAX_RETRY_MILLIS)
     private val images = ChatImages(api, session, pickedImages, imageCache)
-
-    /** One per conversation: its sends go out one at a time, in the order they were sent. */
-    private val sendLocks = ConcurrentHashMap<String, Mutex>()
+    private val sends = ChatSends(api, state, scope, images, chatStore, clock) { key ->
+        modelOf(key, chatStore.chats.value, settings.value)
+    }
 
     init {
         scope.launch {
@@ -179,37 +170,11 @@ class ChatRepository(
         return images.file(key, mediaId)
     }
 
-    /**
-     * Shows [text] and [image] at once as pending and sends them with a fresh client message id, the image
-     * uploaded first; a plain chat's send
-     * names its model, which stays the chat's pick and becomes the model used last. Accepted, it shows as sent until history's row with that id replaces it. False,
-     * and nothing sent, while the chat's conversation is not known, or a plain chat has no model.
-     */
-    fun send(chatId: String, text: String, image: PickedImage?): Boolean {
-        val generation = state.value.generation
-        val key = state.value.keyOf(chatId) ?: return false
-        val model = if (chatId == BELLACLAW_CHAT_ID) {
-            null
-        } else {
-            modelOf(key, chatStore.chats.value, settings.value) ?: return false
-        }
-        val message = PendingSend(UUID.randomUUID().toString(), text, model, clock.instant(), image)
-        state.update { it.copy(pending = it.pending + (key to it.pending[key].orEmpty() + message)) }
-        if (model != null) {
-            scope.launch { chatStore.setModel(key, model) }
-        }
-        scope.launch { post(generation, key, message) }
-        return true
-    }
+    /** Shows [text] and [image] at once as pending and sends them; see [ChatSends.send]. */
+    fun send(chatId: String, text: String, image: PickedImage?): Boolean = sends.send(chatId, text, image)
 
-    /** Sends the failed message [messageId] again, with the same client message id; an uploaded image is not uploaded again. */
-    fun retry(chatId: String, messageId: String) {
-        val generation = state.value.generation
-        val key = state.value.keyOf(chatId) ?: return
-        val message = state.value.pending[key]?.firstOrNull { it.clientMessageId == messageId && it.state == SendState.FAILED } ?: return
-        changePending(key, messageId) { it.copy(state = SendState.PENDING, failure = null) }
-        scope.launch { post(generation, key, message) }
-    }
+    /** Sends the failed message [messageId] again; see [ChatSends.retry]. */
+    fun retry(chatId: String, messageId: String) = sends.retry(chatId, messageId)
 
     /** Brings [conversationKey] up to date after a push, as on a `changed`: reads the list, then syncs its history. */
     suspend fun catchUp(conversationKey: String) {
@@ -237,53 +202,6 @@ class ChatRepository(
 
     suspend fun setModel(chatId: String, model: ModelChoice) {
         chatStore.setModel(chatId, model)
-    }
-
-    /**
-     * Uploads [message]'s image if it has not been, then posts it; neither request starts once the session of
-     * [generation] has ended. A conversation's sends wait for the one before, so a text sent after a photo
-     * arrives after it.
-     */
-    private suspend fun post(generation: Int, key: String, message: PendingSend) = sendLocks.getOrPut(key) { Mutex() }.withLock {
-        if (state.value.generation != generation) {
-            return@withLock
-        }
-        var uploaded = message.uploaded
-        if (message.image != null && uploaded == null) {
-            when (val result = images.upload(key, message.image)) {
-                is ApiResult.Success -> {
-                    uploaded = result.value
-                    changePending(key, message.clientMessageId) { it.copy(uploaded = result.value) }
-                }
-                is ApiResult.ApiError -> return@withLock markFailed(key, message.clientMessageId, result)
-                ApiResult.NetworkFailure -> return@withLock markFailed(key, message.clientMessageId, null)
-            }
-        }
-        if (state.value.generation != generation) {
-            return@withLock
-        }
-        val model = message.model?.let { ModelBody(it.providerId, it.model, it.effort.wireName()) }
-        val body = SendBody(message.clientMessageId, message.text, model, uploaded?.let { listOf(it) })
-        when (val result = api.postSignedIn<SendBody, EmptyBody>(messagesPath(key), body)) {
-            is ApiResult.Success -> changePending(key, message.clientMessageId) { it.copy(state = SendState.STORED) }
-            is ApiResult.ApiError -> markFailed(key, message.clientMessageId, result)
-            ApiResult.NetworkFailure -> markFailed(key, message.clientMessageId, null)
-        }
-    }
-
-    /** Marks the send failed, with the server's text for a refused request: `400`, and an upload's `413` or `415`. */
-    private fun markFailed(key: String, clientMessageId: String, error: ApiResult.ApiError?) {
-        changePending(key, clientMessageId) {
-            it.copy(state = SendState.FAILED, failure = error?.message?.takeIf { error.status in SHOWN_REFUSALS })
-        }
-    }
-
-    /** Changes the pending send [clientMessageId] if it is still there. */
-    private fun changePending(key: String, clientMessageId: String, change: (PendingSend) -> PendingSend) {
-        state.update { current ->
-            val sends = current.pending[key] ?: return@update current
-            current.copy(pending = current.pending + (key to sends.map { if (it.clientMessageId == clientMessageId) change(it) else it }))
-        }
     }
 
     /** The plain chats of [list], in its order. */
@@ -315,7 +233,6 @@ class ChatRepository(
     }
 
     private companion object {
-        val SHOWN_REFUSALS = setOf(400, 413, 415)
         const val FIRST_RETRY_MILLIS = 1_000L
         const val MAX_RETRY_MILLIS = 30_000L
     }
