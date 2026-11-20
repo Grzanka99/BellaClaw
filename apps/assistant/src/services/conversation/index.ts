@@ -25,6 +25,7 @@ import {
   lt,
   lte,
   ne,
+  notExists,
   or,
   sql,
 } from "drizzle-orm";
@@ -122,19 +123,46 @@ export class ConversationStore {
     });
   }
 
-  // lists a new plain chat of the owner; createdAt: epoch ms
+  // Lists a new plain chat of the owner, or hands back the owner's plain chat with no transcript
+  // row, so the owner has at most one empty chat. createdAt: epoch ms, of a new chat
   public async createPlain(
     db: TDatabaseHandle,
     conversationKey: string,
     ownerKey: string,
     createdAt: number,
-  ): Promise<void> {
+  ): Promise<{ conversationKey: string; createdAt: number }> {
+    const empty = await db
+      .select({
+        conversationKey: conversationsTable.conversationKey,
+        createdAt: conversationsTable.createdAt,
+      })
+      .from(conversationsTable)
+      .where(
+        and(
+          eq(conversationsTable.ownerKey, ownerKey),
+          eq(conversationsTable.kind, EConversationKind.Plain),
+          notExists(
+            db
+              .select({ id: memoriesTable.id })
+              .from(memoriesTable)
+              .where(eq(memoriesTable.chatId, conversationsTable.conversationKey)),
+          ),
+        ),
+      )
+      .limit(1)
+      .get();
+
+    if (empty !== undefined && empty.createdAt !== null) {
+      return { conversationKey: empty.conversationKey, createdAt: empty.createdAt.getTime() };
+    }
+
     await db.insert(conversationsTable).values({
       conversationKey,
       ownerKey,
       kind: EConversationKind.Plain,
       createdAt: new Date(createdAt),
     });
+    return { conversationKey, createdAt };
   }
 
   // whether the registry lists the conversation; a plain chat is listed from its creation to its

@@ -137,11 +137,15 @@ export class MessageHandler {
       backoffMs: [],
       handler: async (event, ctx) => {
         const { ownerKey } = event.payload;
-        const conversationKey = IdentityService.instance.plainConversationKey(ownerKey);
+        const newKey = IdentityService.instance.plainConversationKey(ownerKey);
 
         await ctx.complete(async (tx, emit) => {
-          const createdAt = Date.now();
-          await this.conversations.createPlain(tx, conversationKey, ownerKey, createdAt);
+          const { conversationKey, createdAt } = await this.conversations.createPlain(
+            tx,
+            newKey,
+            ownerKey,
+            Date.now(),
+          );
           emit(
             EEventType.ConversationCreated,
             { conversationKey, ownerKey, kind: EConversationKind.Plain, createdAt },

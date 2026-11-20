@@ -223,6 +223,27 @@ test("the app creates a plain chat, lists it, sends with a model, reads the plai
   expect(await history(chat)).toEqual([]);
 });
 
+test("New chat hands back the account's empty plain chat until a message is in it, never another account's", async () => {
+  await start();
+  const alice = `acct-${crypto.randomUUID()}`;
+  const bob = `acct-${crypto.randomUUID()}`;
+  const chat = await createChat(alice);
+
+  expect(await createChat(alice)).toBe(chat);
+  expect(await createChat(bob)).not.toBe(chat);
+
+  await send(alice, chat, { clientMessageId: "m-1", text: "Hello", model: GPT });
+  const next = await createChat(alice);
+
+  expect(next).not.toBe(chat);
+  expect(await createChat(alice)).toBe(next);
+  expect(
+    (await listConversations(DatabaseConnector.instance.database, account(alice))).map(
+      (row) => row.conversationKey,
+    ),
+  ).toEqual([account(alice).conversationKey, next, chat]);
+});
+
 test("a send to a plain chat names a model the server offers, with an effort the model supports", async () => {
   const { runPlain } = await start();
   const accountId = `acct-${crypto.randomUUID()}`;
@@ -408,6 +429,10 @@ test("two plain chats run their turns at the same time, each on the model its me
   const started: string[] = [];
   const models = new Map<string, string>();
   const runPlain = mock(async (args: TRunArgs) => {
+    if (args.prompt === "Earlier") {
+      return scriptedReply(args, "Plain reply to Earlier");
+    }
+
     started.push(args.conversationKey ?? "");
     models.set(args.conversationKey ?? "", `${args.model?.model.id}/${args.model?.effort}`);
 
@@ -422,6 +447,9 @@ test("two plain chats run their turns at the same time, each on the model its me
   await start(runPlain);
   const accountId = `acct-${crypto.randomUUID()}`;
   const first = await createChat(accountId);
+
+  // the first chat holds a message, so New chat makes a second one
+  await send(accountId, first, { clientMessageId: "m-0", text: "Earlier", model: GPT });
   const second = await createChat(accountId);
 
   await Promise.all([
@@ -432,7 +460,12 @@ test("two plain chats run their turns at the same time, each on the model its me
   expect(started.sort()).toEqual([first, second].sort());
   expect(models.get(first)).toBe(`${GPT.model}/low`);
   expect(models.get(second)).toBe(`${HAIKU.model}/off`);
-  expect((await history(first)).map((row) => row.text)).toEqual(["One", "Plain reply to One"]);
+  expect((await history(first)).map((row) => row.text)).toEqual([
+    "Earlier",
+    "Plain reply to Earlier",
+    "One",
+    "Plain reply to One",
+  ]);
   expect((await history(second)).map((row) => row.text)).toEqual(["Two", "Plain reply to Two"]);
 });
 
@@ -596,9 +629,9 @@ test("a failed or empty title call leaves the plain chat untitled and usable, wi
   const { runPlain } = await start(undefined, false, completeText);
   const accountId = `acct-${crypto.randomUUID()}`;
   const chat = await createChat(accountId);
-  const empty = await createChat(accountId);
 
   await send(accountId, chat, { clientMessageId: "m-1", text: "Hello", model: GPT });
+  const empty = await createChat(accountId);
   completeText.mockImplementation(async () => undefined);
   await send(accountId, empty, { clientMessageId: "m-1", text: "Hello", model: GPT });
   await send(accountId, chat, { clientMessageId: "m-2", text: "Still there?", model: GPT });
