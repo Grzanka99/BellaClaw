@@ -51,7 +51,16 @@ fun BellaClawNavHost(hasPendingLink: Boolean, chatToOpen: String?, onChatOpened:
     }
     val onBack: NavBackStackEntry.() -> Unit = { ifResumed { navController.popBackStack() } }
 
-    NavHost(navController = navController, startDestination = HomeDestination) {
+    NavHost(
+        navController = navController,
+        startDestination = HomeDestination,
+        enterTransition = enterSlide,
+        exitTransition = exitSlide,
+        popEnterTransition = popEnterAtRest,
+        popExitTransition = popExitShrink,
+        predictivePopEnterTransition = predictivePopEnterAtRest,
+        predictivePopExitTransition = predictivePopExitShrink,
+    ) {
         composable<HomeDestination> { entry ->
             HomeRoute(
                 onOpenChat = { chatId -> entry.ifResumed { navController.navigate(ChatDestination(chatId)) } },

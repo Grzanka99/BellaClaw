@@ -13,7 +13,16 @@ import one.scary.bellaclaw.ui.signin.SignInRoute
 fun SignInNavHost(hasPendingLink: Boolean) {
     val navController = rememberNavController()
 
-    NavHost(navController = navController, startDestination = SignInDestination) {
+    NavHost(
+        navController = navController,
+        startDestination = SignInDestination,
+        enterTransition = enterSlide,
+        exitTransition = exitSlide,
+        popEnterTransition = popEnterAtRest,
+        popExitTransition = popExitShrink,
+        predictivePopEnterTransition = predictivePopEnterAtRest,
+        predictivePopExitTransition = predictivePopExitShrink,
+    ) {
         composable<SignInDestination> { entry ->
             SignInRoute(
                 onCreateAccount = { serverUrl ->
