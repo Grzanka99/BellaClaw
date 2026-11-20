@@ -20,9 +20,10 @@ import one.scary.bellaclaw.data.remote.HistoryRowBody
 
 /**
  * Keeps [ChatRepository]'s [state] in step with the server: the conversation list, every loaded
- * history and the history of each open chat. Reads of the list run one at a time, and so do the syncs of one history, so an older answer
- * never lands after a newer one. A failed read of the list, or of an open chat's history, is tried again
- * after [firstRetryMillis], doubling to [maxRetryMillis], in [live] until a read of it succeeds.
+ * history and the history of each open chat. Reads of the list run one at a time, and so do the syncs
+ * of one history, so an older answer never lands after a newer one. A failed read of the list, or of an
+ * open chat's history, is tried again after [firstRetryMillis], doubling to [maxRetryMillis], in [live]
+ * until a read of it succeeds.
  */
 internal class ChatSync(
     private val api: ApiClient,
@@ -109,7 +110,7 @@ internal class ChatSync(
                     current
                 } else {
                     val list = current.conversations
-                    val created = ConversationBody(key, PLAIN, revision = 0, rewriteRevision = 0)
+                    val created = ConversationBody(key, ChatState.PLAIN, revision = 0, rewriteRevision = 0)
                     current.copy(conversations = list.take(1) + created + list.drop(1))
                 }
             }
@@ -259,11 +260,15 @@ internal class ChatSync(
     }
 
     private companion object {
-        const val PLAIN = "plain"
-
         /** The list's entry in [failed]; conversation keys always hold a colon. */
         const val LIST = "list"
     }
 }
 
 internal fun messagesPath(key: String) = "/api/conversations/$key/messages"
+
+/** [older] then [newer], each row once. */
+private fun mergeRows(older: List<HistoryRowBody>, newer: List<HistoryRowBody>): List<HistoryRowBody> {
+    val ids = newer.mapTo(HashSet()) { it.id }
+    return older.filter { it.id !in ids } + newer
+}

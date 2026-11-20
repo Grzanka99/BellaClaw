@@ -62,6 +62,7 @@ internal data class ChatState(
 
     companion object {
         const val BELLA = "bella"
+        const val PLAIN = "plain"
     }
 }
 
@@ -114,9 +115,3 @@ internal fun HistoryRowBody.toMessage(chatId: String) = Message(
 /** Derived from the key, so it stays the same across starts. */
 internal fun iconOf(conversationKey: String): ChatIcon =
     ChatIcon.entries[Math.floorMod(conversationKey.hashCode(), ChatIcon.entries.size)]
-
-/** [older] then [newer], each row once. */
-internal fun mergeRows(older: List<HistoryRowBody>, newer: List<HistoryRowBody>): List<HistoryRowBody> {
-    val ids = newer.mapTo(HashSet()) { it.id }
-    return older.filter { it.id !in ids } + newer
-}

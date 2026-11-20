@@ -5,8 +5,6 @@ import java.time.Clock
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -31,9 +29,7 @@ import one.scary.bellaclaw.data.remote.ConversationBody
 import one.scary.bellaclaw.data.remote.EmptyBody
 import one.scary.bellaclaw.data.remote.ModelBody
 import one.scary.bellaclaw.data.remote.SendBody
-import one.scary.bellaclaw.data.remote.StreamEventBody
 import one.scary.bellaclaw.model.AppPush
-import one.scary.bellaclaw.model.Author
 import one.scary.bellaclaw.model.BELLACLAW_CHAT_ID
 import one.scary.bellaclaw.model.BellaClawChat
 import one.scary.bellaclaw.model.Chat
@@ -73,6 +69,7 @@ class ChatRepository(
 ) {
     private val state = MutableStateFlow(ChatState())
     private val sync = ChatSync(api, state, scope, retryMillis, MAX_RETRY_MILLIS)
+    private val stream = ChatStream(api, state, sync, scope, chatStore::forget, clock, retryMillis, MAX_RETRY_MILLIS)
     private val images = ChatImages(api, session, pickedImages, imageCache)
 
     /** One per conversation: its sends go out one at a time, in the order they were sent. */
@@ -86,7 +83,7 @@ class ChatRepository(
                 if (current != null) {
                     foreground.collectLatest { isForeground ->
                         if (isForeground) {
-                            runStream()
+                            stream.runStream()
                         }
                     }
                 }
@@ -286,75 +283,6 @@ class ChatRepository(
         state.update { current ->
             val sends = current.pending[key] ?: return@update current
             current.copy(pending = current.pending + (key to sends.map { if (it.clientMessageId == clientMessageId) change(it) else it }))
-        }
-    }
-
-    /**
-     * Keeps the stream open, reconnecting after a drop with a growing delay, until cancelled (background, a
-     * session change). Failed reads are tried again in its scope, so they end with it.
-     */
-    private suspend fun runStream() = coroutineScope {
-        sync.live = this
-        try {
-            keepStreamOpen()
-        } finally {
-            sync.live = null
-        }
-    }
-
-    private suspend fun keepStreamOpen() {
-        var wait = retryMillis
-        while (true) {
-            var opened = false
-            val result = try {
-                api.streamSignedIn("/api/stream") { type, data ->
-                    opened = true
-                    val event = try {
-                        ApiClient.json.decodeFromString<StreamEventBody>(data)
-                    } catch (_: IllegalArgumentException) {
-                        // SerializationException included: an event this app cannot read is skipped.
-                        null
-                    }
-                    if (event != null) {
-                        onEvent(type, event)
-                    }
-                }
-            } finally {
-                state.update { it.copy(isStreamOpen = false, typing = emptySet()) }
-            }
-            if (result is ApiResult.ApiError && result.status == ApiClient.UNAUTHORIZED) {
-                return
-            }
-            if (opened) {
-                wait = retryMillis
-            }
-            delay(wait)
-            wait = (wait * 2).coerceAtMost(MAX_RETRY_MILLIS)
-        }
-    }
-
-    private fun onEvent(type: String, event: StreamEventBody) {
-        val key = event.conversationKey
-        when (type) {
-            "check" -> {
-                state.update { it.copy(isStreamOpen = true, typing = emptySet()) }
-                scope.launch { sync.refreshList() }
-            }
-            "changed" -> scope.launch { sync.refreshList() }
-            "typing" -> if (key != null) {
-                state.update { if (event.typing) it.copy(typing = it.typing + key) else it.copy(typing = it.typing - key) }
-            }
-            "deleted" -> if (key != null) {
-                state.update { it.withoutConversation(key) }
-                scope.launch { chatStore.forget(key) }
-            }
-            "reply" -> if (key != null && event.text != null) {
-                state.update { current ->
-                    val chatId = current.conversation(key)?.chatId() ?: key
-                    val reply = Message("reply-${UUID.randomUUID()}", chatId, Author.ASSISTANT, event.text, clock.instant())
-                    current.copy(replies = current.replies + (key to current.replies[key].orEmpty() + reply))
-                }
-            }
         }
     }
 
