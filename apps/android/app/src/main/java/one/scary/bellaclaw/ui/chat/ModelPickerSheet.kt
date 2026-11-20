@@ -2,16 +2,19 @@ package one.scary.bellaclaw.ui.chat
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
@@ -20,12 +23,16 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.flow.first
 import one.scary.bellaclaw.R
 import one.scary.bellaclaw.model.ChatProvider
 import one.scary.bellaclaw.model.Effort
@@ -45,7 +52,8 @@ class ModelPickerEvents(
 /**
  * "Model for this chat": every provider with its models by name, a provider that cannot be used now
  * greyed out with its reason; the picked model's efforts; Done. Loading, or the error with Retry, until
- * a list is held. The content scrolls when it is taller than the sheet.
+ * a list is held. Only the providers and models scroll, opening on the picked model; the efforts and
+ * Done stay at the bottom.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -57,7 +65,6 @@ fun ModelPickerSheet(state: ModelPickerState, events: ModelPickerEvents) {
     ) {
         Column(
             modifier = Modifier
-                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 24.dp)
                 .padding(bottom = 24.dp),
         ) {
@@ -73,18 +80,50 @@ fun ModelPickerSheet(state: ModelPickerState, events: ModelPickerEvents) {
 }
 
 @Composable
-private fun ModelPickerContent(providers: List<ChatProvider>, state: ModelPickerState, events: ModelPickerEvents) {
-    Column(modifier = Modifier.selectableGroup()) {
+private fun ColumnScope.ModelPickerContent(
+    providers: List<ChatProvider>,
+    state: ModelPickerState,
+    events: ModelPickerEvents,
+) {
+    // The row the list opens on: the picked model's, else the first. A header row per provider, then its models.
+    val pickedIndex = remember {
+        var index = 0
+        var picked = 0
         providers.forEach { provider ->
-            Text(provider.id, style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp))
-            if (!provider.isUsable) {
-                Text(
-                    provider.reason.orEmpty(),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+            index++
             provider.models.forEach { model ->
+                if (provider.id == state.selection?.providerId && model.id == state.selection.model) {
+                    picked = index
+                }
+                index++
+            }
+        }
+        picked
+    }
+    val listState = rememberLazyListState(initialFirstVisibleItemIndex = pickedIndex)
+    // Once, after the first layout: centre the picked row. Later lists and picks leave the scroll alone,
+    // and so does a sheet restored (a rotation) scrolled away from that row.
+    LaunchedEffect(listState) {
+        val layout = snapshotFlow { listState.layoutInfo }.first { it.visibleItemsInfo.isNotEmpty() }
+        val row = layout.visibleItemsInfo.firstOrNull { it.index == pickedIndex } ?: return@LaunchedEffect
+        val viewportCentre = (layout.viewportStartOffset + layout.viewportEndOffset) / 2
+        listState.scrollBy((row.offset + row.size / 2 - viewportCentre).toFloat())
+    }
+    LazyColumn(state = listState, modifier = Modifier.weight(1f, fill = false).selectableGroup()) {
+        providers.forEach { provider ->
+            item {
+                Column {
+                    Text(provider.id, style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp))
+                    if (!provider.isUsable) {
+                        Text(
+                            provider.reason.orEmpty(),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+            items(provider.models) { model ->
                 val selected = provider.id == state.selection?.providerId && model.id == state.selection.model
                 Row(
                     modifier = Modifier
