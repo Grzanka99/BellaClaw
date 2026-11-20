@@ -133,7 +133,7 @@ export class AuthorizationService {
     }
 
     if (current?.status === EAuthorizationStatus.Authorized) {
-      if (normalizedContent === this.activationToken) {
+      if (this.matchesActivationToken(normalizedContent) === true) {
         return {
           decision: EAuthorizationDecision.AlreadyActivated,
           failedAttempts: 0,
@@ -160,7 +160,7 @@ export class AuthorizationService {
     let failedAttempts = 0;
     let decision = EAuthorizationDecision.Activated;
 
-    if (normalizedContent !== this.activationToken) {
+    if (this.matchesActivationToken(normalizedContent) !== true) {
       failedAttempts = (current?.failedAttempts ?? 0) + 1;
       status = EAuthorizationStatus.Pending;
       decision = EAuthorizationDecision.FailedAttempt;

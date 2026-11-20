@@ -1788,6 +1788,17 @@ test("only an upload may carry a body over 64 KiB", async () => {
     ]);
     expect((await post(`/api/conversations/${conversationKey}/media`)).status).toBe(200);
     expect(assistant.uploads).toHaveLength(1);
+
+    // a chunked body declares no length
+    const chunked = await app.request(`/api/conversations/${conversationKey}/messages`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${alice.token}`, "Content-Type": "application/json" },
+      body: new Blob([
+        JSON.stringify({ clientMessageId: "m-1", text: "a".repeat(65_537) }),
+      ]).stream(),
+    });
+    expect(chunked.status).toBe(400);
+    expect(assistant.sends).toHaveLength(0);
   } finally {
     await database.remove();
   }

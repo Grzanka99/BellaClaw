@@ -144,7 +144,29 @@ async function parseBody<T>(request: Request, schema: z.ZodType<T>) {
   let body: unknown;
 
   try {
-    body = await request.json();
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+
+    // NOTE: read to the JSON limit whatever length the request declares: a chunked body declares
+    // none
+    if (request.body !== null) {
+      const reader = request.body.getReader();
+      let part = await reader.read();
+
+      while (!part.done) {
+        size += part.value.byteLength;
+
+        if (size > MAX_JSON_BODY_BYTES) {
+          await reader.cancel();
+          throw new Error("Request body too large");
+        }
+
+        chunks.push(part.value);
+        part = await reader.read();
+      }
+    }
+
+    body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
   } catch {
     // no JSON fails the schema
   }
