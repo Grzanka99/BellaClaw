@@ -12,49 +12,49 @@ import {
 } from "@bellaclaw/database";
 import {
   CONVERSATION_NOT_FOUND,
-  DASHBOARD_ACTIVATION_CHECK_PATH,
-  DASHBOARD_LINKS_PATH,
-  DASHBOARD_PRESENCE_PATH,
-  DASHBOARD_STREAM_PATH,
   DEVICE_NOT_FOUND,
-  dashboardAccountConversationMediaFilePath,
-  dashboardAccountConversationMediaPath,
-  dashboardAccountConversationMessagesPath,
-  dashboardAccountConversationPath,
-  dashboardAccountConversationsPath,
-  dashboardAccountDevicePath,
-  dashboardAccountDevicesPath,
-  dashboardAccountMessagePath,
-  dashboardAccountModelPath,
-  dashboardAccountPath,
-  dashboardAccountPersonalityPath,
-  dashboardChatLinkPath,
+  GATEWAY_ACTIVATION_CHECK_PATH,
+  GATEWAY_LINKS_PATH,
+  GATEWAY_PRESENCE_PATH,
+  GATEWAY_STREAM_PATH,
+  gatewayAccountConversationMediaFilePath,
+  gatewayAccountConversationMediaPath,
+  gatewayAccountConversationMessagesPath,
+  gatewayAccountConversationPath,
+  gatewayAccountConversationsPath,
+  gatewayAccountDevicePath,
+  gatewayAccountDevicesPath,
+  gatewayAccountMessagePath,
+  gatewayAccountModelPath,
+  gatewayAccountPath,
+  gatewayAccountPersonalityPath,
+  gatewayChatLinkPath,
   isP256PublicKey,
   MAX_IMAGE_BYTES,
-  SDashboardActivationCheckRequest,
-  SDashboardAppMessage,
-  SDashboardDeviceId,
-  SDashboardDeviceRegistration,
-  SDashboardLinkRequest,
-  SDashboardModelUpdate,
-  SDashboardPersonalityUpdate,
-  SDashboardPresence,
-  type TDashboardAccount,
-  type TDashboardActivationCheck,
-  type TDashboardAppMessageAccepted,
-  type TDashboardChatLink,
-  type TDashboardConversationCreated,
-  type TDashboardConversationDeleted,
-  type TDashboardDevice,
-  type TDashboardDevicesRemoved,
-  type TDashboardError,
-  type TDashboardLinkStarted,
-  type TDashboardMedia,
-  type TDashboardMessageDeleted,
-  type TDashboardModelChoice,
-  type TDashboardModelState,
-  type TDashboardPersonality,
-  type TDashboardPresenceAccepted,
+  SGatewayActivationCheckRequest,
+  SGatewayAppMessage,
+  SGatewayDeviceId,
+  SGatewayDeviceRegistration,
+  SGatewayLinkRequest,
+  SGatewayModelUpdate,
+  SGatewayPersonalityUpdate,
+  SGatewayPresence,
+  type TGatewayAccount,
+  type TGatewayActivationCheck,
+  type TGatewayAppMessageAccepted,
+  type TGatewayChatLink,
+  type TGatewayConversationCreated,
+  type TGatewayConversationDeleted,
+  type TGatewayDevice,
+  type TGatewayDevicesRemoved,
+  type TGatewayError,
+  type TGatewayLinkStarted,
+  type TGatewayMedia,
+  type TGatewayMessageDeleted,
+  type TGatewayModelChoice,
+  type TGatewayModelState,
+  type TGatewayPersonality,
+  type TGatewayPresenceAccepted,
   type TOption,
 } from "@bellaclaw/shared";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
@@ -92,11 +92,11 @@ import { EConfigKey, type TConfigRecord } from "../settings/schema";
 
 const COMMAND_TIMEOUT_MS = 60_000;
 // NOTE: a delete waits on the chat's lane behind a running turn and its compaction. Just under
-// the dashboard's 250 s wait for this API, so the dashboard gets the answer.
+// the gateway's 250 s wait for this API, so the gateway gets the answer.
 const DELETE_TIMEOUT_MS = 240_000;
 
 // the shared body, with provider and purpose narrowed to the assistant's enums
-const SModelUpdate = SDashboardModelUpdate.extend({
+const SModelUpdate = SGatewayModelUpdate.extend({
   aiProvider: SAiProvider.optional(),
   aiModelPurpose: z.enum(EModelPurpose).optional(),
 });
@@ -111,7 +111,7 @@ const STREAM_KEEP_ALIVE_MS = 25_000;
 const pendingUpdates = new Map<string, PromiseWithResolvers<TConfigRecord>>();
 const pendingDeletes = new Map<string, PromiseWithResolvers<number[]>>();
 const pendingLinks = new Map<string, PromiseWithResolvers<void>>();
-const pendingCreates = new Map<string, PromiseWithResolvers<TDashboardConversationCreated>>();
+const pendingCreates = new Map<string, PromiseWithResolvers<TGatewayConversationCreated>>();
 const pendingConversationDeletes = new Map<string, PromiseWithResolvers<void>>();
 const pendingDeviceRegistrations = new Map<string, PromiseWithResolvers<void>>();
 const pendingDeviceUnregistrations = new Map<string, PromiseWithResolvers<void>>();
@@ -242,7 +242,7 @@ async function requestOutcome<T extends EEventType, R>(
   }
 }
 
-function createModelState(settings: TConfigRecord): TDashboardModelState {
+function createModelState(settings: TConfigRecord): TGatewayModelState {
   const provider = resolveAiProvider(settings);
   const models = getAiModelConfigs(
     provider,
@@ -301,7 +301,7 @@ async function updateModel(
   );
 }
 
-function createPersonality(settings: TConfigRecord): TDashboardPersonality {
+function createPersonality(settings: TConfigRecord): TGatewayPersonality {
   return {
     bellaPersona: settings[EConfigKey.AiInstructionsPersona],
     plainChatsUseBellaPersona: settings[EConfigKey.AiPlainChatsUseBellaPersona] === "true",
@@ -316,7 +316,7 @@ async function updatePersonality(
   { ownerKey, conversationKey }: TAccountKeys,
   body: unknown,
 ): Promise<TConfigRecord> {
-  const update = SDashboardPersonalityUpdate.safeParse(body);
+  const update = SGatewayPersonalityUpdate.safeParse(body);
 
   if (!update.success) {
     throw new Error(
@@ -355,7 +355,7 @@ async function updatePersonality(
 // A plain chat's model as the app chose it, checked against what the server offers: a provider of
 // its own that is usable now (its API key is set, its OAuth login is connected), a model that
 // provider lists, an effort the model supports
-async function checkModelChoice(choice: TDashboardModelChoice): Promise<TModelChoice> {
+async function checkModelChoice(choice: TGatewayModelChoice): Promise<TModelChoice> {
   const provider = SAiProvider.safeParse(choice.provider);
 
   if (!provider.success) {
@@ -385,8 +385,8 @@ async function checkModelChoice(choice: TDashboardModelChoice): Promise<TModelCh
 
 // publishes identity.link.requested and answers once the cutover began; it does not wait for
 // identity.linked
-async function requestLink(body: unknown): Promise<TDashboardLinkStarted> {
-  const request = SDashboardLinkRequest.safeParse(body);
+async function requestLink(body: unknown): Promise<TGatewayLinkStarted> {
+  const request = SGatewayLinkRequest.safeParse(body);
 
   if (!request.success) {
     throw new Error("Invalid link request");
@@ -470,7 +470,7 @@ async function readBody(request: Request, maxBytes: number): Promise<TOption<Uin
 }
 
 function errorResponse(error: string, status: number, code: TOption<string>): Response {
-  const body: TDashboardError = { error, code };
+  const body: TGatewayError = { error, code };
 
   return Response.json(body, { status });
 }
@@ -516,61 +516,61 @@ export async function handleInternalApiRequest(
     // a malformed escape is an unknown route
   }
 
-  const activationRoute = request.method === "POST" && pathname === DASHBOARD_ACTIVATION_CHECK_PATH;
-  const linkRequestRoute = request.method === "POST" && pathname === DASHBOARD_LINKS_PATH;
-  const streamRoute = request.method === "GET" && pathname === DASHBOARD_STREAM_PATH;
-  const presenceRoute = request.method === "POST" && pathname === DASHBOARD_PRESENCE_PATH;
+  const activationRoute = request.method === "POST" && pathname === GATEWAY_ACTIVATION_CHECK_PATH;
+  const linkRequestRoute = request.method === "POST" && pathname === GATEWAY_LINKS_PATH;
+  const streamRoute = request.method === "GET" && pathname === GATEWAY_STREAM_PATH;
+  const presenceRoute = request.method === "POST" && pathname === GATEWAY_PRESENCE_PATH;
   const chatLinkRoute =
-    request.method === "GET" && key.length > 0 && pathname === dashboardChatLinkPath(key);
+    request.method === "GET" && key.length > 0 && pathname === gatewayChatLinkPath(key);
   const accountRoute =
-    request.method === "GET" && key.length > 0 && pathname === dashboardAccountPath(key);
+    request.method === "GET" && key.length > 0 && pathname === gatewayAccountPath(key);
   const modelRoute =
     key.length > 0 &&
-    pathname === dashboardAccountModelPath(key) &&
+    pathname === gatewayAccountModelPath(key) &&
     (request.method === "GET" || request.method === "PUT");
   const personalityRoute =
     key.length > 0 &&
-    pathname === dashboardAccountPersonalityPath(key) &&
+    pathname === gatewayAccountPersonalityPath(key) &&
     (request.method === "GET" || request.method === "PUT");
   const messageDeleteRoute =
     request.method === "DELETE" &&
     key.length > 0 &&
     Number.isSafeInteger(messageId) &&
-    pathname === dashboardAccountMessagePath(key, messageId);
+    pathname === gatewayAccountMessagePath(key, messageId);
   const appMessageRoute =
     request.method === "POST" &&
     key.length > 0 &&
     conversationKey.length > 0 &&
-    pathname === dashboardAccountConversationMessagesPath(key, conversationKey);
+    pathname === gatewayAccountConversationMessagesPath(key, conversationKey);
   const conversationCreateRoute =
     request.method === "POST" &&
     key.length > 0 &&
-    pathname === dashboardAccountConversationsPath(key);
+    pathname === gatewayAccountConversationsPath(key);
   const conversationDeleteRoute =
     request.method === "DELETE" &&
     key.length > 0 &&
     conversationKey.length > 0 &&
-    pathname === dashboardAccountConversationPath(key, conversationKey);
+    pathname === gatewayAccountConversationPath(key, conversationKey);
 
   const mediaUploadRoute =
     request.method === "POST" &&
     key.length > 0 &&
     conversationKey.length > 0 &&
-    pathname === dashboardAccountConversationMediaPath(key, conversationKey);
+    pathname === gatewayAccountConversationMediaPath(key, conversationKey);
   const mediaDownloadRoute =
     request.method === "GET" &&
     key.length > 0 &&
     conversationKey.length > 0 &&
     mediaId.length > 0 &&
-    pathname === dashboardAccountConversationMediaFilePath(key, conversationKey, mediaId);
+    pathname === gatewayAccountConversationMediaFilePath(key, conversationKey, mediaId);
   // segment 5 is the device id here
   const deviceRoute =
     (request.method === "PUT" || request.method === "DELETE") &&
     key.length > 0 &&
     conversationKey.length > 0 &&
-    pathname === dashboardAccountDevicePath(key, conversationKey);
+    pathname === gatewayAccountDevicePath(key, conversationKey);
   const accountDevicesRoute =
-    request.method === "DELETE" && key.length > 0 && pathname === dashboardAccountDevicesPath(key);
+    request.method === "DELETE" && key.length > 0 && pathname === gatewayAccountDevicesPath(key);
 
   if (
     !activationRoute &&
@@ -601,14 +601,14 @@ export async function handleInternalApiRequest(
   try {
     // a read: checking a code changes nothing, so no command is published
     if (activationRoute) {
-      const check = SDashboardActivationCheckRequest.safeParse(await request.json());
+      const check = SGatewayActivationCheckRequest.safeParse(await request.json());
 
       if (!check.success) {
         throw new Error("Invalid activation code check");
       }
 
       const matches = AuthorizationService.instance.matchesActivationToken(check.data.code);
-      const body: TDashboardActivationCheck = { result: "unset" };
+      const body: TGatewayActivationCheck = { result: "unset" };
 
       if (matches === true) {
         body.result = "valid";
@@ -624,14 +624,14 @@ export async function handleInternalApiRequest(
     }
 
     if (presenceRoute) {
-      const presence = SDashboardPresence.safeParse(await request.json());
+      const presence = SGatewayPresence.safeParse(await request.json());
 
       if (!presence.success) {
         throw new Error("Invalid presence");
       }
 
       AppChannel.instance.reportPresence(presence.data.accountIds);
-      const body: TDashboardPresenceAccepted = { ok: true };
+      const body: TGatewayPresenceAccepted = { ok: true };
 
       return Response.json(body);
     }
@@ -642,7 +642,7 @@ export async function handleInternalApiRequest(
 
     if (chatLinkRoute) {
       const link = await IdentityService.instance.link(key);
-      const body: TDashboardChatLink = { link: undefined };
+      const body: TGatewayChatLink = { link: undefined };
 
       if (link !== undefined) {
         body.link = { accountId: link.accountId, state: link.state };
@@ -654,7 +654,7 @@ export async function handleInternalApiRequest(
     const account = await IdentityService.instance.account(key);
 
     if (accountRoute) {
-      const body: TDashboardAccount = {
+      const body: TGatewayAccount = {
         conversationKey: account.conversationKey,
         ownerKey: account.ownerKey,
         links: account.links.map((link) => ({
@@ -684,7 +684,7 @@ export async function handleInternalApiRequest(
         return errorResponse("Not found", 404, undefined);
       }
 
-      const message = SDashboardAppMessage.safeParse(await request.json());
+      const message = SGatewayAppMessage.safeParse(await request.json());
 
       if (!message.success) {
         throw new Error(message.error.issues[0]?.message ?? "Invalid message");
@@ -692,7 +692,7 @@ export async function handleInternalApiRequest(
 
       const { clientMessageId, text, images = [] } = message.data;
       const dedupeKey = `app:${conversationKey}:${clientMessageId}`;
-      const body: TDashboardAppMessageAccepted = { clientMessageId };
+      const body: TGatewayAppMessageAccepted = { clientMessageId };
 
       // NOTE: a repeated send is the stored message, answered before the model check: its provider
       // may have become unusable since
@@ -776,7 +776,7 @@ export async function handleInternalApiRequest(
         return errorResponse(`The content is not ${mimeType}`, 415, undefined);
       }
 
-      const body: TOption<TDashboardMedia> = await AppChannel.instance.store(
+      const body: TOption<TGatewayMedia> = await AppChannel.instance.store(
         key,
         account,
         conversationKey,
@@ -817,7 +817,7 @@ export async function handleInternalApiRequest(
     // NOTE: on the global lane, so a device's registers and unregisters apply in order. An
     // unregister of a device the account does not hold is a 404
     if (deviceRoute) {
-      const deviceId = SDashboardDeviceId.safeParse(conversationKey);
+      const deviceId = SGatewayDeviceId.safeParse(conversationKey);
 
       if (!deviceId.success) {
         throw new Error("Invalid device id");
@@ -828,10 +828,10 @@ export async function handleInternalApiRequest(
         chatId: account.conversationKey,
         platform: undefined,
       };
-      const body: TDashboardDevice = { deviceId: deviceId.data };
+      const body: TGatewayDevice = { deviceId: deviceId.data };
 
       if (request.method === "PUT") {
-        const registration = SDashboardDeviceRegistration.safeParse(await request.json());
+        const registration = SGatewayDeviceRegistration.safeParse(await request.json());
 
         if (!registration.success) {
           throw new Error(registration.error.issues[0]?.message ?? "Invalid device");
@@ -877,7 +877,7 @@ export async function handleInternalApiRequest(
 
     // every device of the account, one unregister each; one gone meanwhile counts as removed
     if (accountDevicesRoute) {
-      const body: TDashboardDevicesRemoved = {
+      const body: TGatewayDevicesRemoved = {
         deviceIds: await AppChannel.instance.listDeviceIds(key),
       };
 
@@ -909,7 +909,7 @@ export async function handleInternalApiRequest(
     }
 
     if (conversationCreateRoute) {
-      const body: TDashboardConversationCreated = await requestOutcome(
+      const body: TGatewayConversationCreated = await requestOutcome(
         pendingCreates,
         { turnId: createSystemTurnId(), chatId: account.conversationKey, platform: undefined },
         account.ownerKey,
@@ -957,14 +957,14 @@ export async function handleInternalApiRequest(
         throw error;
       }
 
-      const body: TDashboardConversationDeleted = { conversationKey };
+      const body: TGatewayConversationDeleted = { conversationKey };
 
       return Response.json(body);
     }
 
     if (messageDeleteRoute) {
       const { conversationKey } = account;
-      const body: TDashboardMessageDeleted = {
+      const body: TGatewayMessageDeleted = {
         deletedMessageIds: await requestOutcome(
           pendingDeletes,
           { turnId: createSystemTurnId(), chatId: conversationKey, platform: undefined },
@@ -1016,9 +1016,9 @@ export async function handleInternalApiRequest(
   }
 }
 
-// starts only when BELLACLAW_DASHBOARD_SECRET is set
+// starts only when BELLACLAW_GATEWAY_SECRET is set
 export function startInternalApiServer(): void {
-  const secret = Bun.env.BELLACLAW_DASHBOARD_SECRET?.trim();
+  const secret = Bun.env.BELLACLAW_GATEWAY_SECRET?.trim();
 
   if (server !== undefined || secret === undefined || secret.length === 0) {
     return;

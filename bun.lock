@@ -38,8 +38,8 @@
         "drizzle-kit": "^0.31.10",
       },
     },
-    "apps/dashboard": {
-      "name": "@bellaclaw/dashboard",
+    "apps/gateway": {
+      "name": "@bellaclaw/gateway",
       "dependencies": {
         "3d-force-graph": "^1.80.2",
         "@bellaclaw/database": "workspace:*",
@@ -147,9 +147,9 @@
 
     "@bellaclaw/behavior-logs": ["@bellaclaw/behavior-logs@workspace:packages/behavior-logs"],
 
-    "@bellaclaw/dashboard": ["@bellaclaw/dashboard@workspace:apps/dashboard"],
-
     "@bellaclaw/database": ["@bellaclaw/database@workspace:packages/database"],
+
+    "@bellaclaw/gateway": ["@bellaclaw/gateway@workspace:apps/gateway"],
 
     "@bellaclaw/log-viewer": ["@bellaclaw/log-viewer@workspace:apps/log-viewer"],
 

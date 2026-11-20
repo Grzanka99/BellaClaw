@@ -7,7 +7,7 @@ import {
   listHistory,
   type THistoryCursor,
 } from "@bellaclaw/database";
-import { dashboardAccountConversationMessagesPath, type TOption } from "@bellaclaw/shared";
+import { gatewayAccountConversationMessagesPath, type TOption } from "@bellaclaw/shared";
 import { fauxAssistantMessage, type Message } from "@earendil-works/pi-ai";
 import { asc, eq } from "drizzle-orm";
 import type { AgentHarness } from "../ai/agent-harness";
@@ -106,11 +106,11 @@ function request(method: string, path: string, body?: unknown) {
   );
 }
 
-// an app send as the dashboard forwards it; the status and the body once the turn settled
+// an app send as the gateway forwards it; the status and the body once the turn settled
 async function sendApp(accountId: string, conversationKey: string, body: unknown) {
   const response = await request(
     "POST",
-    dashboardAccountConversationMessagesPath(accountId, conversationKey),
+    gatewayAccountConversationMessagesPath(accountId, conversationKey),
     body,
   );
   const answer = [response.status, await response.json()];

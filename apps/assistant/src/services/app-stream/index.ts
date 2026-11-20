@@ -1,10 +1,10 @@
 import { EEventType } from "@bellaclaw/database";
-import type { TDashboardStreamEvent, TOption } from "@bellaclaw/shared";
+import type { TGatewayStreamEvent, TOption } from "@bellaclaw/shared";
 import { ESubscriptionMode, EventBus } from "../events";
 import { IdentityService } from "../identity";
 import { EMessagePlatform } from "../messaging/types";
 
-type TAppStreamListener = (event: TDashboardStreamEvent) => void;
+type TAppStreamListener = (event: TGatewayStreamEvent) => void;
 
 // NOTE: the app's live stream: nudges, typing and confidential replies for the edge, which fans
 // them out per account. Live only: a stream that was not open misses nothing it can get back,
@@ -155,7 +155,7 @@ export class AppStream {
     }
   }
 
-  private send(event: TDashboardStreamEvent): void {
+  private send(event: TGatewayStreamEvent): void {
     for (const listener of this.listeners) {
       listener(event);
     }

@@ -10,7 +10,7 @@ import { createFakeAssistant } from "./test-utils";
 let directory: string;
 let path: string;
 
-// a dashboard database to import: accounts without a public id, and account_chats rows
+// a gateway database to import: accounts without a public id, and account_chats rows
 // chats: [chatId, account row id, linkedAt]
 function seedOldDatabase(chats: [string, number, number][]) {
   const db = new Database(path);
@@ -52,7 +52,7 @@ function hasImportTable() {
 }
 
 beforeEach(async () => {
-  directory = await mkdtemp(join(tmpdir(), "dashboard-import-"));
+  directory = await mkdtemp(join(tmpdir(), "gateway-import-"));
   path = join(directory, "dashboard.db");
 });
 

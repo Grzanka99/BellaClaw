@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, expect, mock, test } from "bun:test";
 import { EEventType, eventsTable, identityLinksTable, listHistory } from "@bellaclaw/database";
 import {
-  DASHBOARD_STREAM_PATH,
-  dashboardAccountConversationMessagesPath,
-  type TDashboardStreamEvent,
+  GATEWAY_STREAM_PATH,
+  gatewayAccountConversationMessagesPath,
+  type TGatewayStreamEvent,
 } from "@bellaclaw/shared";
 import { fauxAssistantMessage, type Message } from "@earendil-works/pi-ai";
 import { eq } from "drizzle-orm";
@@ -108,7 +108,7 @@ function request(method: string, path: string, body?: unknown) {
 
 // the edge's stream; events: every event read so far, by reading what has arrived
 async function openStream() {
-  const response = await request("GET", DASHBOARD_STREAM_PATH);
+  const response = await request("GET", GATEWAY_STREAM_PATH);
   expect(response.status).toBe(200);
   expect(response.headers.get("Content-Type")).toBe("application/x-ndjson");
   const reader = response.body?.getReader();
@@ -118,7 +118,7 @@ async function openStream() {
   }
 
   const decoder = new TextDecoder();
-  const events: TDashboardStreamEvent[] = [];
+  const events: TGatewayStreamEvent[] = [];
   let buffered = "";
   let pending = reader.read();
 
@@ -155,7 +155,7 @@ function listeners() {
 async function sendApp(accountId: string, text: string, clientMessageId: string) {
   const response = await request(
     "POST",
-    dashboardAccountConversationMessagesPath(accountId, `bella:${accountId}`),
+    gatewayAccountConversationMessagesPath(accountId, `bella:${accountId}`),
     { clientMessageId, text },
   );
   expect(response.status).toBe(200);
@@ -172,7 +172,7 @@ test("an app send streams typing on as requested and as started, the user's row,
   await sendApp(accountId, "And you?", "m-2");
 
   // the order a client relies on: a nudge after typing stops already carries the reply
-  const turn = (revision: number): TDashboardStreamEvent[] => [
+  const turn = (revision: number): TGatewayStreamEvent[] => [
     { type: "typing", accountId, conversationKey, typing: true },
     { type: "typing", accountId, conversationKey, typing: true },
     { type: "changed", accountId, conversationKey, revision, rewriteRevision: 0 },
@@ -197,7 +197,7 @@ test("a message queued behind a running turn turns typing on again when it start
   const stream = await openStream();
   const accountId = `acct-${crypto.randomUUID()}`;
   const conversationKey = `bella:${accountId}`;
-  const path = dashboardAccountConversationMessagesPath(accountId, conversationKey);
+  const path = gatewayAccountConversationMessagesPath(accountId, conversationKey);
 
   expect((await request("POST", path, { clientMessageId: "m-1", text: "Slow" })).status).toBe(200);
   await running.promise;
@@ -206,13 +206,13 @@ test("a message queued behind a running turn turns typing on again when it start
   release.resolve();
   await EventBus.instance.idle();
 
-  const typing = (on: boolean): TDashboardStreamEvent => ({
+  const typing = (on: boolean): TGatewayStreamEvent => ({
     type: "typing",
     accountId,
     conversationKey,
     typing: on,
   });
-  const changed = (revision: number): TDashboardStreamEvent => ({
+  const changed = (revision: number): TGatewayStreamEvent => ({
     type: "changed",
     accountId,
     conversationKey,
@@ -350,10 +350,10 @@ test("a confidential command reply to an app message streams once as a reply and
 });
 
 test("!app and !dashboard from the app answer with a stored plain reply and no link; from Signal they send a confidential link", async () => {
-  const originalUrl = Bun.env.BELLACLAW_DASHBOARD_PUBLIC_URL;
-  const originalSecret = Bun.env.BELLACLAW_DASHBOARD_SECRET;
-  Bun.env.BELLACLAW_DASHBOARD_PUBLIC_URL = "https://dashboard.test";
-  Bun.env.BELLACLAW_DASHBOARD_SECRET = "dashboard-secret";
+  const originalUrl = Bun.env.BELLACLAW_GATEWAY_PUBLIC_URL;
+  const originalSecret = Bun.env.BELLACLAW_GATEWAY_SECRET;
+  Bun.env.BELLACLAW_GATEWAY_PUBLIC_URL = "https://dashboard.test";
+  Bun.env.BELLACLAW_GATEWAY_SECRET = "gateway-secret";
 
   try {
     const accountId = `acct-${crypto.randomUUID()}`;
@@ -388,8 +388,8 @@ test("!app and !dashboard from the app answer with a stored plain reply and no l
     expect(await stream.drain()).toHaveLength(2);
     await stream.close();
   } finally {
-    Bun.env.BELLACLAW_DASHBOARD_PUBLIC_URL = originalUrl;
-    Bun.env.BELLACLAW_DASHBOARD_SECRET = originalSecret;
+    Bun.env.BELLACLAW_GATEWAY_PUBLIC_URL = originalUrl;
+    Bun.env.BELLACLAW_GATEWAY_SECRET = originalSecret;
   }
 });
 
@@ -454,14 +454,14 @@ test("a dead-lettered turn request turns typing off; a dead letter of another ev
 test("the stream needs the secret, and an aborted connection releases its listener", async () => {
   await start();
   const refused = await handleInternalApiRequest(
-    new Request(`http://internal${DASHBOARD_STREAM_PATH}`),
+    new Request(`http://internal${GATEWAY_STREAM_PATH}`),
     SECRET,
   );
   expect(refused.status).toBe(401);
 
   const aborted = new AbortController();
   await handleInternalApiRequest(
-    new Request(`http://internal${DASHBOARD_STREAM_PATH}`, {
+    new Request(`http://internal${GATEWAY_STREAM_PATH}`, {
       headers: { Authorization: `Bearer ${SECRET}` },
       signal: aborted.signal,
     }),

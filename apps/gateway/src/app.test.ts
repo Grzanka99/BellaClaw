@@ -10,7 +10,7 @@ import {
   MIGRATIONS_FOLDER,
   memoriesTable,
 } from "@bellaclaw/database";
-import { createDashboardLinkToken } from "@bellaclaw/shared";
+import { createGatewayLinkToken } from "@bellaclaw/shared";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/libsql";
 import { migrate } from "drizzle-orm/libsql/migrator";
@@ -96,7 +96,7 @@ function createTestApp(path = ":memory:", reader?: TChatReader, streamSilenceMs 
   }
 
   function token(chatKey: string) {
-    return createDashboardLinkToken(SECRET, chatKey, Date.now());
+    return createGatewayLinkToken(SECRET, chatKey, Date.now());
   }
 
   // registers an account with a fresh link to the chat; its link becomes active
@@ -323,7 +323,7 @@ test("the account routes reach only the signed-in account's keys, and need a ses
 });
 
 test("a row of account_chats the import still holds counts as its account's link", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "dashboard-app-"));
+  const directory = await mkdtemp(join(tmpdir(), "gateway-app-"));
   const path = join(directory, "dashboard.db");
 
   try {
@@ -759,9 +759,9 @@ test("the app reads its personality settings, changes each and reads the change 
   expect(await read(alice.token)).toEqual([200, changed]);
 });
 
-// the assistant's database in a temporary file, migrated, with the reader the dashboard uses on it
+// the assistant's database in a temporary file, migrated, with the reader the gateway uses on it
 async function createAssistantDatabase() {
-  const dir = await mkdtemp(join(tmpdir(), "bellaclaw-dashboard-history-"));
+  const dir = await mkdtemp(join(tmpdir(), "bellaclaw-gateway-history-"));
   const url = `file:${join(dir, "assistant.db")}`;
   const db = drizzle({ connection: { url } });
   await migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });

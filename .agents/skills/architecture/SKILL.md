@@ -132,7 +132,7 @@ A call across services is allowed only when it changes no state:
 - Infrastructure: `DatabaseConnector`, `EventBus`, `AppLogger`, `startSpan`.
 - Cached read models: `SettingsService.getAll` (fed by `settings.changed`),
   `AuthorizationService.listAuthorizedChatIds` (fed by `authorization.changed`) and
-  `matchesActivationToken` (the configured code, for the dashboard's registration),
+  `matchesActivationToken` (the configured code, for the gateway's registration),
   `IdentityService.resolve`, `linkedAccount`, `link`, `account`,
   `waitWhileLinking` and `listNoticeRecipients`
   (loaded from `identity_links`, fed by `identity.link.started` and `identity.linked`),
@@ -144,8 +144,8 @@ A call across services is allowed only when it changes no state:
 - The stateless engine: `AgentHarness.runMain`, `runPlain`, `runScheduledTask`,
   `compactConversation`.
 - Live state an event cannot carry: `McpService.open`, `McpRunRegistry`, `AppStream.listen`
-  (the dashboard's open streams), `AppChannel.openEdgeConnection`, `reportPresence` and
-  `hasOpenStream` (which accounts have an open stream at the dashboard, in memory only).
+  (the gateway's open streams), `AppChannel.openEdgeConnection`, `reportPresence` and
+  `hasOpenStream` (which accounts have an open stream at the gateway, in memory only).
 - Bytes an event must not carry: the internal API hands an app upload to `AppChannel.store` and
   reads it back with `open`; `findAttachments` checks a send's named images.
 - Reads, including reads that prepare a command (`AutomationService.resolveNames`,
@@ -199,9 +199,9 @@ confidential reply with `confidential: true`.
 
 The live consumer `app-stream` turns `conversation.changed`, `conversation.deleted` and
 `turn.requested`, `turn.started`, `turn.completed`, `turn.failed` and `event.dead_lettered` of an
-account's conversations into nudges, deletes and typing for the dashboard's one stream, tagged with the account id.
+account's conversations into nudges, deletes and typing for the gateway's one stream, tagged with the account id.
 It turns a `reply.ready` marked `confidential` whose channel is the app into a `reply` with its text,
-which the dashboard sends to that account's app sessions only: the only copy of the reply, lost
+which the gateway sends to that account's app sessions only: the only copy of the reply, lost
 when no stream is open.
 Typing goes on at `turn.requested` and again at `turn.started`, which carries the keys the turn
 runs under: a turn queued behind another starts after that one's typing off. Nothing replays: the
@@ -216,12 +216,12 @@ address).
 
 The App channel owns the app's devices: its durable consumer `app` answers
 `app.device.register.requested` with `app.device.registered` (insert or replace by the device id,
-which the dashboard makes per app session) and `app.device.unregister.requested` with `app.device.unregistered`, or `command.rejected` with
+which the gateway makes per app session) and `app.device.unregister.requested` with `app.device.unregistered`, or `command.rejected` with
 `device-not-found` for a device the account does not hold; both on the `global` lane. The register
 command carries the key material and is in `EVENT_SCRUBBED`. Its live consumer `app-cache` feeds
 the device read model. Who owns a conversation is one rule, `findOwnedConversation` in
 `@bellaclaw/database`: the registry's owner, or, before its first row, the account whose Bella
-conversation it is. The dashboard's reads, the internal API's send and Authorization's gate for an
+conversation it is. The gateway's reads, the internal API's send and Authorization's gate for an
 app message all use it.
 
 The same consumer `app` pushes: on `conversation.changed` with a `messageId` whose row went out on

@@ -54,23 +54,23 @@ services:
       - bellaclaw-data:/app-data:ro
       - bellaclaw-src:/srv:ro
 
-  dashboard:
+  gateway:
     image: bellaclaw:local
     pull_policy: never
-    container_name: bellaclaw-dashboard
+    container_name: bellaclaw-gateway
     restart: on-failure
     environment:
       - TURSO_CONNECTION_URL=${TURSO_CONNECTION_URL:-}
       - TURSO_AUTH_TOKEN=${TURSO_AUTH_TOKEN:-}
-      - BELLACLAW_DASHBOARD_PUBLIC_URL=${BELLACLAW_DASHBOARD_PUBLIC_URL:-}
-      - BELLACLAW_DASHBOARD_SECRET=${BELLACLAW_DASHBOARD_SECRET:-}
+      - BELLACLAW_GATEWAY_PUBLIC_URL=${BELLACLAW_GATEWAY_PUBLIC_URL:-}
+      - BELLACLAW_GATEWAY_SECRET=${BELLACLAW_GATEWAY_SECRET:-}
       - BELLACLAW_INTERNAL_API_URL=http://bellaclaw:3081
-      - BELLACLAW_DASHBOARD_HOSTNAME=0.0.0.0
-      - BELLACLAW_DASHBOARD_DB_PATH=/dashboard-data/dashboard.db
+      - BELLACLAW_GATEWAY_HOSTNAME=0.0.0.0
+      - BELLACLAW_GATEWAY_DB_PATH=/dashboard-data/dashboard.db
       - BELLACLAW_RELEASES_DIR=/srv
     depends_on:
       - bellaclaw
-    command: ["bun", "apps/assistant/scripts/supervisor.ts", "dashboard"]
+    command: ["bun", "apps/assistant/scripts/supervisor.ts", "gateway"]
     ports:
       - "127.0.0.1:8988:8988"
     volumes:

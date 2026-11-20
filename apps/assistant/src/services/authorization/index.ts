@@ -303,7 +303,7 @@ export class AuthorizationService {
     logAuthorizationDecision(event.trace, result);
   }
 
-  // NOTE: an app message is sent by the account the dashboard verified, as its owner key, under
+  // NOTE: an app message is sent by the account the gateway verified, as its owner key, under
   // the conversation key the app named. The session stands for the activation gate; the message
   // passes only when the conversation belongs to that account, and is dropped alike for a
   // conversation of another account and one that does not exist. It leaves with the kind the

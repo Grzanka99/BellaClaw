@@ -1,4 +1,4 @@
-import { createDashboardLinkToken } from "@bellaclaw/shared";
+import { createGatewayLinkToken } from "@bellaclaw/shared";
 import { IdentityService, type TChatAddress } from "../identity";
 import { EMessagePlatform } from "../messaging/types";
 import type { TCommand, TCommandResult } from "./types";
@@ -10,14 +10,14 @@ function createLinkReply(address: TChatAddress, path: string): TCommandResult {
     return "This app is signed in to your account already; the dashboard or another device signs in with your username and password, or with a link asked from a linked Signal or Discord chat.";
   }
 
-  const publicUrl = Bun.env.BELLACLAW_DASHBOARD_PUBLIC_URL?.trim();
-  const secret = Bun.env.BELLACLAW_DASHBOARD_SECRET?.trim();
+  const publicUrl = Bun.env.BELLACLAW_GATEWAY_PUBLIC_URL?.trim();
+  const secret = Bun.env.BELLACLAW_GATEWAY_SECRET?.trim();
 
   if (!publicUrl || !secret) {
     return "The dashboard is not configured.";
   }
 
-  const token = createDashboardLinkToken(
+  const token = createGatewayLinkToken(
     secret,
     IdentityService.instance.addressKey(address),
     Date.now(),

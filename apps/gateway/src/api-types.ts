@@ -1,12 +1,12 @@
-// The JSON shapes of the dashboard's HTTP API, for the browser. Types only: import with
+// The JSON shapes of the gateway's HTTP API, for the browser. Types only: import with
 // `import type`, so no server code reaches the client bundle.
 import type { THistoryMessage, TListedConversation } from "@bellaclaw/database";
 import type {
-  TDashboardConversationCreated,
-  TDashboardConversationDeleted,
-  TDashboardLinkState,
-  TDashboardMedia,
-  TDashboardMessageDeleted,
+  TGatewayConversationCreated,
+  TGatewayConversationDeleted,
+  TGatewayLinkState,
+  TGatewayMedia,
+  TGatewayMessageDeleted,
 } from "@bellaclaw/shared";
 
 // a row the app shows: a message, or a display row (a command with its reply, a notice, a failure
@@ -19,16 +19,16 @@ export type { THistoryMessage } from "@bellaclaw/database";
 // GET and PUT /api/personality answer, and PUT /api/personality body (the fields to change, at
 // least one): Bella's persona and the persona of the plain chats
 export type {
-  TDashboardAppMessage,
-  TDashboardAppMessageAccepted,
-  TDashboardHistoryImage,
-  TDashboardModelChoice,
-  TDashboardModelState,
-  TDashboardModelUpdate,
-  TDashboardPersonality,
-  TDashboardPersonalityUpdate,
-  TDashboardReasoningEffort,
-  TDashboardServiceTier,
+  TGatewayAppMessage,
+  TGatewayAppMessageAccepted,
+  TGatewayHistoryImage,
+  TGatewayModelChoice,
+  TGatewayModelState,
+  TGatewayModelUpdate,
+  TGatewayPersonality,
+  TGatewayPersonalityUpdate,
+  TGatewayReasoningEffort,
+  TGatewayServiceTier,
 } from "@bellaclaw/shared";
 
 // body of every answer outside 2xx. code otherAccount: the session belongs to another account than
@@ -62,7 +62,7 @@ export type TRegisterRequest = {
 export type TLoginRequest = { username: string; password: string; token?: string };
 
 // chatKey: the linked address; linkedAt: epoch ms
-export type TLinkedChat = { chatKey: string; state: TDashboardLinkState; linkedAt: number };
+export type TLinkedChat = { chatKey: string; state: TGatewayLinkState; linkedAt: number };
 
 // GET /api/me answer, and the answer of register, login, link login and link. chats: oldest link
 // first
@@ -78,7 +78,7 @@ export type TLogoutResponse = { ok: true };
 // PUT /api/device body, from the app only: the device's FCM registration token and its RFC 8291
 // key material, the P-256 public key (65 bytes, an uncompressed point on the curve) and the auth
 // secret (16 bytes), base64url
-export type { TDashboardDeviceRegistration as TDeviceRegistration } from "@bellaclaw/shared";
+export type { TGatewayDeviceRegistration as TDeviceRegistration } from "@bellaclaw/shared";
 
 // PUT and DELETE /api/device answer
 export type TDeviceResponse = { ok: true };
@@ -96,7 +96,7 @@ export type TChatMessage = {
 export type TMessagesResponse = { messages: TChatMessage[]; nextBefore?: number };
 
 // DELETE /api/messages/:messageId answer
-export type TMessageDeletedResponse = TDashboardMessageDeleted;
+export type TMessageDeletedResponse = TGatewayMessageDeleted;
 
 // revision: raised on every change of the conversation's transcript; rewriteRevision: the revision
 // of its latest change that was not an append. A client synced at or above rewriteRevision fetches
@@ -113,14 +113,14 @@ export type TConversationSummary = TListedConversation;
 export type TConversationsResponse = { conversations: TConversationSummary[] };
 
 // POST /api/conversations answer: a new plain chat, listed and empty, at revision 0
-export type TConversationCreatedResponse = TDashboardConversationCreated;
+export type TConversationCreatedResponse = TGatewayConversationCreated;
 
 // POST /api/conversations/:conversationKey/media answer: the uploaded image, as a send names it.
 // The body is the image's bytes, Content-Type its type
-export type TMediaUploadedResponse = TDashboardMedia;
+export type TMediaUploadedResponse = TGatewayMedia;
 
 // DELETE /api/conversations/:conversationKey answer: the plain chat is gone with its history
-export type TConversationDeletedResponse = TDashboardConversationDeleted;
+export type TConversationDeletedResponse = TGatewayConversationDeleted;
 
 // GET /api/conversations/:conversationKey/messages answer, oldest first: the newest rows, the rows
 // below `before`, or the rows above `after`. nextBefore: the `before` of the older page, when one

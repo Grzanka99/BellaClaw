@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { appDevicesTable, EEventType, eventsTable } from "@bellaclaw/database";
 import {
-  DASHBOARD_PRESENCE_PATH,
-  dashboardAccountDevicePath,
-  dashboardAccountDevicesPath,
+  GATEWAY_PRESENCE_PATH,
+  gatewayAccountDevicePath,
+  gatewayAccountDevicesPath,
 } from "@bellaclaw/shared";
 import { asc, eq } from "drizzle-orm";
 import { DatabaseConnector } from "../database";
@@ -48,11 +48,11 @@ function send(method: string, path: string, body: unknown, signal?: AbortSignal)
 }
 
 function register(accountId: string, deviceId: string, fcmToken: string, index: number) {
-  return send("PUT", dashboardAccountDevicePath(accountId, deviceId), { fcmToken, ...keys(index) });
+  return send("PUT", gatewayAccountDevicePath(accountId, deviceId), { fcmToken, ...keys(index) });
 }
 
 function unregister(accountId: string, deviceId: string) {
-  return send("DELETE", dashboardAccountDevicePath(accountId, deviceId), undefined);
+  return send("DELETE", gatewayAccountDevicePath(accountId, deviceId), undefined);
 }
 
 function devices() {
@@ -146,13 +146,13 @@ describe("AppChannel devices", () => {
     await register("acct-1", "phone-2", "token-b", 1);
     await register("acct-2", "phone-3", "token-c", 0);
 
-    const removed = await send("DELETE", dashboardAccountDevicesPath("acct-1"), undefined);
+    const removed = await send("DELETE", gatewayAccountDevicesPath("acct-1"), undefined);
 
     expect(await removed.json()).toEqual({ deviceIds: ["phone-1", "phone-2"] });
     expect((await devices()).map((row) => row.id)).toEqual(["phone-3"]);
     expect(await AppChannel.instance.hasDevice("acct-1")).toBe(false);
     expect(
-      await (await send("DELETE", dashboardAccountDevicesPath("acct-1"), undefined)).json(),
+      await (await send("DELETE", gatewayAccountDevicesPath("acct-1"), undefined)).json(),
     ).toEqual({ deviceIds: [] });
   });
 
@@ -173,11 +173,11 @@ describe("AppChannel devices", () => {
       { ...valid, fcmToken: "x".repeat(4097) },
       { ...valid, extra: true },
     ]) {
-      expect(
-        (await send("PUT", dashboardAccountDevicePath("acct-1", "phone-1"), body)).status,
-      ).toBe(400);
+      expect((await send("PUT", gatewayAccountDevicePath("acct-1", "phone-1"), body)).status).toBe(
+        400,
+      );
     }
-    expect((await send("PUT", dashboardAccountDevicePath("acct-1", "phone.1"), valid)).status).toBe(
+    expect((await send("PUT", gatewayAccountDevicePath("acct-1", "phone.1"), valid)).status).toBe(
       400,
     );
 
@@ -209,14 +209,14 @@ describe("AppChannel presence", () => {
 
     expect(
       await (
-        await send("POST", DASHBOARD_PRESENCE_PATH, { accountIds: ["acct-1", "acct-2"] })
+        await send("POST", GATEWAY_PRESENCE_PATH, { accountIds: ["acct-1", "acct-2"] })
       ).json(),
     ).toEqual({ ok: true });
     expect(AppChannel.instance.hasOpenStream("acct-1")).toBe(true);
     expect(AppChannel.instance.hasOpenStream("acct-2")).toBe(true);
 
     // a stream closed at the edge
-    await send("POST", DASHBOARD_PRESENCE_PATH, { accountIds: ["acct-2"] });
+    await send("POST", GATEWAY_PRESENCE_PATH, { accountIds: ["acct-2"] });
     expect(AppChannel.instance.hasOpenStream("acct-1")).toBe(false);
     expect(AppChannel.instance.hasOpenStream("acct-2")).toBe(true);
 
@@ -224,7 +224,7 @@ describe("AppChannel presence", () => {
     expect(AppChannel.instance.hasOpenStream("acct-2")).toBe(false);
 
     // a report that arrives with no connection open is not kept
-    await send("POST", DASHBOARD_PRESENCE_PATH, { accountIds: ["acct-2"] });
+    await send("POST", GATEWAY_PRESENCE_PATH, { accountIds: ["acct-2"] });
     expect(AppChannel.instance.hasOpenStream("acct-2")).toBe(false);
   });
 });

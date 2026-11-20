@@ -1,6 +1,6 @@
 /** @jsxImportSource hono/jsx/dom */
 import { useEffect, useState } from "hono/jsx/dom";
-import type { TDashboardPersonalityUpdate, TMeResponse } from "../api-types";
+import type { TGatewayPersonalityUpdate, TMeResponse } from "../api-types";
 import { ACCOUNT_CHANGED_EVENT, api, UNAUTHORIZED_EVENT } from "./api";
 import { FactsTab } from "./facts";
 import { HistoryTab } from "./history";
@@ -39,7 +39,7 @@ export function Dashboard({ me: initialMe, onLoggedOut, onAccountChanged }: TDas
   const [panelVersion, setPanelVersion] = useState(0);
   // the Personality tab's unsaved edits, only the fields the user changed, kept while the tab
   // mounts again
-  const [personalityDraft, setPersonalityDraft] = useState<TDashboardPersonalityUpdate>({});
+  const [personalityDraft, setPersonalityDraft] = useState<TGatewayPersonalityUpdate>({});
 
   useEffect(() => {
     const onHashChange = () => setTab(readTab());

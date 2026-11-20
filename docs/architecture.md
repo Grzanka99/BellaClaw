@@ -11,7 +11,7 @@ BellaClaw is a Bun workspace orchestrated by Turborepo:
 | --- | --- |
 | `@bellaclaw/assistant` | Messaging, AI orchestration, authorization, scheduling, memory, settings, and the Turso database connection. |
 | `@bellaclaw/log-viewer` | Hono routes, query parsing, assets, and behavior-log rendering. |
-| `@bellaclaw/dashboard` | Per-user web control panel: accounts, sessions, chat links, message history, fact graph, model and personality settings. |
+| `@bellaclaw/gateway` | Per-user web control panel: accounts, sessions, chat links, message history, fact graph, model and personality settings. |
 | `@bellaclaw/behavior-logs` | Behavior event types, SQLite schema, read/write access, and log CLI tools. |
 | `@bellaclaw/database` | Drizzle schema, the enums it stores, migrations, and drizzle-kit configs. |
 | `@bellaclaw/shared` | Primitives every workspace needs: `TOption`, `AsyncQueue`, the logger, and `REPOSITORY_ROOT`. |
@@ -31,14 +31,14 @@ Services talk through one durable event log in SQLite; see the
 
 ![Every BellaClaw service talks through the event bus](event-architecture.svg)
 
-Requesters are conversation tools, slash commands, scheduling and the internal API the dashboard calls; command owners are cron, automations, memory, settings, calendar, conversation, mcp-auth and ai-auth. Reads from the allow-list (settings and authorization caches, read tools, drivers) are direct calls and are not drawn.
+Requesters are conversation tools, slash commands, scheduling and the internal API the gateway calls; command owners are cron, automations, memory, settings, calendar, conversation, mcp-auth and ai-auth. Reads from the allow-list (settings and authorization caches, read tools, drivers) are direct calls and are not drawn.
 
 1. A Discord or Signal transport publishes `message.received` with a dedupe key per platform
    message. The internal API publishes a message of the app as `message.received` with channel
    `app`, keyed by its conversation, with the app's message id as the dedupe key.
 2. Authorization decides activation and lockout, then publishes `message.authorized`. An app
    message skips the activation gate and passes only when the conversation belongs to the account
-   the dashboard verified; it leaves with the conversation's kind from the registry (Bella or
+   the gateway verified; it leaves with the conversation's kind from the registry (Bella or
    plain).
 3. Commands answers a `!command` with `reply.ready`, or publishes `turn.requested`. In a plain
    chat a `!` message is text for the model.
@@ -61,7 +61,7 @@ Requesters are conversation tools, slash commands, scheduling and the internal A
    reloads instead of fetching by cursor. Memory distills facts from `turn.completed`, except a
    plain chat's, and its boot catch-up skips plain chats. The live
    consumer `app-stream` turns `conversation.changed` and the turn facts of account conversations
-   into nudges and typing on the dashboard's stream (see `docs/dashboard.md`), and a confidential
+   into nudges and typing on the gateway's stream (see `docs/gateway.md`), and a confidential
    `reply.ready` to an app message into a `reply` the app shows once. The App
    channel's durable consumer `app` pushes the new rows of the app channel to an account with no
    open stream.
@@ -70,13 +70,13 @@ Requesters are conversation tools, slash commands, scheduling and the internal A
 
 Images never travel on the bus: `message.received` carries references that name their channel
 and source address, and a turn fetches the bytes through that channel's attachment store. The app
-uploads an image through the dashboard to the internal API's media route; the App channel
+uploads an image through the gateway to the internal API's media route; the App channel
 (`services/app`) checks and keeps it on the assistant's data volume, lists it in `app_media`, and
 serves it for download. It is the `app` attachment store for fetch and delete, so the cleanup of
 images older than three compactions and a message delete remove app files too, and its durable
 consumer of `conversation.deleted` removes a deleted plain chat's images, sent or only uploaded.
 
-The App channel also owns the app's devices (`app_devices`: the id the dashboard made for an app
+The App channel also owns the app's devices (`app_devices`: the id the gateway made for an app
 session, the account, the FCM token and the RFC 8291 key material). Its durable consumer `app` handles
 `app.device.register.requested` (answered by `app.device.registered`) and
 `app.device.unregister.requested` (answered by `app.device.unregistered`, or `command.rejected`
@@ -85,7 +85,7 @@ an account, as a new password at the dashboard asks, with one unregister command
 live consumer `app-cache` keeps which account has a device, loaded at boot, for Outbound and for
 the audience of a global notice, which also holds the Bella conversation of every account with a
 device. It also keeps in memory which accounts have an
-open stream at the dashboard, as the dashboard reports it over its live connection; a dropped
+open stream at the gateway, as the gateway reports it over its live connection; a dropped
 connection or a restart reads closed for every account.
 
 The same consumer `app` sends the push. `conversation.changed` carries `messageId` when a reply,

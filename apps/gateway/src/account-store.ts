@@ -1,10 +1,10 @@
 import { Database } from "bun:sqlite";
 import { createHash, randomBytes } from "node:crypto";
-import type { TDashboardLinkToken, TOption } from "@bellaclaw/shared";
+import type { TGatewayLinkToken, TOption } from "@bellaclaw/shared";
 
 export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
-// id: the row id, which never leaves the dashboard; publicId: the account's id for the assistant
+// id: the row id, which never leaves the gateway; publicId: the account's id for the assistant
 export type TAccount = { id: number; publicId: string; username: string };
 
 // the new account, or why none was created
@@ -99,7 +99,7 @@ export class AccountStore {
   public createAccount(
     username: string,
     passwordHash: string,
-    link: TOption<TDashboardLinkToken>,
+    link: TOption<TGatewayLinkToken>,
     now: number,
   ): TRegistration {
     return this.db.transaction((): TRegistration => {
@@ -133,7 +133,7 @@ export class AccountStore {
   }
 
   // False when the link was already used or has expired.
-  public consumeLink(link: TDashboardLinkToken, now: number): boolean {
+  public consumeLink(link: TGatewayLinkToken, now: number): boolean {
     return this.db.transaction(() => this.useLink(link, now))();
   }
 
@@ -142,7 +142,7 @@ export class AccountStore {
   // Undefined, with nothing changed, when the link was already used or has expired.
   public redeemLoginLink(
     accountId: number,
-    link: TDashboardLinkToken,
+    link: TGatewayLinkToken,
     passwordHash: TOption<string>,
     kind: TSessionKind,
     now: number,
@@ -329,7 +329,7 @@ export class AccountStore {
 
   // NOTE: runs inside the caller's transaction. False when the link was already used or has
   // expired.
-  private useLink(link: TDashboardLinkToken, now: number): boolean {
+  private useLink(link: TGatewayLinkToken, now: number): boolean {
     // NOTE: the rows of expired tokens go below, so an expired token is refused here and never
     // reaches the insert
     if (link.expiresAt <= now) {

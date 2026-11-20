@@ -26,8 +26,8 @@ import { SettingsService } from "../settings";
 import { DefaultConfigRecord } from "../settings/schema";
 import type { TConversation } from "./types";
 
-const originalUrl = Bun.env.BELLACLAW_DASHBOARD_PUBLIC_URL;
-const originalSecret = Bun.env.BELLACLAW_DASHBOARD_SECRET;
+const originalUrl = Bun.env.BELLACLAW_GATEWAY_PUBLIC_URL;
+const originalSecret = Bun.env.BELLACLAW_GATEWAY_SECRET;
 
 function reset() {
   for (const service of [
@@ -47,15 +47,15 @@ beforeEach(async () => {
   reset();
   await resetEventTables();
   await resetIdentityLinksTable();
-  Bun.env.BELLACLAW_DASHBOARD_PUBLIC_URL = "https://dashboard.test";
-  Bun.env.BELLACLAW_DASHBOARD_SECRET = "dashboard-secret";
+  Bun.env.BELLACLAW_GATEWAY_PUBLIC_URL = "https://dashboard.test";
+  Bun.env.BELLACLAW_GATEWAY_SECRET = "gateway-secret";
 });
 
 afterEach(async () => {
   await EventBus.instance.idle();
   await EventBus.instance.stop();
-  Bun.env.BELLACLAW_DASHBOARD_PUBLIC_URL = originalUrl;
-  Bun.env.BELLACLAW_DASHBOARD_SECRET = originalSecret;
+  Bun.env.BELLACLAW_GATEWAY_PUBLIC_URL = originalUrl;
+  Bun.env.BELLACLAW_GATEWAY_SECRET = originalSecret;
   reset();
 });
 

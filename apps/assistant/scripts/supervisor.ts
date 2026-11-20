@@ -29,7 +29,7 @@ const CI_PASSED_CONCLUSIONS = ["success", "skipped", "neutral"];
 // an error message goes to chat, and a remote URL can carry a token
 const URL_CREDENTIALS = /\/\/[^/@\s]+@/g;
 
-const SRole = z.enum(["assistant", "log-viewer", "dashboard"]);
+const SRole = z.enum(["assistant", "log-viewer", "gateway"]);
 const SChildMessage = z.object({ type: z.enum(["ready", "update"]) });
 const SCheckRuns = z.object({
   check_runs: z.array(z.object({ conclusion: z.string().nullable() })),
@@ -40,9 +40,7 @@ const role = SRole.safeParse(Bun.argv[2]);
 const releasesDir = Bun.env.BELLACLAW_RELEASES_DIR;
 
 if (!role.success || !releasesDir) {
-  throw new Error(
-    "Usage: BELLACLAW_RELEASES_DIR=<dir> supervisor.ts assistant|log-viewer|dashboard",
-  );
+  throw new Error("Usage: BELLACLAW_RELEASES_DIR=<dir> supervisor.ts assistant|log-viewer|gateway");
 }
 
 const root: string = releasesDir;
@@ -428,7 +426,7 @@ if (role.data === "assistant") {
     scheduleDailyUpdate();
   }
 } else {
-  // the log viewer and the dashboard only follow the release the assistant's supervisor selects
+  // the log viewer and the gateway only follow the release the assistant's supervisor selects
   let dir = await currentDir();
 
   void startApp(dir);

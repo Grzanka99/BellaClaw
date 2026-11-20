@@ -14,7 +14,7 @@ const STREAM_RETRY_MS = 2_000;
 // a little over two keep-alive intervals of the assistant's stream (25 s, in its internal API)
 const STREAM_SILENCE_MS = 60_000;
 
-const logger = createLogger("DASHBOARD");
+const logger = createLogger("GATEWAY");
 
 function requireEnv(name: string): string {
   const value = Bun.env[name]?.trim();
@@ -40,32 +40,32 @@ async function buildClient(): Promise<Map<string, Blob>> {
   return new Map(build.outputs.map((output) => [output.path.slice(1), output]));
 }
 
-const publicUrl = Bun.env.BELLACLAW_DASHBOARD_PUBLIC_URL?.trim();
-const secret = Bun.env.BELLACLAW_DASHBOARD_SECRET?.trim();
+const publicUrl = Bun.env.BELLACLAW_GATEWAY_PUBLIC_URL?.trim();
+const secret = Bun.env.BELLACLAW_GATEWAY_SECRET?.trim();
 
 // NOTE: the root `start` and `dev` scripts run every app, and the assistant reads the same two
-// variables as "dashboard disabled". So this is a clean exit, not an error.
+// variables as "gateway disabled". So this is a clean exit, not an error.
 if (!publicUrl || !secret) {
   logger.info(
-    "Dashboard is not configured: BELLACLAW_DASHBOARD_PUBLIC_URL or BELLACLAW_DASHBOARD_SECRET is unset",
+    "Gateway is not configured: BELLACLAW_GATEWAY_PUBLIC_URL or BELLACLAW_GATEWAY_SECRET is unset",
   );
   process.exit(0);
 }
 
 if (!URL.canParse(publicUrl)) {
-  throw new Error("BELLACLAW_DASHBOARD_PUBLIC_URL must be a URL");
+  throw new Error("BELLACLAW_GATEWAY_PUBLIC_URL must be a URL");
 }
 
-const hostname = Bun.env.BELLACLAW_DASHBOARD_HOSTNAME?.trim() || "127.0.0.1";
-const port = Number(Bun.env.BELLACLAW_DASHBOARD_PORT?.trim() || 8988);
+const hostname = Bun.env.BELLACLAW_GATEWAY_HOSTNAME?.trim() || "127.0.0.1";
+const port = Number(Bun.env.BELLACLAW_GATEWAY_PORT?.trim() || 8988);
 
 if (!Number.isInteger(port) || port < 1 || port > 65_535) {
-  throw new Error("BELLACLAW_DASHBOARD_PORT must be an integer from 1 to 65535");
+  throw new Error("BELLACLAW_GATEWAY_PORT must be an integer from 1 to 65535");
 }
 
 const internalApiUrl = Bun.env.BELLACLAW_INTERNAL_API_URL?.trim() || "http://127.0.0.1:3081";
 const databasePath =
-  Bun.env.BELLACLAW_DASHBOARD_DB_PATH?.trim() || repositoryPath(".data", "dashboard.db");
+  Bun.env.BELLACLAW_GATEWAY_DB_PATH?.trim() || repositoryPath(".data", "dashboard.db");
 const reader = createChatReader(requireEnv("TURSO_CONNECTION_URL"), requireEnv("TURSO_AUTH_TOKEN"));
 
 mkdirSync(dirname(databasePath), { recursive: true });
@@ -111,7 +111,7 @@ const server = Bun.serve({
   fetch: app.fetch,
 });
 
-logger.info(`Dashboard listening on http://${hostname}:${server.port}`);
+logger.info(`Gateway listening on http://${hostname}:${server.port}`);
 
 // the process ends with the server, so the stream from the assistant is never closed
 void liveStream.follow(new AbortController().signal);

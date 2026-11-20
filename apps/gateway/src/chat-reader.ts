@@ -43,7 +43,7 @@ export type TChatReader = {
   ): Promise<THistoryMessage[]>;
 };
 
-// NOTE: the assistant's database. The dashboard only reads it; writes go through the internal API.
+// NOTE: the assistant's database. The gateway only reads it; writes go through the internal API.
 export function createChatReader(url: string, authToken: string): TChatReader {
   const db = drizzle({ connection: { url, authToken } });
 

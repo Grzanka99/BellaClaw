@@ -1,23 +1,23 @@
 /** @jsxImportSource hono/jsx/dom */
 import type { TOption } from "@bellaclaw/shared";
 import { useEffect, useState } from "hono/jsx/dom";
-import type { TDashboardPersonality, TDashboardPersonalityUpdate } from "../api-types";
+import type { TGatewayPersonality, TGatewayPersonalityUpdate } from "../api-types";
 import { api } from "./api";
 
 type TPersonalityTabProps = {
   // only the fields the user edited, kept by the parent so a remount keeps unsaved edits; every
   // other field shows the saved settings
-  draft: TDashboardPersonalityUpdate;
+  draft: TGatewayPersonalityUpdate;
   // changes the latest draft
-  setDraft: (change: (draft: TDashboardPersonalityUpdate) => TDashboardPersonalityUpdate) => void;
+  setDraft: (change: (draft: TGatewayPersonalityUpdate) => TGatewayPersonalityUpdate) => void;
 };
 
 // the draft's fields that differ from values: an edit that holds the same value is none
 function differing(
-  draft: TDashboardPersonalityUpdate,
-  values: TDashboardPersonalityUpdate,
-): TDashboardPersonalityUpdate {
-  const rest: TDashboardPersonalityUpdate = {};
+  draft: TGatewayPersonalityUpdate,
+  values: TGatewayPersonalityUpdate,
+): TGatewayPersonalityUpdate {
+  const rest: TGatewayPersonalityUpdate = {};
 
   if (draft.bellaPersona !== undefined && draft.bellaPersona !== values.bellaPersona) {
     rest.bellaPersona = draft.bellaPersona;
@@ -42,14 +42,14 @@ function differing(
 
 export function PersonalityTab({ draft, setDraft }: TPersonalityTabProps) {
   // what the assistant uses now
-  const [saved, setSaved] = useState<TOption<TDashboardPersonality>>(undefined);
+  const [saved, setSaved] = useState<TOption<TGatewayPersonality>>(undefined);
   const [busy, setBusy] = useState(true);
   const [failure, setFailure] = useState<TOption<string>>(undefined);
 
-  async function request(method: string, update: TOption<TDashboardPersonalityUpdate>) {
+  async function request(method: string, update: TOption<TGatewayPersonalityUpdate>) {
     setBusy(true);
     setFailure(undefined);
-    const result = await api<TDashboardPersonality>(method, "/api/personality", update);
+    const result = await api<TGatewayPersonality>(method, "/api/personality", update);
     setBusy(false);
 
     if ("error" in result) {
@@ -83,12 +83,12 @@ export function PersonalityTab({ draft, setDraft }: TPersonalityTabProps) {
   }
 
   const loaded = saved;
-  const shown: TDashboardPersonality = { ...saved, ...draft };
+  const shown: TGatewayPersonality = { ...saved, ...draft };
   // only the edits that differ from the saved settings, so an untouched control changes nothing
   const update = differing(draft, saved);
 
   // a control returned to its saved value is no edit
-  function edit(change: TDashboardPersonalityUpdate) {
+  function edit(change: TGatewayPersonalityUpdate) {
     setDraft((latest) => differing({ ...latest, ...change }, loaded));
   }
 

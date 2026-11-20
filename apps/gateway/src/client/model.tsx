@@ -1,29 +1,25 @@
 /** @jsxImportSource hono/jsx/dom */
 import type { TOption } from "@bellaclaw/shared";
 import { useEffect, useState } from "hono/jsx/dom";
-import type {
-  TDashboardModelState,
-  TDashboardModelUpdate,
-  TDashboardServiceTier,
-} from "../api-types";
+import type { TGatewayModelState, TGatewayModelUpdate, TGatewayServiceTier } from "../api-types";
 import { api } from "./api";
 import { Select } from "./select";
 
-type TSelection = TDashboardModelState["purposes"][number];
+type TSelection = TGatewayModelState["purposes"][number];
 
-const SERVICE_TIERS: TDashboardServiceTier[] = ["default", "flex", "priority"];
+const SERVICE_TIERS: TGatewayServiceTier[] = ["default", "flex", "priority"];
 
 type TPurposeCardProps = {
   // what the assistant uses now
   selection: TSelection;
   // what the controls show
   draft: TSelection;
-  models: TDashboardModelState["availableModels"];
+  models: TGatewayModelState["availableModels"];
   disabled: boolean;
   verifying: boolean;
   error: TOption<string>;
   onDraft: (draft: TSelection) => void;
-  onUpdate: (update: TDashboardModelUpdate) => void;
+  onUpdate: (update: TGatewayModelUpdate) => void;
 };
 
 function PurposeCard({
@@ -39,7 +35,7 @@ function PurposeCard({
   const model = models.find((candidate) => candidate.id === draft.model);
   const efforts: TSelection["effort"][] = ["default", ...(model?.supportedEfforts ?? [])];
   // only what differs from the selection, so an untouched control changes nothing
-  const update: TDashboardModelUpdate = { aiModelPurpose: selection.purpose };
+  const update: TGatewayModelUpdate = { aiModelPurpose: selection.purpose };
 
   if (draft.model !== selection.model) {
     update.aiModel = draft.model;
@@ -124,7 +120,7 @@ function PurposeCard({
 }
 
 export function ModelTab() {
-  const [state, setState] = useState<TOption<TDashboardModelState>>(undefined);
+  const [state, setState] = useState<TOption<TGatewayModelState>>(undefined);
   // unsaved choices by purpose
   const [drafts, setDrafts] = useState<Record<string, TSelection>>({});
   // the request in flight: "load", "provider" or a purpose
@@ -132,10 +128,10 @@ export function ModelTab() {
   // scope: the request that failed, named like `busy`
   const [failure, setFailure] = useState<TOption<{ scope: string; message: string }>>(undefined);
 
-  async function request(scope: string, method: string, update: TOption<TDashboardModelUpdate>) {
+  async function request(scope: string, method: string, update: TOption<TGatewayModelUpdate>) {
     setBusy(scope);
     setFailure(undefined);
-    const result = await api<TDashboardModelState>(method, "/api/model", update);
+    const result = await api<TGatewayModelState>(method, "/api/model", update);
     setBusy(undefined);
 
     if ("error" in result) {

@@ -1,5 +1,5 @@
 {
-  "name": "@bellaclaw/dashboard",
+  "name": "@bellaclaw/gateway",
   "private": true,
   "type": "module",
   "module": "src/index.ts",

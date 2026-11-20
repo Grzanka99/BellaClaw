@@ -2,43 +2,43 @@ import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 import type { TOption } from "./option";
 
-export const DASHBOARD_LINK_TOKEN_TTL_MS = 10 * 60 * 1000;
+export const GATEWAY_LINK_TOKEN_TTL_MS = 10 * 60 * 1000;
 
-const SDashboardLinkToken = z
+const SGatewayLinkToken = z
   .object({ chatId: z.string().min(1), nonce: z.string().min(1), expiresAt: z.number().int() })
   .strict();
 
-export type TDashboardLinkToken = z.infer<typeof SDashboardLinkToken>;
+export type TGatewayLinkToken = z.infer<typeof SGatewayLinkToken>;
 
-function signDashboardLinkPayload(secret: string, payload: string): Buffer {
+function signGatewayLinkPayload(secret: string, payload: string): Buffer {
   return createHmac("sha256", secret).update(payload).digest();
 }
 
 // now: epoch ms
-export function createDashboardLinkToken(secret: string, chatId: string, now: number): string {
-  const token: TDashboardLinkToken = {
+export function createGatewayLinkToken(secret: string, chatId: string, now: number): string {
+  const token: TGatewayLinkToken = {
     chatId,
     nonce: randomBytes(16).toString("base64url"),
-    expiresAt: now + DASHBOARD_LINK_TOKEN_TTL_MS,
+    expiresAt: now + GATEWAY_LINK_TOKEN_TTL_MS,
   };
   const payload = Buffer.from(JSON.stringify(token)).toString("base64url");
 
-  return `${payload}.${signDashboardLinkPayload(secret, payload).toString("base64url")}`;
+  return `${payload}.${signGatewayLinkPayload(secret, payload).toString("base64url")}`;
 }
 
 // now: epoch ms. Undefined for a malformed, tampered or expired token.
-export function verifyDashboardLinkToken(
+export function verifyGatewayLinkToken(
   secret: string,
   token: string,
   now: number,
-): TOption<TDashboardLinkToken> {
+): TOption<TGatewayLinkToken> {
   const [payload, signature, ...rest] = token.split(".");
 
   if (payload === undefined || signature === undefined || rest.length > 0) {
     return undefined;
   }
 
-  const expected = signDashboardLinkPayload(secret, payload);
+  const expected = signGatewayLinkPayload(secret, payload);
   const actual = Buffer.from(signature, "base64url");
 
   if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) {
@@ -53,7 +53,7 @@ export function verifyDashboardLinkToken(
     return undefined;
   }
 
-  const parsed = SDashboardLinkToken.safeParse(decoded);
+  const parsed = SGatewayLinkToken.safeParse(decoded);
 
   if (!parsed.success || parsed.data.expiresAt <= now) {
     return undefined;
@@ -62,7 +62,7 @@ export function verifyDashboardLinkToken(
   return parsed.data;
 }
 
-export const SDashboardReasoningEffort = z.enum([
+export const SGatewayReasoningEffort = z.enum([
   "off",
   "minimal",
   "low",
@@ -72,15 +72,15 @@ export const SDashboardReasoningEffort = z.enum([
   "max",
 ]);
 
-export type TDashboardReasoningEffort = z.infer<typeof SDashboardReasoningEffort>;
+export type TGatewayReasoningEffort = z.infer<typeof SGatewayReasoningEffort>;
 
 // "default" is no tier
-export const SDashboardServiceTier = z.enum(["default", "flex", "priority"]);
+export const SGatewayServiceTier = z.enum(["default", "flex", "priority"]);
 
-export type TDashboardServiceTier = z.infer<typeof SDashboardServiceTier>;
+export type TGatewayServiceTier = z.infer<typeof SGatewayServiceTier>;
 
 // GET and PUT /internal/accounts/:accountId/model response
-export const SDashboardModelState = z.object({
+export const SGatewayModelState = z.object({
   provider: z.string(),
   providers: z.array(z.string()),
   // one entry per model purpose, with the effective selection
@@ -89,8 +89,8 @@ export const SDashboardModelState = z.object({
       purpose: z.string(),
       model: z.string(),
       // "default" is the model's own default
-      effort: z.union([SDashboardReasoningEffort, z.literal("default")]),
-      serviceTier: SDashboardServiceTier,
+      effort: z.union([SGatewayReasoningEffort, z.literal("default")]),
+      serviceTier: SGatewayServiceTier,
     }),
   ),
   // the models of the active provider
@@ -98,79 +98,79 @@ export const SDashboardModelState = z.object({
     z.object({
       id: z.string(),
       name: z.string(),
-      supportedEfforts: z.array(SDashboardReasoningEffort),
+      supportedEfforts: z.array(SGatewayReasoningEffort),
       supportsServiceTier: z.boolean(),
     }),
   ),
 });
 
-export type TDashboardModelState = z.infer<typeof SDashboardModelState>;
+export type TGatewayModelState = z.infer<typeof SGatewayModelState>;
 
 // PUT /internal/accounts/:accountId/model body: the AI arguments of the update-settings tool.
 // aiProvider is one of `providers` and aiModelPurpose one of `purposes[].purpose`.
-export const SDashboardModelUpdate = z
+export const SGatewayModelUpdate = z
   .object({
     aiProvider: z.string().min(1).optional(),
     aiModel: z.string().min(1).optional(),
     // Main when omitted
     aiModelPurpose: z.string().min(1).optional(),
-    aiReasoningEffort: SDashboardReasoningEffort.optional(),
-    aiServiceTier: SDashboardServiceTier.optional(),
+    aiReasoningEffort: SGatewayReasoningEffort.optional(),
+    aiServiceTier: SGatewayServiceTier.optional(),
     resetAiModel: z.boolean().optional(),
     resetAiReasoningEffort: z.boolean().optional(),
   })
   .strict();
 
-export type TDashboardModelUpdate = z.infer<typeof SDashboardModelUpdate>;
+export type TGatewayModelUpdate = z.infer<typeof SGatewayModelUpdate>;
 
 // GET and PUT /internal/accounts/:accountId/personality response. bellaPersona: the persona of the
 // Bella conversation; plainChatsUseBellaPersona: plain chats start from Bella's persona;
 // plainChatsPersona: added after Bella's persona when that is used, else the plain chats' whole
 // persona; empty with Bella's persona off, plain chats have none
-export const SDashboardPersonality = z.object({
+export const SGatewayPersonality = z.object({
   bellaPersona: z.string(),
   plainChatsUseBellaPersona: z.boolean(),
   plainChatsPersona: z.string(),
 });
 
-export type TDashboardPersonality = z.infer<typeof SDashboardPersonality>;
+export type TGatewayPersonality = z.infer<typeof SGatewayPersonality>;
 
 // PUT /internal/accounts/:accountId/personality body: the fields to change, at least one.
 // bellaPersona must not be blank; plainChatsPersona may be empty
-export const SDashboardPersonalityUpdate = SDashboardPersonality.partial().strict();
+export const SGatewayPersonalityUpdate = SGatewayPersonality.partial().strict();
 
-export type TDashboardPersonalityUpdate = z.infer<typeof SDashboardPersonalityUpdate>;
+export type TGatewayPersonalityUpdate = z.infer<typeof SGatewayPersonalityUpdate>;
 
 // DELETE /internal/accounts/:accountId/messages/:messageId response
-export const SDashboardMessageDeleted = z.object({ deletedMessageIds: z.array(z.number().int()) });
+export const SGatewayMessageDeleted = z.object({ deletedMessageIds: z.array(z.number().int()) });
 
-export type TDashboardMessageDeleted = z.infer<typeof SDashboardMessageDeleted>;
+export type TGatewayMessageDeleted = z.infer<typeof SGatewayMessageDeleted>;
 
 // the model a plain chat's turn runs on, which the app keeps per chat. provider: one of the model
 // state's `providers`; model: one of that provider's models; effort: one the model supports
-export const SDashboardModelChoice = z
+export const SGatewayModelChoice = z
   .object({
     provider: z.string().min(1),
     model: z.string().min(1),
-    effort: SDashboardReasoningEffort,
+    effort: SGatewayReasoningEffort,
   })
   .strict();
 
-export type TDashboardModelChoice = z.infer<typeof SDashboardModelChoice>;
+export type TGatewayModelChoice = z.infer<typeof SGatewayModelChoice>;
 
 // the largest image the app may upload, and the largest a turn loads from any channel
 export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
 // POST /internal/accounts/:accountId/conversations/:conversationKey/media response: an image the
 // app uploaded to the conversation, as a send names it
-export const SDashboardMedia = z.object({ id: z.string().min(1), mimeType: z.string() }).strict();
+export const SGatewayMedia = z.object({ id: z.string().min(1), mimeType: z.string() }).strict();
 
-export type TDashboardMedia = z.infer<typeof SDashboardMedia>;
+export type TGatewayMedia = z.infer<typeof SGatewayMedia>;
 
 // an image of a history row. mediaId: it downloads from the conversation's media route by this
 // id. An image the conversation no longer keeps, and every image that came through Signal or
 // Discord, is a placeholder without one
-export type TDashboardHistoryImage = {
+export type TGatewayHistoryImage = {
   mediaId: TOption<string>;
   mimeType: string;
 };
@@ -180,12 +180,12 @@ export type TDashboardHistoryImage = {
 // same conversation is the same message. model: required for a plain chat, refused for the Bella
 // conversation, which runs on the account's settings. images: uploads to this conversation; a
 // message with images may have no text
-export const SDashboardAppMessage = z
+export const SGatewayAppMessage = z
   .object({
     clientMessageId: z.string().min(1).max(128),
     text: z.string(),
-    model: SDashboardModelChoice.optional(),
-    images: z.array(SDashboardMedia).optional(),
+    model: SGatewayModelChoice.optional(),
+    images: z.array(SGatewayMedia).optional(),
   })
   .strict()
   .refine(
@@ -193,28 +193,28 @@ export const SDashboardAppMessage = z
     "The message is empty",
   );
 
-export type TDashboardAppMessage = z.infer<typeof SDashboardAppMessage>;
+export type TGatewayAppMessage = z.infer<typeof SGatewayAppMessage>;
 
 // POST /internal/accounts/:accountId/conversations/:conversationKey/messages response: the message
 // is stored and its turn will run
-export const SDashboardAppMessageAccepted = z.object({ clientMessageId: z.string() });
+export const SGatewayAppMessageAccepted = z.object({ clientMessageId: z.string() });
 
-export type TDashboardAppMessageAccepted = z.infer<typeof SDashboardAppMessageAccepted>;
+export type TGatewayAppMessageAccepted = z.infer<typeof SGatewayAppMessageAccepted>;
 
 // POST /internal/accounts/:accountId/conversations response: the new plain chat, listed and
 // empty. createdAt: epoch ms
-export const SDashboardConversationCreated = z.object({
+export const SGatewayConversationCreated = z.object({
   conversationKey: z.string(),
   createdAt: z.number().int(),
 });
 
-export type TDashboardConversationCreated = z.infer<typeof SDashboardConversationCreated>;
+export type TGatewayConversationCreated = z.infer<typeof SGatewayConversationCreated>;
 
 // DELETE /internal/accounts/:accountId/conversations/:conversationKey response: the plain chat is
 // gone with its transcript
-export const SDashboardConversationDeleted = z.object({ conversationKey: z.string() });
+export const SGatewayConversationDeleted = z.object({ conversationKey: z.string() });
 
-export type TDashboardConversationDeleted = z.infer<typeof SDashboardConversationDeleted>;
+export type TGatewayConversationDeleted = z.infer<typeof SGatewayConversationDeleted>;
 
 // the rejection code of a delete of a conversation that is no plain chat of the account
 export const CONVERSATION_NOT_FOUND = "conversation-not-found";
@@ -223,7 +223,7 @@ export const CONVERSATION_NOT_FOUND = "conversation-not-found";
 export const DEVICE_NOT_FOUND = "device-not-found";
 
 // the id the edge made for an app session's device, a path segment
-export const SDashboardDeviceId = z.string().regex(/^[A-Za-z0-9_-]{1,128}$/, "Invalid device id");
+export const SGatewayDeviceId = z.string().regex(/^[A-Za-z0-9_-]{1,128}$/, "Invalid device id");
 
 // base64url, without padding, of exactly length bytes
 function base64UrlOfLength(length: number) {
@@ -239,7 +239,7 @@ function base64UrlOfLength(length: number) {
 // fcmToken: the device's FCM registration token. publicKey: its P-256 public key, an uncompressed
 // point, which isP256PublicKey checks; authSecret: its auth secret; both base64url, as RFC 8291
 // names them
-export const SDashboardDeviceRegistration = z
+export const SGatewayDeviceRegistration = z
   .object({
     fcmToken: z.string().min(1).max(4096),
     publicKey: base64UrlOfLength(65),
@@ -247,7 +247,7 @@ export const SDashboardDeviceRegistration = z
   })
   .strict();
 
-export type TDashboardDeviceRegistration = z.infer<typeof SDashboardDeviceRegistration>;
+export type TGatewayDeviceRegistration = z.infer<typeof SGatewayDeviceRegistration>;
 
 // whether publicKey, base64url, is a point on the P-256 curve
 export async function isP256PublicKey(publicKey: string): Promise<boolean> {
@@ -267,84 +267,84 @@ export async function isP256PublicKey(publicKey: string): Promise<boolean> {
 }
 
 // the answer to a device's register and unregister
-export const SDashboardDevice = z.object({ deviceId: z.string() });
+export const SGatewayDevice = z.object({ deviceId: z.string() });
 
-export type TDashboardDevice = z.infer<typeof SDashboardDevice>;
+export type TGatewayDevice = z.infer<typeof SGatewayDevice>;
 
 // the answer to the unregister of every device of an account: the ids it removed
-export const SDashboardDevicesRemoved = z.object({ deviceIds: z.array(z.string()) });
+export const SGatewayDevicesRemoved = z.object({ deviceIds: z.array(z.string()) });
 
-export type TDashboardDevicesRemoved = z.infer<typeof SDashboardDevicesRemoved>;
+export type TGatewayDevicesRemoved = z.infer<typeof SGatewayDevicesRemoved>;
 
 // POST /internal/presence body: every account with an open app stream at the edge, the whole set
-export const SDashboardPresence = z.object({ accountIds: z.array(z.string().min(1)) }).strict();
+export const SGatewayPresence = z.object({ accountIds: z.array(z.string().min(1)) }).strict();
 
-export type TDashboardPresence = z.infer<typeof SDashboardPresence>;
+export type TGatewayPresence = z.infer<typeof SGatewayPresence>;
 
 // POST /internal/presence response
-export const SDashboardPresenceAccepted = z.object({ ok: z.literal(true) });
+export const SGatewayPresenceAccepted = z.object({ ok: z.literal(true) });
 
-export type TDashboardPresenceAccepted = z.infer<typeof SDashboardPresenceAccepted>;
+export type TGatewayPresenceAccepted = z.infer<typeof SGatewayPresenceAccepted>;
 
 // the rejection code of a link request for an address another account owns
 export const ADDRESS_LINKED_ELSEWHERE = "address-linked-elsewhere";
 
-export const SDashboardLinkState = z.enum(["migrating", "active"]);
+export const SGatewayLinkState = z.enum(["migrating", "active"]);
 
-export type TDashboardLinkState = z.infer<typeof SDashboardLinkState>;
+export type TGatewayLinkState = z.infer<typeof SGatewayLinkState>;
 
 // POST /internal/links body. accountId: the account's public id; chatKey: the address, as a link
 // token carries it
-export const SDashboardLinkRequest = z
+export const SGatewayLinkRequest = z
   .object({ accountId: z.string().min(1), chatKey: z.string().min(1) })
   .strict();
 
-export type TDashboardLinkRequest = z.infer<typeof SDashboardLinkRequest>;
+export type TGatewayLinkRequest = z.infer<typeof SGatewayLinkRequest>;
 
 // POST /internal/links response: the link is recorded as migrating and its cutover began
-export const SDashboardLinkStarted = z.object({ state: z.literal("migrating") });
+export const SGatewayLinkStarted = z.object({ state: z.literal("migrating") });
 
-export type TDashboardLinkStarted = z.infer<typeof SDashboardLinkStarted>;
+export type TGatewayLinkStarted = z.infer<typeof SGatewayLinkStarted>;
 
 // GET /internal/links/:chatKey response; no link when the address has none
-export const SDashboardChatLink = z.object({
-  link: z.object({ accountId: z.string(), state: SDashboardLinkState }).optional(),
+export const SGatewayChatLink = z.object({
+  link: z.object({ accountId: z.string(), state: SGatewayLinkState }).optional(),
 });
 
-export type TDashboardChatLink = z.infer<typeof SDashboardChatLink>;
+export type TGatewayChatLink = z.infer<typeof SGatewayChatLink>;
 
 // GET /internal/accounts/:accountId response. conversationKey: the account's Bella conversation,
 // the key of its messages; ownerKey: the key of its facts and settings. links: oldest first,
 // linkedAt in epoch ms
-export const SDashboardAccount = z.object({
+export const SGatewayAccount = z.object({
   conversationKey: z.string(),
   ownerKey: z.string(),
   links: z.array(
-    z.object({ chatKey: z.string(), state: SDashboardLinkState, linkedAt: z.number().int() }),
+    z.object({ chatKey: z.string(), state: SGatewayLinkState, linkedAt: z.number().int() }),
   ),
 });
 
-export type TDashboardAccount = z.infer<typeof SDashboardAccount>;
+export type TGatewayAccount = z.infer<typeof SGatewayAccount>;
 
 // body of a 400 (invalid input or rejected command), 401 (bad or missing bearer) or 404 (unknown
 // route, or a conversation the account does not own). code: the stable error code of a rejected
 // command that has one
-export const SDashboardError = z.object({ error: z.string(), code: z.string().optional() });
+export const SGatewayError = z.object({ error: z.string(), code: z.string().optional() });
 
-export type TDashboardError = z.infer<typeof SDashboardError>;
+export type TGatewayError = z.infer<typeof SGatewayError>;
 
 // POST /internal/activation-code/check body: a code a person typed to register
-export const SDashboardActivationCheckRequest = z.object({ code: z.string() }).strict();
+export const SGatewayActivationCheckRequest = z.object({ code: z.string() }).strict();
 
-export type TDashboardActivationCheckRequest = z.infer<typeof SDashboardActivationCheckRequest>;
+export type TGatewayActivationCheckRequest = z.infer<typeof SGatewayActivationCheckRequest>;
 
 // POST /internal/activation-code/check response. unset: no activation code is configured, so no
 // code is right
-export const SDashboardActivationCheck = z.object({
+export const SGatewayActivationCheck = z.object({
   result: z.enum(["valid", "invalid", "unset"]),
 });
 
-export type TDashboardActivationCheck = z.infer<typeof SDashboardActivationCheck>;
+export type TGatewayActivationCheck = z.infer<typeof SGatewayActivationCheck>;
 
 // GET /internal/stream: one line of JSON per event, for every account, live from the assistant;
 // an empty line keeps an idle connection open. accountId: the account the event belongs to.
@@ -352,7 +352,7 @@ export type TDashboardActivationCheck = z.infer<typeof SDashboardActivationCheck
 // conversation started (true) or ended (false); deleted: the plain chat is gone; reply: a
 // confidential reply to a message sent from the app, never stored, for app streams only. Nothing
 // replays
-export const SDashboardStreamEvent = z.discriminatedUnion("type", [
+export const SGatewayStreamEvent = z.discriminatedUnion("type", [
   z
     .object({
       type: z.literal("changed"),
@@ -383,7 +383,7 @@ export const SDashboardStreamEvent = z.discriminatedUnion("type", [
     .strict(),
 ]);
 
-export type TDashboardStreamEvent = z.infer<typeof SDashboardStreamEvent>;
+export type TGatewayStreamEvent = z.infer<typeof SGatewayStreamEvent>;
 
 // The plaintext of a push, before it is encrypted for one device (RFC 8291): a new row of a
 // conversation, for a notification shown without a fetch. revision: the conversation's revision
@@ -403,71 +403,68 @@ export type TAppPush = z.infer<typeof SAppPush>;
 
 export const APP_PUSH_MAX_BYTES = 2_800;
 
-export const DASHBOARD_STREAM_PATH = "/internal/stream";
+export const GATEWAY_STREAM_PATH = "/internal/stream";
 
-export const DASHBOARD_ACTIVATION_CHECK_PATH = "/internal/activation-code/check";
+export const GATEWAY_ACTIVATION_CHECK_PATH = "/internal/activation-code/check";
 
-export const DASHBOARD_LINKS_PATH = "/internal/links";
+export const GATEWAY_LINKS_PATH = "/internal/links";
 
-export const DASHBOARD_PRESENCE_PATH = "/internal/presence";
+export const GATEWAY_PRESENCE_PATH = "/internal/presence";
 
-export function dashboardChatLinkPath(chatKey: string): string {
-  return `${DASHBOARD_LINKS_PATH}/${encodeURIComponent(chatKey)}`;
+export function gatewayChatLinkPath(chatKey: string): string {
+  return `${GATEWAY_LINKS_PATH}/${encodeURIComponent(chatKey)}`;
 }
 
-export function dashboardAccountPath(accountId: string): string {
+export function gatewayAccountPath(accountId: string): string {
   return `/internal/accounts/${encodeURIComponent(accountId)}`;
 }
 
-export function dashboardAccountModelPath(accountId: string): string {
-  return `${dashboardAccountPath(accountId)}/model`;
+export function gatewayAccountModelPath(accountId: string): string {
+  return `${gatewayAccountPath(accountId)}/model`;
 }
 
-export function dashboardAccountPersonalityPath(accountId: string): string {
-  return `${dashboardAccountPath(accountId)}/personality`;
+export function gatewayAccountPersonalityPath(accountId: string): string {
+  return `${gatewayAccountPath(accountId)}/personality`;
 }
 
-export function dashboardAccountMessagePath(accountId: string, messageId: number): string {
-  return `${dashboardAccountPath(accountId)}/messages/${messageId}`;
+export function gatewayAccountMessagePath(accountId: string, messageId: number): string {
+  return `${gatewayAccountPath(accountId)}/messages/${messageId}`;
 }
 
-export function dashboardAccountConversationsPath(accountId: string): string {
-  return `${dashboardAccountPath(accountId)}/conversations`;
+export function gatewayAccountConversationsPath(accountId: string): string {
+  return `${gatewayAccountPath(accountId)}/conversations`;
 }
 
-export function dashboardAccountConversationPath(
+export function gatewayAccountConversationPath(accountId: string, conversationKey: string): string {
+  return `${gatewayAccountConversationsPath(accountId)}/${encodeURIComponent(conversationKey)}`;
+}
+
+export function gatewayAccountConversationMediaPath(
   accountId: string,
   conversationKey: string,
 ): string {
-  return `${dashboardAccountConversationsPath(accountId)}/${encodeURIComponent(conversationKey)}`;
+  return `${gatewayAccountConversationPath(accountId, conversationKey)}/media`;
 }
 
-export function dashboardAccountConversationMediaPath(
-  accountId: string,
-  conversationKey: string,
-): string {
-  return `${dashboardAccountConversationPath(accountId, conversationKey)}/media`;
-}
-
-export function dashboardAccountConversationMediaFilePath(
+export function gatewayAccountConversationMediaFilePath(
   accountId: string,
   conversationKey: string,
   mediaId: string,
 ): string {
-  return `${dashboardAccountConversationMediaPath(accountId, conversationKey)}/${encodeURIComponent(mediaId)}`;
+  return `${gatewayAccountConversationMediaPath(accountId, conversationKey)}/${encodeURIComponent(mediaId)}`;
 }
 
-export function dashboardAccountConversationMessagesPath(
+export function gatewayAccountConversationMessagesPath(
   accountId: string,
   conversationKey: string,
 ): string {
-  return `${dashboardAccountPath(accountId)}/conversations/${encodeURIComponent(conversationKey)}/messages`;
+  return `${gatewayAccountPath(accountId)}/conversations/${encodeURIComponent(conversationKey)}/messages`;
 }
 
-export function dashboardAccountDevicesPath(accountId: string): string {
-  return `${dashboardAccountPath(accountId)}/devices`;
+export function gatewayAccountDevicesPath(accountId: string): string {
+  return `${gatewayAccountPath(accountId)}/devices`;
 }
 
-export function dashboardAccountDevicePath(accountId: string, deviceId: string): string {
-  return `${dashboardAccountDevicesPath(accountId)}/${encodeURIComponent(deviceId)}`;
+export function gatewayAccountDevicePath(accountId: string, deviceId: string): string {
+  return `${gatewayAccountDevicesPath(accountId)}/${encodeURIComponent(deviceId)}`;
 }

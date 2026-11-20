@@ -12,7 +12,7 @@ import {
   DEVICE_NOT_FOUND,
   repositoryPath,
   type TAppPush,
-  type TDashboardMedia,
+  type TGatewayMedia,
   type TLogger,
   type TOption,
 } from "@bellaclaw/shared";
@@ -419,7 +419,7 @@ export class AppChannel implements TAttachmentStore {
     conversationKey: string,
     mimeType: string,
     data: Uint8Array,
-  ): Promise<TOption<TDashboardMedia>> {
+  ): Promise<TOption<TGatewayMedia>> {
     const id = crypto.randomUUID();
     await Bun.write(join(this.directory, id), data);
     const stored = await DatabaseConnector.instance.run(async (db) => {
@@ -451,7 +451,7 @@ export class AppChannel implements TAttachmentStore {
     db: TDatabaseHandle,
     accountId: string,
     conversationKey: string,
-    media: TDashboardMedia[],
+    media: TGatewayMedia[],
   ): Promise<TAttachmentRef[]> {
     if (media.length === 0) {
       return [];

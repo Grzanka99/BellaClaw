@@ -4,13 +4,13 @@ import {
   ADDRESS_LINKED_ELSEWHERE,
   createLogger,
   isP256PublicKey,
-  SDashboardAppMessage,
-  SDashboardDeviceRegistration,
-  SDashboardModelUpdate,
-  SDashboardPersonalityUpdate,
-  type TDashboardLinkToken,
+  SGatewayAppMessage,
+  SGatewayDeviceRegistration,
+  SGatewayModelUpdate,
+  SGatewayPersonalityUpdate,
+  type TGatewayLinkToken,
   type TOption,
-  verifyDashboardLinkToken,
+  verifyGatewayLinkToken,
 } from "@bellaclaw/shared";
 import { type Context, Hono } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
@@ -119,15 +119,15 @@ const SHistoryQuery = z
     "Send after or before, not both",
   );
 
-export type TDashboardConfig = {
-  // the origin of BELLACLAW_DASHBOARD_PUBLIC_URL
+export type TGatewayConfig = {
+  // the origin of BELLACLAW_GATEWAY_PUBLIC_URL
   publicOrigin: string;
-  // BELLACLAW_DASHBOARD_SECRET, trimmed
+  // BELLACLAW_GATEWAY_SECRET, trimmed
   secret: string;
 };
 
-export type TDashboardDependencies = {
-  config: TDashboardConfig;
+export type TGatewayDependencies = {
+  config: TGatewayConfig;
   store: AccountStore;
   reader: TChatReader;
   internalApi: TInternalApi;
@@ -138,7 +138,7 @@ export type TDashboardDependencies = {
 
 type TEnv = { Variables: { account: TAccount } };
 
-const logger = createLogger("DASHBOARD");
+const logger = createLogger("GATEWAY");
 
 async function parseBody<T>(request: Request, schema: z.ZodType<T>) {
   let body: unknown;
@@ -184,7 +184,7 @@ function bearerToken(c: Context): TOption<string> {
 }
 
 // NOTE: a request of the app carries a bearer token or the client header, and never uses the
-// cookie. A browser sends neither header across sites without a preflight, which the dashboard
+// cookie. A browser sends neither header across sites without a preflight, which the gateway
 // does not answer, so app requests are exempt from the Origin rule.
 function isAppRequest(c: Context): boolean {
   return bearerToken(c) !== undefined || c.req.header(CLIENT_HEADER) === "app";
@@ -197,7 +197,7 @@ export function createApp({
   internalApi,
   liveStream,
   serveClient,
-}: TDashboardDependencies) {
+}: TGatewayDependencies) {
   const app = new Hono<TEnv>();
   // verified for an unknown username, so the answer takes as long as for a wrong password
   const dummyPasswordHash = Bun.password.hash(randomBytes(16).toString("hex"));
@@ -210,8 +210,8 @@ export function createApp({
   const activationFailures = { count: 0, lastAt: 0 };
 
   // now: epoch ms. Consumes nothing.
-  function findUnusedLink(token: string, now: number): TOption<TDashboardLinkToken> {
-    const link = verifyDashboardLinkToken(config.secret, token, now);
+  function findUnusedLink(token: string, now: number): TOption<TGatewayLinkToken> {
+    const link = verifyGatewayLinkToken(config.secret, token, now);
 
     if (link === undefined || store.isLinkUsed(link.nonce)) {
       return undefined;
@@ -524,7 +524,7 @@ export function createApp({
     }
 
     const { token, activationCode } = body.data;
-    let link: TOption<TDashboardLinkToken>;
+    let link: TOption<TGatewayLinkToken>;
 
     // nothing is hashed or created without a right code or a usable link of an unlinked chat
     if (activationCode !== undefined) {
@@ -616,7 +616,7 @@ export function createApp({
     }
 
     const now = Date.now();
-    let link: TOption<TDashboardLinkToken>;
+    let link: TOption<TGatewayLinkToken>;
 
     if (body.data.token !== undefined) {
       link = findUnusedLink(body.data.token, now);
@@ -803,7 +803,7 @@ export function createApp({
       return c.json<TApiError>({ error: "Unauthorized" }, 401);
     }
 
-    const body = await parseBody(c.req.raw, SDashboardDeviceRegistration);
+    const body = await parseBody(c.req.raw, SGatewayDeviceRegistration);
 
     if (!body.success) {
       return c.json(invalidBody(body.error), 400);
@@ -1018,7 +1018,7 @@ export function createApp({
       return c.json<TApiError>({ error: "Not found" }, 404);
     }
 
-    const body = await parseBody(c.req.raw, SDashboardAppMessage);
+    const body = await parseBody(c.req.raw, SGatewayAppMessage);
 
     if (!body.success) {
       return c.json(invalidBody(body.error), 400);
@@ -1191,7 +1191,7 @@ export function createApp({
   });
 
   app.put("/api/model", requireSession, async (c) => {
-    const body = await parseBody(c.req.raw, SDashboardModelUpdate);
+    const body = await parseBody(c.req.raw, SGatewayModelUpdate);
 
     if (!body.success) {
       return c.json(invalidBody(body.error), 400);
@@ -1217,7 +1217,7 @@ export function createApp({
   });
 
   app.put("/api/personality", requireSession, async (c) => {
-    const body = await parseBody(c.req.raw, SDashboardPersonalityUpdate);
+    const body = await parseBody(c.req.raw, SGatewayPersonalityUpdate);
 
     if (!body.success) {
       return c.json(invalidBody(body.error), 400);

@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { EEventType, eventsTable } from "@bellaclaw/database";
-import { verifyDashboardLinkToken } from "@bellaclaw/shared";
+import { verifyGatewayLinkToken } from "@bellaclaw/shared";
 import { asc, eq } from "drizzle-orm";
 import { AuthorizationService } from "../authorization";
 import { DatabaseConnector } from "../database";
@@ -165,10 +165,10 @@ describe("commands consumer", () => {
   });
 
   test("!dashboard signs the address the command came from, not the owner", async () => {
-    const originalUrl = Bun.env.BELLACLAW_DASHBOARD_PUBLIC_URL;
-    const originalSecret = Bun.env.BELLACLAW_DASHBOARD_SECRET;
-    Bun.env.BELLACLAW_DASHBOARD_PUBLIC_URL = "https://dashboard.test";
-    Bun.env.BELLACLAW_DASHBOARD_SECRET = "dashboard-secret";
+    const originalUrl = Bun.env.BELLACLAW_GATEWAY_PUBLIC_URL;
+    const originalSecret = Bun.env.BELLACLAW_GATEWAY_SECRET;
+    Bun.env.BELLACLAW_GATEWAY_PUBLIC_URL = "https://dashboard.test";
+    Bun.env.BELLACLAW_GATEWAY_SECRET = "gateway-secret";
 
     try {
       const reply = await withEventContext((ctx) =>
@@ -180,20 +180,20 @@ describe("commands consumer", () => {
       }
       const token = text.match(/token=([^\s]+)/)?.[1] ?? "";
 
-      expect(verifyDashboardLinkToken("dashboard-secret", token, Date.now())?.chatId).toBe(
+      expect(verifyGatewayLinkToken("gateway-secret", token, Date.now())?.chatId).toBe(
         "signal:+100",
       );
     } finally {
-      Bun.env.BELLACLAW_DASHBOARD_PUBLIC_URL = originalUrl;
-      Bun.env.BELLACLAW_DASHBOARD_SECRET = originalSecret;
+      Bun.env.BELLACLAW_GATEWAY_PUBLIC_URL = originalUrl;
+      Bun.env.BELLACLAW_GATEWAY_SECRET = originalSecret;
     }
   });
 
   test("!app answers confidentially with the dashboard's app page, signed for the address", async () => {
-    const originalUrl = Bun.env.BELLACLAW_DASHBOARD_PUBLIC_URL;
-    const originalSecret = Bun.env.BELLACLAW_DASHBOARD_SECRET;
-    Bun.env.BELLACLAW_DASHBOARD_PUBLIC_URL = "https://dashboard.test/";
-    Bun.env.BELLACLAW_DASHBOARD_SECRET = "dashboard-secret";
+    const originalUrl = Bun.env.BELLACLAW_GATEWAY_PUBLIC_URL;
+    const originalSecret = Bun.env.BELLACLAW_GATEWAY_SECRET;
+    Bun.env.BELLACLAW_GATEWAY_PUBLIC_URL = "https://dashboard.test/";
+    Bun.env.BELLACLAW_GATEWAY_SECRET = "gateway-secret";
 
     try {
       const reply = await withEventContext((ctx) =>
@@ -205,17 +205,17 @@ describe("commands consumer", () => {
       }
       const token = text.match(/^https:\/\/dashboard\.test\/app\?token=([^\s]+)\n/)?.[1] ?? "";
 
-      expect(verifyDashboardLinkToken("dashboard-secret", token, Date.now())?.chatId).toBe(
+      expect(verifyGatewayLinkToken("gateway-secret", token, Date.now())?.chatId).toBe(
         "signal:+100",
       );
 
-      Bun.env.BELLACLAW_DASHBOARD_SECRET = "";
+      Bun.env.BELLACLAW_GATEWAY_SECRET = "";
       expect(
         await withEventContext((ctx) => runCommand("account:acct-1", signal, "!app", ctx)),
       ).toBe("The dashboard is not configured.");
     } finally {
-      Bun.env.BELLACLAW_DASHBOARD_PUBLIC_URL = originalUrl;
-      Bun.env.BELLACLAW_DASHBOARD_SECRET = originalSecret;
+      Bun.env.BELLACLAW_GATEWAY_PUBLIC_URL = originalUrl;
+      Bun.env.BELLACLAW_GATEWAY_SECRET = originalSecret;
     }
   });
 

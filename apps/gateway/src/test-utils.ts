@@ -1,11 +1,11 @@
 import {
   ADDRESS_LINKED_ELSEWHERE,
-  type TDashboardAppMessage,
-  type TDashboardChatLink,
-  type TDashboardDeviceRegistration,
-  type TDashboardLinkState,
-  type TDashboardPersonality,
-  type TDashboardStreamEvent,
+  type TGatewayAppMessage,
+  type TGatewayChatLink,
+  type TGatewayDeviceRegistration,
+  type TGatewayLinkState,
+  type TGatewayPersonality,
+  type TGatewayStreamEvent,
   type TOption,
 } from "@bellaclaw/shared";
 import type { TInternalApi } from "./internal-api";
@@ -21,13 +21,13 @@ import type { TInternalApi } from "./internal-api";
 // unregisterAccountDevices. presence: every set reportPresence delivered, oldest first;
 // failingPresenceReports: how many next reportPresence calls answer 502
 export function createFakeAssistant() {
-  const personalities = new Map<string, TDashboardPersonality>();
-  const defaultPersonality: TDashboardPersonality = {
+  const personalities = new Map<string, TGatewayPersonality>();
+  const defaultPersonality: TGatewayPersonality = {
     bellaPersona: "You are Bella.",
     plainChatsUseBellaPersona: true,
     plainChatsPersona: "",
   };
-  const links = new Map<string, { accountId: string; state: TDashboardLinkState }>();
+  const links = new Map<string, { accountId: string; state: TGatewayLinkState }>();
   const requests: { accountId: string; chatKey: string }[] = [];
   const calls: { method: string; accountId: string }[] = [];
   const state: {
@@ -40,7 +40,7 @@ export function createFakeAssistant() {
     failingPresenceReports: 0,
   };
   const codeChecks: string[] = [];
-  const sends: { accountId: string; conversationKey: string; message: TDashboardAppMessage }[] = [];
+  const sends: { accountId: string; conversationKey: string; message: TGatewayAppMessage }[] = [];
   const uploads: {
     accountId: string;
     conversationKey: string;
@@ -51,7 +51,7 @@ export function createFakeAssistant() {
   const streams: ReadableStreamDefaultController<Uint8Array>[] = [];
   const devices = new Map<
     string,
-    { accountId: string; registration: TDashboardDeviceRegistration }
+    { accountId: string; registration: TGatewayDeviceRegistration }
   >();
   const presence: string[][] = [];
   const encoder = new TextEncoder();
@@ -110,7 +110,7 @@ export function createFakeAssistant() {
         return unavailable;
       }
 
-      const data: TDashboardChatLink = { link: links.get(chatKey) };
+      const data: TGatewayChatLink = { link: links.get(chatKey) };
 
       return { data };
     },
@@ -271,7 +271,7 @@ export function createFakeAssistant() {
     streams,
     devices,
     presence,
-    push(event: TDashboardStreamEvent) {
+    push(event: TGatewayStreamEvent) {
       streams.at(-1)?.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
     },
     drop() {

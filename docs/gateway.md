@@ -1,20 +1,20 @@
-# Dashboard
+# Gateway
 
-The dashboard is a web control panel for the people who chat with BellaClaw. Each user has an
-account and sees only the chats linked to it. It is meant to be reachable from the internet behind
+The gateway serves the dashboard, a web control panel for the people who chat with BellaClaw. Each
+user has an account and sees only the chats linked to it. The gateway is meant to be reachable from the internet behind
 a TLS reverse proxy.
 
-It lives in the `@bellaclaw/dashboard` workspace (`apps/dashboard`). The log viewer is a separate
+It lives in the `@bellaclaw/gateway` workspace (`apps/gateway`). The log viewer is a separate
 app and stays private; see [Behavior Logs](behavior-logs.md).
 
 ## Setup
 
-Set both variables in `.env`; the other dashboard variables have defaults (see
-[Configuration](configuration.md#dashboard)):
+Set both variables in `.env`; the other gateway variables have defaults (see
+[Configuration](configuration.md#gateway)):
 
 ```dotenv
-BELLACLAW_DASHBOARD_PUBLIC_URL=https://dashboard.example.com
-BELLACLAW_DASHBOARD_SECRET=
+BELLACLAW_GATEWAY_PUBLIC_URL=https://dashboard.example.com
+BELLACLAW_GATEWAY_SECRET=
 ```
 
 Generate the secret with:
@@ -23,21 +23,21 @@ Generate the secret with:
 openssl rand -base64 32
 ```
 
-The assistant and the dashboard read the same two values. Without either of them, `!dashboard`
-replies that the dashboard is not configured, and the dashboard process logs one line and exits
+The assistant and the gateway read the same two values. Without either of them, `!dashboard`
+replies that the dashboard is not configured, and the gateway process logs one line and exits
 with code `0`. Without the secret, the assistant does not start its internal listener.
 
-The dashboard also reads `TURSO_CONNECTION_URL` and `TURSO_AUTH_TOKEN` from `.env`.
+The gateway also reads `TURSO_CONNECTION_URL` and `TURSO_AUTH_TOKEN` from `.env`.
 
 ### Compose
 
-Compose starts the `dashboard` service with the other services, so `bun run server:init` and
+Compose starts the `gateway` service with the other services, so `bun run server:init` and
 `bun run server:update` cover it. It:
 
 - publishes `127.0.0.1:8988`, for the reverse proxy on the same host
 - reaches the assistant's internal listener at `http://bellaclaw:3081` on the Compose network
 - keeps its own database in the `dashboard-data` volume
-- restarts only on failure, so an unconfigured dashboard stays stopped
+- restarts only on failure, so an unconfigured gateway stays stopped
 - follows a [self-update](deployment.md#self-update) within 30 seconds
 - receives only the Turso credentials, the public URL and the secret from `.env`
 
@@ -47,7 +47,7 @@ The assistant publishes no port for the internal listener.
 
 Bun serves plain HTTP. Terminate TLS in a reverse proxy and forward `443` to `127.0.0.1:8988`.
 
-- The session cookie is `Secure`, so `BELLACLAW_DASHBOARD_PUBLIC_URL` must be HTTPS, or
+- The session cookie is `Secure`, so `BELLACLAW_GATEWAY_PUBLIC_URL` must be HTTPS, or
   `http://localhost` in development.
 - Changes from the browser are accepted only when its `Origin` matches the public URL. Use the
   exact origin users open. Requests of the app are exempt; see [The App](#the-app).
@@ -71,7 +71,7 @@ dashboard.example.com {
 ## Linking a Chat
 
 1. Send `!dashboard` in the chat.
-2. BellaClaw replies with `BELLACLAW_DASHBOARD_PUBLIC_URL/link?token=…`. The link works once and
+2. BellaClaw replies with `BELLACLAW_GATEWAY_PUBLIC_URL/link?token=…`. The link works once and
    expires after 10 minutes.
 3. Open it, then create an account or log in. The chat is linked to that account.
 
@@ -85,7 +85,7 @@ it.
 
 ## The App
 
-The Android app talks only to the dashboard and uses the same `/api` routes as the web client.
+The Android app talks only to the gateway and uses the same `/api` routes as the web client.
 
 Its requests carry `Authorization: Bearer <token>`, or, to start a session,
 `X-BellaClaw-Client: app`. They never use the cookie and need no `Origin`. Register, login and
@@ -95,7 +95,7 @@ through a login link ends it too.
 
 Device, for notifications:
 
-- Each app session has its own device id, a random value the dashboard makes with the session.
+- Each app session has its own device id, a random value the gateway makes with the session.
   The app never chooses or sees it.
 - `PUT /api/device` with `{ fcmToken, publicKey, authSecret }`: registers the session's device for
   the signed-in account and answers `{ ok: true }`. `fcmToken` is its FCM registration token (at
@@ -140,13 +140,13 @@ Notifications (when the assistant has an FCM credential, see
 Ways in:
 
 - **Activation code**: `POST /api/register` with `username`, `password` and `activationCode`
-  (`BELLACLAW_ACTIVATION_TOKEN`). The assistant checks the code; the dashboard never holds it. The
+  (`BELLACLAW_ACTIVATION_TOKEN`). The assistant checks the code; the gateway never holds it. The
   account has no chat until one is linked. Without a configured code, registration by code answers
   `403`. After five wrong codes, registration by code is closed for everyone for 15 minutes.
 - **Password**: `POST /api/login`.
-- **`!app`**: BellaClaw replies with `BELLACLAW_DASHBOARD_PUBLIC_URL/app?token=…`, which works
+- **`!app`**: BellaClaw replies with `BELLACLAW_GATEWAY_PUBLIC_URL/app?token=…`, which works
   once and expires after 10 minutes. The page offers "Open in app", an Android intent link that
-  opens `bellaclaw://login?server=<dashboard URL>&token=<token>` in the package
+  opens `bellaclaw://login?server=<gateway URL>&token=<token>` in the package
   `one.scary.bellaclaw` only, and that deep link as a code to copy. The app checks the token with `POST /api/link/check`. A linked chat logs in with
   `POST /api/link/login`, optionally setting a new password. An unlinked chat registers with
   `POST /api/register` and `token`, or is linked with `POST /api/login` and `token`, or with
@@ -206,7 +206,7 @@ Conversations:
 Images:
 
 - `POST /api/conversations/:conversationKey/media` with the image's bytes as the body and its type
-  as `Content-Type` (`image/jpeg`, `image/png`, `image/webp` or `image/gif`): the dashboard streams
+  as `Content-Type` (`image/jpeg`, `image/png`, `image/webp` or `image/gif`): the gateway streams
   the bytes to the assistant, which checks the type, the size and that the bytes really are that
   format before it stores anything, and answers `{ id, mimeType }` for a send. A file over 5 MB
   answers 413, another type or content 415. Only this route takes a body over 64 KiB.
@@ -239,10 +239,10 @@ Live stream, while the app is in the foreground:
 - The stream opens with `check`, so the app compares revisions for whatever changed while it was
   away. Nothing replays. Within one conversation the events come in the order they happened: a
   `changed` after typing goes off already includes the reply.
-- The dashboard holds one stream from the assistant for every account (`GET /internal/stream`,
-  lines of JSON with the account id). When it drops, the dashboard sends `check` to every open
+- The gateway holds one stream from the assistant for every account (`GET /internal/stream`,
+  lines of JSON with the account id). When it drops, the gateway sends `check` to every open
   stream, connects again after 2 seconds, and sends `check` again once it is back.
-- While that stream is open, the dashboard tells the assistant which accounts have an app stream
+- While that stream is open, the gateway tells the assistant which accounts have an app stream
   open (`POST /internal/presence` with `{ accountIds }`, the whole set): on each connection, and
   when an account's first app stream opens or its last one closes. A failed report is sent again
   after 2 seconds until one succeeds. Only app sessions' streams count; a browser's stream still
@@ -250,7 +250,7 @@ Live stream, while the app is in the foreground:
   assistant restarts, every account reads closed until the next report.
 
 A conversation of another account answers `404 { "error": "Not found" }`, exactly like one that
-does not exist, for reading, sending, deleting, uploading and downloading. The dashboard checks ownership in the
+does not exist, for reading, sending, deleting, uploading and downloading. The gateway checks ownership in the
 assistant's conversation registry (`findOwnedConversation` in `@bellaclaw/database`); the
 assistant checks it again on a send and a delete.
 
@@ -286,7 +286,7 @@ A settings change runs the same checks and provider verification as asking Bella
 
 ## Deleting a Message
 
-The dashboard asks the assistant to delete the message. The assistant publishes
+The gateway asks the assistant to delete the message. The assistant publishes
 `conversation.message.delete.requested`, and the conversation service answers with
 `conversation.message.deleted`.
 
@@ -304,7 +304,7 @@ It does not change:
 
 Exposed:
 
-- The dashboard on `127.0.0.1:8988`, published to the internet only through the reverse proxy.
+- The gateway on `127.0.0.1:8988`, published to the internet only through the reverse proxy.
 
 Not exposed:
 
@@ -312,9 +312,9 @@ Not exposed:
   is only on the Compose network. Outside Compose it binds `127.0.0.1`.
 - The log viewer.
 
-The dashboard reads message history, the conversation registry and facts directly from the
+The gateway reads message history, the conversation registry and facts directly from the
 assistant's libSQL/Turso database and never writes to it. Every change goes through the internal listener, which has a few fixed
-endpoints and requires `Authorization: Bearer BELLACLAW_DASHBOARD_SECRET`.
+endpoints and requires `Authorization: Bearer BELLACLAW_GATEWAY_SECRET`.
 
 The secret also signs link tokens. Anyone who has it can create links for any chat and call the
 internal listener. Rotating it invalidates unused links.
@@ -323,7 +323,7 @@ State:
 
 | Data | Location |
 | --- | --- |
-| Accounts, password hashes, web and app sessions (with each app session's device id), chat links, used link tokens | Dashboard SQLite file, `BELLACLAW_DASHBOARD_DB_PATH` |
+| Accounts, password hashes, web and app sessions (with each app session's device id), chat links, used link tokens | Gateway SQLite file, `BELLACLAW_GATEWAY_DB_PATH` |
 | Messages, facts, settings | Assistant database |
 | App devices: FCM token and RFC 8291 key material | Assistant database, `app_devices` |
 | FCM service-account key | Assistant only, `BELLACLAW_FCM_CREDENTIALS_PATH` |

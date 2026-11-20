@@ -1,4 +1,4 @@
-import { createLogger, SDashboardStreamEvent, type TOption } from "@bellaclaw/shared";
+import { createLogger, SGatewayStreamEvent, type TOption } from "@bellaclaw/shared";
 import type { TAppStreamEvent } from "./api-types";
 import type { TInternalApi } from "./internal-api";
 
@@ -72,7 +72,7 @@ export function createLiveStream(internalApi: TInternalApi, retryMs: number, sil
       return;
     }
 
-    const parsed = SDashboardStreamEvent.safeParse(decoded);
+    const parsed = SGatewayStreamEvent.safeParse(decoded);
 
     if (!parsed.success) {
       logger.error("The assistant's stream sent an unknown event");

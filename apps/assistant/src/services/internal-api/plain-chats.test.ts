@@ -11,10 +11,10 @@ import {
   memoriesTable,
 } from "@bellaclaw/database";
 import {
-  dashboardAccountConversationMessagesPath,
-  dashboardAccountConversationPath,
-  dashboardAccountConversationsPath,
-  type TDashboardStreamEvent,
+  gatewayAccountConversationMessagesPath,
+  gatewayAccountConversationPath,
+  gatewayAccountConversationsPath,
+  type TGatewayStreamEvent,
   type TOption,
 } from "@bellaclaw/shared";
 import { fauxAssistantMessage, type Message } from "@earendil-works/pi-ai";
@@ -123,7 +123,7 @@ async function start(
       embedMany: mock(async (texts: string[]) => texts.map(() => Array(768).fill(0.1))),
     },
   });
-  const streamed: TDashboardStreamEvent[] = [];
+  const streamed: TGatewayStreamEvent[] = [];
   AppStream.instance.setup();
   AppStream.instance.listen((event) => streamed.push(event));
   MessageHandler.instance.setup();
@@ -152,18 +152,14 @@ async function request(method: string, path: string, body?: unknown) {
 }
 
 async function createChat(accountId: string): Promise<string> {
-  const [status, body] = await request("POST", dashboardAccountConversationsPath(accountId));
+  const [status, body] = await request("POST", gatewayAccountConversationsPath(accountId));
   expect(status).toBe(200);
   expect(body).toEqual({ conversationKey: expect.any(String), createdAt: expect.any(Number) });
   return (body as { conversationKey: string }).conversationKey;
 }
 
 function send(accountId: string, conversationKey: string, body: unknown) {
-  return request(
-    "POST",
-    dashboardAccountConversationMessagesPath(accountId, conversationKey),
-    body,
-  );
+  return request("POST", gatewayAccountConversationMessagesPath(accountId, conversationKey), body);
 }
 
 function account(accountId: string) {
@@ -231,7 +227,7 @@ test("the app creates a plain chat, lists it, sends with a model, reads the plai
   await send(accountId, keys.conversationKey, { clientMessageId: "b-2", text: "Hi" });
   expect(runMain.mock.calls[0]?.[0].settings).toBe(DefaultConfigRecord);
 
-  const [status, body] = await request("DELETE", dashboardAccountConversationPath(accountId, chat));
+  const [status, body] = await request("DELETE", gatewayAccountConversationPath(accountId, chat));
   expect([status, body]).toEqual([200, { conversationKey: chat }]);
   expect(streamed).toContainEqual({ type: "deleted", accountId, conversationKey: chat });
   expect(
@@ -244,7 +240,7 @@ test("the app creates a plain chat, lists it, sends with a model, reads the plai
   expect(
     await send(accountId, chat, { clientMessageId: "m-2", text: "Again", model: GPT }),
   ).toEqual([404, NOT_FOUND]);
-  expect(await request("DELETE", dashboardAccountConversationPath(accountId, chat))).toEqual([
+  expect(await request("DELETE", gatewayAccountConversationPath(accountId, chat))).toEqual([
     404,
     NOT_FOUND,
   ]);
@@ -370,16 +366,13 @@ test("another account's plain chat is answered like one that does not exist, for
     404,
     NOT_FOUND,
   ]);
-  expect(await request("DELETE", dashboardAccountConversationPath(bob, chat))).toEqual([
+  expect(await request("DELETE", gatewayAccountConversationPath(bob, chat))).toEqual([
     404,
     NOT_FOUND,
   ]);
   // the Bella conversation is no plain chat: it cannot be deleted
   expect(
-    await request(
-      "DELETE",
-      dashboardAccountConversationPath(alice, account(alice).conversationKey),
-    ),
+    await request("DELETE", gatewayAccountConversationPath(alice, account(alice).conversationKey)),
   ).toEqual([404, NOT_FOUND]);
   // both are refused before a command reaches a lane
   expect(await eventsOf(EEventType.ConversationDeleteRequested)).toEqual([]);
@@ -498,7 +491,7 @@ test("deleting a plain chat leaves no transcript rows, summary or registry entry
   ];
   expect(await rowsOf()).toEqual([2, 1, 1]);
 
-  expect(await request("DELETE", dashboardAccountConversationPath(accountId, chat))).toEqual([
+  expect(await request("DELETE", gatewayAccountConversationPath(accountId, chat))).toEqual([
     200,
     { conversationKey: chat },
   ]);

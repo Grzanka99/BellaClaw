@@ -10,12 +10,12 @@ import {
   type THistoryMessage,
 } from "@bellaclaw/database";
 import {
-  dashboardAccountConversationMediaFilePath,
-  dashboardAccountConversationMediaPath,
-  dashboardAccountConversationMessagesPath,
-  dashboardAccountConversationPath,
-  dashboardAccountConversationsPath,
-  dashboardAccountMessagePath,
+  gatewayAccountConversationMediaFilePath,
+  gatewayAccountConversationMediaPath,
+  gatewayAccountConversationMessagesPath,
+  gatewayAccountConversationPath,
+  gatewayAccountConversationsPath,
+  gatewayAccountMessagePath,
   MAX_IMAGE_BYTES,
 } from "@bellaclaw/shared";
 import {
@@ -183,7 +183,7 @@ async function request(method: string, path: string, body: TBody, contentType: s
 async function upload(accountId: string, conversationKey: string, data: TBody, type: string) {
   const response = await request(
     "POST",
-    dashboardAccountConversationMediaPath(accountId, conversationKey),
+    gatewayAccountConversationMediaPath(accountId, conversationKey),
     data,
     type,
   );
@@ -200,7 +200,7 @@ async function uploaded(accountId: string, conversationKey: string) {
 function download(accountId: string, conversationKey: string, mediaId: string) {
   return request(
     "GET",
-    dashboardAccountConversationMediaFilePath(accountId, conversationKey, mediaId),
+    gatewayAccountConversationMediaFilePath(accountId, conversationKey, mediaId),
     null,
     "",
   );
@@ -209,7 +209,7 @@ function download(accountId: string, conversationKey: string, mediaId: string) {
 async function send(accountId: string, conversationKey: string, body: unknown) {
   const response = await request(
     "POST",
-    dashboardAccountConversationMessagesPath(accountId, conversationKey),
+    gatewayAccountConversationMessagesPath(accountId, conversationKey),
     JSON.stringify(body),
     "application/json",
   );
@@ -463,7 +463,7 @@ test("a deleted plain chat leaves no file behind, sent or only uploaded", async 
   const accountId = `acct-${crypto.randomUUID()}`;
   const created = await request(
     "POST",
-    dashboardAccountConversationsPath(accountId),
+    gatewayAccountConversationsPath(accountId),
     null,
     "application/json",
   );
@@ -483,7 +483,7 @@ test("a deleted plain chat leaves no file behind, sent or only uploaded", async 
 
   const deleted = await request(
     "DELETE",
-    dashboardAccountConversationPath(accountId, conversationKey),
+    gatewayAccountConversationPath(accountId, conversationKey),
     null,
     "application/json",
   );
@@ -572,7 +572,7 @@ test("a deleted message takes its image with it", async () => {
 
   const deleted = await request(
     "DELETE",
-    dashboardAccountMessagePath(accountId, row?.id ?? 0),
+    gatewayAccountMessagePath(accountId, row?.id ?? 0),
     null,
     "application/json",
   );

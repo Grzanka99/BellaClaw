@@ -1,57 +1,57 @@
 import {
   createLogger,
-  DASHBOARD_ACTIVATION_CHECK_PATH,
-  DASHBOARD_LINKS_PATH,
-  DASHBOARD_PRESENCE_PATH,
-  DASHBOARD_STREAM_PATH,
-  dashboardAccountConversationMediaFilePath,
-  dashboardAccountConversationMediaPath,
-  dashboardAccountConversationMessagesPath,
-  dashboardAccountConversationPath,
-  dashboardAccountConversationsPath,
-  dashboardAccountDevicePath,
-  dashboardAccountDevicesPath,
-  dashboardAccountMessagePath,
-  dashboardAccountModelPath,
-  dashboardAccountPath,
-  dashboardAccountPersonalityPath,
-  dashboardChatLinkPath,
-  SDashboardAccount,
-  SDashboardActivationCheck,
-  SDashboardAppMessageAccepted,
-  SDashboardChatLink,
-  SDashboardConversationCreated,
-  SDashboardConversationDeleted,
-  SDashboardDevice,
-  SDashboardDevicesRemoved,
-  SDashboardError,
-  SDashboardLinkStarted,
-  SDashboardMedia,
-  SDashboardMessageDeleted,
-  SDashboardModelState,
-  SDashboardPersonality,
-  SDashboardPresenceAccepted,
-  type TDashboardAccount,
-  type TDashboardActivationCheck,
-  type TDashboardActivationCheckRequest,
-  type TDashboardAppMessage,
-  type TDashboardAppMessageAccepted,
-  type TDashboardChatLink,
-  type TDashboardConversationCreated,
-  type TDashboardConversationDeleted,
-  type TDashboardDevice,
-  type TDashboardDeviceRegistration,
-  type TDashboardDevicesRemoved,
-  type TDashboardLinkRequest,
-  type TDashboardLinkStarted,
-  type TDashboardMedia,
-  type TDashboardMessageDeleted,
-  type TDashboardModelState,
-  type TDashboardModelUpdate,
-  type TDashboardPersonality,
-  type TDashboardPersonalityUpdate,
-  type TDashboardPresence,
-  type TDashboardPresenceAccepted,
+  GATEWAY_ACTIVATION_CHECK_PATH,
+  GATEWAY_LINKS_PATH,
+  GATEWAY_PRESENCE_PATH,
+  GATEWAY_STREAM_PATH,
+  gatewayAccountConversationMediaFilePath,
+  gatewayAccountConversationMediaPath,
+  gatewayAccountConversationMessagesPath,
+  gatewayAccountConversationPath,
+  gatewayAccountConversationsPath,
+  gatewayAccountDevicePath,
+  gatewayAccountDevicesPath,
+  gatewayAccountMessagePath,
+  gatewayAccountModelPath,
+  gatewayAccountPath,
+  gatewayAccountPersonalityPath,
+  gatewayChatLinkPath,
+  SGatewayAccount,
+  SGatewayActivationCheck,
+  SGatewayAppMessageAccepted,
+  SGatewayChatLink,
+  SGatewayConversationCreated,
+  SGatewayConversationDeleted,
+  SGatewayDevice,
+  SGatewayDevicesRemoved,
+  SGatewayError,
+  SGatewayLinkStarted,
+  SGatewayMedia,
+  SGatewayMessageDeleted,
+  SGatewayModelState,
+  SGatewayPersonality,
+  SGatewayPresenceAccepted,
+  type TGatewayAccount,
+  type TGatewayActivationCheck,
+  type TGatewayActivationCheckRequest,
+  type TGatewayAppMessage,
+  type TGatewayAppMessageAccepted,
+  type TGatewayChatLink,
+  type TGatewayConversationCreated,
+  type TGatewayConversationDeleted,
+  type TGatewayDevice,
+  type TGatewayDeviceRegistration,
+  type TGatewayDevicesRemoved,
+  type TGatewayLinkRequest,
+  type TGatewayLinkStarted,
+  type TGatewayMedia,
+  type TGatewayMessageDeleted,
+  type TGatewayModelState,
+  type TGatewayModelUpdate,
+  type TGatewayPersonality,
+  type TGatewayPersonalityUpdate,
+  type TGatewayPresence,
+  type TGatewayPresenceAccepted,
   type TOption,
 } from "@bellaclaw/shared";
 import type { z } from "zod";
@@ -74,35 +74,32 @@ export type TInternalApiResult<T> =
 // accountId: an account's public id; chatKey: an address, as a link token carries it
 export type TInternalApi = {
   // code: what a person typed to register; the assistant holds the activation code
-  checkActivationCode(code: string): Promise<TInternalApiResult<TDashboardActivationCheck>>;
-  requestLink(
-    accountId: string,
-    chatKey: string,
-  ): Promise<TInternalApiResult<TDashboardLinkStarted>>;
-  getChatLink(chatKey: string): Promise<TInternalApiResult<TDashboardChatLink>>;
-  getAccount(accountId: string): Promise<TInternalApiResult<TDashboardAccount>>;
-  getModel(accountId: string): Promise<TInternalApiResult<TDashboardModelState>>;
+  checkActivationCode(code: string): Promise<TInternalApiResult<TGatewayActivationCheck>>;
+  requestLink(accountId: string, chatKey: string): Promise<TInternalApiResult<TGatewayLinkStarted>>;
+  getChatLink(chatKey: string): Promise<TInternalApiResult<TGatewayChatLink>>;
+  getAccount(accountId: string): Promise<TInternalApiResult<TGatewayAccount>>;
+  getModel(accountId: string): Promise<TInternalApiResult<TGatewayModelState>>;
   updateModel(
     accountId: string,
-    update: TDashboardModelUpdate,
-  ): Promise<TInternalApiResult<TDashboardModelState>>;
-  getPersonality(accountId: string): Promise<TInternalApiResult<TDashboardPersonality>>;
+    update: TGatewayModelUpdate,
+  ): Promise<TInternalApiResult<TGatewayModelState>>;
+  getPersonality(accountId: string): Promise<TInternalApiResult<TGatewayPersonality>>;
   updatePersonality(
     accountId: string,
-    update: TDashboardPersonalityUpdate,
-  ): Promise<TInternalApiResult<TDashboardPersonality>>;
+    update: TGatewayPersonalityUpdate,
+  ): Promise<TInternalApiResult<TGatewayPersonality>>;
   deleteMessage(
     accountId: string,
     messageId: number,
-  ): Promise<TInternalApiResult<TDashboardMessageDeleted>>;
+  ): Promise<TInternalApiResult<TGatewayMessageDeleted>>;
   // answers once the message is stored, before its turn runs
   sendMessage(
     accountId: string,
     conversationKey: string,
-    message: TDashboardAppMessage,
-  ): Promise<TInternalApiResult<TDashboardAppMessageAccepted>>;
+    message: TGatewayAppMessage,
+  ): Promise<TInternalApiResult<TGatewayAppMessageAccepted>>;
   // a new plain chat of the account
-  createConversation(accountId: string): Promise<TInternalApiResult<TDashboardConversationCreated>>;
+  createConversation(accountId: string): Promise<TInternalApiResult<TGatewayConversationCreated>>;
   // streams an image's bytes to the assistant, which checks and stores them; the answer names it
   // for a send. mimeType: the type the client declared
   uploadMedia(
@@ -110,7 +107,7 @@ export type TInternalApi = {
     conversationKey: string,
     mimeType: string,
     body: ReadableStream<Uint8Array> | null,
-  ): Promise<TInternalApiResult<TDashboardMedia>>;
+  ): Promise<TInternalApiResult<TGatewayMedia>>;
   // the assistant's answer with the image's bytes and type, to pass on
   downloadMedia(
     accountId: string,
@@ -121,27 +118,25 @@ export type TInternalApi = {
   deleteConversation(
     accountId: string,
     conversationKey: string,
-  ): Promise<TInternalApiResult<TDashboardConversationDeleted>>;
+  ): Promise<TInternalApiResult<TGatewayConversationDeleted>>;
   // the assistant's live stream for every account, lines of JSON, open until either side closes
   // it; signal closes it
   openStream(signal: AbortSignal): Promise<TInternalApiResult<ReadableStream<Uint8Array>>>;
   // every account with an open app stream here, the whole set
-  reportPresence(accountIds: string[]): Promise<TInternalApiResult<TDashboardPresenceAccepted>>;
+  reportPresence(accountIds: string[]): Promise<TInternalApiResult<TGatewayPresenceAccepted>>;
   // the device of an app session of the account, its token and keys replacing any it had
   registerDevice(
     accountId: string,
     deviceId: string,
-    registration: TDashboardDeviceRegistration,
-  ): Promise<TInternalApiResult<TDashboardDevice>>;
+    registration: TGatewayDeviceRegistration,
+  ): Promise<TInternalApiResult<TGatewayDevice>>;
   // 404 for a device the account does not hold
   unregisterDevice(
     accountId: string,
     deviceId: string,
-  ): Promise<TInternalApiResult<TDashboardDevice>>;
+  ): Promise<TInternalApiResult<TGatewayDevice>>;
   // every device of the account
-  unregisterAccountDevices(
-    accountId: string,
-  ): Promise<TInternalApiResult<TDashboardDevicesRemoved>>;
+  unregisterAccountDevices(accountId: string): Promise<TInternalApiResult<TGatewayDevicesRemoved>>;
 };
 
 // The assistant's internal API. baseUrl has no trailing slash.
@@ -151,13 +146,13 @@ export function createInternalApi(baseUrl: string, secret: string): TInternalApi
     path: string,
     schema: z.ZodType<T>,
     body: TOption<
-      | TDashboardModelUpdate
-      | TDashboardPersonalityUpdate
-      | TDashboardLinkRequest
-      | TDashboardActivationCheckRequest
-      | TDashboardAppMessage
-      | TDashboardPresence
-      | TDashboardDeviceRegistration
+      | TGatewayModelUpdate
+      | TGatewayPersonalityUpdate
+      | TGatewayLinkRequest
+      | TGatewayActivationCheckRequest
+      | TGatewayAppMessage
+      | TGatewayPresence
+      | TGatewayDeviceRegistration
     >,
   ): Promise<TInternalApiResult<T>> {
     return send(method, path, schema, "application/json", JSON.stringify(body));
@@ -197,7 +192,7 @@ export function createInternalApi(baseUrl: string, secret: string): TInternalApi
     }
 
     if (status === 400 || status === 404 || status === 410 || status === 413 || status === 415) {
-      const failure = SDashboardError.safeParse(payload);
+      const failure = SGatewayError.safeParse(payload);
 
       if (failure.success) {
         return { error: failure.data.error, status, code: failure.data.code };
@@ -211,40 +206,40 @@ export function createInternalApi(baseUrl: string, secret: string): TInternalApi
 
   return {
     checkActivationCode: (code) =>
-      call("POST", DASHBOARD_ACTIVATION_CHECK_PATH, SDashboardActivationCheck, { code }),
+      call("POST", GATEWAY_ACTIVATION_CHECK_PATH, SGatewayActivationCheck, { code }),
     requestLink: (accountId, chatKey) =>
-      call("POST", DASHBOARD_LINKS_PATH, SDashboardLinkStarted, { accountId, chatKey }),
+      call("POST", GATEWAY_LINKS_PATH, SGatewayLinkStarted, { accountId, chatKey }),
     getChatLink: (chatKey) =>
-      call("GET", dashboardChatLinkPath(chatKey), SDashboardChatLink, undefined),
+      call("GET", gatewayChatLinkPath(chatKey), SGatewayChatLink, undefined),
     getAccount: (accountId) =>
-      call("GET", dashboardAccountPath(accountId), SDashboardAccount, undefined),
+      call("GET", gatewayAccountPath(accountId), SGatewayAccount, undefined),
     getModel: (accountId) =>
-      call("GET", dashboardAccountModelPath(accountId), SDashboardModelState, undefined),
+      call("GET", gatewayAccountModelPath(accountId), SGatewayModelState, undefined),
     updateModel: (accountId, update) =>
-      call("PUT", dashboardAccountModelPath(accountId), SDashboardModelState, update),
+      call("PUT", gatewayAccountModelPath(accountId), SGatewayModelState, update),
     getPersonality: (accountId) =>
-      call("GET", dashboardAccountPersonalityPath(accountId), SDashboardPersonality, undefined),
+      call("GET", gatewayAccountPersonalityPath(accountId), SGatewayPersonality, undefined),
     updatePersonality: (accountId, update) =>
-      call("PUT", dashboardAccountPersonalityPath(accountId), SDashboardPersonality, update),
+      call("PUT", gatewayAccountPersonalityPath(accountId), SGatewayPersonality, update),
     deleteMessage: (accountId, messageId) =>
       call(
         "DELETE",
-        dashboardAccountMessagePath(accountId, messageId),
-        SDashboardMessageDeleted,
+        gatewayAccountMessagePath(accountId, messageId),
+        SGatewayMessageDeleted,
         undefined,
       ),
     sendMessage: (accountId, conversationKey, message) =>
       call(
         "POST",
-        dashboardAccountConversationMessagesPath(accountId, conversationKey),
-        SDashboardAppMessageAccepted,
+        gatewayAccountConversationMessagesPath(accountId, conversationKey),
+        SGatewayAppMessageAccepted,
         message,
       ),
     uploadMedia: (accountId, conversationKey, mimeType, body) =>
       send(
         "POST",
-        dashboardAccountConversationMediaPath(accountId, conversationKey),
-        SDashboardMedia,
+        gatewayAccountConversationMediaPath(accountId, conversationKey),
+        SGatewayMedia,
         mimeType,
         body ?? undefined,
       ),
@@ -253,7 +248,7 @@ export function createInternalApi(baseUrl: string, secret: string): TInternalApi
 
       try {
         response = await fetch(
-          `${baseUrl}${dashboardAccountConversationMediaFilePath(accountId, conversationKey, mediaId)}`,
+          `${baseUrl}${gatewayAccountConversationMediaFilePath(accountId, conversationKey, mediaId)}`,
           {
             headers: { Authorization: `Bearer ${secret}` },
             signal: AbortSignal.timeout(INTERNAL_API_TIMEOUT_MS),
@@ -279,7 +274,7 @@ export function createInternalApi(baseUrl: string, secret: string): TInternalApi
         // no JSON fails the schema
       }
 
-      const failure = SDashboardError.safeParse(payload);
+      const failure = SGatewayError.safeParse(payload);
 
       if ((status === 404 || status === 410) && failure.success) {
         return { error: failure.data.error, status };
@@ -292,29 +287,29 @@ export function createInternalApi(baseUrl: string, secret: string): TInternalApi
     createConversation: (accountId) =>
       call(
         "POST",
-        dashboardAccountConversationsPath(accountId),
-        SDashboardConversationCreated,
+        gatewayAccountConversationsPath(accountId),
+        SGatewayConversationCreated,
         undefined,
       ),
     deleteConversation: (accountId, conversationKey) =>
       call(
         "DELETE",
-        dashboardAccountConversationPath(accountId, conversationKey),
-        SDashboardConversationDeleted,
+        gatewayAccountConversationPath(accountId, conversationKey),
+        SGatewayConversationDeleted,
         undefined,
       ),
     reportPresence: (accountIds) =>
-      call("POST", DASHBOARD_PRESENCE_PATH, SDashboardPresenceAccepted, { accountIds }),
+      call("POST", GATEWAY_PRESENCE_PATH, SGatewayPresenceAccepted, { accountIds }),
     registerDevice: (accountId, deviceId, registration) =>
-      call("PUT", dashboardAccountDevicePath(accountId, deviceId), SDashboardDevice, registration),
+      call("PUT", gatewayAccountDevicePath(accountId, deviceId), SGatewayDevice, registration),
     unregisterDevice: (accountId, deviceId) =>
-      call("DELETE", dashboardAccountDevicePath(accountId, deviceId), SDashboardDevice, undefined),
+      call("DELETE", gatewayAccountDevicePath(accountId, deviceId), SGatewayDevice, undefined),
     unregisterAccountDevices: (accountId) =>
-      call("DELETE", dashboardAccountDevicesPath(accountId), SDashboardDevicesRemoved, undefined),
+      call("DELETE", gatewayAccountDevicesPath(accountId), SGatewayDevicesRemoved, undefined),
     // NOTE: no timeout: the stream stays open, and the assistant's keep-alives hold it
     openStream: async (signal) => {
       try {
-        const response = await fetch(`${baseUrl}${DASHBOARD_STREAM_PATH}`, {
+        const response = await fetch(`${baseUrl}${GATEWAY_STREAM_PATH}`, {
           headers: { Authorization: `Bearer ${secret}` },
           signal,
         });
