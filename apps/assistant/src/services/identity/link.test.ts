@@ -31,7 +31,7 @@ import { ConversationStore } from "../conversation";
 import type { TConversation } from "../conversation/types";
 import { CronScheduler } from "../cron";
 import { DatabaseConnector } from "../database";
-import { resetEventTables, resetIdentityLinksTable } from "../database/test-utils";
+import { linkTestAddress, resetEventTables, resetIdentityLinksTable } from "../database/test-utils";
 import { CommandRejectedError, EventBus } from "../events";
 import { testEventRequester } from "../events/test-utils";
 import { setupMcpAuth } from "../mcp/auth";
@@ -666,15 +666,7 @@ describe("linking an address to an account", () => {
   });
 
   test("an address of another account is rejected with a stable code and nothing moves", async () => {
-    await database()
-      .insert(identityLinksTable)
-      .values({
-        channel: EMessagePlatform.Signal,
-        address: "+930",
-        accountId: "acct-owner",
-        state: EIdentityLinkState.Active,
-        linkedAt: new Date(1_000),
-      });
+    await linkTestAddress("+930", "acct-owner");
     await seedChat("signal:+930", "owned");
     await setupOwners(async () => true);
     await EventBus.instance.start();

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import type { TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
 import { ECronJobType, EEventType, eventsTable, memoriesTable } from "@bellaclaw/database";
-import { fauxAssistantMessage, type Message, normalizeContext } from "@earendil-works/pi-ai";
+import { normalizeContext } from "@earendil-works/pi-ai";
 import { convertResponsesMessages } from "@earendil-works/pi-ai/api/openai-responses-shared";
 import { transformMessages } from "@earendil-works/pi-ai/api/transform-messages";
 import { eq } from "drizzle-orm";
@@ -18,6 +18,7 @@ import type { TCronFiredPayload } from "../events/catalog";
 import { testMessageOrigin } from "../events/test-utils";
 import { Memory } from "../memory";
 import { MessageHandler } from "../message-handler";
+import { scriptedReply } from "../message-handler/test-utils";
 import { MessagingAdapter } from "../messaging";
 import { EMessagePlatform } from "../messaging/types";
 import { SettingsService } from "../settings";
@@ -102,20 +103,9 @@ function setupConversationHandler(chatId: string) {
     getAll: mock(async () => DefaultConfigRecord),
   };
   const handler = MessageHandler.instance;
-  const runMain = mock(async (args: Parameters<AgentHarness["runMain"]>[0]) => {
-    const messages: Message[] = [
-      ...(args.conversation?.entries.map((entry) => entry.message) ?? []),
-      { role: "user", content: args.prompt, timestamp: Date.now() },
-      fauxAssistantMessage("Main reply"),
-    ];
-    return {
-      text: "Main reply",
-      iterations: 1,
-      toolCallCount: 0,
-      stopReason: "completed",
-      messages,
-    };
-  });
+  const runMain = mock(async (args: Parameters<AgentHarness["runMain"]>[0]) =>
+    scriptedReply(args, "Main reply"),
+  );
   const compactConversation = mock(async (_state: TConversation): Promise<unknown> => undefined);
   Object.assign(handler, { ai: { runMain, compactConversation } });
   const requestTurn = () =>

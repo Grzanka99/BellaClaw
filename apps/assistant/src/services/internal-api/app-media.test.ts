@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, beforeEach, expect, mock, test } from "bun:test";
+import { afterAll, beforeAll, expect, mock, test } from "bun:test";
 import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -33,7 +33,6 @@ import { AuthorizationService } from "../authorization";
 import { Commands } from "../commands";
 import type { TConversation } from "../conversation/types";
 import { DatabaseConnector } from "../database";
-import { resetEventTables, resetIdentityLinksTable } from "../database/test-utils";
 import { ESubscriptionMode, EventBus } from "../events";
 import { IdentityService } from "../identity";
 import { MessageHandler } from "../message-handler";
@@ -41,9 +40,9 @@ import { MessagingAdapter } from "../messaging";
 import { EMessagePlatform } from "../messaging/types";
 import { SettingsService } from "../settings";
 import { DefaultConfigRecord, EConfigKey } from "../settings/schema";
-import { handleInternalApiRequest, setupInternalApi } from ".";
+import { setupInternalApi } from ".";
+import { internalRequest, resetServices } from "./test-utils";
 
-const SECRET = "internal-secret";
 const MODEL = "google/gemini-3.1-pro-preview";
 const NO_VISION_NOTE = "[User sent an image; the current model cannot view images]";
 // a PNG's signature and some bytes
@@ -57,20 +56,16 @@ let mediaDir = "";
 
 type TBody = RequestInit["body"];
 
-function reset() {
-  for (const service of [
-    EventBus,
-    MessageHandler,
-    MessagingAdapter,
-    Commands,
-    AuthorizationService,
-    IdentityService,
-    SettingsService,
-    AppChannel,
-  ]) {
-    Object.assign(service, { _instance: undefined });
-  }
-}
+resetServices([
+  EventBus,
+  MessageHandler,
+  MessagingAdapter,
+  Commands,
+  AuthorizationService,
+  IdentityService,
+  SettingsService,
+  AppChannel,
+]);
 
 beforeAll(async () => {
   mediaDir = await mkdtemp(join(tmpdir(), "bellaclaw-app-media-"));
@@ -86,19 +81,6 @@ afterAll(async () => {
   if (previousProvider !== undefined) {
     aiModels.setProvider(previousProvider);
   }
-});
-
-beforeEach(async () => {
-  reset();
-  await resetEventTables();
-  await resetIdentityLinksTable();
-});
-
-afterEach(async () => {
-  await EventBus.instance.idle();
-  await EventBus.instance.stop();
-  await resetIdentityLinksTable();
-  reset();
 });
 
 // the model as a faux OpenRouter, with or without vision; contexts: what each request carried
@@ -168,14 +150,7 @@ async function start(
 }
 
 async function request(method: string, path: string, body: TBody, contentType: string) {
-  const response = await handleInternalApiRequest(
-    new Request(`http://internal${path}`, {
-      method,
-      headers: { Authorization: `Bearer ${SECRET}`, "Content-Type": contentType },
-      body,
-    }),
-    SECRET,
-  );
+  const response = await internalRequest(method, path, body, { "Content-Type": contentType });
   await EventBus.instance.idle();
   return response;
 }
@@ -261,6 +236,12 @@ function handlerAi(): { runMain: AgentHarness["runMain"] } {
 
 function mediaRows() {
   return DatabaseConnector.instance.database.select().from(appMediaTable);
+}
+
+// no file or row of the image is left
+async function expectMediaGone(mediaId: string) {
+  expect(await readdir(mediaDir)).not.toContain(mediaId);
+  expect((await mediaRows()).map((row) => row.id)).not.toContain(mediaId);
 }
 
 test("an uploaded image reaches the model in the turn as an image, a model without vision gets the text fallback", async () => {
@@ -357,8 +338,7 @@ test("the image downloads again until the third compaction deletes it; then the 
     author: "user",
     images: [{ mediaId: undefined, mimeType: "image/png" }],
   });
-  expect(await readdir(mediaDir)).not.toContain(media.id);
-  expect((await mediaRows()).map((row) => row.id)).not.toContain(media.id);
+  await expectMediaGone(media.id);
 });
 
 test("an oversized, unsupported or mislabelled file is refused before anything is stored", async () => {
@@ -556,8 +536,7 @@ test("a failed turn's image stays listed, is not replayed, and goes with the thi
     author: "user",
     images: [{ mediaId: undefined, mimeType: "image/png" }],
   });
-  expect(await readdir(mediaDir)).not.toContain(media.id);
-  expect((await mediaRows()).map((row) => row.id)).not.toContain(media.id);
+  await expectMediaGone(media.id);
 });
 
 test("a deleted message takes its image with it", async () => {
@@ -579,8 +558,7 @@ test("a deleted message takes its image with it", async () => {
   expect(deleted.status).toBe(200);
 
   expect((await download(accountId, conversationKey, media.id)).status).toBe(410);
-  expect(await readdir(mediaDir)).not.toContain(media.id);
-  expect((await mediaRows()).map((row) => row.id)).not.toContain(media.id);
+  await expectMediaGone(media.id);
 });
 
 test("a command's image is deleted: a command takes none", async () => {
@@ -600,6 +578,5 @@ test("a command's image is deleted: a command takes none", async () => {
     undefined,
   ]);
   expect((await download(accountId, conversationKey, media.id)).status).toBe(410);
-  expect(await readdir(mediaDir)).not.toContain(media.id);
-  expect((await mediaRows()).map((row) => row.id)).not.toContain(media.id);
+  await expectMediaGone(media.id);
 });

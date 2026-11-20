@@ -11,9 +11,8 @@ import { resetEventTables } from "../database/test-utils";
 import { EventBus } from "../events";
 import { IdentityService } from "../identity";
 import { handleInternalApiRequest, setupInternalApi } from "../internal-api";
+import { internalRequest, TEST_SECRET } from "../internal-api/test-utils";
 import { AppChannel } from ".";
-
-const SECRET = "internal-secret";
 
 // real P-256 public keys, uncompressed, base64url
 const PUBLIC_KEYS = [
@@ -35,24 +34,16 @@ function reset() {
   Object.assign(AppChannel, { _instance: undefined });
 }
 
-function send(method: string, path: string, body: unknown, signal?: AbortSignal) {
-  return handleInternalApiRequest(
-    new Request(`http://internal${path}`, {
-      method,
-      headers: { Authorization: `Bearer ${SECRET}` },
-      body: JSON.stringify(body),
-      signal,
-    }),
-    SECRET,
+function register(accountId: string, deviceId: string, fcmToken: string, index: number) {
+  return internalRequest(
+    "PUT",
+    gatewayAccountDevicePath(accountId, deviceId),
+    JSON.stringify({ fcmToken, ...keys(index) }),
   );
 }
 
-function register(accountId: string, deviceId: string, fcmToken: string, index: number) {
-  return send("PUT", gatewayAccountDevicePath(accountId, deviceId), { fcmToken, ...keys(index) });
-}
-
 function unregister(accountId: string, deviceId: string) {
-  return send("DELETE", gatewayAccountDevicePath(accountId, deviceId), undefined);
+  return internalRequest("DELETE", gatewayAccountDevicePath(accountId, deviceId));
 }
 
 function devices() {
@@ -77,7 +68,13 @@ async function start() {
 // the edge's live connection, open until the returned function closes it
 async function openEdgeConnection() {
   const aborted = new AbortController();
-  const response = await send("GET", "/internal/stream", undefined, aborted.signal);
+  const response = await handleInternalApiRequest(
+    new Request("http://internal/internal/stream", {
+      headers: { Authorization: `Bearer ${TEST_SECRET}` },
+      signal: aborted.signal,
+    }),
+    TEST_SECRET,
+  );
   const reader = response.body?.getReader();
   await reader?.read();
 
@@ -146,13 +143,13 @@ describe("AppChannel devices", () => {
     await register("acct-1", "phone-2", "token-b", 1);
     await register("acct-2", "phone-3", "token-c", 0);
 
-    const removed = await send("DELETE", gatewayAccountDevicesPath("acct-1"), undefined);
+    const removed = await internalRequest("DELETE", gatewayAccountDevicesPath("acct-1"));
 
     expect(await removed.json()).toEqual({ deviceIds: ["phone-1", "phone-2"] });
     expect((await devices()).map((row) => row.id)).toEqual(["phone-3"]);
     expect(await AppChannel.instance.hasDevice("acct-1")).toBe(false);
     expect(
-      await (await send("DELETE", gatewayAccountDevicesPath("acct-1"), undefined)).json(),
+      await (await internalRequest("DELETE", gatewayAccountDevicesPath("acct-1"))).json(),
     ).toEqual({ deviceIds: [] });
   });
 
@@ -173,13 +170,25 @@ describe("AppChannel devices", () => {
       { ...valid, fcmToken: "x".repeat(4097) },
       { ...valid, extra: true },
     ]) {
-      expect((await send("PUT", gatewayAccountDevicePath("acct-1", "phone-1"), body)).status).toBe(
-        400,
-      );
+      expect(
+        (
+          await internalRequest(
+            "PUT",
+            gatewayAccountDevicePath("acct-1", "phone-1"),
+            JSON.stringify(body),
+          )
+        ).status,
+      ).toBe(400);
     }
-    expect((await send("PUT", gatewayAccountDevicePath("acct-1", "phone.1"), valid)).status).toBe(
-      400,
-    );
+    expect(
+      (
+        await internalRequest(
+          "PUT",
+          gatewayAccountDevicePath("acct-1", "phone.1"),
+          JSON.stringify(valid),
+        )
+      ).status,
+    ).toBe(400);
 
     const commands = await DatabaseConnector.instance.database
       .select()
@@ -209,14 +218,22 @@ describe("AppChannel presence", () => {
 
     expect(
       await (
-        await send("POST", GATEWAY_PRESENCE_PATH, { accountIds: ["acct-1", "acct-2"] })
+        await internalRequest(
+          "POST",
+          GATEWAY_PRESENCE_PATH,
+          JSON.stringify({ accountIds: ["acct-1", "acct-2"] }),
+        )
       ).json(),
     ).toEqual({ ok: true });
     expect(AppChannel.instance.hasOpenStream("acct-1")).toBe(true);
     expect(AppChannel.instance.hasOpenStream("acct-2")).toBe(true);
 
     // a stream closed at the edge
-    await send("POST", GATEWAY_PRESENCE_PATH, { accountIds: ["acct-2"] });
+    await internalRequest(
+      "POST",
+      GATEWAY_PRESENCE_PATH,
+      JSON.stringify({ accountIds: ["acct-2"] }),
+    );
     expect(AppChannel.instance.hasOpenStream("acct-1")).toBe(false);
     expect(AppChannel.instance.hasOpenStream("acct-2")).toBe(true);
 
@@ -224,7 +241,11 @@ describe("AppChannel presence", () => {
     expect(AppChannel.instance.hasOpenStream("acct-2")).toBe(false);
 
     // a report that arrives with no connection open is not kept
-    await send("POST", GATEWAY_PRESENCE_PATH, { accountIds: ["acct-2"] });
+    await internalRequest(
+      "POST",
+      GATEWAY_PRESENCE_PATH,
+      JSON.stringify({ accountIds: ["acct-2"] }),
+    );
     expect(AppChannel.instance.hasOpenStream("acct-2")).toBe(false);
   });
 });

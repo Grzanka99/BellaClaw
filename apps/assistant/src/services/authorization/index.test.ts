@@ -1,18 +1,18 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { EEventType, eventsTable, identityLinksTable } from "@bellaclaw/database";
+import { EEventType, eventsTable } from "@bellaclaw/database";
 import type { TOption } from "@bellaclaw/shared";
 import { asc, eq } from "drizzle-orm";
 import { Commands } from "../commands";
 import { DatabaseConnector } from "../database";
 import {
+  linkTestAddress,
   resetEventTables,
   resetIdentityLinksTable,
   resetMessageAuthorizationsTable,
 } from "../database/test-utils";
 import { EventBus } from "../events";
-import { testMessageAddress, testMessageOrigin } from "../events/test-utils";
+import { publishTestMessage, testMessageOrigin } from "../events/test-utils";
 import { IdentityService } from "../identity";
-import { EIdentityLinkState } from "../identity/schema";
 import { EMessagePlatform } from "../messaging/types";
 import { AuthorizationService } from ".";
 import { EAuthorizationDecision, EAuthorizationStatus } from "./schema";
@@ -114,24 +114,6 @@ describe("AuthorizationService.authorize", () => {
 describe("authorization consumer", () => {
   let bus: EventBus;
 
-  async function receive(chatId: string, content: string, dedupeKey: TOption<string>) {
-    await bus.publish({
-      type: EEventType.MessageReceived,
-      source: "test",
-      key: chatId,
-      trace: { turnId: "test:auth", chatId, platform: EMessagePlatform.Signal },
-      payload: {
-        ...testMessageAddress(chatId, EMessagePlatform.Signal),
-        content,
-        attachments: [],
-        receivedAt: 1,
-      },
-      causationId: undefined,
-      dedupeKey,
-    });
-    await bus.idle();
-  }
-
   async function payloadsOf(type: EEventType) {
     const rows = await DatabaseConnector.instance.database
       .select()
@@ -154,14 +136,14 @@ describe("authorization consumer", () => {
   });
 
   test("rejects silently, replies to activation and authorizes later messages", async () => {
-    await receive("signal:+200", "wrong", undefined);
+    await publishTestMessage("signal:+200", "wrong");
     expect(await payloadsOf(EEventType.MessageRejected)).toEqual([
       { chatId: "signal:+200", decision: EAuthorizationDecision.FailedAttempt, failedAttempts: 1 },
     ]);
     expect(await payloadsOf(EEventType.ReplyReady)).toEqual([]);
 
-    await receive("signal:+200", "open-sesame", undefined);
-    await receive("signal:+200", "open-sesame", undefined);
+    await publishTestMessage("signal:+200", "open-sesame");
+    await publishTestMessage("signal:+200", "open-sesame");
     expect(await payloadsOf(EEventType.ReplyReady)).toEqual([
       { ...testMessageOrigin("signal:+200", EMessagePlatform.Signal), text: "Activated." },
       { ...testMessageOrigin("signal:+200", EMessagePlatform.Signal), text: "Already activated." },
@@ -169,7 +151,7 @@ describe("authorization consumer", () => {
     expect(await AuthorizationService.instance.listAuthorizedChatIds()).toContain("signal:+200");
     expect(await payloadsOf(EEventType.MessageAuthorized)).toEqual([]);
 
-    await receive("signal:+200", "hello", undefined);
+    await publishTestMessage("signal:+200", "hello");
     expect(await payloadsOf(EEventType.TurnRequested)).toEqual([
       expect.objectContaining({ conversationKey: "signal:+200", content: "hello" }),
     ]);
@@ -181,18 +163,12 @@ describe("authorization consumer", () => {
 
   test("the activation replies of a linked address run on its Bella conversation's lane", async () => {
     await resetIdentityLinksTable();
-    await DatabaseConnector.instance.database.insert(identityLinksTable).values({
-      channel: EMessagePlatform.Signal,
-      address: "+300",
-      accountId: "acct-1",
-      state: EIdentityLinkState.Active,
-      linkedAt: new Date(1_000),
-    });
+    await linkTestAddress("+300", "acct-1");
     Object.assign(IdentityService, { _instance: undefined });
 
     try {
-      await receive("signal:+300", "open-sesame", undefined);
-      await receive("signal:+300", "open-sesame", undefined);
+      await publishTestMessage("signal:+300", "open-sesame");
+      await publishTestMessage("signal:+300", "open-sesame");
     } finally {
       await resetIdentityLinksTable();
       Object.assign(IdentityService, { _instance: undefined });

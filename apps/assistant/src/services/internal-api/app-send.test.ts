@@ -1,59 +1,41 @@
-import { afterEach, beforeEach, expect, mock, test } from "bun:test";
+import { expect, mock, test } from "bun:test";
 import {
   EEventType,
   eventsTable,
   findOwnedConversation,
-  identityLinksTable,
   listHistory,
   type THistoryCursor,
 } from "@bellaclaw/database";
 import { gatewayAccountConversationMessagesPath, type TOption } from "@bellaclaw/shared";
-import { fauxAssistantMessage, type Message } from "@earendil-works/pi-ai";
 import { asc, eq } from "drizzle-orm";
 import type { AgentHarness } from "../ai/agent-harness";
 import { AuthorizationService } from "../authorization";
 import { Commands } from "../commands";
 import { DatabaseConnector } from "../database";
-import { resetEventTables, resetIdentityLinksTable } from "../database/test-utils";
+import { linkTestAddress } from "../database/test-utils";
 import { EventBus } from "../events";
+import { publishTestMessage } from "../events/test-utils";
 import { IdentityService } from "../identity";
-import { EIdentityLinkState } from "../identity/schema";
 import { MessageHandler } from "../message-handler";
+import { scriptedReply } from "../message-handler/test-utils";
 import { MessagingAdapter } from "../messaging";
 import { EMessagePlatform } from "../messaging/types";
 import { SettingsService } from "../settings";
 import { DefaultConfigRecord } from "../settings/schema";
-import { handleInternalApiRequest, setupInternalApi } from ".";
+import { setupInternalApi } from ".";
+import { internalRequest, resetServices } from "./test-utils";
 
-const SECRET = "internal-secret";
 const NOT_FOUND = { error: "Not found" };
 
-function reset() {
-  for (const service of [
-    EventBus,
-    MessageHandler,
-    MessagingAdapter,
-    Commands,
-    AuthorizationService,
-    IdentityService,
-    SettingsService,
-  ]) {
-    Object.assign(service, { _instance: undefined });
-  }
-}
-
-beforeEach(async () => {
-  reset();
-  await resetEventTables();
-  await resetIdentityLinksTable();
-});
-
-afterEach(async () => {
-  await EventBus.instance.idle();
-  await EventBus.instance.stop();
-  await resetIdentityLinksTable();
-  reset();
-});
+resetServices([
+  EventBus,
+  MessageHandler,
+  MessagingAdapter,
+  Commands,
+  AuthorizationService,
+  IdentityService,
+  SettingsService,
+]);
 
 // the pipeline from the internal API to Outbound on a fresh bus, with a scripted model and a
 // Signal transport
@@ -61,20 +43,9 @@ async function start() {
   Object.assign(SettingsService, {
     _instance: { getAll: mock(async () => DefaultConfigRecord) },
   });
-  const runMain = mock(async (args: Parameters<AgentHarness["runMain"]>[0]) => {
-    const messages: Message[] = [
-      ...(args.conversation?.entries.map((entry) => entry.message) ?? []),
-      { role: "user", content: args.prompt, timestamp: Date.now() },
-      fauxAssistantMessage(`Reply to ${args.prompt}`),
-    ];
-    return {
-      text: `Reply to ${args.prompt}`,
-      iterations: 1,
-      toolCallCount: 0,
-      stopReason: "completed",
-      messages,
-    };
-  });
+  const runMain = mock(async (args: Parameters<AgentHarness["runMain"]>[0]) =>
+    scriptedReply(args, `Reply to ${args.prompt}`),
+  );
   Object.assign(MessageHandler.instance, {
     ai: { runMain, compactConversation: mock(async () => undefined) },
   });
@@ -95,23 +66,12 @@ async function start() {
   return { runMain, sendText };
 }
 
-function request(method: string, path: string, body?: unknown) {
-  return handleInternalApiRequest(
-    new Request(`http://internal${path}`, {
-      method,
-      headers: { Authorization: `Bearer ${SECRET}` },
-      body: JSON.stringify(body),
-    }),
-    SECRET,
-  );
-}
-
 // an app send as the gateway forwards it; the status and the body once the turn settled
 async function sendApp(accountId: string, conversationKey: string, body: unknown) {
-  const response = await request(
+  const response = await internalRequest(
     "POST",
     gatewayAccountConversationMessagesPath(accountId, conversationKey),
-    body,
+    JSON.stringify(body),
   );
   const answer = [response.status, await response.json()];
   await EventBus.instance.idle();
@@ -243,34 +203,11 @@ test("a conversation of another account is answered like one that does not exist
 test("a Signal message of a linked address is answered on Signal, and the app's history shows it", async () => {
   const accountId = `acct-${crypto.randomUUID()}`;
   const address = `+${Date.now()}`;
-  await DatabaseConnector.instance.database.insert(identityLinksTable).values({
-    channel: EMessagePlatform.Signal,
-    address,
-    accountId,
-    state: EIdentityLinkState.Active,
-    linkedAt: new Date(1_000),
-  });
+  await linkTestAddress(address, accountId);
   const { sendText } = await start();
   const chatKey = `signal:${address}`;
 
-  await EventBus.instance.publish({
-    type: EEventType.MessageReceived,
-    source: "signal",
-    key: chatKey,
-    trace: { turnId: "test:signal", chatId: chatKey, platform: EMessagePlatform.Signal },
-    payload: {
-      conversationKey: chatKey,
-      ownerKey: chatKey,
-      channel: EMessagePlatform.Signal,
-      replyAddress: address,
-      content: "Hi from Signal",
-      attachments: [],
-      receivedAt: Date.now(),
-    },
-    causationId: undefined,
-    dedupeKey: undefined,
-  });
-  await EventBus.instance.idle();
+  await publishTestMessage(chatKey, "Hi from Signal");
 
   expect(sendText.mock.calls).toEqual([[address, "Reply to Hi from Signal"]]);
   const { conversationKey } = account(accountId);
@@ -288,7 +225,7 @@ test("a message deleted in the dashboard moves the rewrite revision, and a reloa
   await sendApp(accountId, conversationKey, { clientMessageId: "m-1", text: "Hello" });
   const reply = (await history(conversationKey)).at(-1);
 
-  const deleted = await request(
+  const deleted = await internalRequest(
     "DELETE",
     `/internal/accounts/${encodeURIComponent(accountId)}/messages/${reply?.id}`,
   );

@@ -1,4 +1,7 @@
+import { identityLinksTable } from "@bellaclaw/database";
 import { sql } from "drizzle-orm";
+import { EIdentityLinkState } from "../identity/schema";
+import { EMessagePlatform } from "../messaging/types";
 import { DatabaseConnector } from "./index";
 
 export async function resetCronEngineJobsTable() {
@@ -64,4 +67,17 @@ export async function resetIdentityLinksTable() {
   const db = DatabaseConnector.instance.database;
 
   await db.run(sql`DELETE FROM identity_links`);
+}
+
+// an address linked to an account, active since a fixed time
+export async function linkTestAddress(
+  address: string,
+  accountId: string,
+  channel = EMessagePlatform.Signal,
+  state = EIdentityLinkState.Active,
+  linkedAt = 1_000,
+) {
+  await DatabaseConnector.instance.database
+    .insert(identityLinksTable)
+    .values({ channel, address, accountId, state, linkedAt: new Date(linkedAt) });
 }

@@ -9,21 +9,19 @@ import {
   EEventType,
   eventDeliveriesTable,
   eventsTable,
-  identityLinksTable,
   listHistory,
   memoriesTable,
 } from "@bellaclaw/database";
 import { APP_PUSH_MAX_BYTES, SAppPush, type TAppPush } from "@bellaclaw/shared";
-import { fauxAssistantMessage, type Message } from "@earendil-works/pi-ai";
 import { and, eq, inArray } from "drizzle-orm";
 import type { AgentHarness } from "../ai/agent-harness";
 import { DatabaseConnector } from "../database";
-import { resetEventTables, resetIdentityLinksTable } from "../database/test-utils";
+import { linkTestAddress, resetEventTables, resetIdentityLinksTable } from "../database/test-utils";
 import { EventBus, type TEventDraft } from "../events";
 import { testEventRequester } from "../events/test-utils";
 import { IdentityService } from "../identity";
-import { EIdentityLinkState } from "../identity/schema";
 import { MessageHandler } from "../message-handler";
+import { scriptedReply } from "../message-handler/test-utils";
 import { MessagingAdapter } from "../messaging";
 import { EMessagePlatform } from "../messaging/types";
 import { Notices } from "../notices";
@@ -275,14 +273,9 @@ describe("AppChannel push", () => {
   // the turn engine scripted, outbound with a Signal transport, the App channel and Notices
   async function start(reply: string) {
     Object.assign(SettingsService, { _instance: { getAll: async () => DefaultConfigRecord } });
-    const runMain = mock(async (args: Parameters<AgentHarness["runMain"]>[0]) => {
-      const messages: Message[] = [
-        ...(args.conversation?.entries.map((entry) => entry.message) ?? []),
-        { role: "user", content: args.prompt, timestamp: Date.now() },
-        fauxAssistantMessage(reply),
-      ];
-      return { text: reply, iterations: 1, toolCallCount: 0, stopReason: "completed", messages };
-    });
+    const runMain = mock(async (args: Parameters<AgentHarness["runMain"]>[0]) =>
+      scriptedReply(args, reply),
+    );
     Object.assign(MessageHandler.instance, {
       ai: { runMain, compactConversation: mock(async () => undefined) },
     });
@@ -415,13 +408,7 @@ describe("AppChannel push", () => {
     await DatabaseConnector.instance.database
       .delete(conversationsTable)
       .where(eq(conversationsTable.conversationKey, PLAIN));
-    await DatabaseConnector.instance.database.insert(identityLinksTable).values({
-      channel: EMessagePlatform.Signal,
-      address: "+100",
-      accountId: "acct-1",
-      state: EIdentityLinkState.Active,
-      linkedAt: new Date(1_000),
-    });
+    await linkTestAddress("+100", "acct-1");
     pushed = [];
     answers = new Map();
     tokenExchanges = 0;

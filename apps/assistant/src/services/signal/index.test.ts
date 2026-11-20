@@ -1,13 +1,12 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
-import { EEventType, eventsTable, identityLinksTable } from "@bellaclaw/database";
+import { EEventType, eventsTable } from "@bellaclaw/database";
 import { asc, eq } from "drizzle-orm";
 import { DatabaseConnector } from "../database";
-import { resetEventTables, resetIdentityLinksTable } from "../database/test-utils";
+import { linkTestAddress, resetEventTables, resetIdentityLinksTable } from "../database/test-utils";
 import { EventBus } from "../events";
 import type { TEventPayloads } from "../events/catalog";
 import { testMessageOrigin } from "../events/test-utils";
 import { IdentityService } from "../identity";
-import { EIdentityLinkState } from "../identity/schema";
 import { MessagingAdapter } from "../messaging";
 import { EMessagePlatform } from "../messaging/types";
 import { SignalClient } from "./client";
@@ -180,13 +179,7 @@ describe("SignalSingleton", () => {
     Bun.env.SIGNAL_PHONE_NUMBER = "+100";
     await resetEventTables();
     await resetIdentityLinksTable();
-    await DatabaseConnector.instance.database.insert(identityLinksTable).values({
-      channel: EMessagePlatform.Signal,
-      address: "+300",
-      accountId: "acct-1",
-      state: EIdentityLinkState.Active,
-      linkedAt: new Date(1_000),
-    });
+    await linkTestAddress("+300", "acct-1");
     Object.assign(IdentityService, { _instance: undefined });
     const signal = SignalSingleton.instance as unknown as TSignalSingletonInternals;
     signal.client = {

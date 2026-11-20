@@ -3,11 +3,9 @@ import {
   ECronJobType,
   EEventType,
   eventsTable,
-  identityLinksTable,
   memoriesTable,
   messageAuthorizationsTable,
 } from "@bellaclaw/database";
-import { fauxAssistantMessage, type Message } from "@earendil-works/pi-ai";
 import { asc, eq } from "drizzle-orm";
 import type { AgentHarness } from "../ai/agent-harness";
 import { AuthorizationService } from "../authorization";
@@ -15,13 +13,15 @@ import { EAuthorizationStatus } from "../authorization/schema";
 import { Commands } from "../commands";
 import { DatabaseConnector } from "../database";
 import {
+  linkTestAddress,
   resetEventTables,
   resetIdentityLinksTable,
   resetMessageAuthorizationsTable,
 } from "../database/test-utils";
 import { EventBus } from "../events";
-import { testMessageAddress } from "../events/test-utils";
+import { publishTestMessage } from "../events/test-utils";
 import { MessageHandler } from "../message-handler";
+import { scriptedReply } from "../message-handler/test-utils";
 import { MessagingAdapter } from "../messaging";
 import { EMessagePlatform } from "../messaging/types";
 import { Notices } from "../notices";
@@ -52,9 +52,7 @@ function link(
   linkedAt: number,
   state = EIdentityLinkState.Active,
 ) {
-  return DatabaseConnector.instance.database
-    .insert(identityLinksTable)
-    .values({ channel, address, accountId, state, linkedAt: new Date(linkedAt) });
+  return linkTestAddress(address, accountId, channel, state, linkedAt);
 }
 
 function transport(platform: EMessagePlatform) {
@@ -115,19 +113,9 @@ describe("IdentityService", () => {
     await link(EMessagePlatform.Signal, "+100", "acct-1", 1_000);
     await link(EMessagePlatform.Signal, "+200", "acct-1", 2_000);
     const getAll = mockSettings();
-    const runMain = mock(async (args: Parameters<AgentHarness["runMain"]>[0]) => {
-      const messages: Message[] = [
-        { role: "user", content: args.prompt, timestamp: Date.now() },
-        fauxAssistantMessage("Main reply"),
-      ];
-      return {
-        text: "Main reply",
-        iterations: 1,
-        toolCallCount: 0,
-        stopReason: "completed",
-        messages,
-      };
-    });
+    const runMain = mock(async (args: Parameters<AgentHarness["runMain"]>[0]) =>
+      scriptedReply({ ...args, conversation: undefined }, "Main reply"),
+    );
     Object.assign(MessageHandler.instance, {
       ai: { runMain, compactConversation: mock(async () => undefined) },
     });
@@ -138,21 +126,7 @@ describe("IdentityService", () => {
     MessagingAdapter.instance.setup();
     await EventBus.instance.start();
 
-    await EventBus.instance.publish({
-      type: EEventType.MessageReceived,
-      source: "test",
-      key: "signal:+200",
-      trace: { turnId: "test:linked", chatId: "signal:+200", platform: EMessagePlatform.Signal },
-      payload: {
-        ...testMessageAddress("signal:+200", EMessagePlatform.Signal),
-        content: "Hello",
-        attachments: [],
-        receivedAt: Date.now(),
-      },
-      causationId: undefined,
-      dedupeKey: undefined,
-    });
-    await EventBus.instance.idle();
+    await publishTestMessage("signal:+200", "Hello");
 
     expect(await rows("bella:acct-1")).toEqual([
       { author: "user", channel: EMessagePlatform.Signal },

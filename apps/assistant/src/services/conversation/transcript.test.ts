@@ -7,19 +7,19 @@ import {
   type TSelectMemory,
 } from "@bellaclaw/database";
 import type { TOption } from "@bellaclaw/shared";
-import { fauxAssistantMessage, type Message } from "@earendil-works/pi-ai";
 import { asc, eq } from "drizzle-orm";
 import type { AgentHarness } from "../ai/agent-harness";
 import { ERole } from "../ai/types";
 import { AuthorizationService } from "../authorization";
 import { Commands } from "../commands";
 import { DatabaseConnector } from "../database";
-import { resetEventTables, resetIdentityLinksTable } from "../database/test-utils";
 import { EventBus } from "../events";
 import { testMessageOrigin, withEventContext } from "../events/test-utils";
 import { IdentityService } from "../identity";
+import { resetServices } from "../internal-api/test-utils";
 import { Memory } from "../memory";
 import { MessageHandler } from "../message-handler";
+import { scriptedReply } from "../message-handler/test-utils";
 import { MessagingAdapter } from "../messaging";
 import { EMessagePlatform } from "../messaging/types";
 import { SettingsService } from "../settings";
@@ -29,34 +29,24 @@ import type { TConversation } from "./types";
 const originalUrl = Bun.env.BELLACLAW_GATEWAY_PUBLIC_URL;
 const originalSecret = Bun.env.BELLACLAW_GATEWAY_SECRET;
 
-function reset() {
-  for (const service of [
-    EventBus,
-    MessageHandler,
-    MessagingAdapter,
-    Commands,
-    AuthorizationService,
-    IdentityService,
-    SettingsService,
-  ]) {
-    Object.assign(service, { _instance: undefined });
-  }
-}
+resetServices([
+  EventBus,
+  MessageHandler,
+  MessagingAdapter,
+  Commands,
+  AuthorizationService,
+  IdentityService,
+  SettingsService,
+]);
 
-beforeEach(async () => {
-  reset();
-  await resetEventTables();
-  await resetIdentityLinksTable();
+beforeEach(() => {
   Bun.env.BELLACLAW_GATEWAY_PUBLIC_URL = "https://dashboard.test";
   Bun.env.BELLACLAW_GATEWAY_SECRET = "gateway-secret";
 });
 
-afterEach(async () => {
-  await EventBus.instance.idle();
-  await EventBus.instance.stop();
+afterEach(() => {
   Bun.env.BELLACLAW_GATEWAY_PUBLIC_URL = originalUrl;
   Bun.env.BELLACLAW_GATEWAY_SECRET = originalSecret;
-  reset();
 });
 
 // Commands, the conversation consumer and outbound on a fresh bus, with a scripted model
@@ -64,20 +54,9 @@ async function setupSession() {
   Object.assign(SettingsService, {
     _instance: { getAll: mock(async () => DefaultConfigRecord) },
   });
-  const runMain = mock(async (args: Parameters<AgentHarness["runMain"]>[0]) => {
-    const messages: Message[] = [
-      ...(args.conversation?.entries.map((entry) => entry.message) ?? []),
-      { role: "user", content: args.prompt, timestamp: Date.now() },
-      fauxAssistantMessage(`Reply to ${args.prompt}`),
-    ];
-    return {
-      text: `Reply to ${args.prompt}`,
-      iterations: 1,
-      toolCallCount: 0,
-      stopReason: "completed",
-      messages,
-    };
-  });
+  const runMain = mock(async (args: Parameters<AgentHarness["runMain"]>[0]) =>
+    scriptedReply(args, `Reply to ${args.prompt}`),
+  );
   Object.assign(MessageHandler.instance, {
     ai: { runMain, compactConversation: mock(async () => undefined) },
   });

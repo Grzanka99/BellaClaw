@@ -19,7 +19,6 @@ import {
   type TGatewayStreamEvent,
   type TOption,
 } from "@bellaclaw/shared";
-import { fauxAssistantMessage, type Message } from "@earendil-works/pi-ai";
 import { asc, eq } from "drizzle-orm";
 import type { AgentHarness } from "../ai/agent-harness";
 import { setupAiAuth } from "../ai/auth";
@@ -32,17 +31,17 @@ import { AuthorizationService } from "../authorization";
 import { Commands } from "../commands";
 import { ConversationStore } from "../conversation";
 import { DatabaseConnector } from "../database";
-import { resetEventTables, resetIdentityLinksTable } from "../database/test-utils";
 import { EventBus } from "../events";
 import { IdentityService } from "../identity";
 import { FactDistiller } from "../memory/distill";
 import { MessageHandler } from "../message-handler";
+import { scriptedReply } from "../message-handler/test-utils";
 import { MessagingAdapter } from "../messaging";
 import { SettingsService } from "../settings";
 import { DefaultConfigRecord, EConfigKey } from "../settings/schema";
-import { handleInternalApiRequest, setupInternalApi } from ".";
+import { setupInternalApi } from ".";
+import { internalRequest, resetServices } from "./test-utils";
 
-const SECRET = "internal-secret";
 const NOT_FOUND = { error: "Not found" };
 const GPT = { provider: "openrouter", model: "openai/gpt-5", effort: "low" };
 const HAIKU = { provider: "openrouter", model: "anthropic/claude-haiku-4.5", effort: "off" };
@@ -52,45 +51,25 @@ type TCompleteTextArgs = Parameters<LlmClient["completeText"]>[0];
 
 const previousOpenrouterKey = Bun.env.OPENROUTER_API_KEY;
 
-function reset() {
-  for (const service of [
-    EventBus,
-    MessageHandler,
-    MessagingAdapter,
-    Commands,
-    AuthorizationService,
-    IdentityService,
-    SettingsService,
-    FactDistiller,
-    AppStream,
-  ]) {
-    Object.assign(service, { _instance: undefined });
-  }
-}
+resetServices([
+  EventBus,
+  MessageHandler,
+  MessagingAdapter,
+  Commands,
+  AuthorizationService,
+  IdentityService,
+  SettingsService,
+  FactDistiller,
+  AppStream,
+]);
 
-beforeEach(async () => {
+beforeEach(() => {
   Bun.env.OPENROUTER_API_KEY = "openrouter-test-key";
-  reset();
-  await resetEventTables();
-  await resetIdentityLinksTable();
 });
 
-afterEach(async () => {
-  await EventBus.instance.idle();
-  await EventBus.instance.stop();
-  await resetIdentityLinksTable();
-  reset();
+afterEach(() => {
   Bun.env.OPENROUTER_API_KEY = previousOpenrouterKey;
 });
-
-function reply(args: TRunArgs, text: string) {
-  const messages: Message[] = [
-    ...(args.conversation?.entries.map((entry) => entry.message) ?? []),
-    { role: "user", content: args.prompt, timestamp: Date.now() },
-    fauxAssistantMessage(text),
-  ];
-  return { text, iterations: 1, toolCallCount: 0, stopReason: "completed", messages };
-}
 
 // the pipeline from the internal API to the transcript and Memory on a fresh bus, with a scripted
 // model: the Bella agent and the plain agent answer apart. Memory distils a fact from every user
@@ -98,7 +77,7 @@ function reply(args: TRunArgs, text: string) {
 // diagnosis run for real instead of every owner reading the default settings. completeText: the
 // Utility call that writes a plain chat's title
 async function start(
-  runPlain = mock(async (args: TRunArgs) => reply(args, `Plain reply to ${args.prompt}`)),
+  runPlain = mock(async (args: TRunArgs) => scriptedReply(args, `Plain reply to ${args.prompt}`)),
   storedSettings = false,
   completeText = mock(async (_args: TCompleteTextArgs): Promise<TOption<string>> => "Trip plans"),
 ) {
@@ -110,7 +89,9 @@ async function start(
       _instance: { getAll: mock(async () => DefaultConfigRecord) },
     });
   }
-  const runMain = mock(async (args: TRunArgs) => reply(args, `Bella reply to ${args.prompt}`));
+  const runMain = mock(async (args: TRunArgs) =>
+    scriptedReply(args, `Bella reply to ${args.prompt}`),
+  );
   Object.assign(MessageHandler.instance, {
     ai: { runMain, runPlain, compactConversation: mock(async () => undefined) },
     llm: { completeText },
@@ -140,14 +121,7 @@ async function start(
 }
 
 async function request(method: string, path: string, body?: unknown) {
-  const response = await handleInternalApiRequest(
-    new Request(`http://internal${path}`, {
-      method,
-      headers: { Authorization: `Bearer ${SECRET}` },
-      body: JSON.stringify(body),
-    }),
-    SECRET,
-  );
+  const response = await internalRequest(method, path, JSON.stringify(body));
   const answer: [number, unknown] = [response.status, await response.json()];
   await EventBus.instance.idle();
   return answer;
@@ -351,7 +325,7 @@ test("a plain chat's failed turn answers the failure reply and leaves the accoun
   const runPlain = mock(async (args: TRunArgs) => {
     expired = true;
     // no final response
-    return { ...reply(args, ""), text: undefined as unknown as string };
+    return { ...scriptedReply(args, ""), text: undefined as unknown as string };
   });
 
   try {
@@ -443,7 +417,7 @@ test("two plain chats run their turns at the same time, each on the model its me
     }
 
     await running.promise;
-    return reply(args, `Plain reply to ${args.prompt}`);
+    return scriptedReply(args, `Plain reply to ${args.prompt}`);
   });
   await start(runPlain);
   const accountId = `acct-${crypto.randomUUID()}`;
@@ -591,7 +565,9 @@ test("the first reply of a plain chat writes one title, which the stream announc
 });
 
 test("a plain chat whose first turn fails takes its title from the next completed turn", async () => {
-  const runPlain = mock(async (args: TRunArgs) => reply(args, `Plain reply to ${args.prompt}`));
+  const runPlain = mock(async (args: TRunArgs) =>
+    scriptedReply(args, `Plain reply to ${args.prompt}`),
+  );
   runPlain.mockImplementationOnce(async () => {
     throw new Error("provider down");
   });

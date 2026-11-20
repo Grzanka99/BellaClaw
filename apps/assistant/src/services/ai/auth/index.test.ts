@@ -2,16 +2,13 @@ import { afterEach, beforeEach, expect, type Mock, mock, spyOn, test } from "bun
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { EEventType, identityLinksTable } from "@bellaclaw/database";
+import { EEventType } from "@bellaclaw/database";
 import { createModels, createProvider, type OAuthCredential } from "@earendil-works/pi-ai";
 import { openAICodexResponsesApi } from "@earendil-works/pi-ai/api/openai-codex-responses.lazy";
 import { AuthorizationService } from "../../authorization";
-import { DatabaseConnector } from "../../database";
-import { resetIdentityLinksTable } from "../../database/test-utils";
+import { linkTestAddress, resetIdentityLinksTable } from "../../database/test-utils";
 import { EventBus, type TEventContext, type TEventDraft } from "../../events";
 import { IdentityService } from "../../identity";
-import { EIdentityLinkState } from "../../identity/schema";
-import { EMessagePlatform } from "../../messaging/types";
 import { EConfigKey } from "../../settings/schema";
 import { FileCredentialStore } from "../providers/file-credential-store";
 import { EAiProvider } from "../types";
@@ -170,13 +167,7 @@ test("alerts a linked account although no chat is authorized", async () => {
   );
   authorizedChats.mockResolvedValue([]);
   await resetIdentityLinksTable();
-  await DatabaseConnector.instance.database.insert(identityLinksTable).values({
-    channel: EMessagePlatform.Signal,
-    address: "+100",
-    accountId: "acct-alert",
-    state: EIdentityLinkState.Active,
-    linkedAt: new Date(1_000),
-  });
+  await linkTestAddress("+100", "acct-alert");
   Object.assign(IdentityService, { _instance: undefined });
 
   try {

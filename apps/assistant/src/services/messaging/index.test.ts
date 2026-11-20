@@ -5,17 +5,15 @@ import {
   EEventType,
   eventDeliveriesTable,
   eventsTable,
-  identityLinksTable,
   memoriesTable,
 } from "@bellaclaw/database";
 import { asc, eq, inArray } from "drizzle-orm";
 import { AppChannel } from "../app";
 import { DatabaseConnector } from "../database";
-import { resetEventTables, resetIdentityLinksTable } from "../database/test-utils";
+import { linkTestAddress, resetEventTables, resetIdentityLinksTable } from "../database/test-utils";
 import { EventBus, type TEventDraft } from "../events";
 import { testEventRequester, testMessageOrigin } from "../events/test-utils";
 import { IdentityService } from "../identity";
-import { EIdentityLinkState } from "../identity/schema";
 import { MessageHandler } from "../message-handler";
 import { SettingsService } from "../settings";
 import { DefaultConfigRecord } from "../settings/schema";
@@ -207,13 +205,7 @@ describe("MessagingAdapter main channel", () => {
     await DatabaseConnector.instance.database
       .delete(memoriesTable)
       .where(inArray(memoriesTable.chatId, ["bella:acct-1", "bella:acct-unlinked"]));
-    await DatabaseConnector.instance.database.insert(identityLinksTable).values({
-      channel: EMessagePlatform.Signal,
-      address: "+100",
-      accountId: "acct-1",
-      state: EIdentityLinkState.Active,
-      linkedAt: new Date(1_000),
-    });
+    await linkTestAddress("+100", "acct-1");
     Object.assign(SettingsService, { _instance: { getAll: async () => DefaultConfigRecord } });
     signal = mock(async (_address: string, _text: string) => undefined);
     const adapter = MessagingAdapter.instance;

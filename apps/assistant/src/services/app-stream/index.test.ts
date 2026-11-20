@@ -1,57 +1,40 @@
-import { afterEach, beforeEach, expect, mock, test } from "bun:test";
-import { EEventType, eventsTable, identityLinksTable, listHistory } from "@bellaclaw/database";
+import { expect, mock, test } from "bun:test";
+import { EEventType, eventsTable, listHistory } from "@bellaclaw/database";
 import {
   GATEWAY_STREAM_PATH,
   gatewayAccountConversationMessagesPath,
   type TGatewayStreamEvent,
+  type TOption,
 } from "@bellaclaw/shared";
-import { fauxAssistantMessage, type Message } from "@earendil-works/pi-ai";
 import { eq } from "drizzle-orm";
 import type { AgentHarness } from "../ai/agent-harness";
 import { AuthorizationService } from "../authorization";
 import { Commands } from "../commands";
 import { DatabaseConnector } from "../database";
-import { resetEventTables, resetIdentityLinksTable } from "../database/test-utils";
+import { linkTestAddress } from "../database/test-utils";
 import { EventBus } from "../events";
+import { publishTestMessage } from "../events/test-utils";
 import { IdentityService } from "../identity";
-import { EIdentityLinkState } from "../identity/schema";
 import { handleInternalApiRequest, setupInternalApi } from "../internal-api";
+import { internalRequest, resetServices, TEST_SECRET } from "../internal-api/test-utils";
 import { MessageHandler } from "../message-handler";
+import { scriptedReply } from "../message-handler/test-utils";
 import { MessagingAdapter } from "../messaging";
 import { EMessagePlatform } from "../messaging/types";
 import { SettingsService } from "../settings";
 import { DefaultConfigRecord } from "../settings/schema";
 import { AppStream } from ".";
 
-const SECRET = "internal-secret";
-
-function reset() {
-  for (const service of [
-    EventBus,
-    MessageHandler,
-    MessagingAdapter,
-    Commands,
-    AuthorizationService,
-    IdentityService,
-    SettingsService,
-    AppStream,
-  ]) {
-    Object.assign(service, { _instance: undefined });
-  }
-}
-
-beforeEach(async () => {
-  reset();
-  await resetEventTables();
-  await resetIdentityLinksTable();
-});
-
-afterEach(async () => {
-  await EventBus.instance.idle();
-  await EventBus.instance.stop();
-  await resetIdentityLinksTable();
-  reset();
-});
+resetServices([
+  EventBus,
+  MessageHandler,
+  MessagingAdapter,
+  Commands,
+  AuthorizationService,
+  IdentityService,
+  SettingsService,
+  AppStream,
+]);
 
 // the pipeline from the internal API to Outbound on a fresh bus, with a scripted model, a Signal
 // transport and the app stream; the model awaits beforeReply before it answers a prompt
@@ -61,18 +44,7 @@ async function start(beforeReply = async (_prompt: string) => {}) {
   });
   const runMain = mock(async (args: Parameters<AgentHarness["runMain"]>[0]) => {
     await beforeReply(args.prompt);
-    const messages: Message[] = [
-      ...(args.conversation?.entries.map((entry) => entry.message) ?? []),
-      { role: "user", content: args.prompt, timestamp: Date.now() },
-      fauxAssistantMessage(`Reply to ${args.prompt}`),
-    ];
-    return {
-      text: `Reply to ${args.prompt}`,
-      iterations: 1,
-      toolCallCount: 0,
-      stopReason: "completed",
-      messages,
-    };
+    return scriptedReply(args, `Reply to ${args.prompt}`);
   });
   Object.assign(MessageHandler.instance, {
     ai: { runMain, compactConversation: mock(async () => undefined) },
@@ -95,20 +67,33 @@ async function start(beforeReply = async (_prompt: string) => {}) {
   return { sendText };
 }
 
-function request(method: string, path: string, body?: unknown) {
-  return handleInternalApiRequest(
-    new Request(`http://internal${path}`, {
-      method,
-      headers: { Authorization: `Bearer ${SECRET}` },
-      body: JSON.stringify(body),
-    }),
-    SECRET,
-  );
+// a dead letter of an event of eventType in the conversation
+async function publishDeadLetter(conversationKey: string, eventType: EEventType) {
+  await EventBus.instance.publish({
+    type: EEventType.EventDeadLettered,
+    source: "events",
+    key: conversationKey,
+    trace: { turnId: "test:dead", chatId: conversationKey, platform: EMessagePlatform.App },
+    payload: {
+      eventId: `event-${eventType}`,
+      eventType,
+      consumer: "conversation",
+      attempts: 1,
+      error: "killed",
+    },
+    causationId: undefined,
+    dedupeKey: undefined,
+  });
 }
 
-// the edge's stream; events: every event read so far, by reading what has arrived
+// no test uses these conversations: each read's own one's typing off marks the end of what it reads
+let markers = 0;
+// a read that has not met its marker by then fails, well before Bun's test timeout
+const MARKER_DEADLINE_MS = 2_000;
+
+// the edge's stream
 async function openStream() {
-  const response = await request("GET", GATEWAY_STREAM_PATH);
+  const response = await internalRequest("GET", GATEWAY_STREAM_PATH);
   expect(response.status).toBe(200);
   expect(response.headers.get("Content-Type")).toBe("application/x-ndjson");
   const reader = response.body?.getReader();
@@ -118,30 +103,59 @@ async function openStream() {
   }
 
   const decoder = new TextDecoder();
-  const events: TGatewayStreamEvent[] = [];
+  // read from the stream, not returned yet
+  const unread: TGatewayStreamEvent[] = [];
   let buffered = "";
-  let pending = reader.read();
 
-  return {
-    events,
-    // reads until nothing more arrives within a moment
-    async drain() {
+  // reads up to and including the first event equal to marker. Returns every event that arrived
+  // before it and after the previous read's marker (or since the stream opened), in arrival order
+  async function readUntil(marker: TGatewayStreamEvent) {
+    let timer: TOption<ReturnType<typeof setTimeout>>;
+    const deadline = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(
+        () =>
+          reject(new Error(`No marker ${JSON.stringify(marker)} within ${MARKER_DEADLINE_MS} ms`)),
+        MARKER_DEADLINE_MS,
+      );
+    });
+
+    try {
       while (true) {
-        const chunk = await Promise.race([pending, Bun.sleep(20).then(() => undefined)]);
+        const found = unread.findIndex((event) => Bun.deepEquals(event, marker));
 
-        if (chunk === undefined || chunk.done) {
-          return events;
+        if (found !== -1) {
+          return unread.splice(0, found + 1).slice(0, found);
         }
 
-        pending = reader.read();
+        const chunk = await Promise.race([reader.read(), deadline]);
+
+        if (chunk.done) {
+          throw new Error("The stream closed before the marker");
+        }
+
         buffered += decoder.decode(chunk.value);
         const lines = buffered.split("\n");
         buffered = lines.pop() ?? "";
 
         for (const line of lines.filter((line) => line.length > 0)) {
-          events.push(JSON.parse(line));
+          unread.push(JSON.parse(line));
         }
       }
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  return {
+    readUntil,
+    // makes the stream send a marker of its own, a fresh conversation's typing off, and reads up
+    // to it
+    async drainToMarker() {
+      markers += 1;
+      const accountId = `acct-stream-marker-${markers}`;
+      const conversationKey = `bella:${accountId}`;
+      await publishDeadLetter(conversationKey, EEventType.TurnRequested);
+      return readUntil({ type: "typing", accountId, conversationKey, typing: false });
     },
     close: () => reader.cancel(),
   };
@@ -153,10 +167,10 @@ function listeners() {
 }
 
 async function sendApp(accountId: string, text: string, clientMessageId: string) {
-  const response = await request(
+  const response = await internalRequest(
     "POST",
     gatewayAccountConversationMessagesPath(accountId, `bella:${accountId}`),
-    { clientMessageId, text },
+    JSON.stringify({ clientMessageId, text }),
   );
   expect(response.status).toBe(200);
   await EventBus.instance.idle();
@@ -179,7 +193,7 @@ test("an app send streams typing on as requested and as started, the user's row,
     { type: "typing", accountId, conversationKey, typing: false },
     { type: "changed", accountId, conversationKey, revision: revision + 1, rewriteRevision: 0 },
   ];
-  expect(await stream.drain()).toEqual([...turn(1), ...turn(3)]);
+  expect(await stream.drainToMarker()).toEqual([...turn(1), ...turn(3)]);
 
   await stream.close();
   expect(listeners()).toBe(0);
@@ -199,13 +213,6 @@ test("a message queued behind a running turn turns typing on again when it start
   const conversationKey = `bella:${accountId}`;
   const path = gatewayAccountConversationMessagesPath(accountId, conversationKey);
 
-  expect((await request("POST", path, { clientMessageId: "m-1", text: "Slow" })).status).toBe(200);
-  await running.promise;
-  expect((await request("POST", path, { clientMessageId: "m-2", text: "Next" })).status).toBe(200);
-  await stream.drain();
-  release.resolve();
-  await EventBus.instance.idle();
-
   const typing = (on: boolean): TGatewayStreamEvent => ({
     type: "typing",
     accountId,
@@ -219,13 +226,57 @@ test("a message queued behind a running turn turns typing on again when it start
     revision,
     rewriteRevision: 0,
   });
-  // the second request turns typing on while the first turn runs; the first turn's typing off
-  // comes before the second turn starts, which turns it on again before its reply
-  expect(await stream.drain()).toEqual([
-    typing(true),
-    typing(true),
-    changed(1),
-    typing(true),
+
+  // the first turn stays parked until released, also when an assertion fails
+  try {
+    expect(
+      (
+        await internalRequest(
+          "POST",
+          path,
+          JSON.stringify({ clientMessageId: "m-1", text: "Slow" }),
+        )
+      ).status,
+    ).toBe(200);
+    await running.promise;
+    expect(
+      (
+        await internalRequest(
+          "POST",
+          path,
+          JSON.stringify({ clientMessageId: "m-2", text: "Next" }),
+        )
+      ).status,
+    ).toBe(200);
+    // a confidential command reply follows the second request's typing on on the conversation's
+    // own lanes, and is neither stored nor nudged
+    expect(
+      (
+        await internalRequest(
+          "POST",
+          path,
+          JSON.stringify({ clientMessageId: "m-3", text: "!mcp-auth" }),
+        )
+      ).status,
+    ).toBe(200);
+
+    // the second request turns typing on while the first turn runs
+    expect(
+      await stream.readUntil({
+        type: "reply",
+        accountId,
+        conversationKey,
+        text: "Usage: !mcp-auth connect|disconnect|status PROFILE or !mcp-auth token PROFILE TOKEN",
+      }),
+    ).toEqual([typing(true), typing(true), changed(1), typing(true)]);
+  } finally {
+    release.resolve();
+  }
+  await EventBus.instance.idle();
+
+  // the first turn's typing off comes before the second turn starts, which turns it on again
+  // before its reply
+  expect(await stream.drainToMarker()).toEqual([
     typing(false),
     changed(2),
     typing(true),
@@ -239,41 +290,17 @@ test("a message queued behind a running turn turns typing on again when it start
 test("a Signal message of a linked address streams under the address's account; an unlinked chat streams nothing", async () => {
   const accountId = `acct-${crypto.randomUUID()}`;
   const address = `+${Date.now()}`;
-  await DatabaseConnector.instance.database.insert(identityLinksTable).values({
-    channel: EMessagePlatform.Signal,
-    address,
-    accountId,
-    state: EIdentityLinkState.Active,
-    linkedAt: new Date(1_000),
-  });
+  await linkTestAddress(address, accountId);
   const { sendText } = await start();
   const stream = await openStream();
 
   for (const chatAddress of [address, `+${Date.now() + 1}`]) {
-    const chatKey = `signal:${chatAddress}`;
-    await EventBus.instance.publish({
-      type: EEventType.MessageReceived,
-      source: "signal",
-      key: chatKey,
-      trace: { turnId: `test:${chatKey}`, chatId: chatKey, platform: EMessagePlatform.Signal },
-      payload: {
-        conversationKey: chatKey,
-        ownerKey: chatKey,
-        channel: EMessagePlatform.Signal,
-        replyAddress: chatAddress,
-        content: "Hi from Signal",
-        attachments: [],
-        receivedAt: Date.now(),
-      },
-      causationId: undefined,
-      dedupeKey: undefined,
-    });
-    await EventBus.instance.idle();
+    await publishTestMessage(`signal:${chatAddress}`, "Hi from Signal");
   }
 
   expect(sendText.mock.calls[0]).toEqual([address, "Reply to Hi from Signal"]);
   const conversationKey = `bella:${accountId}`;
-  expect(await stream.drain()).toEqual([
+  expect(await stream.drainToMarker()).toEqual([
     { type: "typing", accountId, conversationKey, typing: true },
     { type: "typing", accountId, conversationKey, typing: true },
     { type: "changed", accountId, conversationKey, revision: 1, rewriteRevision: 0 },
@@ -283,52 +310,19 @@ test("a Signal message of a linked address streams under the address's account; 
   await stream.close();
 });
 
-// a message from a Signal address, as the Signal channel publishes it
-async function sendSignal(address: string, text: string) {
-  const chatKey = `signal:${address}`;
-  await EventBus.instance.publish({
-    type: EEventType.MessageReceived,
-    source: "signal",
-    key: chatKey,
-    trace: { turnId: `test:${chatKey}`, chatId: chatKey, platform: EMessagePlatform.Signal },
-    payload: {
-      conversationKey: chatKey,
-      ownerKey: chatKey,
-      channel: EMessagePlatform.Signal,
-      replyAddress: address,
-      content: text,
-      attachments: [],
-      receivedAt: Date.now(),
-    },
-    causationId: undefined,
-    dedupeKey: undefined,
-  });
-  await EventBus.instance.idle();
-}
-
-async function linkSignal(accountId: string, address: string) {
-  await DatabaseConnector.instance.database.insert(identityLinksTable).values({
-    channel: EMessagePlatform.Signal,
-    address,
-    accountId,
-    state: EIdentityLinkState.Active,
-    linkedAt: new Date(1_000),
-  });
-}
-
 test("a confidential command reply to an app message streams once as a reply and is neither stored nor nudged; on Signal it is sent and streams nothing", async () => {
   const accountId = `acct-${crypto.randomUUID()}`;
   const conversationKey = `bella:${accountId}`;
   const address = `+${Date.now()}`;
   const usage =
     "Usage: !mcp-auth connect|disconnect|status PROFILE or !mcp-auth token PROFILE TOKEN";
-  await linkSignal(accountId, address);
+  await linkTestAddress(address, accountId);
   const { sendText } = await start();
   const stream = await openStream();
 
   await sendApp(accountId, "!mcp-auth", "m-1");
 
-  expect(await stream.drain()).toEqual([
+  expect(await stream.drainToMarker()).toEqual([
     { type: "reply", accountId, conversationKey, text: usage },
   ]);
   expect(
@@ -341,11 +335,10 @@ test("a confidential command reply to an app message streams once as a reply and
       .where(eq(eventsTable.type, EEventType.ConversationChanged)),
   ).toEqual([]);
 
-  await sendSignal(address, "!mcp-auth");
+  await publishTestMessage(`signal:${address}`, "!mcp-auth");
 
   expect(sendText.mock.calls).toEqual([[address, usage]]);
-  // drain returns every event read so far: the app reply alone
-  expect(await stream.drain()).toHaveLength(1);
+  expect(await stream.drainToMarker()).toEqual([]);
   await stream.close();
 });
 
@@ -359,14 +352,14 @@ test("!app and !dashboard from the app answer with a stored plain reply and no l
     const accountId = `acct-${crypto.randomUUID()}`;
     const conversationKey = `bella:${accountId}`;
     const address = `+${Date.now()}`;
-    await linkSignal(accountId, address);
+    await linkTestAddress(address, accountId);
     const { sendText } = await start();
     const stream = await openStream();
 
     await sendApp(accountId, "!app", "m-1");
     await sendApp(accountId, "!dashboard", "m-2");
 
-    expect(await stream.drain()).toEqual([
+    expect(await stream.drainToMarker()).toEqual([
       { type: "changed", accountId, conversationKey, revision: 1, rewriteRevision: 0 },
       { type: "changed", accountId, conversationKey, revision: 2, rewriteRevision: 0 },
     ]);
@@ -379,13 +372,13 @@ test("!app and !dashboard from the app answer with a stored plain reply and no l
     expect(texts.filter((text) => text.startsWith("This app is signed in"))).toHaveLength(2);
     expect(texts.join("\n")).not.toContain("token=");
 
-    await sendSignal(address, "!app");
-    await sendSignal(address, "!dashboard");
+    await publishTestMessage(`signal:${address}`, "!app");
+    await publishTestMessage(`signal:${address}`, "!dashboard");
 
     expect(sendText.mock.calls.map((call) => call[0])).toEqual([address, address]);
     expect(sendText.mock.calls[0]?.[1]).toStartWith("https://dashboard.test/app?token=");
     expect(sendText.mock.calls[1]?.[1]).toStartWith("https://dashboard.test/link?token=");
-    expect(await stream.drain()).toHaveLength(2);
+    expect(await stream.drainToMarker()).toEqual([]);
     await stream.close();
   } finally {
     Bun.env.BELLACLAW_GATEWAY_PUBLIC_URL = originalUrl;
@@ -403,14 +396,14 @@ test("a message deleted in the dashboard streams a nudge whose rewrite revision 
   const reply = (
     await listHistory(DatabaseConnector.instance.database, conversationKey, undefined, 50)
   ).at(-1);
-  const deleted = await request(
+  const deleted = await internalRequest(
     "DELETE",
     `/internal/accounts/${encodeURIComponent(accountId)}/messages/${reply?.id}`,
   );
   expect(deleted.status).toBe(200);
   await EventBus.instance.idle();
 
-  expect(await stream.drain()).toEqual([
+  expect(await stream.drainToMarker()).toEqual([
     { type: "changed", accountId, conversationKey, revision: 3, rewriteRevision: 3 },
   ]);
   await stream.close();
@@ -422,30 +415,13 @@ test("a dead-lettered turn request turns typing off; a dead letter of another ev
   const conversationKey = `bella:${accountId}`;
   const stream = await openStream();
 
-  async function deadLetter(eventType: EEventType) {
-    await EventBus.instance.publish({
-      type: EEventType.EventDeadLettered,
-      source: "events",
-      key: conversationKey,
-      trace: { turnId: "test:dead", chatId: conversationKey, platform: EMessagePlatform.App },
-      payload: {
-        eventId: `event-${eventType}`,
-        eventType,
-        consumer: "conversation",
-        attempts: 1,
-        error: "killed",
-      },
-      causationId: undefined,
-      dedupeKey: undefined,
-    });
-    await EventBus.instance.idle();
-  }
+  await publishDeadLetter(conversationKey, EEventType.ConversationChanged);
+  await EventBus.instance.idle();
+  expect(await stream.drainToMarker()).toEqual([]);
 
-  await deadLetter(EEventType.ConversationChanged);
-  expect(await stream.drain()).toEqual([]);
-
-  await deadLetter(EEventType.TurnRequested);
-  expect(await stream.drain()).toEqual([
+  await publishDeadLetter(conversationKey, EEventType.TurnRequested);
+  await EventBus.instance.idle();
+  expect(await stream.drainToMarker()).toEqual([
     { type: "typing", accountId, conversationKey, typing: false },
   ]);
   await stream.close();
@@ -455,17 +431,17 @@ test("the stream needs the secret, and an aborted connection releases its listen
   await start();
   const refused = await handleInternalApiRequest(
     new Request(`http://internal${GATEWAY_STREAM_PATH}`),
-    SECRET,
+    TEST_SECRET,
   );
   expect(refused.status).toBe(401);
 
   const aborted = new AbortController();
   await handleInternalApiRequest(
     new Request(`http://internal${GATEWAY_STREAM_PATH}`, {
-      headers: { Authorization: `Bearer ${SECRET}` },
+      headers: { Authorization: `Bearer ${TEST_SECRET}` },
       signal: aborted.signal,
     }),
-    SECRET,
+    TEST_SECRET,
   );
   expect(listeners()).toBe(1);
   aborted.abort();

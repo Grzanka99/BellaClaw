@@ -1,14 +1,13 @@
 import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
-import { appDevicesTable, EEventType, eventsTable, identityLinksTable } from "@bellaclaw/database";
+import { appDevicesTable, EEventType, eventsTable } from "@bellaclaw/database";
 import { eq } from "drizzle-orm";
 import { AppChannel } from "../app";
 import { AuthorizationService } from "../authorization";
 import { DatabaseConnector } from "../database";
-import { resetEventTables, resetIdentityLinksTable } from "../database/test-utils";
+import { linkTestAddress, resetEventTables, resetIdentityLinksTable } from "../database/test-utils";
 import { EventBus, type TEventDraft } from "../events";
 import type { TEventPayloads } from "../events/catalog";
 import { IdentityService } from "../identity";
-import { EIdentityLinkState } from "../identity/schema";
 import { MessagingAdapter } from "../messaging";
 import { EMessagePlatform } from "../messaging/types";
 import { Notices } from ".";
@@ -122,13 +121,7 @@ describe("Notices", () => {
 
   test("a supervisor notice reaches an app-only account with a device and a linked account with a device in their Bella conversations, once each", async () => {
     await resetIdentityLinksTable();
-    await DatabaseConnector.instance.database.insert(identityLinksTable).values({
-      channel: EMessagePlatform.Signal,
-      address: "+300",
-      accountId: "acct-1",
-      state: EIdentityLinkState.Active,
-      linkedAt: new Date(1_000),
-    });
+    await linkTestAddress("+300", "acct-1");
     const device = { fcmToken: "token", publicKey: "key", authSecret: "secret" };
     await DatabaseConnector.instance.database.insert(appDevicesTable).values([
       { ...device, id: "device-1", accountId: "acct-1", registeredAt: new Date(1_000) },
@@ -185,13 +178,7 @@ describe("Notices", () => {
 
   test("a notice to a linked account goes to its Bella conversation, on that conversation's lane", async () => {
     await resetIdentityLinksTable();
-    await DatabaseConnector.instance.database.insert(identityLinksTable).values({
-      channel: EMessagePlatform.Signal,
-      address: "+300",
-      accountId: "acct-1",
-      state: EIdentityLinkState.Active,
-      linkedAt: new Date(1_000),
-    });
+    await linkTestAddress("+300", "acct-1");
     Object.assign(IdentityService, { _instance: undefined });
 
     try {

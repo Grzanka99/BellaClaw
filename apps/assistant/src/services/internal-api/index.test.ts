@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { EEventType, eventsTable, identityLinksTable } from "@bellaclaw/database";
 import { ADDRESS_LINKED_ELSEWHERE } from "@bellaclaw/shared";
 import { eq } from "drizzle-orm";
@@ -6,7 +6,7 @@ import { LlmClient } from "../ai/llm";
 import { EAiProvider } from "../ai/types";
 import { AuthorizationService } from "../authorization";
 import { DatabaseConnector } from "../database";
-import { resetEventTables, resetIdentityLinksTable } from "../database/test-utils";
+import { linkTestAddress } from "../database/test-utils";
 import { ESubscriptionMode, EventBus } from "../events";
 import { IdentityService } from "../identity";
 import { EIdentityLinkState } from "../identity/schema";
@@ -14,36 +14,15 @@ import { EMessagePlatform } from "../messaging/types";
 import { SettingsService } from "../settings";
 import { DefaultConfigRecord, EConfigKey } from "../settings/schema";
 import { handleInternalApiRequest, setupInternalApi } from ".";
+import { internalRequest, resetServices, TEST_SECRET } from "./test-utils";
 
-const SECRET = "internal-secret";
 // a provider whose model list needs no network
 const SETTINGS = { ...DefaultConfigRecord, [EConfigKey.AiProvider]: EAiProvider.Ollama };
 
-function reset() {
-  Object.assign(EventBus, { _instance: undefined });
-  Object.assign(IdentityService, { _instance: undefined });
-  Object.assign(SettingsService, { _instance: undefined });
-}
-
-function send(method: string, path: string, body?: unknown) {
-  return handleInternalApiRequest(
-    new Request(`http://internal${path}`, {
-      method,
-      headers: { Authorization: `Bearer ${SECRET}` },
-      body: JSON.stringify(body),
-    }),
-    SECRET,
-  );
-}
+resetServices([EventBus, IdentityService, SettingsService]);
 
 function link(address: string, accountId: string, state: EIdentityLinkState, linkedAt: number) {
-  return DatabaseConnector.instance.database.insert(identityLinksTable).values({
-    channel: EMessagePlatform.Signal,
-    address,
-    accountId,
-    state,
-    linkedAt: new Date(linkedAt),
-  });
+  return linkTestAddress(address, accountId, EMessagePlatform.Signal, state, linkedAt);
 }
 
 async function start() {
@@ -52,17 +31,7 @@ async function start() {
   await EventBus.instance.start();
 }
 
-beforeEach(async () => {
-  reset();
-  await resetEventTables();
-  await resetIdentityLinksTable();
-});
-
-afterEach(async () => {
-  await EventBus.instance.idle();
-  await EventBus.instance.stop();
-  await resetIdentityLinksTable();
-  reset();
+afterEach(() => {
   mock.restore();
 });
 
@@ -70,10 +39,14 @@ describe("internal API", () => {
   test("a link request answers once the cutover started, without waiting for the link", async () => {
     await start();
 
-    const response = await send("POST", "/internal/links", {
-      accountId: "acct-1",
-      chatKey: "signal:+100",
-    });
+    const response = await internalRequest(
+      "POST",
+      "/internal/links",
+      JSON.stringify({
+        accountId: "acct-1",
+        chatKey: "signal:+100",
+      }),
+    );
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ state: "migrating" });
@@ -89,7 +62,7 @@ describe("internal API", () => {
     expect(started).toEqual([{ key: "signal:+100" }]);
 
     // the read model answers the new link at once
-    const read = await send("GET", "/internal/links/signal%3A%2B100");
+    const read = await internalRequest("GET", "/internal/links/signal%3A%2B100");
     expect(await read.json()).toEqual({ link: { accountId: "acct-1", state: "migrating" } });
   });
 
@@ -97,10 +70,14 @@ describe("internal API", () => {
     await link("+100", "acct-owner", EIdentityLinkState.Active, 1_000);
     await start();
 
-    const response = await send("POST", "/internal/links", {
-      accountId: "acct-other",
-      chatKey: "signal:+100",
-    });
+    const response = await internalRequest(
+      "POST",
+      "/internal/links",
+      JSON.stringify({
+        accountId: "acct-other",
+        chatKey: "signal:+100",
+      }),
+    );
 
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({
@@ -112,10 +89,14 @@ describe("internal API", () => {
   test("a link request with a chat key that names no address is invalid", async () => {
     await start();
 
-    const response = await send("POST", "/internal/links", {
-      accountId: "acct-1",
-      chatKey: "nowhere",
-    });
+    const response = await internalRequest(
+      "POST",
+      "/internal/links",
+      JSON.stringify({
+        accountId: "acct-1",
+        chatKey: "nowhere",
+      }),
+    );
 
     expect(response.status).toBe(400);
     expect(await DatabaseConnector.instance.database.select().from(identityLinksTable)).toEqual([]);
@@ -125,10 +106,12 @@ describe("internal API", () => {
     await link("+100", "acct-1", EIdentityLinkState.Active, 1_000);
     await start();
 
-    expect(await (await send("GET", "/internal/links/signal%3A%2B100")).json()).toEqual({
+    expect(await (await internalRequest("GET", "/internal/links/signal%3A%2B100")).json()).toEqual({
       link: { accountId: "acct-1", state: "active" },
     });
-    expect(await (await send("GET", "/internal/links/signal%3A%2B999")).json()).toEqual({});
+    expect(await (await internalRequest("GET", "/internal/links/signal%3A%2B999")).json()).toEqual(
+      {},
+    );
   });
 
   test("an account answers its keys and its links, oldest first", async () => {
@@ -137,7 +120,7 @@ describe("internal API", () => {
     await link("+300", "acct-2", EIdentityLinkState.Active, 500);
     await start();
 
-    expect(await (await send("GET", "/internal/accounts/acct-1")).json()).toEqual({
+    expect(await (await internalRequest("GET", "/internal/accounts/acct-1")).json()).toEqual({
       conversationKey: "bella:acct-1",
       ownerKey: "account:acct-1",
       links: [
@@ -151,7 +134,7 @@ describe("internal API", () => {
     await link("+100", "acct-1", EIdentityLinkState.Active, 1_000);
     await start();
 
-    const response = await send("GET", "/internal/accounts/acct-2");
+    const response = await internalRequest("GET", "/internal/accounts/acct-2");
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
       conversationKey: "bella:acct-2",
@@ -168,12 +151,17 @@ describe("internal API", () => {
       Bun.env.BELLACLAW_ACTIVATION_TOKEN = "open-sesame";
       Object.assign(AuthorizationService, { _instance: undefined });
       const check = async (code: unknown) =>
-        (await send("POST", "/internal/activation-code/check", { code })).json();
+        (
+          await internalRequest("POST", "/internal/activation-code/check", JSON.stringify({ code }))
+        ).json();
 
       expect(await check(" open-sesame ")).toEqual({ result: "valid" });
       expect(await check("open-sesam")).toEqual({ result: "invalid" });
       expect(await check("")).toEqual({ result: "invalid" });
-      expect((await send("POST", "/internal/activation-code/check", {})).status).toBe(400);
+      expect(
+        (await internalRequest("POST", "/internal/activation-code/check", JSON.stringify({})))
+          .status,
+      ).toBe(400);
 
       Bun.env.BELLACLAW_ACTIVATION_TOKEN = "  ";
       Object.assign(AuthorizationService, { _instance: undefined });
@@ -212,13 +200,17 @@ describe("internal API", () => {
     });
     await start();
 
-    const read = await send("GET", "/internal/accounts/acct-1/model");
+    const read = await internalRequest("GET", "/internal/accounts/acct-1/model");
     expect(read.status).toBe(200);
     expect(await read.json()).toMatchObject({ provider: EAiProvider.Ollama });
 
-    const changed = await send("PUT", "/internal/accounts/acct-1/model", {
-      aiProvider: EAiProvider.Openrouter,
-    });
+    const changed = await internalRequest(
+      "PUT",
+      "/internal/accounts/acct-1/model",
+      JSON.stringify({
+        aiProvider: EAiProvider.Openrouter,
+      }),
+    );
     expect(changed.status).toBe(200);
 
     expect(getAll.mock.calls.map(([ownerKey]) => ownerKey)).toEqual([
@@ -238,11 +230,11 @@ describe("internal API", () => {
     const bob = `acct-${crypto.randomUUID()}`;
     const path = (accountId: string) => `/internal/accounts/${accountId}/personality`;
     const read = async (accountId: string) => {
-      const response = await send("GET", path(accountId));
+      const response = await internalRequest("GET", path(accountId));
       return [response.status, await response.json()];
     };
     const change = async (accountId: string, body: unknown) => {
-      const response = await send("PUT", path(accountId), body);
+      const response = await internalRequest("PUT", path(accountId), JSON.stringify(body));
       return [response.status, await response.json()];
     };
     const defaults = {
@@ -316,7 +308,7 @@ describe("internal API", () => {
     });
     await start();
 
-    const response = await send("DELETE", "/internal/accounts/acct-1/messages/7");
+    const response = await internalRequest("DELETE", "/internal/accounts/acct-1/messages/7");
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ deletedMessageIds: [7] });
@@ -328,7 +320,7 @@ describe("internal API", () => {
 
     const unauthorized = await handleInternalApiRequest(
       new Request("http://internal/internal/accounts/acct-1", { method: "GET" }),
-      SECRET,
+      TEST_SECRET,
     );
     expect(unauthorized.status).toBe(401);
   });
