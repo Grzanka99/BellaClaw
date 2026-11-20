@@ -135,7 +135,7 @@ class SettingsRepository(
 
     /** Switches BellaClaw to another provider; the server verifies its models first. The current provider changes nothing. */
     fun setProvider(providerId: String) {
-        val models = loadedModels() ?: return
+        val models = state.value.models.valueOrNull ?: return
         if (models.providerId != providerId) {
             changeModels(ModelUpdateBody(aiProvider = providerId))
         }
@@ -143,7 +143,7 @@ class SettingsRepository(
 
     /** Sends what differs from the role's current model and effort; nothing when nothing does. */
     fun setRoleModel(role: ModelRole, model: RoleModel) {
-        val current = loadedModels()?.roles?.get(role) ?: return
+        val current = state.value.models.valueOrNull?.roles?.get(role) ?: return
         var newModel: String? = null
         if (model.model != current.model) {
             newModel = model.model
@@ -228,11 +228,6 @@ class SettingsRepository(
                 }
             }
         }
-    }
-
-    private fun loadedModels() = when (val models = state.value.models) {
-        is Loadable.Loaded -> models.value
-        else -> null
     }
 
     private fun updateForSession(token: String?, change: (SettingsSnapshot) -> SettingsSnapshot) {

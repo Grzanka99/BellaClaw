@@ -1,8 +1,6 @@
 package one.scary.bellaclaw.data.local
 
 import java.io.File
-import java.nio.file.Files
-import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -28,9 +26,7 @@ class ImageCache(
     suspend fun put(session: Session, conversationKey: String, mediaId: String, bytes: ByteArray): File = withContext(ioDispatcher) {
         val target = file(session, conversationKey, mediaId)
         target.parentFile?.mkdirs()
-        val temporary = File.createTempFile("image", ".tmp", target.parentFile)
-        temporary.writeBytes(bytes)
-        Files.move(temporary.toPath(), target.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+        target.writeAtomically(bytes, File.createTempFile("image", ".tmp", target.parentFile))
         target
     }
 

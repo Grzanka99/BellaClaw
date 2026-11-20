@@ -1,20 +1,17 @@
 package one.scary.bellaclaw.ui.signin
 
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import one.scary.bellaclaw.R
 import one.scary.bellaclaw.model.AccountError
-import one.scary.bellaclaw.ui.components.BackButton
+import one.scary.bellaclaw.ui.components.BackTopBar
 import one.scary.bellaclaw.ui.theme.BellaClawTheme
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RegisterScreen(
     state: RegisterUiState,
@@ -29,10 +26,7 @@ fun RegisterScreen(
     Scaffold(
         modifier = modifier,
         topBar = {
-            TopAppBar(
-                title = { Text(stringResource(R.string.register_title)) },
-                navigationIcon = { BackButton(onBack) },
-            )
+            BackTopBar(stringResource(R.string.register_title), onBack)
         },
     ) { padding ->
         SignInColumn(padding) {

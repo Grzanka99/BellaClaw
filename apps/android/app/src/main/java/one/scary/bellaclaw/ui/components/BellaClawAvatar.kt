@@ -11,9 +11,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.dp
 
 @Composable
 fun BellaClawAvatar(size: Dp, modifier: Modifier = Modifier) {
@@ -30,10 +28,4 @@ fun BellaClawAvatar(size: Dp, modifier: Modifier = Modifier) {
             modifier = Modifier.size(size * 0.5f),
         )
     }
-}
-
-/** The small dot that says the live stream is open. */
-@Composable
-fun OnlineDot(color: Color, modifier: Modifier = Modifier) {
-    Box(modifier = modifier.size(8.dp).background(color, CircleShape))
 }

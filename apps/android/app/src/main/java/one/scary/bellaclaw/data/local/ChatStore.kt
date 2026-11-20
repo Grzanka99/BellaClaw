@@ -2,8 +2,6 @@ package one.scary.bellaclaw.data.local
 
 import java.io.File
 import java.io.IOException
-import java.nio.file.Files
-import java.nio.file.StandardCopyOption
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -13,7 +11,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.Json
 import one.scary.bellaclaw.model.Effort
 import one.scary.bellaclaw.model.ModelChoice
 
@@ -69,9 +66,7 @@ class ChatStore(
                 lastModel = next.lastModel?.stored(),
             )
             withContext(ioDispatcher) {
-                val temporary = File(file.parentFile, "${file.name}.tmp")
-                temporary.writeText(json.encodeToString(StoredChats.serializer(), stored))
-                Files.move(temporary.toPath(), file.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+                file.writeAtomically(lenientJson.encodeToString(StoredChats.serializer(), stored).encodeToByteArray())
             }
             state.value = next
         }
@@ -82,7 +77,7 @@ class ChatStore(
             return LocalChats()
         }
         val stored = try {
-            json.decodeFromString(StoredChats.serializer(), file.readText())
+            lenientJson.decodeFromString(StoredChats.serializer(), file.readText())
         } catch (_: IOException) {
             return LocalChats()
         } catch (_: IllegalArgumentException) {
@@ -105,8 +100,4 @@ class ChatStore(
         val lastSeen: Map<String, Long> = emptyMap(),
         val lastModel: StoredModel? = null,
     )
-
-    private companion object {
-        val json = Json { ignoreUnknownKeys = true }
-    }
 }

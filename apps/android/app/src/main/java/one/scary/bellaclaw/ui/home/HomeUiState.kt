@@ -1,5 +1,6 @@
 package one.scary.bellaclaw.ui.home
 
+import one.scary.bellaclaw.model.BELLACLAW_CHAT_ID
 import one.scary.bellaclaw.model.ChatIcon
 import java.time.Instant
 
@@ -34,8 +35,10 @@ data class PlainChatSummary(
 ) : ChatSummary
 
 data class HomeUiState(
-    val bellaClaw: BellaClawSummary? = null,
+    val bellaClaw: BellaClawSummary = BellaClawSummary(BELLACLAW_CHAT_ID, preview = null, lastActivity = null),
     val chats: List<PlainChatSummary> = emptyList(),
     /** Set once a new chat exists; the screen opens it and reports back with [HomeViewModel.onNewChatOpened]. */
     val createdChatId: String? = null,
+    /** The last New chat failed (offline, a server error); cleared by the next one. */
+    val newChatFailed: Boolean = false,
 )

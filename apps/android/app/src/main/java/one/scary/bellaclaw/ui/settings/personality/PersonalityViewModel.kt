@@ -98,11 +98,7 @@ class PersonalityViewModel(
         if (save.value.isRunning || save.value.isDone) {
             return
         }
-        val loaded = settingsRepository.settings.value.personality
-        val base = draft.value ?: when (loaded) {
-            is Loadable.Loaded -> loaded.value
-            else -> return
-        }
+        val base = draft.value ?: settingsRepository.settings.value.personality.valueOrNull ?: return
         draft.value = change(base)
     }
 

@@ -54,7 +54,7 @@ class ApiClientTest {
     }
 
     @Test
-    fun `a signed-in GET, PUT and DELETE carry the bearer token, and only the PUT a body`() = runTest {
+    fun `a signed-in GET and PUT carry the bearer token, and only the PUT a body`() = runTest {
         val client = ApiClient(gateway.signedInStore())
 
         gateway.answer(200, """{"username":"ada","chats":[]}""")
@@ -70,14 +70,6 @@ class ApiClientTest {
         assertEquals("PUT", put.method)
         assertEquals("Bearer t0", put.headers["Authorization"])
         assertEquals("x", put.json()["token"]?.jsonPrimitive?.content)
-
-        gateway.answer(200, """{"username":"ada","chats":[]}""")
-        client.deleteSignedIn<AccountBody>("/api/thing")
-        val delete = gateway.takeRequest()
-        assertEquals("DELETE", delete.method)
-        assertEquals("/api/thing", delete.url.encodedPath)
-        assertEquals("Bearer t0", delete.headers["Authorization"])
-        assertEquals(0L, delete.bodySize)
     }
 
     @Test

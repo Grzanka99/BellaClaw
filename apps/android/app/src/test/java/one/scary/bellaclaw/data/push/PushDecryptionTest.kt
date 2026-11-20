@@ -6,7 +6,7 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class PushDecryptionTest {
-    private val push = AppPush("bella:acct-1", kind = "bella", messageId = 42, revision = 7, text = "Zażółć gęślą jaźń", truncated = false)
+    private val push = AppPush("bella:acct-1", kind = "bella", messageId = 42, text = "Zażółć gęślą jaźń")
     private val pushJson =
         """{"conversationKey":"bella:acct-1","kind":"bella","messageId":42,"revision":7,"text":"Zażółć gęślą jaźń","truncated":false}"""
 

@@ -9,11 +9,9 @@ import androidx.compose.material.icons.outlined.Face
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.Psychology
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -22,14 +20,13 @@ import androidx.compose.ui.unit.dp
 import one.scary.bellaclaw.R
 import one.scary.bellaclaw.model.Loadable
 import one.scary.bellaclaw.model.ThemeMode
-import one.scary.bellaclaw.ui.components.BackButton
+import one.scary.bellaclaw.ui.components.BackTopBar
 import one.scary.bellaclaw.ui.components.SectionHeader
 import one.scary.bellaclaw.ui.components.SettingsRow
 import one.scary.bellaclaw.ui.components.label
 import one.scary.bellaclaw.ui.components.text
 import one.scary.bellaclaw.ui.theme.BellaClawTheme
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     state: SettingsUiState,
@@ -44,10 +41,7 @@ fun SettingsScreen(
     Scaffold(
         modifier = modifier,
         topBar = {
-            TopAppBar(
-                title = { Text(stringResource(R.string.settings_title)) },
-                navigationIcon = { BackButton(onBack) },
-            )
+            BackTopBar(stringResource(R.string.settings_title), onBack)
         },
     ) { padding ->
         Column(modifier = Modifier.padding(padding).verticalScroll(rememberScrollState())) {

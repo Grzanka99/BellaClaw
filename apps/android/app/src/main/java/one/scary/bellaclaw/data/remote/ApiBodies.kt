@@ -38,7 +38,7 @@ data class AccountBody(val username: String)
 @Serializable
 data class LinkCheckBody(val valid: Boolean, val chatKey: String? = null, val username: String? = null)
 
-/** POST /api/logout. */
+/** The answer of POST /api/logout and PUT /api/device. */
 @Serializable
 data class OkBody(val ok: Boolean)
 

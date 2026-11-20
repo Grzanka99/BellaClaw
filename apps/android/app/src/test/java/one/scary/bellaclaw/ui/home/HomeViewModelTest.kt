@@ -8,6 +8,7 @@ import one.scary.bellaclaw.data.ChatRepository
 import one.scary.bellaclaw.data.FakeGateway
 import one.scary.bellaclaw.data.FakeGateway.Companion.BELLA_KEY
 import one.scary.bellaclaw.data.TestServer
+import one.scary.bellaclaw.data.errorAnswer
 import one.scary.bellaclaw.data.local.SessionStore
 import one.scary.bellaclaw.model.BELLACLAW_CHAT_ID
 import one.scary.bellaclaw.model.Session
@@ -50,8 +51,8 @@ class HomeViewModelTest {
 
         val state = viewModel.uiState.first { it.chats.size == 2 }
 
-        assertEquals(BELLACLAW_CHAT_ID, state.bellaClaw?.id)
-        assertEquals("Reminder set for 18:00.", state.bellaClaw?.preview)
+        assertEquals(BELLACLAW_CHAT_ID, state.bellaClaw.id)
+        assertEquals("Reminder set for 18:00.", state.bellaClaw.preview)
         assertEquals(listOf("plain:ada:a", "plain:ada:b"), state.chats.map { it.id })
         assertEquals(listOf("Regex", null), state.chats.map { it.title })
         assertEquals("^\\d{2}-\\d{3}$", state.chats[0].preview)
@@ -63,13 +64,13 @@ class HomeViewModelTest {
         gateway.addRow(BELLA_KEY, "assistant", "Reminder set for 18:00.")
         val repository = repository()
         val viewModel = home(repository)
-        viewModel.uiState.first { it.bellaClaw?.isUnread == true }
+        viewModel.uiState.first { it.bellaClaw.isUnread == true }
 
         val chat = ChatViewModel(BELLACLAW_CHAT_ID, repository, testServer.settingsRepository(scope = backgroundScope), SavedStateHandle())
         collectIn(chat.uiState)
         chat.uiState.first { state -> state.rows.any { it is ChatRow.Item } }
 
-        viewModel.uiState.first { it.bellaClaw?.isUnread == false }
+        viewModel.uiState.first { it.bellaClaw.isUnread == false }
     }
 
     @Test
@@ -89,18 +90,33 @@ class HomeViewModelTest {
     }
 
     @Test
+    fun `a failed new chat says so until the next tap`() = runTest {
+        testServer.route("POST", "/api/conversations", 500, errorAnswer("Internal error"))
+        val viewModel = home(repository())
+
+        viewModel.newChat()
+
+        viewModel.uiState.first { it.newChatFailed }
+
+        testServer.route("POST", "/api/conversations", 200, """{"conversationKey":"plain:ada:a"}""")
+        viewModel.newChat()
+
+        viewModel.uiState.first { !it.newChatFailed && it.createdChatId == "plain:ada:a" }
+    }
+
+    @Test
     fun `signing out leaves no chat behind, and signing in loads them again`() = runTest {
         gateway.addChat("plain:ada:a", "Regex")
         gateway.addRow(BELLA_KEY, "assistant", "Reminder set for 18:00.")
         val store = testServer.signedInStore()
         val viewModel = home(repository(store))
-        viewModel.uiState.first { it.chats.size == 1 && it.bellaClaw?.preview != null }
+        viewModel.uiState.first { it.chats.size == 1 && it.bellaClaw.preview != null }
 
         testServer.repository(store).signOut()
 
-        viewModel.uiState.first { it.chats.isEmpty() && it.bellaClaw?.preview == null }
+        viewModel.uiState.first { it.chats.isEmpty() && it.bellaClaw.preview == null }
 
         store.save(Session(testServer.url, "ada", "t1"))
-        viewModel.uiState.first { it.chats.size == 1 && it.bellaClaw?.preview != null }
+        viewModel.uiState.first { it.chats.size == 1 && it.bellaClaw.preview != null }
     }
 }

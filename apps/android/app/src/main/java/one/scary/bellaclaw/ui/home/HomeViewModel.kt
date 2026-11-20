@@ -17,6 +17,7 @@ import one.scary.bellaclaw.ui.appContainer
 
 class HomeViewModel(private val chatRepository: ChatRepository) : ViewModel() {
     private val createdChatId = MutableStateFlow<String?>(null)
+    private val newChatFailed = MutableStateFlow(false)
 
     /** True from [newChat] until the screen has opened the new chat. */
     private var isCreatingChat = false
@@ -26,7 +27,8 @@ class HomeViewModel(private val chatRepository: ChatRepository) : ViewModel() {
         chatRepository.latestMessages,
         chatRepository.unread,
         createdChatId,
-    ) { chats, latest, unread, created ->
+        newChatFailed,
+    ) { chats, latest, unread, created, failed ->
         val bellaClaw = latest[BellaClawChat.id]
         HomeUiState(
             bellaClaw = BellaClawSummary(BellaClawChat.id, bellaClaw?.text, bellaClaw?.sentAt, BellaClawChat.id in unread),
@@ -38,19 +40,25 @@ class HomeViewModel(private val chatRepository: ChatRepository) : ViewModel() {
                     PlainChatSummary(chat.id, chat.title, chat.icon, last?.text, last?.sentAt, chat.id in unread)
                 },
             createdChatId = created,
+            newChatFailed = failed,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HomeUiState())
 
-    /** Creates one chat; further calls do nothing until the screen reports it opened with [onNewChatOpened]. */
+    /**
+     * Creates one chat; further calls do nothing until the screen reports it opened with [onNewChatOpened].
+     * A failure sets [HomeUiState.newChatFailed] until the next call.
+     */
     fun newChat() {
         if (isCreatingChat) {
             return
         }
         isCreatingChat = true
+        newChatFailed.value = false
         viewModelScope.launch {
             val created = chatRepository.createChat()
             if (created == null) {
                 isCreatingChat = false
+                newChatFailed.value = true
             } else {
                 createdChatId.value = created
             }

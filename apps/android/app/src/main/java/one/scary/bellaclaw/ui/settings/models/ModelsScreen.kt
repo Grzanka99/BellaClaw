@@ -5,12 +5,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -19,7 +17,7 @@ import androidx.compose.ui.unit.dp
 import one.scary.bellaclaw.R
 import one.scary.bellaclaw.model.Effort
 import one.scary.bellaclaw.model.ModelRole
-import one.scary.bellaclaw.ui.components.BackButton
+import one.scary.bellaclaw.ui.components.BackTopBar
 import one.scary.bellaclaw.ui.components.LoadFailedContent
 import one.scary.bellaclaw.ui.components.LoadingContent
 import one.scary.bellaclaw.ui.components.OptionDropdown
@@ -29,7 +27,6 @@ import one.scary.bellaclaw.ui.components.label
 import one.scary.bellaclaw.ui.components.text
 import one.scary.bellaclaw.ui.theme.BellaClawTheme
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ModelsScreen(
     state: ModelsUiState,
@@ -43,10 +40,7 @@ fun ModelsScreen(
     Scaffold(
         modifier = modifier,
         topBar = {
-            TopAppBar(
-                title = { Text(stringResource(R.string.models_title)) },
-                navigationIcon = { BackButton(onBack) },
-            )
+            BackTopBar(stringResource(R.string.models_title), onBack)
         },
     ) { padding ->
         val loadError = state.loadError

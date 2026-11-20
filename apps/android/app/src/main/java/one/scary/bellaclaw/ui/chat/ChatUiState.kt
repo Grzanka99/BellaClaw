@@ -31,10 +31,10 @@ data class ChatUiState(
     /** True when no chat has this screen's id; the screen then returns to Home. */
     val isMissing: Boolean = false,
     /** Whether the chat's conversation is known and, for a plain chat, its model; until then nothing can be sent. */
-    val isConversationKnown: Boolean = false,
+    val isReadyToSend: Boolean = false,
 ) {
     val canSend: Boolean
-        get() = isConversationKnown && !isCheckingAttachment && (draft.isNotBlank() || attachmentUri != null)
+        get() = isReadyToSend && !isCheckingAttachment && (draft.isNotBlank() || attachmentUri != null)
 }
 
 /** One row of the conversation: a day label or a message. */
@@ -63,8 +63,7 @@ data class ModelPickerState(
     /** The efforts the selected model supports. */
     val efforts: List<Effort>
         get() {
-            val loaded = providers as? Loadable.Loaded ?: return emptyList()
-            val provider = loaded.value.firstOrNull { it.id == selection?.providerId }
+            val provider = providers.valueOrNull.orEmpty().firstOrNull { it.id == selection?.providerId }
             return provider?.models?.firstOrNull { it.id == selection?.model }?.efforts.orEmpty()
         }
 }

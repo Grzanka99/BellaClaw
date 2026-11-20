@@ -2,15 +2,12 @@ package one.scary.bellaclaw.data.local
 
 import java.io.File
 import java.io.IOException
-import java.nio.file.Files
-import java.nio.file.StandardCopyOption
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.Json
 import one.scary.bellaclaw.model.ThemeMode
 import one.scary.bellaclaw.model.ThemeSettings
 
@@ -30,9 +27,7 @@ class ThemeStore(
     suspend fun save(theme: ThemeSettings) {
         mutex.withLock {
             withContext(ioDispatcher) {
-                val temporary = File(file.parentFile, "${file.name}.tmp")
-                temporary.writeText(json.encodeToString(StoredTheme.serializer(), StoredTheme(theme.mode, theme.dynamicColor)))
-                Files.move(temporary.toPath(), file.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+                file.writeAtomically(lenientJson.encodeToString(StoredTheme.serializer(), StoredTheme(theme.mode, theme.dynamicColor)).encodeToByteArray())
             }
         }
     }
@@ -42,7 +37,7 @@ class ThemeStore(
             return ThemeSettings()
         }
         return try {
-            val stored = json.decodeFromString(StoredTheme.serializer(), file.readText())
+            val stored = lenientJson.decodeFromString(StoredTheme.serializer(), file.readText())
             ThemeSettings(stored.mode, stored.dynamicColor)
         } catch (_: IOException) {
             ThemeSettings()
@@ -57,8 +52,4 @@ class ThemeStore(
         val mode: ThemeMode = ThemeMode.SYSTEM,
         val dynamicColor: Boolean = false,
     )
-
-    private companion object {
-        val json = Json { ignoreUnknownKeys = true }
-    }
 }

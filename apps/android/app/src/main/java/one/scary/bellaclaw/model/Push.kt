@@ -1,17 +1,15 @@
 package one.scary.bellaclaw.model
 
 /**
- * A new message, as a push brings it: the row [messageId] of conversation [conversationKey] at the
- * conversation's [revision]. [kind] is the conversation's kind as the list names it (`bella`, else a
- * plain chat). [text] is the row's text, or only its start when [truncated].
+ * A new message, as a push brings it: the row [messageId] of conversation [conversationKey]. [kind] is the
+ * conversation's kind as the list names it (`bella`, else a plain chat). [text] is the row's text, cut short
+ * when the whole push would be over the server's push size limit.
  */
 data class AppPush(
     val conversationKey: String,
     val kind: String,
     val messageId: Long,
-    val revision: Long,
     val text: String,
-    val truncated: Boolean,
 )
 
 /**

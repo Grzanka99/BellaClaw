@@ -37,8 +37,11 @@ internal data class ChatState(
         if (chatId == BELLACLAW_CHAT_ID) {
             return conversations.firstOrNull { it.kind == BELLA }?.conversationKey
         }
-        return conversations.firstOrNull { it.conversationKey == chatId }?.conversationKey
+        return conversation(chatId)?.conversationKey
     }
+
+    /** The listed conversation [key], or null while the list has none. */
+    fun conversation(key: String): ConversationBody? = conversations.firstOrNull { it.conversationKey == key }
 
     fun withoutConversation(key: String) = copy(
         conversations = conversations.filter { it.conversationKey != key },

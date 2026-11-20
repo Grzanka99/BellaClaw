@@ -18,7 +18,6 @@ import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -100,7 +99,6 @@ fun Composer(
             onClick = onSend,
             enabled = canSend,
             modifier = Modifier.size(56.dp),
-            colors = IconButtonDefaults.filledIconButtonColors(),
         ) {
             Icon(Icons.AutoMirrored.Filled.Send, contentDescription = stringResource(R.string.action_send))
         }

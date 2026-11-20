@@ -17,7 +17,6 @@ import one.scary.bellaclaw.data.SettingsRepository
 import one.scary.bellaclaw.model.Effort
 import one.scary.bellaclaw.model.Loadable
 import one.scary.bellaclaw.model.ModelRole
-import one.scary.bellaclaw.model.ModelSettings
 import one.scary.bellaclaw.model.RoleModel
 import one.scary.bellaclaw.ui.appContainer
 
@@ -55,10 +54,7 @@ class ModelsViewModel(private val settingsRepository: SettingsRepository) : View
         viewModelScope.launch {
             settingsRepository.settings.map { it.models }.distinctUntilChanged().collect { loaded ->
                 editor.update { draft ->
-                    val models = when (loaded) {
-                        is Loadable.Loaded -> loaded.value.models
-                        else -> emptyList()
-                    }
+                    val models = loaded.valueOrNull?.models.orEmpty()
                     val model = models.firstOrNull { it.id == draft?.model?.model }
                     val effort = draft?.model?.effort
                     if (model == null || (effort != null && effort !in model.efforts)) {
@@ -84,13 +80,13 @@ class ModelsViewModel(private val settingsRepository: SettingsRepository) : View
         if (settingsRepository.settings.value.isChangingModels) {
             return
         }
-        val model = loadedModels()?.roles?.get(role) ?: return
+        val model = settingsRepository.settings.value.models.valueOrNull?.roles?.get(role) ?: return
         editor.value = EditorDraft(role, model)
     }
 
     /** An effort the new model does not support falls back to the model's own default. */
     fun onEditorModel(modelId: String) {
-        val efforts = loadedModels()?.models?.firstOrNull { it.id == modelId }?.efforts.orEmpty()
+        val efforts = settingsRepository.settings.value.models.valueOrNull?.models?.firstOrNull { it.id == modelId }?.efforts.orEmpty()
         editor.update { draft ->
             draft?.let {
                 var effort = it.model.effort
@@ -120,11 +116,6 @@ class ModelsViewModel(private val settingsRepository: SettingsRepository) : View
 
     fun dismissEditor() {
         editor.value = null
-    }
-
-    private fun loadedModels(): ModelSettings? = when (val models = settingsRepository.settings.value.models) {
-        is Loadable.Loaded -> models.value
-        else -> null
     }
 
     companion object {

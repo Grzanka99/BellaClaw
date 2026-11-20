@@ -28,7 +28,7 @@ import one.scary.bellaclaw.data.local.SessionStore
  * error, so a body holding a password or a token never goes to another address. The read timeout covers
  * the server's longest wait (a link waits up to 60 seconds for the assistant).
  */
-class ApiClient(@PublishedApi internal val sessionStore: SessionStore) {
+class ApiClient(private val sessionStore: SessionStore) {
     private val http = OkHttpClient.Builder()
         .followRedirects(false)
         .followSslRedirects(false)
@@ -42,34 +42,30 @@ class ApiClient(@PublishedApi internal val sessionStore: SessionStore) {
 
     /** POSTs [body] to [path] on [serverUrl] without a session: sign-in and link checks. */
     suspend inline fun <reified B, reified R> post(serverUrl: String, path: String, body: B): ApiResult<R> =
-        exchange("POST", serverUrl + path, bearer = null, jsonBody(json.encodeToString(body))) { json.decodeFromString<R>(it.decodeToString()) }
+        exchange("POST", serverUrl + path, bearer = null, jsonBodyOf(body), decode = decodeJson())
 
     /** GETs [path] on the session's server with its token; a missing session answers as a `401` would, here and below. */
     suspend inline fun <reified R> getSignedIn(path: String): ApiResult<R> =
-        signedIn("GET", path, body = null) { json.decodeFromString<R>(it.decodeToString()) }
+        signedIn("GET", path, body = null, decode = decodeJson())
 
     /** GETs the bytes at [path] on the session's server with its token: an image. */
     suspend fun getBytesSignedIn(path: String): ApiResult<ByteArray> = signedIn("GET", path, body = null) { it }
 
     /** POSTs [body] to [path] on the session's server with its token. */
     suspend inline fun <reified B, reified R> postSignedIn(path: String, body: B): ApiResult<R> =
-        signedIn("POST", path, jsonBody(json.encodeToString(body))) { json.decodeFromString<R>(it.decodeToString()) }
+        signedIn("POST", path, jsonBodyOf(body), decode = decodeJson())
 
     /** POSTs [bytes] of [contentType] to [path] on the session's server with its token: an image upload. */
     suspend inline fun <reified R> postBytesSignedIn(path: String, bytes: ByteArray, contentType: String): ApiResult<R> =
-        signedIn("POST", path, bytes.toRequestBody(contentType.toMediaType())) { json.decodeFromString<R>(it.decodeToString()) }
+        signedIn("POST", path, bytes.toRequestBody(contentType.toMediaType()), decode = decodeJson())
 
     /** PUTs [body] to [path] on the session's server with its token. */
     suspend inline fun <reified B, reified R> putSignedIn(path: String, body: B): ApiResult<R> =
-        signedIn("PUT", path, jsonBody(json.encodeToString(body))) { json.decodeFromString<R>(it.decodeToString()) }
+        signedIn("PUT", path, jsonBodyOf(body), decode = decodeJson())
 
     /** PUTs [body] to [path] like [putSignedIn], waiting up to [LONG_WAIT_READ_TIMEOUT_SECONDS] for the answer. */
     suspend inline fun <reified B, reified R> putSignedInLongWait(path: String, body: B): ApiResult<R> =
-        signedIn("PUT", path, jsonBody(json.encodeToString(body)), longWait = true) { json.decodeFromString<R>(it.decodeToString()) }
-
-    /** DELETEs [path] on the session's server with its token. */
-    suspend inline fun <reified R> deleteSignedIn(path: String): ApiResult<R> =
-        signedIn("DELETE", path, body = null) { json.decodeFromString<R>(it.decodeToString()) }
+        signedIn("PUT", path, jsonBodyOf(body), longWait = true, decode = decodeJson())
 
     /**
      * Reads the server-sent event stream at [path] on the session's server with its token, handing each
@@ -79,15 +75,7 @@ class ApiClient(@PublishedApi internal val sessionStore: SessionStore) {
      */
     suspend fun streamSignedIn(path: String, onEvent: (type: String, data: String) -> Unit): ApiResult<Unit> {
         val session = sessionStore.session.value ?: return ApiResult.ApiError(UNAUTHORIZED, null)
-        val request = try {
-            Request.Builder()
-                .header(CLIENT_HEADER, "app")
-                .header("Authorization", "Bearer ${session.token}")
-                .url(session.serverUrl + path)
-                .build()
-        } catch (_: IllegalArgumentException) {
-            return ApiResult.NetworkFailure
-        }
+        val request = request("GET", session.serverUrl + path, session.token, body = null) ?: return ApiResult.NetworkFailure
         val call = http.newCall(request)
         val result = coroutineScope {
             // The blocking read below does not see cancellation; cancelling the call ends it.
@@ -157,18 +145,7 @@ class ApiClient(@PublishedApi internal val sessionStore: SessionStore) {
         longWait: Boolean = false,
         decode: (ByteArray) -> R,
     ): ApiResult<R> {
-        val builder = Request.Builder()
-            .header(CLIENT_HEADER, "app")
-            .method(method, body)
-        if (bearer != null) {
-            builder.header("Authorization", "Bearer $bearer")
-        }
-        val request = try {
-            builder.url(url).build()
-        } catch (_: IllegalArgumentException) {
-            // A host that passes checkServerUrl but OkHttp refuses (a label over 63 characters, a bad xn-- label).
-            return ApiResult.NetworkFailure
-        }
+        val request = request(method, url, bearer, body) ?: return ApiResult.NetworkFailure
         val client = if (longWait) {
             longWaitHttp
         } else {
@@ -185,6 +162,21 @@ class ApiClient(@PublishedApi internal val sessionStore: SessionStore) {
             // SerializationException included.
             ApiResult.ApiError(status, null)
         }
+    }
+
+    /** The request with the client header and, given a [bearer], its token; null when OkHttp refuses [url] or the token. */
+    private fun request(method: String, url: String, bearer: String?, body: RequestBody?): Request? = try {
+        val builder = Request.Builder()
+            .header(CLIENT_HEADER, "app")
+            .method(method, body)
+        if (bearer != null) {
+            builder.header("Authorization", "Bearer $bearer")
+        }
+        builder.url(url).build()
+    } catch (_: IllegalArgumentException) {
+        // A host that passes checkServerUrl but OkHttp refuses (a label over 63 characters, a bad xn-- label),
+        // or a token that is not a valid header value.
+        null
     }
 
     /** The status and body of the answer, or null when there was none. */
@@ -227,9 +219,13 @@ class ApiClient(@PublishedApi internal val sessionStore: SessionStore) {
             explicitNulls = false
         }
 
-        private val JSON = "application/json; charset=utf-8".toMediaType()
+        @PublishedApi
+        internal val JSON = "application/json; charset=utf-8".toMediaType()
 
         @PublishedApi
-        internal fun jsonBody(text: String): RequestBody = text.toRequestBody(JSON)
+        internal inline fun <reified R> decodeJson(): (ByteArray) -> R = { json.decodeFromString<R>(it.decodeToString()) }
+
+        @PublishedApi
+        internal inline fun <reified B> jsonBodyOf(body: B): RequestBody = json.encodeToString(body).toRequestBody(JSON)
     }
 }

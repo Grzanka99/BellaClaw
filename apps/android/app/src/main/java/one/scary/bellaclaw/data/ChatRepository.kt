@@ -40,7 +40,6 @@ import one.scary.bellaclaw.model.Chat
 import one.scary.bellaclaw.model.ChatNotification
 import one.scary.bellaclaw.model.Effort
 import one.scary.bellaclaw.model.ImageCheck
-import one.scary.bellaclaw.model.Loadable
 import one.scary.bellaclaw.model.Message
 import one.scary.bellaclaw.model.ModelChoice
 import one.scary.bellaclaw.model.ModelRole
@@ -232,7 +231,7 @@ class ChatRepository(
         if (push.kind == ChatState.BELLA) {
             return ChatNotification(key, BELLACLAW_CHAT_ID, null, text)
         }
-        val title = current.conversations.firstOrNull { it.conversationKey == key }?.title
+        val title = current.conversation(key)?.title
         return ChatNotification(key, key, title, text)
     }
 
@@ -266,7 +265,7 @@ class ChatRepository(
         if (state.value.generation != generation) {
             return@withLock
         }
-        val model = message.model?.let { ModelBody(it.providerId, it.model, it.effort.name.lowercase()) }
+        val model = message.model?.let { ModelBody(it.providerId, it.model, it.effort.wireName()) }
         val body = SendBody(message.clientMessageId, message.text, model, uploaded?.let { listOf(it) })
         when (val result = api.postSignedIn<SendBody, EmptyBody>(messagesPath(key), body)) {
             is ApiResult.Success -> changePending(key, message.clientMessageId) { it.copy(state = SendState.STORED) }
@@ -351,7 +350,7 @@ class ChatRepository(
             }
             "reply" -> if (key != null && event.text != null) {
                 state.update { current ->
-                    val chatId = current.conversations?.firstOrNull { it.conversationKey == key }?.chatId() ?: key
+                    val chatId = current.conversation(key)?.chatId() ?: key
                     val reply = Message("reply-${UUID.randomUUID()}", chatId, Author.ASSISTANT, event.text, clock.instant())
                     current.copy(replies = current.replies + (key to current.replies[key].orEmpty() + reply))
                 }
@@ -373,14 +372,14 @@ class ChatRepository(
      */
     private fun modelOf(key: String, local: LocalChats, settings: SettingsSnapshot): ModelChoice? {
         local.models[key]?.let { return it }
-        val catalog = (settings.chatModels as? Loadable.Loaded)?.value
+        val catalog = settings.chatModels.valueOrNull
         local.lastModel?.takeIf { last ->
             catalog == null || catalog.any { provider ->
                 provider.isUsable && provider.id == last.providerId &&
                     provider.models.any { it.id == last.model && last.effort in it.efforts }
             }
         }?.let { return it }
-        val models = (settings.models as? Loadable.Loaded)?.value ?: return null
+        val models = settings.models.valueOrNull ?: return null
         val main = models.roles[ModelRole.MAIN] ?: return null
         val efforts = models.models.firstOrNull { it.id == main.model }?.efforts.orEmpty()
         val effort = main.effort ?: Effort.MEDIUM.takeIf { it in efforts } ?: efforts.firstOrNull() ?: return null

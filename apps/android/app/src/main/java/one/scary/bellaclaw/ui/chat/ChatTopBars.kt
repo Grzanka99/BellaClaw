@@ -19,7 +19,7 @@ import androidx.compose.ui.unit.dp
 import one.scary.bellaclaw.R
 import one.scary.bellaclaw.ui.components.BackButton
 import one.scary.bellaclaw.ui.components.BellaClawAvatar
-import one.scary.bellaclaw.ui.components.OnlineDot
+import one.scary.bellaclaw.ui.components.Dot
 import one.scary.bellaclaw.ui.theme.BellaClawThemeTokens
 
 /** BellaClaw's bar: back, avatar, name and the stream dot. No model control, no menu. */
@@ -35,7 +35,7 @@ fun BellaClawTopBar(isStreamOpen: Boolean, onBack: () -> Unit) {
                 Text(stringResource(R.string.bellaclaw_name))
                 if (isStreamOpen) {
                     Spacer(Modifier.width(8.dp))
-                    OnlineDot(color = BellaClawThemeTokens.extraColors.online)
+                    Dot(color = BellaClawThemeTokens.extraColors.online)
                 }
             }
         },

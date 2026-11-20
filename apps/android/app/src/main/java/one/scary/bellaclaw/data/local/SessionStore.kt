@@ -2,8 +2,6 @@ package one.scary.bellaclaw.data.local
 
 import java.io.File
 import java.io.IOException
-import java.nio.file.Files
-import java.nio.file.StandardCopyOption
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -13,7 +11,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.Json
 import one.scary.bellaclaw.model.Session
 
 /**
@@ -52,9 +49,7 @@ class SessionStore(
 
     private suspend fun writeLocked(value: StoredSession) {
         withContext(ioDispatcher) {
-            val temporary = File(file.parentFile, "${file.name}.tmp")
-            temporary.writeText(json.encodeToString(StoredSession.serializer(), value))
-            Files.move(temporary.toPath(), file.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+            file.writeAtomically(lenientJson.encodeToString(StoredSession.serializer(), value).encodeToByteArray())
         }
         stored = value
         sessionState.value = value.toSession()
@@ -65,7 +60,7 @@ class SessionStore(
             return StoredSession()
         }
         return try {
-            json.decodeFromString(StoredSession.serializer(), file.readText())
+            lenientJson.decodeFromString(StoredSession.serializer(), file.readText())
         } catch (_: IOException) {
             StoredSession()
         } catch (_: IllegalArgumentException) {
@@ -86,9 +81,5 @@ class SessionStore(
             }
             return Session(serverUrl, username, token)
         }
-    }
-
-    private companion object {
-        val json = Json { ignoreUnknownKeys = true }
     }
 }

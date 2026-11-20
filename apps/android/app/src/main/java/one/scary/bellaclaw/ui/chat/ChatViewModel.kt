@@ -76,7 +76,7 @@ class ChatViewModel(
         chatRepository.isTyping(chatId),
         chatRepository.isStreamOpen,
         chatRepository.canSend(chatId),
-    ) { chat, messages, typing, streamOpen, known ->
+    ) { chat, messages, typing, streamOpen, isReadyToSend ->
         val (kind, title) = when (chat) {
             null -> return@combine ChatUiState(isMissing = true)
             is BellaClawChat -> ChatKind.BELLACLAW to null
@@ -88,7 +88,7 @@ class ChatViewModel(
             rows = chatRows(messages, zone),
             isTyping = typing,
             isStreamOpen = streamOpen,
-            isConversationKnown = known,
+            isReadyToSend = isReadyToSend,
         )
     }
 
@@ -216,10 +216,8 @@ class ChatViewModel(
         local.update { state -> state.copy(pickerSelection = validSelection(state.pickerSelection, chatModels)?.let(change)) }
     }
 
-    private fun validSelection(selection: ModelChoice?, chatModels: Loadable<List<ChatProvider>>): ModelChoice? = when (chatModels) {
-        is Loadable.Loaded -> pickerSelection(selection, chatModels.value)
-        else -> null
-    }
+    private fun validSelection(selection: ModelChoice?, chatModels: Loadable<List<ChatProvider>>): ModelChoice? =
+        chatModels.valueOrNull?.let { pickerSelection(selection, it) }
 
     companion object {
         private const val DRAFT_KEY = "draft"

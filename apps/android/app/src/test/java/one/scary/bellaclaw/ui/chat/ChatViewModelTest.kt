@@ -102,7 +102,7 @@ class ChatViewModelTest {
     fun `an image sends without text, shows at once from the picked file, uploads, then posts with the upload's answer`() = runTest {
         testServer.pickedImages.files["content://picked/1"] = "image/jpeg" to photo
         val viewModel = viewModel(BELLACLAW_CHAT_ID, repository())
-        viewModel.uiState.first { it.isConversationKnown }
+        viewModel.uiState.first { it.isReadyToSend }
 
         viewModel.onAttach("content://picked/1")
         viewModel.uiState.first { it.attachmentUri == "content://picked/1" && it.canSend }
@@ -132,7 +132,7 @@ class ChatViewModelTest {
         testServer.pickedImages.files["content://picked/1"] = "image/png" to photo
         gateway.uploadFailures.put(413 to errorAnswer("The image is over 5 MB"))
         val viewModel = viewModel(BELLACLAW_CHAT_ID, repository())
-        viewModel.uiState.first { it.isConversationKnown }
+        viewModel.uiState.first { it.isReadyToSend }
         viewModel.onAttach("content://picked/1")
         viewModel.uiState.first { it.attachmentUri != null && it.canSend }
         viewModel.send()
@@ -267,7 +267,7 @@ class ChatViewModelTest {
         gateway.addChat("plain:ada:k1", "Kotlin")
         gateway.sendFailures.put(400 to errorAnswer("The provider has no API key"))
         val viewModel = viewModel("plain:ada:k1", repository())
-        viewModel.uiState.first { it.title == "Kotlin" && it.isConversationKnown }
+        viewModel.uiState.first { it.title == "Kotlin" && it.isReadyToSend }
 
         viewModel.onDraftChange("Hello")
         viewModel.send()
@@ -286,7 +286,7 @@ class ChatViewModelTest {
     @Test
     fun `a confidential command settles once accepted, though history never has it`() = runTest {
         val viewModel = viewModel(BELLACLAW_CHAT_ID, repository())
-        viewModel.uiState.first { it.isConversationKnown && it.isStreamOpen }
+        viewModel.uiState.first { it.isReadyToSend && it.isStreamOpen }
 
         viewModel.onDraftChange("!ai-auth openai")
         viewModel.send()
@@ -400,7 +400,7 @@ class ChatViewModelTest {
         gateway.addChat("plain:ada:k1", "Kotlin")
         val repository = repository()
         val viewModel = viewModel("plain:ada:k1", repository)
-        viewModel.uiState.first { it.title == "Kotlin" && it.isConversationKnown }
+        viewModel.uiState.first { it.title == "Kotlin" && it.isReadyToSend }
 
         viewModel.openModelPicker()
         val opened = viewModel.uiState.first { it.picker.loaded() != null }.picker!!
@@ -436,7 +436,7 @@ class ChatViewModelTest {
         gateway.addChat("plain:ada:k2", "Rust")
         val repository = repository()
         val first = viewModel("plain:ada:k1", repository)
-        first.uiState.first { it.title == "Kotlin" && it.isConversationKnown }
+        first.uiState.first { it.title == "Kotlin" && it.isReadyToSend }
         first.openModelPicker()
         first.uiState.first { it.picker.loaded() != null }
         first.onPickerModel("opencode-go", "glm-5")
@@ -444,7 +444,7 @@ class ChatViewModelTest {
         repository.chat("plain:ada:k1").first { (it as? PlainChat)?.model?.model == "glm-5" }
 
         val second = viewModel("plain:ada:k2", repository)
-        second.uiState.first { it.title == "Rust" && it.isConversationKnown }
+        second.uiState.first { it.title == "Rust" && it.isReadyToSend }
         second.onDraftChange("Hi")
         second.send()
 
@@ -457,7 +457,7 @@ class ChatViewModelTest {
         gateway.addChat("plain:ada:k1", "Kotlin")
         val repository = repository()
         val viewModel = viewModel("plain:ada:k1", repository)
-        viewModel.uiState.first { it.title == "Kotlin" && it.isConversationKnown }
+        viewModel.uiState.first { it.title == "Kotlin" && it.isReadyToSend }
         viewModel.openModelPicker()
         viewModel.uiState.first { it.picker.loaded() != null }
         viewModel.onPickerModel("openai-codex", "gpt-5.5")
@@ -485,7 +485,7 @@ class ChatViewModelTest {
         val store = testServer.signedInStore()
         val settings = testServer.settingsRepository(store, backgroundScope)
         val viewModel = viewModel("plain:ada:k1", testServer.chatRepository(store, backgroundScope, settings = settings), settings = settings)
-        viewModel.uiState.first { it.title == "Kotlin" && it.isConversationKnown }
+        viewModel.uiState.first { it.title == "Kotlin" && it.isReadyToSend }
         settings.settings.first { it.chatModels is Loadable.Loaded }
         testServer.route("GET", "/api/models", 200, chatModelsAnswer(codexReason = null), delayMillis = 1_000)
 
@@ -501,7 +501,7 @@ class ChatViewModelTest {
         gateway.addChat("plain:ada:k1", "Kotlin")
         testServer.route("GET", "/api/models", 503, errorAnswer("Unavailable"))
         val viewModel = viewModel("plain:ada:k1", repository())
-        viewModel.uiState.first { it.title == "Kotlin" && it.isConversationKnown }
+        viewModel.uiState.first { it.title == "Kotlin" && it.isReadyToSend }
 
         viewModel.openModelPicker()
 

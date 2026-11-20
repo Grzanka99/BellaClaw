@@ -16,7 +16,7 @@ import javax.crypto.Mac
 import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.SecretKeySpec
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.Json
+import one.scary.bellaclaw.data.local.lenientJson
 import one.scary.bellaclaw.model.AppPush
 
 private const val SALT_BYTES = 16
@@ -24,8 +24,6 @@ private const val HEADER_BYTES = SALT_BYTES + 5
 private const val PUBLIC_KEY_BYTES = 65
 private const val TAG_BYTES = 16
 private const val LAST_RECORD_DELIMITER: Byte = 2
-
-private val json = Json { ignoreUnknownKeys = true }
 
 /** The push in [ciphertext] (the FCM data field, base64url), or null when it does not decrypt for [keys] or parse. */
 fun decryptPush(ciphertext: String, keys: DeviceKeys): AppPush? {
@@ -35,7 +33,7 @@ fun decryptPush(ciphertext: String, keys: DeviceKeys): AppPush? {
         null
     } ?: return null
     return try {
-        json.decodeFromString(PushBody.serializer(), plaintext.decodeToString()).toAppPush()
+        lenientJson.decodeFromString(PushBody.serializer(), plaintext.decodeToString()).toAppPush()
     } catch (_: IllegalArgumentException) {
         // SerializationException included.
         null
@@ -101,9 +99,7 @@ private class PushBody(
     val conversationKey: String,
     val kind: String,
     val messageId: Long,
-    val revision: Long,
     val text: String,
-    val truncated: Boolean,
 ) {
-    fun toAppPush() = AppPush(conversationKey, kind, messageId, revision, text, truncated)
+    fun toAppPush() = AppPush(conversationKey, kind, messageId, text)
 }

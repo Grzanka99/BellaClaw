@@ -30,7 +30,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import one.scary.bellaclaw.R
 import one.scary.bellaclaw.ui.components.BellaClawAvatar
-import one.scary.bellaclaw.ui.components.OnlineDot
+import one.scary.bellaclaw.ui.components.Dot
 import one.scary.bellaclaw.ui.components.formatListTime
 import one.scary.bellaclaw.ui.components.imageVector
 
@@ -103,7 +103,7 @@ private fun ChatRowLayout(
             Text(text = title, style = titleStyle, maxLines = 1, overflow = TextOverflow.Ellipsis)
             summary.preview?.let {
                 Text(
-                    text = it.ifEmpty { stringResource(R.string.image_placeholder) },
+                    text = it.ifEmpty { stringResource(R.string.image) },
                     style = MaterialTheme.typography.bodyMedium,
                     color = mutedColor,
                     maxLines = 1,
@@ -130,7 +130,7 @@ private fun ChatRowLayout(
                 )
                 if (summary.isUnread) {
                     val unread = stringResource(R.string.unread)
-                    OnlineDot(
+                    Dot(
                         color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.padding(top = 8.dp).semantics { contentDescription = unread },
                     )

@@ -129,7 +129,7 @@ internal class ChatSync(
             var previous: Long? = null
             while (synced) {
                 val current = state.value
-                val listed = current.conversations.firstOrNull { it.conversationKey == key }
+                val listed = current.conversation(key)
                 if (current.generation != generation || listed == null) {
                     break
                 }
@@ -149,7 +149,7 @@ internal class ChatSync(
             failed.remove(key)
             return
         }
-        val chatId = state.value.conversations.firstOrNull { it.conversationKey == key }?.chatId()
+        val chatId = state.value.conversation(key)?.chatId()
         if (chatId in openChats.value) {
             failed.add(key)
             retryLater(key) { syncHistory(key) }

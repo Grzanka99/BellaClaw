@@ -45,7 +45,8 @@ business logic, never touch a repository, and never see the `NavController`. A o
 (a chat was created, the personality was saved) is a field in the UI state; the Route acts on it in a
 `LaunchedEffect` once its entry is resumed (`withResumed`), so the navigation is not dropped, and only
 then tells the ViewModel it was handled. An event that starts such a result (New chat)
-is ignored while one is pending.
+is ignored while one is pending; when it fails, a UI state field says so (`HomeUiState.newChatFailed`)
+until the next such event.
 
 A state that only lasts while the data says so (a chat id with no chat: `ChatUiState.isMissing`) is a
 plain UI state field; the Route reacts to it (back to Home) without acknowledging it.
@@ -84,7 +85,7 @@ whenever it changes, since the app theme can override the device theme.
 - Only repositories call `ApiClient`; ViewModels see `AccountError` and model types, never
   `ApiResult` or request bodies. Every request carries `X-BellaClaw-Client: app`; a POST or PUT carries a
   body with a `Content-Length`: JSON, or an image upload's bytes (`postBytesSignedIn`). `post` goes to a server named by the caller (sign-in, link check);
-  `getSignedIn`, `getBytesSignedIn` (an image), `postSignedIn`, `postBytesSignedIn`, `putSignedIn` and `deleteSignedIn` go to the session's server with
+  `getSignedIn`, `getBytesSignedIn` (an image), `postSignedIn`, `postBytesSignedIn` and `putSignedIn` go to the session's server with
   `Authorization: Bearer <token>`. `ApiClient` builds
   its one OkHttp client: it follows no redirect (a redirect answer is an API error like any other
   non-2xx, so no body with a password or token is replayed elsewhere), and its read timeout (70 s)
@@ -136,7 +137,7 @@ else from Firebase; the manifest turns off Firebase's default data collection an
   is deleted; the next sign-in gets a new one.
 - Receiving: `PushService` (not exported) takes the data field `ciphertext` and hands it to
   `PushRepository.receive`, which decrypts it (`decryptPush`: RFC 8291, `aes128gcm`, one record) into
-  `AppPush` (`conversationKey`, `kind`, `messageId`, `revision`, `text`, `truncated`; `kind` as the
+  `AppPush` (`conversationKey`, `kind`, `messageId`, `text`; `kind` as the
   list names it) and queues it on `pushes` (one collector; kept until collected). A message that arrives
   signed out, or does not decrypt or parse, is dropped, and one still waiting when its session is no
   longer the session is dropped when its turn comes. A push counts as handled once its collector
@@ -150,8 +151,7 @@ else from Firebase; the manifest turns off Firebase's default data collection an
   the list has not named it, and the push's text. `ChatRepository.catchUp` then reads the list and
   syncs that conversation's history, for up to 8 s so a stalled read never holds the next push back
   (a cut catch-up is left unfinished), and the notification is shown again, without alerting, if the
-  title or the text changed: the title once known, the whole text of row `messageId` for a
-  `truncated` push. A conversation whose chat is
+  title or the text changed: the title once known, the text of row `messageId` once history has it. A conversation whose chat is
   open on screen while in the foreground gets none, and loses its notification when its chat opens;
   any change of session clears all of them, and a show for a session that is no longer the session is
   skipped. `AndroidNotifier` posts them, tagged with the conversation key, on two channels the person

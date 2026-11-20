@@ -26,6 +26,10 @@ sealed interface Loadable<out T> {
 
     data class Failed(val error: AccountError) : Loadable<Nothing>
 
+    /** The value once loaded, else null. */
+    val valueOrNull: T?
+        get() = (this as? Loaded)?.value
+
     fun <R> map(transform: (T) -> R): Loadable<R> = when (this) {
         Loading -> Loading
         is Loaded -> Loaded(transform(value))

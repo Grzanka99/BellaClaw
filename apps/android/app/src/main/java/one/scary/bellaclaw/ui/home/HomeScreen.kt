@@ -1,6 +1,7 @@
 package one.scary.bellaclaw.ui.home
 
 import android.content.res.Configuration
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
@@ -14,6 +15,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -57,24 +59,32 @@ fun HomeScreen(
             )
         },
     ) { padding ->
-        LazyColumn(contentPadding = PaddingValues(bottom = 96.dp), modifier = Modifier.padding(padding)) {
-            state.bellaClaw?.let { bellaClaw ->
-                item(key = bellaClaw.id) {
+        Column(modifier = Modifier.padding(padding)) {
+            if (state.newChatFailed) {
+                Text(
+                    stringResource(R.string.error_new_chat),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                )
+            }
+            LazyColumn(contentPadding = PaddingValues(bottom = 96.dp), modifier = Modifier.weight(1f)) {
+                item(key = state.bellaClaw.id) {
                     BellaClawRow(
-                        summary = bellaClaw,
-                        onClick = { onOpenChat(bellaClaw.id) },
+                        summary = state.bellaClaw,
+                        onClick = { onOpenChat(state.bellaClaw.id) },
                         modifier = Modifier.padding(top = 8.dp, bottom = 4.dp),
                     )
                 }
-            }
-            item {
-                SectionHeader(stringResource(R.string.home_chats))
-            }
-            items(state.chats, key = { it.id }) { chat ->
-                PlainChatRow(summary = chat, onClick = { onOpenChat(chat.id) })
-            }
-            item {
-                Spacer(Modifier.height(8.dp))
+                item {
+                    SectionHeader(stringResource(R.string.home_chats))
+                }
+                items(state.chats, key = { it.id }) { chat ->
+                    PlainChatRow(summary = chat, onClick = { onOpenChat(chat.id) })
+                }
+                item {
+                    Spacer(Modifier.height(8.dp))
+                }
             }
         }
     }

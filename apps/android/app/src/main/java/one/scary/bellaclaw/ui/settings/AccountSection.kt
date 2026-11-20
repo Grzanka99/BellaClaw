@@ -8,16 +8,15 @@ import androidx.compose.material.icons.outlined.AccountCircle
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
-import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import one.scary.bellaclaw.R
 import one.scary.bellaclaw.ui.components.SectionHeader
+import one.scary.bellaclaw.ui.components.TransparentListItemColors
 import one.scary.bellaclaw.ui.components.text
 
 /** The signed-in account and its server, and Sign out with its failure. */
@@ -28,7 +27,7 @@ fun AccountSection(state: SettingsUiState, onSignOut: () -> Unit) {
         headlineContent = { Text(state.username) },
         supportingContent = { Text(state.serverUrl) },
         leadingContent = { Icon(Icons.Outlined.AccountCircle, contentDescription = null) },
-        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+        colors = TransparentListItemColors,
     )
     ListItem(
         headlineContent = { Text(stringResource(R.string.sign_out)) },
@@ -46,7 +45,7 @@ fun AccountSection(state: SettingsUiState, onSignOut: () -> Unit) {
         } else {
             null
         },
-        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+        colors = TransparentListItemColors,
         modifier = Modifier.clickable(enabled = !state.isSigningOut, onClick = onSignOut),
     )
 }

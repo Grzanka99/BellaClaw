@@ -59,7 +59,7 @@ fun BubbleImage(image: MessageImage, loader: MessageImageLoader, onOpen: () -> U
     val bitmap = rememberDecoded(image, loader, with(LocalDensity.current) { MAX_SIZE.roundToPx() })
     val shape = RoundedCornerShape(12.dp)
     if (bitmap == null) {
-        val description = stringResource(R.string.image_placeholder)
+        val description = stringResource(R.string.image)
         ImagePlaceholder(
             modifier = modifier
                 .size(PLACEHOLDER_SIZE)
@@ -69,7 +69,7 @@ fun BubbleImage(image: MessageImage, loader: MessageImageLoader, onOpen: () -> U
     } else {
         Image(
             bitmap = bitmap,
-            contentDescription = stringResource(R.string.image_placeholder),
+            contentDescription = stringResource(R.string.image),
             contentScale = ContentScale.Crop,
             modifier = modifier
                 .sizeIn(maxWidth = MAX_SIZE, maxHeight = MAX_SIZE)
@@ -90,7 +90,7 @@ fun ImageViewer(image: MessageImage, loader: MessageImageLoader, onClose: () -> 
             if (bitmap != null) {
                 Image(
                     bitmap = bitmap,
-                    contentDescription = stringResource(R.string.image_placeholder),
+                    contentDescription = stringResource(R.string.image),
                     contentScale = ContentScale.Fit,
                     modifier = Modifier.fillMaxSize(),
                 )
