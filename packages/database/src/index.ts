@@ -5,6 +5,7 @@ export {
   listConversations,
   listHistory,
   type THistoryCursor,
+  type THistoryImage,
   type THistoryMessage,
   type TListedConversation,
   type TOwnedConversation,

@@ -1,4 +1,4 @@
-import type { TGatewayHistoryImage, TOption } from "@bellaclaw/shared";
+import type { TOption } from "@bellaclaw/shared";
 import { and, asc, desc, eq, gt, inArray, lt } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import { z } from "zod";
@@ -26,6 +26,14 @@ export type TListedConversation = TOwnedConversation & {
 // after: the rows above the id, for an append; before: the rows below it, for an older page
 export type THistoryCursor = { direction: "after" | "before"; id: number };
 
+// an image of a history row. mediaId: it downloads from the conversation's media route by this
+// id. An image the conversation no longer keeps, and every image that came through Signal or
+// Discord, is a placeholder without one
+export type THistoryImage = {
+  mediaId: TOption<string>;
+  mimeType: string;
+};
+
 // text: of a user message with images, what the user typed, without the stored image markers;
 // createdAt: epoch ms; clientMessageId: the id the sending client gave an inbound message;
 // images: those of a user message, in order, none when it has no image
@@ -37,7 +45,7 @@ export type THistoryMessage = {
   text: string;
   createdAt: number;
   clientMessageId: TOption<string>;
-  images: TOption<TGatewayHistoryImage[]>;
+  images: TOption<THistoryImage[]>;
 };
 
 // NOTE: a user message's attachment references as the assistant stores them, as much of them as
@@ -188,7 +196,7 @@ export async function listHistory(
     .where(and(...conditions))
     .orderBy(order)
     .limit(limit);
-  const imagesById = new Map<number, { id: string; mimeType: string; channel: string }[]>();
+  const imagesById = new Map<number, z.infer<typeof SStoredAttachments>>();
 
   for (const row of rows) {
     if (row.attachments === null) {
@@ -228,13 +236,26 @@ export async function listHistory(
       (row.author === "user" || row.author === "assistant") &&
       (row.kind === "message" || row.kind === "display")
     ) {
-      const refs = imagesById.get(row.id) ?? [];
+      const refs = imagesById.get(row.id);
       let text = row.message;
+      let images: TOption<THistoryImage[]>;
 
-      for (const _ of refs) {
-        if (text.endsWith(IMAGE_MARKER)) {
-          text = text.slice(0, -IMAGE_MARKER.length).trimEnd();
+      if (refs !== undefined) {
+        for (const _ of refs) {
+          if (text.endsWith(IMAGE_MARKER)) {
+            text = text.slice(0, -IMAGE_MARKER.length).trimEnd();
+          }
         }
+
+        images = refs.map((ref) => {
+          const image: THistoryImage = { mediaId: undefined, mimeType: ref.mimeType };
+
+          if (kept.has(ref.id)) {
+            image.mediaId = ref.id;
+          }
+
+          return image;
+        });
       }
 
       messages.push({
@@ -245,15 +266,7 @@ export async function listHistory(
         text,
         createdAt: row.createdAt?.getTime(),
         clientMessageId: row.clientMessageId ?? undefined,
-        images: imagesById.get(row.id)?.map((ref) => {
-          const image: TGatewayHistoryImage = { mediaId: undefined, mimeType: ref.mimeType };
-
-          if (kept.has(ref.id)) {
-            image.mediaId = ref.id;
-          }
-
-          return image;
-        }),
+        images,
       });
     }
   }

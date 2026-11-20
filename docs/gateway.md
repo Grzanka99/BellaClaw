@@ -1,7 +1,7 @@
 # Gateway
 
-The gateway serves the dashboard, a web control panel for the people who chat with BellaClaw. Each
-user has an account and sees only the chats linked to it. The gateway is meant to be reachable from the internet behind
+The gateway serves the dashboard, a web control panel for the people who chat with BellaClaw, and
+the Android app's API. Each user has an account and sees only the chats linked to it. The gateway is meant to be reachable from the internet behind
 a TLS reverse proxy.
 
 It lives in the `@bellaclaw/gateway` workspace (`apps/gateway`). The log viewer is a separate
@@ -285,7 +285,7 @@ Personality, the same settings as the Personality tab:
 | --- | --- |
 | Model | View and change the AI provider, and the model, effort and service tier per model purpose. |
 | Personality | Edit Bella's persona, whether plain chats start from it, and the plain chats' own text. |
-| History | Browse the chat's messages, newest first, and delete single messages. |
+| History | Browse the Bella conversation's messages, newest first, and delete single messages. |
 | Facts | A 3D graph of the facts BellaClaw remembers. Each fact links to its nearest neighbours by embedding similarity. |
 
 An account with no linked chat sees no tabs: a hint to link a chat and the Personality settings.

@@ -28,7 +28,6 @@ import type {
   TApiError,
   TAppSessionResponse,
   TAppStreamEvent,
-  TConversationCreatedResponse,
   TConversationDeletedResponse,
   TConversationsResponse,
   TDeviceResponse,
@@ -49,7 +48,7 @@ import { buildFactGraph } from "./fact-graph";
 import type { TInternalApi, TInternalApiResult } from "./internal-api";
 import type { TLiveStream } from "./live-stream";
 
-export const SESSION_COOKIE = "bellaclaw_dashboard_session";
+const SESSION_COOKIE = "bellaclaw_dashboard_session";
 // "app" on a request that starts a session asks for a bearer token instead of the cookie
 export const CLIENT_HEADER = "X-BellaClaw-Client";
 
@@ -190,6 +189,29 @@ function isAppRequest(c: Context): boolean {
   return bearerToken(c) !== undefined || c.req.header(CLIENT_HEADER) === "app";
 }
 
+// the answer to a failed assistant request, passed on
+function apiFailed(c: Context, result: Exclude<TInternalApiResult<unknown>, { data: unknown }>) {
+  return c.json<TApiError>({ error: result.error }, result.status);
+}
+
+// the answer to a failed link request; an address of another account says so
+function linkFailed(c: Context, result: Exclude<TInternalApiResult<unknown>, { data: unknown }>) {
+  if (result.code === ADDRESS_LINKED_ELSEWHERE) {
+    return c.json<TApiError>({ error: LINKED_ELSEWHERE }, 409);
+  }
+
+  return c.json<TApiError>({ error: result.error }, result.status);
+}
+
+// the assistant's answer, passed on
+function respond<T>(c: Context, result: TInternalApiResult<T>) {
+  if ("error" in result) {
+    return apiFailed(c, result);
+  } else {
+    return c.json(result.data);
+  }
+}
+
 export function createApp({
   config,
   store,
@@ -231,7 +253,7 @@ export function createApp({
     const result = await internalApi.getAccount(account.publicId);
 
     if ("error" in result) {
-      return c.json<TApiError>({ error: result.error }, result.status);
+      return apiFailed(c, result);
     }
 
     // NOTE: no await between this check and the session, so a password reset meanwhile is seen
@@ -265,7 +287,7 @@ export function createApp({
     const result = await internalApi.getAccount(account.publicId);
 
     if ("error" in result) {
-      return c.json<TApiError>({ error: result.error }, result.status);
+      return apiFailed(c, result);
     }
 
     return c.json<TMeResponse>({ username: account.username, chats: result.data.links });
@@ -291,29 +313,87 @@ export function createApp({
     return { data: chatLink.data.link?.accountId };
   }
 
-  // the answer to a failed link request; an address of another account says so
-  function linkFailed(c: Context, result: Exclude<TInternalApiResult<unknown>, { data: unknown }>) {
-    if (result.code === ADDRESS_LINKED_ELSEWHERE) {
+  // The token's link when it is unused, with the public id of the account its chat is linked to;
+  // else the answer.
+  async function resolveLink(
+    c: Context,
+    token: TOption<string>,
+  ): Promise<Response | { link: TGatewayLinkToken; linkedAccountId: TOption<string> }> {
+    let link: TOption<TGatewayLinkToken>;
+
+    if (token !== undefined) {
+      link = findUnusedLink(token, Date.now());
+    }
+
+    if (link === undefined) {
+      return c.json<TApiError>({ error: INVALID_LINK }, 400);
+    }
+
+    const linked = await findLinkedAccountId(link.chatId);
+
+    if ("error" in linked) {
+      return apiFailed(c, linked);
+    }
+
+    return { link, linkedAccountId: linked.data };
+  }
+
+  // Uses the link for the account and asks the assistant to link its chat; the answer when that
+  // fails, else undefined. A link of another account's chat is refused unused. verifiedHash: the
+  // password hash a login verified; when the stored hash is another one by then, the link is
+  // refused unused.
+  // NOTE: no await between the checks and the use of the link
+  async function linkChat(
+    c: Context,
+    link: TGatewayLinkToken,
+    linkedAccountId: TOption<string>,
+    account: TAccount,
+    verifiedHash: TOption<string>,
+  ): Promise<TOption<Response>> {
+    if (linkedAccountId !== undefined && linkedAccountId !== account.publicId) {
       return c.json<TApiError>({ error: LINKED_ELSEWHERE }, 409);
     }
 
-    return c.json<TApiError>({ error: result.error }, result.status);
+    if (
+      verifiedHash !== undefined &&
+      store.findCredentials(account.username)?.passwordHash !== verifiedHash
+    ) {
+      return c.json<TApiError>({ error: WRONG_CREDENTIALS }, 401);
+    }
+
+    if (!store.consumeLink(link, Date.now())) {
+      return c.json<TApiError>({ error: INVALID_LINK }, 400);
+    }
+
+    const requested = await internalApi.requestLink(account.publicId, link.chatId);
+
+    if ("error" in requested) {
+      return linkFailed(c, requested);
+    }
+
+    return undefined;
   }
 
   // The conversation's revisions when the signed-in account owns it, by the keys the assistant
-  // names for the account; undefined for a conversation of another account or one that does not
-  // exist, alike
+  // names for the account; else the answer, 404 for a conversation of another account or one that
+  // does not exist, alike
   async function findConversation(
     c: Context<TEnv>,
     conversationKey: string,
-  ): Promise<TInternalApiResult<TOption<TOwnedConversation>>> {
+  ): Promise<Response | TOwnedConversation> {
     const account = await internalApi.getAccount(c.var.account.publicId);
 
     if ("error" in account) {
-      return account;
+      return apiFailed(c, account);
     }
 
-    return { data: await reader.findConversation(conversationKey, account.data) };
+    const owned = await reader.findConversation(conversationKey, account.data);
+
+    if (owned === undefined) {
+      return c.json<TApiError>({ error: "Not found" }, 404);
+    }
+
+    return owned;
   }
 
   // NOTE: an app request is served by its bearer token alone, and names no account: the account
@@ -411,7 +491,7 @@ export function createApp({
     const linked = await findLinkedAccountId(link.chatId);
 
     if ("error" in linked) {
-      return c.json<TApiError>({ error: linked.error }, linked.status);
+      return apiFailed(c, linked);
     }
 
     const response: TLinkCheckResponse = { valid: true, chatKey: link.chatId };
@@ -433,22 +513,17 @@ export function createApp({
       return c.json(invalidBody(body.error), 400);
     }
 
-    const link = findUnusedLink(body.data.token, Date.now());
+    const resolved = await resolveLink(c, body.data.token);
 
-    if (link === undefined) {
-      return c.json<TApiError>({ error: INVALID_LINK }, 400);
+    if (resolved instanceof Response) {
+      return resolved;
     }
 
-    const linked = await findLinkedAccountId(link.chatId);
-
-    if ("error" in linked) {
-      return c.json<TApiError>({ error: linked.error }, linked.status);
-    }
-
+    const { link, linkedAccountId } = resolved;
     let account: TOption<TAccount>;
 
-    if (linked.data !== undefined) {
-      account = store.findByPublicId(linked.data);
+    if (linkedAccountId !== undefined) {
+      account = store.findByPublicId(linkedAccountId);
     }
 
     if (account === undefined) {
@@ -458,7 +533,7 @@ export function createApp({
     const described = await internalApi.getAccount(account.publicId);
 
     if ("error" in described) {
-      return c.json<TApiError>({ error: described.error }, described.status);
+      return apiFailed(c, described);
     }
 
     let passwordHash: TOption<string>;
@@ -479,7 +554,7 @@ export function createApp({
       const unregistered = await internalApi.unregisterAccountDevices(account.publicId);
 
       if ("error" in unregistered) {
-        return c.json<TApiError>({ error: unregistered.error }, unregistered.status);
+        return apiFailed(c, unregistered);
       }
     }
 
@@ -552,7 +627,7 @@ export function createApp({
       }
 
       if ("error" in check) {
-        return c.json<TApiError>({ error: check.error }, check.status);
+        return apiFailed(c, check);
       }
 
       if (check.data.result === "unset") {
@@ -563,23 +638,17 @@ export function createApp({
         return c.json<TApiError>({ error: "Wrong activation code" }, 400);
       }
     } else {
-      if (token !== undefined) {
-        link = findUnusedLink(token, Date.now());
+      const resolved = await resolveLink(c, token);
+
+      if (resolved instanceof Response) {
+        return resolved;
       }
 
-      if (link === undefined) {
-        return c.json<TApiError>({ error: INVALID_LINK }, 400);
-      }
-
-      const linked = await findLinkedAccountId(link.chatId);
-
-      if ("error" in linked) {
-        return c.json<TApiError>({ error: linked.error }, linked.status);
-      }
-
-      if (linked.data !== undefined) {
+      if (resolved.linkedAccountId !== undefined) {
         return c.json<TApiError>({ error: LINKED_ELSEWHERE }, 409);
       }
+
+      link = resolved.link;
     }
 
     const registration = store.createAccount(
@@ -668,26 +737,13 @@ export function createApp({
       const linked = await findLinkedAccountId(link.chatId);
 
       if ("error" in linked) {
-        return c.json<TApiError>({ error: linked.error }, linked.status);
+        return apiFailed(c, linked);
       }
 
-      if (linked.data !== undefined && linked.data !== account.publicId) {
-        return c.json<TApiError>({ error: LINKED_ELSEWHERE }, 409);
-      }
+      const failed = await linkChat(c, link, linked.data, account, credentials.passwordHash);
 
-      // NOTE: no await between this check and the use of the link
-      if (store.findCredentials(account.username)?.passwordHash !== credentials.passwordHash) {
-        return c.json<TApiError>({ error: WRONG_CREDENTIALS }, 401);
-      }
-
-      if (!store.consumeLink(link, Date.now())) {
-        return c.json<TApiError>({ error: INVALID_LINK }, 400);
-      }
-
-      const requested = await internalApi.requestLink(account.publicId, link.chatId);
-
-      if ("error" in requested) {
-        return linkFailed(c, requested);
+      if (failed !== undefined) {
+        return failed;
       }
     }
 
@@ -704,30 +760,22 @@ export function createApp({
       return c.json(invalidBody(body.error), 400);
     }
 
-    const link = findUnusedLink(body.data.token, Date.now());
+    const resolved = await resolveLink(c, body.data.token);
 
-    if (link === undefined) {
-      return c.json<TApiError>({ error: INVALID_LINK }, 400);
+    if (resolved instanceof Response) {
+      return resolved;
     }
 
-    const linked = await findLinkedAccountId(link.chatId);
+    const failed = await linkChat(
+      c,
+      resolved.link,
+      resolved.linkedAccountId,
+      c.var.account,
+      undefined,
+    );
 
-    if ("error" in linked) {
-      return c.json<TApiError>({ error: linked.error }, linked.status);
-    }
-
-    if (linked.data !== undefined && linked.data !== c.var.account.publicId) {
-      return c.json<TApiError>({ error: LINKED_ELSEWHERE }, 409);
-    }
-
-    if (!store.consumeLink(link, Date.now())) {
-      return c.json<TApiError>({ error: INVALID_LINK }, 400);
-    }
-
-    const requested = await internalApi.requestLink(c.var.account.publicId, link.chatId);
-
-    if ("error" in requested) {
-      return linkFailed(c, requested);
+    if (failed !== undefined) {
+      return failed;
     }
 
     return describeAccount(c, c.var.account);
@@ -752,7 +800,7 @@ export function createApp({
 
         // 404: the assistant holds no device of this session
         if ("error" in unregistered && unregistered.status !== 404) {
-          return c.json<TApiError>({ error: unregistered.error }, unregistered.status);
+          return apiFailed(c, unregistered);
         }
       }
 
@@ -816,13 +864,17 @@ export function createApp({
     const result = await internalApi.registerDevice(c.var.account.publicId, deviceId, body.data);
 
     if ("error" in result) {
-      return c.json<TApiError>({ error: result.error }, result.status);
+      return apiFailed(c, result);
     }
 
     // a logout or a new password that ended the session meanwhile may have run before this
     // register reached the assistant
     if (store.findAppSession(bearer) === undefined) {
-      await internalApi.unregisterDevice(c.var.account.publicId, deviceId);
+      const removed = await internalApi.unregisterDevice(c.var.account.publicId, deviceId);
+
+      if ("error" in removed) {
+        logger.error(`Device of an ended session not removed: ${removed.error}`);
+      }
 
       return c.json<TApiError>({ error: "Unauthorized" }, 401);
     }
@@ -847,7 +899,7 @@ export function createApp({
     const result = await internalApi.unregisterDevice(c.var.account.publicId, deviceId);
 
     if ("error" in result) {
-      return c.json<TApiError>({ error: result.error }, result.status);
+      return apiFailed(c, result);
     }
 
     return c.json<TDeviceResponse>({ ok: true });
@@ -865,7 +917,7 @@ export function createApp({
     const account = await internalApi.getAccount(c.var.account.publicId);
 
     if ("error" in account) {
-      return c.json<TApiError>({ error: account.error }, account.status);
+      return apiFailed(c, account);
     }
 
     // one row more than a page tells whether another page follows
@@ -890,20 +942,14 @@ export function createApp({
       return c.json<TApiError>({ error: "Invalid message id" }, 400);
     }
 
-    const result = await internalApi.deleteMessage(c.var.account.publicId, messageId.data);
-
-    if ("error" in result) {
-      return c.json<TApiError>({ error: result.error }, result.status);
-    }
-
-    return c.json(result.data);
+    return respond(c, await internalApi.deleteMessage(c.var.account.publicId, messageId.data));
   });
 
   app.get("/api/facts", requireSession, async (c) => {
     const account = await internalApi.getAccount(c.var.account.publicId);
 
     if ("error" in account) {
-      return c.json<TApiError>({ error: account.error }, account.status);
+      return apiFailed(c, account);
     }
 
     return c.json(buildFactGraph(await reader.listFacts(account.data.ownerKey)));
@@ -916,7 +962,7 @@ export function createApp({
     const account = await internalApi.getAccount(c.var.account.publicId);
 
     if ("error" in account) {
-      return c.json<TApiError>({ error: account.error }, account.status);
+      return apiFailed(c, account);
     }
 
     return c.json<TConversationsResponse>({
@@ -925,15 +971,9 @@ export function createApp({
   });
 
   // a new plain chat of the signed-in account; the assistant builds its key
-  app.post("/api/conversations", requireSession, async (c) => {
-    const result = await internalApi.createConversation(c.var.account.publicId);
-
-    if ("error" in result) {
-      return c.json<TApiError>({ error: result.error }, result.status);
-    }
-
-    return c.json<TConversationCreatedResponse>(result.data);
-  });
+  app.post("/api/conversations", requireSession, async (c) =>
+    respond(c, await internalApi.createConversation(c.var.account.publicId)),
+  );
 
   // NOTE: only a plain chat is deleted; the assistant answers 404 for the Bella conversation, as
   // for a conversation of another account
@@ -941,18 +981,14 @@ export function createApp({
     const conversationKey = c.req.param("conversationKey");
     const owned = await findConversation(c, conversationKey);
 
-    if ("error" in owned) {
-      return c.json<TApiError>({ error: owned.error }, owned.status);
-    }
-
-    if (owned.data === undefined) {
-      return c.json<TApiError>({ error: "Not found" }, 404);
+    if (owned instanceof Response) {
+      return owned;
     }
 
     const result = await internalApi.deleteConversation(c.var.account.publicId, conversationKey);
 
     if ("error" in result) {
-      return c.json<TApiError>({ error: result.error }, result.status);
+      return apiFailed(c, result);
     }
 
     return c.json<TConversationDeletedResponse>(result.data);
@@ -973,12 +1009,8 @@ export function createApp({
     // client behind the rows it got, never ahead of them
     const owned = await findConversation(c, conversationKey);
 
-    if ("error" in owned) {
-      return c.json<TApiError>({ error: owned.error }, owned.status);
-    }
-
-    if (owned.data === undefined) {
-      return c.json<TApiError>({ error: "Not found" }, 404);
+    if (owned instanceof Response) {
+      return owned;
     }
 
     let cursor: TOption<THistoryCursor>;
@@ -991,7 +1023,7 @@ export function createApp({
 
     // one row more than a page tells whether another page follows
     const messages = await reader.listHistory(conversationKey, cursor, MESSAGES_PAGE_SIZE + 1);
-    const response: THistoryResponse = { ...owned.data, messages };
+    const response: THistoryResponse = { ...owned, messages };
 
     if (messages.length > MESSAGES_PAGE_SIZE) {
       if (cursor?.direction === "after") {
@@ -1010,12 +1042,8 @@ export function createApp({
     const conversationKey = c.req.param("conversationKey");
     const owned = await findConversation(c, conversationKey);
 
-    if ("error" in owned) {
-      return c.json<TApiError>({ error: owned.error }, owned.status);
-    }
-
-    if (owned.data === undefined) {
-      return c.json<TApiError>({ error: "Not found" }, 404);
+    if (owned instanceof Response) {
+      return owned;
     }
 
     const body = await parseBody(c.req.raw, SGatewayAppMessage);
@@ -1031,7 +1059,7 @@ export function createApp({
     );
 
     if ("error" in result) {
-      return c.json<TApiError>({ error: result.error }, result.status);
+      return apiFailed(c, result);
     }
 
     return c.json(result.data);
@@ -1044,12 +1072,8 @@ export function createApp({
     const conversationKey = c.req.param("conversationKey");
     const owned = await findConversation(c, conversationKey);
 
-    if ("error" in owned) {
-      return c.json<TApiError>({ error: owned.error }, owned.status);
-    }
-
-    if (owned.data === undefined) {
-      return c.json<TApiError>({ error: "Not found" }, 404);
+    if (owned instanceof Response) {
+      return owned;
     }
 
     const result = await internalApi.uploadMedia(
@@ -1060,7 +1084,7 @@ export function createApp({
     );
 
     if ("error" in result) {
-      return c.json<TApiError>({ error: result.error }, result.status);
+      return apiFailed(c, result);
     }
 
     return c.json<TMediaUploadedResponse>(result.data);
@@ -1072,12 +1096,8 @@ export function createApp({
     const conversationKey = c.req.param("conversationKey");
     const owned = await findConversation(c, conversationKey);
 
-    if ("error" in owned) {
-      return c.json<TApiError>({ error: owned.error }, owned.status);
-    }
-
-    if (owned.data === undefined) {
-      return c.json<TApiError>({ error: "Not found" }, 404);
+    if (owned instanceof Response) {
+      return owned;
     }
 
     const result = await internalApi.downloadMedia(
@@ -1087,7 +1107,7 @@ export function createApp({
     );
 
     if ("error" in result) {
-      return c.json<TApiError>({ error: result.error }, result.status);
+      return apiFailed(c, result);
     }
 
     return new Response(result.data.body, {
@@ -1102,9 +1122,10 @@ export function createApp({
   // revisions, and to an app session the account's confidential replies. It opens with a check,
   // so the client compares revisions for whatever changed before it connected. It belongs to the
   // session that opened it: before each event and keep-alive the session is read, without sliding
-  // it, and a session that ended closes the stream. Closing the connection releases the listener and the timer. HEAD opens no stream.
-  // An account holds MAX_ACCOUNT_STREAMS at most: one more ends its oldest, so a phone that
-  // reconnects past dead connections is served and no account holds connections without bound
+  // it, and a session that ended closes the stream. Closing the connection releases the listener
+  // and the timer. HEAD opens no stream. An account holds MAX_ACCOUNT_STREAMS at most: one more
+  // ends its oldest, so a phone that reconnects past dead connections is served and no account
+  // holds connections without bound
   app.get("/api/stream", requireSession, (c) => {
     const headers = { "Content-Type": "text/event-stream", "Cache-Control": "no-store" };
 
@@ -1180,15 +1201,9 @@ export function createApp({
     return new Response(body, { headers });
   });
 
-  app.get("/api/model", requireSession, async (c) => {
-    const result = await internalApi.getModel(c.var.account.publicId);
-
-    if ("error" in result) {
-      return c.json<TApiError>({ error: result.error }, result.status);
-    }
-
-    return c.json(result.data);
-  });
+  app.get("/api/model", requireSession, async (c) =>
+    respond(c, await internalApi.getModel(c.var.account.publicId)),
+  );
 
   app.put("/api/model", requireSession, async (c) => {
     const body = await parseBody(c.req.raw, SGatewayModelUpdate);
@@ -1197,34 +1212,16 @@ export function createApp({
       return c.json(invalidBody(body.error), 400);
     }
 
-    const result = await internalApi.updateModel(c.var.account.publicId, body.data);
-
-    if ("error" in result) {
-      return c.json<TApiError>({ error: result.error }, result.status);
-    }
-
-    return c.json(result.data);
+    return respond(c, await internalApi.updateModel(c.var.account.publicId, body.data));
   });
 
-  app.get("/api/models", requireSession, async (c) => {
-    const result = await internalApi.getModels(c.var.account.publicId);
+  app.get("/api/models", requireSession, async (c) =>
+    respond(c, await internalApi.getModels(c.var.account.publicId)),
+  );
 
-    if ("error" in result) {
-      return c.json<TApiError>({ error: result.error }, result.status);
-    }
-
-    return c.json(result.data);
-  });
-
-  app.get("/api/personality", requireSession, async (c) => {
-    const result = await internalApi.getPersonality(c.var.account.publicId);
-
-    if ("error" in result) {
-      return c.json<TApiError>({ error: result.error }, result.status);
-    }
-
-    return c.json(result.data);
-  });
+  app.get("/api/personality", requireSession, async (c) =>
+    respond(c, await internalApi.getPersonality(c.var.account.publicId)),
+  );
 
   app.put("/api/personality", requireSession, async (c) => {
     const body = await parseBody(c.req.raw, SGatewayPersonalityUpdate);
@@ -1233,13 +1230,7 @@ export function createApp({
       return c.json(invalidBody(body.error), 400);
     }
 
-    const result = await internalApi.updatePersonality(c.var.account.publicId, body.data);
-
-    if ("error" in result) {
-      return c.json<TApiError>({ error: result.error }, result.status);
-    }
-
-    return c.json(result.data);
+    return respond(c, await internalApi.updatePersonality(c.var.account.publicId, body.data));
   });
 
   app.all("/api/*", (c) => c.json<TApiError>({ error: "Not found" }, 404));

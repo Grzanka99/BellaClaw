@@ -113,6 +113,26 @@ function createTestApp(path = ":memory:", reader?: TChatReader, streamSilenceMs 
     return { cookie: cookieOf(response), publicId: store.findCredentials(username)?.publicId };
   }
 
+  // the edge follows the assistant's stream from when its first stream is open; the returned stop
+  // ends it
+  async function startFollowing(): Promise<() => Promise<void>> {
+    const following = new AbortController();
+    const follow = liveStream.follow(following.signal);
+
+    try {
+      await waitUntil(() => assistant.streams.length >= 1);
+    } catch (error) {
+      following.abort();
+      await follow;
+      throw error;
+    }
+
+    return async () => {
+      following.abort();
+      await follow;
+    };
+  }
+
   return {
     app,
     send,
@@ -124,6 +144,7 @@ function createTestApp(path = ":memory:", reader?: TChatReader, streamSilenceMs 
     assistant,
     store,
     liveStream,
+    startFollowing,
   };
 }
 
@@ -1134,46 +1155,39 @@ test("the app creates a plain chat, lists it, sends with a model, reads the repl
 });
 
 test("a deleted plain chat reaches the phone's stream", async () => {
-  const following = new AbortController();
+  const { sendApp, assistant, store, startFollowing } = createTestApp();
+  const alice = await registerApp(sendApp, store, "alice");
+  const stopFollowing = await startFollowing();
 
   try {
-    const { sendApp, assistant, store, liveStream } = createTestApp();
-    const alice = await registerApp(sendApp, store, "alice");
-    const follow = liveStream.follow(following.signal);
-    await waitUntil(() => assistant.streams.length === 1);
     const stream = await openAppStream(sendApp, alice.token);
-    expect(await stream.drain()).toEqual([{ type: "check" }]);
+    expect(await stream.next(1)).toEqual([{ type: "check" }]);
 
     const conversationKey = `plain:${alice.publicId}:chat-1`;
     assistant.push({ type: "deleted", accountId: alice.publicId, conversationKey });
-    expect(await stream.drain()).toEqual([{ type: "deleted", conversationKey }]);
+    expect(await stream.next(1)).toEqual([{ type: "deleted", conversationKey }]);
 
     await stream.close();
-    following.abort();
-    await follow;
   } finally {
-    following.abort();
+    await stopFollowing();
   }
 });
 
 test("a confidential reply reaches the account's app streams only", async () => {
-  const following = new AbortController();
+  const { send, sendApp, register, assistant, store, startFollowing } = createTestApp();
+  const alice = await register("alice", "signal:+100");
+  const loggedIn = await sendApp("POST", "/api/login", { username: "alice", password: PASSWORD });
+  const aliceToken = String((await loggedIn.json()).token);
+  const bob = await registerApp(sendApp, store, "bob");
+  const stopFollowing = await startFollowing();
 
   try {
-    const { send, sendApp, register, assistant, store, liveStream } = createTestApp();
-    const alice = await register("alice", "signal:+100");
-    const loggedIn = await sendApp("POST", "/api/login", { username: "alice", password: PASSWORD });
-    const aliceToken = String((await loggedIn.json()).token);
-    const bob = await registerApp(sendApp, store, "bob");
-    const follow = liveStream.follow(following.signal);
-    await waitUntil(() => assistant.streams.length === 1);
-
     const aliceApp = await openAppStream(sendApp, aliceToken);
     const bobApp = await openAppStream(sendApp, bob.token);
     const browser = await send("GET", "/api/stream", undefined, alice.cookie);
     const browserReader = browser.body?.getReader();
-    expect(await aliceApp.drain()).toEqual([{ type: "check" }]);
-    expect(await bobApp.drain()).toEqual([{ type: "check" }]);
+    expect(await aliceApp.next(1)).toEqual([{ type: "check" }]);
+    expect(await bobApp.next(1)).toEqual([{ type: "check" }]);
 
     const conversationKey = `bella:${alice.publicId}`;
     assistant.push({
@@ -1190,13 +1204,21 @@ test("a confidential reply reaches the account's app streams only", async () => 
       revision: 1,
       rewriteRevision: 0,
     });
-
-    expect((await aliceApp.drain())[0]).toEqual({
-      type: "reply",
-      conversationKey,
-      text: "https://example.test/login",
+    // bob's stream reads up to this event, after the reply
+    const bobKey = `bella:${bob.publicId}`;
+    assistant.push({
+      type: "typing",
+      accountId: bob.publicId,
+      conversationKey: bobKey,
+      typing: true,
     });
-    expect(await bobApp.drain()).toEqual([]);
+
+    expect(await aliceApp.next(1)).toEqual([
+      { type: "reply", conversationKey, text: "https://example.test/login" },
+    ]);
+    expect(await bobApp.next(1)).toEqual([
+      { type: "typing", conversationKey: bobKey, typing: true },
+    ]);
 
     const decoder = new TextDecoder();
     let received = "";
@@ -1209,10 +1231,8 @@ test("a confidential reply reaches the account's app streams only", async () => 
     await aliceApp.close();
     await bobApp.close();
     await browserReader?.cancel();
-    following.abort();
-    await follow;
   } finally {
-    following.abort();
+    await stopFollowing();
   }
 });
 
@@ -1225,8 +1245,7 @@ async function waitUntil(check: () => boolean) {
   expect(check()).toBe(true);
 }
 
-// a phone's event stream: events holds what was read so far, drain reads what has arrived;
-// state.ended: the stream ended
+// a phone's event stream: next reads the next events; state.ended: the stream ended
 async function openAppStream(sendApp: ReturnType<typeof createTestApp>["sendApp"], bearer: string) {
   const response = await sendApp("GET", "/api/stream", undefined, bearer);
   expect(response.status).toBe(200);
@@ -1241,37 +1260,37 @@ async function openAppStream(sendApp: ReturnType<typeof createTestApp>["sendApp"
   const events: Record<string, unknown>[] = [];
   const state = { ended: false };
   let buffered = "";
-  let pending = reader.read();
+  let taken = 0;
 
   return {
-    events,
     state,
-    // reads until nothing more arrives within a moment; returns the events read by this call
-    async drain() {
-      const start = events.length;
+    // reads until count events arrived after those taken before, or the stream ended; returns them
+    async next(count: number) {
+      while (events.length - taken < count && !state.ended) {
+        const chunk = await reader.read();
 
-      while (true) {
-        const chunk = await Promise.race([pending, Bun.sleep(20).then(() => undefined)]);
+        if (chunk.done) {
+          state.ended = true;
+        } else {
+          buffered += decoder.decode(chunk.value);
+          const blocks = buffered.split("\n\n");
+          buffered = blocks.pop() ?? "";
 
-        if (chunk === undefined || chunk.done) {
-          state.ended = chunk?.done === true;
-          return events.slice(start);
-        }
+          for (const block of blocks) {
+            const type = /^event: (.*)$/m.exec(block)?.[1];
+            const data = /^data: (.*)$/m.exec(block)?.[1];
 
-        pending = reader.read();
-        buffered += decoder.decode(chunk.value);
-        const blocks = buffered.split("\n\n");
-        buffered = blocks.pop() ?? "";
-
-        for (const block of blocks) {
-          const type = /^event: (.*)$/m.exec(block)?.[1];
-          const data = /^data: (.*)$/m.exec(block)?.[1];
-
-          if (type !== undefined && data !== undefined) {
-            events.push({ type, ...JSON.parse(data) });
+            if (type !== undefined && data !== undefined) {
+              events.push({ type, ...JSON.parse(data) });
+            }
           }
         }
       }
+
+      const read = events.slice(taken, taken + count);
+      taken += read.length;
+
+      return read;
     },
     close: () => reader.cancel(),
   };
@@ -1296,23 +1315,25 @@ function countSubscriptions(liveStream: ReturnType<typeof createLiveStream>) {
 
 test("the phone sees typing start and stop, then a nudge, then the reply in history; another account's stream carries none of it", async () => {
   const database = await createAssistantDatabase();
-  const following = new AbortController();
+  let stopFollowing = async () => {};
 
   try {
-    const { sendApp, assistant, store, liveStream } = createTestApp(":memory:", database.reader);
+    const { sendApp, assistant, store, liveStream, startFollowing } = createTestApp(
+      ":memory:",
+      database.reader,
+    );
     const subscriptions = countSubscriptions(liveStream);
     const alice = await registerApp(sendApp, store, "alice");
     const bob = await registerApp(sendApp, store, "bob");
     const conversationKey = `bella:${alice.publicId}`;
     const path = `/api/conversations/${encodeURIComponent(conversationKey)}/messages`;
-    const follow = liveStream.follow(following.signal);
-    await waitUntil(() => assistant.streams.length === 1);
+    stopFollowing = await startFollowing();
 
     const aliceStream = await openAppStream(sendApp, alice.token);
     const bobStream = await openAppStream(sendApp, bob.token);
     // each opens with a check: compare revisions for what changed before it connected
-    expect(await aliceStream.drain()).toEqual([{ type: "check" }]);
-    expect(await bobStream.drain()).toEqual([{ type: "check" }]);
+    expect(await aliceStream.next(1)).toEqual([{ type: "check" }]);
+    expect(await bobStream.next(1)).toEqual([{ type: "check" }]);
     const synced = await (await sendApp("GET", path, undefined, alice.token)).json();
     expect(synced).toEqual({ revision: 0, rewriteRevision: 0, messages: [] });
 
@@ -1339,14 +1360,24 @@ test("the phone sees typing start and stop, then a nudge, then the reply in hist
       revision: 2,
       rewriteRevision: 0,
     });
+    // bob's stream reads up to this event, after alice's
+    const bobKey = `bella:${bob.publicId}`;
+    assistant.push({
+      type: "typing",
+      accountId: bob.publicId,
+      conversationKey: bobKey,
+      typing: true,
+    });
 
-    expect(await aliceStream.drain()).toEqual([
+    expect(await aliceStream.next(4)).toEqual([
       { type: "typing", conversationKey, typing: true },
       { type: "changed", conversationKey, revision: 1, rewriteRevision: 0 },
       { type: "typing", conversationKey, typing: false },
       { type: "changed", conversationKey, revision: 2, rewriteRevision: 0 },
     ]);
-    expect(await bobStream.drain()).toEqual([]);
+    expect(await bobStream.next(1)).toEqual([
+      { type: "typing", conversationKey: bobKey, typing: true },
+    ]);
 
     // synced at 0, at or above the rewrite revision 0: a fetch by cursor has the reply
     const fetched = await (await sendApp("GET", path, undefined, alice.token)).json();
@@ -1363,32 +1394,32 @@ test("the phone sees typing start and stop, then a nudge, then the reply in hist
     await aliceStream.close();
     await bobStream.close();
     expect(subscriptions.open).toBe(0);
-    following.abort();
-    await follow;
   } finally {
-    following.abort();
+    await stopFollowing();
     await database.remove();
   }
 });
 
 test("a phone that reconnects is told to check, sees the revision differ, and fetches the rows it missed; a delete is noticed by its rewrite revision", async () => {
   const database = await createAssistantDatabase();
-  const following = new AbortController();
+  let stopFollowing = async () => {};
 
   try {
-    const { sendApp, assistant, store, liveStream } = createTestApp(":memory:", database.reader);
+    const { sendApp, assistant, store, liveStream, startFollowing } = createTestApp(
+      ":memory:",
+      database.reader,
+    );
     const alice = await registerApp(sendApp, store, "alice");
     const accountId = alice.publicId;
     const ownerKey = `account:${accountId}`;
     const conversationKey = `bella:${accountId}`;
     const path = `/api/conversations/${encodeURIComponent(conversationKey)}/messages`;
-    const follow = liveStream.follow(following.signal);
-    await waitUntil(() => assistant.streams.length === 1);
+    stopFollowing = await startFollowing();
     const first = await database.insertRow(conversationKey, "user", "message", "Hello");
     await database.setRevision(conversationKey, ownerKey, 1, 0);
 
     const before = await openAppStream(sendApp, alice.token);
-    expect(await before.drain()).toEqual([{ type: "check" }]);
+    expect(await before.next(1)).toEqual([{ type: "check" }]);
     const synced = await (await sendApp("GET", path, undefined, alice.token)).json();
     expect(synced.revision).toBe(1);
     await before.close();
@@ -1411,7 +1442,7 @@ test("a phone that reconnects is told to check, sees the revision differ, and fe
     stopWatching();
 
     const after = await openAppStream(sendApp, alice.token);
-    expect(await after.drain()).toEqual([{ type: "check" }]);
+    expect(await after.next(1)).toEqual([{ type: "check" }]);
     const list = await (await sendApp("GET", "/api/conversations", undefined, alice.token)).json();
     expect(list.conversations[0]).toMatchObject({ revision: 3, rewriteRevision: 0 });
     // the rewrite revision is at or below the synced revision: fetch by cursor
@@ -1433,7 +1464,7 @@ test("a phone that reconnects is told to check, sees the revision differ, and fe
       revision: 4,
       rewriteRevision: 4,
     });
-    expect(await after.drain()).toEqual([
+    expect(await after.next(1)).toEqual([
       { type: "changed", conversationKey, revision: 4, rewriteRevision: 4 },
     ]);
     // synced at 3, below 4: a reload
@@ -1442,58 +1473,59 @@ test("a phone that reconnects is told to check, sees the revision differ, and fe
     expect(reloaded.messages[0].id).toBe(first.id);
 
     await after.close();
-    following.abort();
-    await follow;
   } finally {
-    following.abort();
+    await stopFollowing();
     await database.remove();
   }
 });
 
 test("when the edge loses the assistant's stream, connected phones are told to check, and the edge connects again", async () => {
-  const following = new AbortController();
-  const { sendApp, assistant, store, liveStream } = createTestApp();
+  const { sendApp, assistant, store, startFollowing } = createTestApp();
   const alice = await registerApp(sendApp, store, "alice");
   const accountId = alice.publicId;
   const conversationKey = `bella:${accountId}`;
-  const follow = liveStream.follow(following.signal);
-  await waitUntil(() => assistant.streams.length === 1);
+  const stopFollowing = await startFollowing();
   const stream = await openAppStream(sendApp, alice.token);
-  expect(await stream.drain()).toEqual([{ type: "check" }]);
+  expect(await stream.next(1)).toEqual([{ type: "check" }]);
 
   assistant.drop();
   await waitUntil(() => assistant.streams.length === 2);
   // one check when the stream drops, one when it opens again
-  expect(await stream.drain()).toEqual([{ type: "check" }, { type: "check" }]);
+  expect(await stream.next(2)).toEqual([{ type: "check" }, { type: "check" }]);
 
   assistant.push({ type: "typing", accountId, conversationKey, typing: true });
-  expect(await stream.drain()).toEqual([{ type: "typing", conversationKey, typing: true }]);
+  expect(await stream.next(1)).toEqual([{ type: "typing", conversationKey, typing: true }]);
 
   await stream.close();
-  following.abort();
-  await follow;
+  await stopFollowing();
   expect(assistant.streams).toHaveLength(2);
 });
 
 test("when the assistant's stream stays open but silent, the edge drops it, tells phones to check and connects again", async () => {
-  const following = new AbortController();
-  const { sendApp, assistant, store, liveStream } = createTestApp(":memory:", undefined, 100);
+  const { sendApp, assistant, store, startFollowing } = createTestApp(":memory:", undefined, 100);
   const alice = await registerApp(sendApp, store, "alice");
   const stream = await openAppStream(sendApp, alice.token);
-  const follow = liveStream.follow(following.signal);
+  const stopFollowing = await startFollowing();
 
   await waitUntil(() => assistant.streams.length === 2);
+  const conversationKey = `bella:${alice.publicId}`;
+  // a sentinel on the second connection: later connections cannot supply a missing check
+  assistant.streams[1]?.enqueue(
+    new TextEncoder().encode(
+      `${JSON.stringify({ type: "typing", accountId: alice.publicId, conversationKey, typing: true })}\n`,
+    ),
+  );
   // the phone's own check, then: opened, dropped as silent, opened again
-  expect(await stream.drain()).toEqual([
+  expect(await stream.next(5)).toEqual([
     { type: "check" },
     { type: "check" },
     { type: "check" },
     { type: "check" },
+    { type: "typing", conversationKey, typing: true },
   ]);
 
   await stream.close();
-  following.abort();
-  await follow;
+  await stopFollowing();
 });
 
 test("the stream needs a session", async () => {
@@ -1505,8 +1537,7 @@ test("the stream needs a session", async () => {
 });
 
 test("a stream ends with its session: logout and a new password set through a login link stop its events", async () => {
-  const following = new AbortController();
-  const { sendApp, register, token, assistant, liveStream } = createTestApp();
+  const { sendApp, register, token, assistant, liveStream, startFollowing } = createTestApp();
   const subscriptions = countSubscriptions(liveStream);
   const alice = await register("alice", "signal:+100");
   const login = async () =>
@@ -1521,18 +1552,17 @@ test("a stream ends with its session: logout and a new password set through a lo
   const second = await login();
   const accountId = String(alice.publicId);
   const conversationKey = `bella:${accountId}`;
-  const follow = liveStream.follow(following.signal);
-  await waitUntil(() => assistant.streams.length === 1);
+  const stopFollowing = await startFollowing();
   const firstStream = await openAppStream(sendApp, first);
   const secondStream = await openAppStream(sendApp, second);
-  expect(await firstStream.drain()).toEqual([{ type: "check" }]);
-  expect(await secondStream.drain()).toEqual([{ type: "check" }]);
+  expect(await firstStream.next(1)).toEqual([{ type: "check" }]);
+  expect(await secondStream.next(1)).toEqual([{ type: "check" }]);
 
   expect((await sendApp("POST", "/api/logout", undefined, second)).status).toBe(200);
   assistant.push({ type: "typing", accountId, conversationKey, typing: true });
-  expect(await secondStream.drain()).toEqual([]);
+  expect(await secondStream.next(1)).toEqual([]);
   expect(secondStream.state.ended).toBe(true);
-  expect(await firstStream.drain()).toEqual([{ type: "typing", conversationKey, typing: true }]);
+  expect(await firstStream.next(1)).toEqual([{ type: "typing", conversationKey, typing: true }]);
   expect(subscriptions.open).toBe(1);
 
   const reset = await sendApp("POST", "/api/link/login", {
@@ -1541,16 +1571,15 @@ test("a stream ends with its session: logout and a new password set through a lo
   });
   expect(reset.status).toBe(200);
   assistant.push({ type: "typing", accountId, conversationKey, typing: false });
-  expect(await firstStream.drain()).toEqual([]);
+  expect(await firstStream.next(1)).toEqual([]);
   expect(firstStream.state.ended).toBe(true);
   expect(subscriptions.open).toBe(0);
 
-  following.abort();
-  await follow;
+  await stopFollowing();
 });
 
 test("an account's fifth stream ends its oldest; another account's streams stay", async () => {
-  const { sendApp, store, liveStream } = createTestApp();
+  const { sendApp, assistant, store, liveStream, startFollowing } = createTestApp();
   const subscriptions = countSubscriptions(liveStream);
   const alice = await registerApp(sendApp, store, "alice");
   const bob = await registerApp(sendApp, store, "bob");
@@ -1561,19 +1590,55 @@ test("an account's fifth stream ends its oldest; another account's streams stay"
     streams.push(await openAppStream(sendApp, alice.token));
   }
 
+  // each opened with a check; the oldest then ended
   for (const stream of [bobStream, ...streams]) {
-    await stream.drain();
+    await stream.next(1);
   }
+
+  await streams[0]?.next(1);
 
   expect(streams.map((stream) => stream.state.ended)).toEqual([true, false, false, false, false]);
   expect(bobStream.state.ended).toBe(false);
   expect(subscriptions.open).toBe(5);
+
+  // a marker of each account reaches the streams still open, after the edge's check on connecting
+  const stopFollowing = await startFollowing();
+  const aliceKey = `bella:${alice.publicId}`;
+  const bobKey = `bella:${bob.publicId}`;
+  assistant.push({
+    type: "typing",
+    accountId: alice.publicId,
+    conversationKey: aliceKey,
+    typing: true,
+  });
+  assistant.push({
+    type: "typing",
+    accountId: bob.publicId,
+    conversationKey: bobKey,
+    typing: true,
+  });
+
+  expect(await bobStream.next(2)).toEqual([
+    { type: "check" },
+    { type: "typing", conversationKey: bobKey, typing: true },
+  ]);
+
+  for (const stream of streams.slice(1)) {
+    expect(await stream.next(2)).toEqual([
+      { type: "check" },
+      { type: "typing", conversationKey: aliceKey, typing: true },
+    ]);
+  }
+
+  expect(await streams[0]?.next(1)).toEqual([]);
+  expect(streams[0]?.state.ended).toBe(true);
 
   for (const stream of [bobStream, ...streams.slice(1)]) {
     await stream.close();
   }
 
   expect(subscriptions.open).toBe(0);
+  await stopFollowing();
 });
 
 test("HEAD of the stream opens no stream and no subscription", async () => {
@@ -1882,15 +1947,14 @@ test("a new password set through a login link unregisters the account's devices 
 });
 
 test("the edge reports every account with an open stream on each connection and when an account's first stream opens or last closes", async () => {
-  const following = new AbortController();
-  const { sendApp, assistant, store, liveStream } = createTestApp();
+  const { sendApp, assistant, store, startFollowing } = createTestApp();
   const alice = await registerApp(sendApp, store, "alice");
   const bob = await registerApp(sendApp, store, "bob");
   // no connection yet: nothing is reported
   const early = await openAppStream(sendApp, alice.token);
   expect(assistant.presence).toEqual([]);
 
-  const follow = liveStream.follow(following.signal);
+  const stopFollowing = await startFollowing();
   await waitUntil(() => assistant.presence.length === 1);
   expect(assistant.presence).toEqual([[alice.publicId]]);
 
@@ -1916,15 +1980,13 @@ test("the edge reports every account with an open stream on each connection and 
   await waitUntil(() => assistant.presence.length === 5);
   expect(assistant.presence[4]).toEqual([]);
 
-  following.abort();
-  await follow;
+  await stopFollowing();
 });
 
 test("a browser's stream receives events but does not count toward presence", async () => {
-  const following = new AbortController();
-  const { send, register, assistant, liveStream } = createTestApp();
+  const { send, register, assistant, startFollowing } = createTestApp();
   const web = await register("bob", "signal:+100");
-  const follow = liveStream.follow(following.signal);
+  const stopFollowing = await startFollowing();
   await waitUntil(() => assistant.presence.length === 1);
 
   const response = await send("GET", "/api/stream", undefined, web.cookie);
@@ -1947,15 +2009,13 @@ test("a browser's stream receives events but does not count toward presence", as
   expect(assistant.presence).toEqual([[]]);
 
   await reader?.cancel();
-  following.abort();
-  await follow;
+  await stopFollowing();
 });
 
 test("a failed presence report is sent again until one succeeds", async () => {
-  const following = new AbortController();
-  const { sendApp, assistant, store, liveStream } = createTestApp();
+  const { sendApp, assistant, store, startFollowing } = createTestApp();
   const alice = await registerApp(sendApp, store, "alice");
-  const follow = liveStream.follow(following.signal);
+  const stopFollowing = await startFollowing();
   await waitUntil(() => assistant.presence.length === 1);
 
   assistant.state.failingPresenceReports = 1;
@@ -1965,6 +2025,5 @@ test("a failed presence report is sent again until one succeeds", async () => {
   expect(assistant.state.failingPresenceReports).toBe(0);
 
   await stream.close();
-  following.abort();
-  await follow;
+  await stopFollowing();
 });

@@ -13,7 +13,7 @@ import type {
 // reply). channel: where it came in or went out; clientMessageId: the id the app gave a message it
 // sent; createdAt: epoch ms; images: a user message's images, absent when it has none, each
 // downloadable by its mediaId or a placeholder without one
-export type { THistoryMessage } from "@bellaclaw/database";
+export type { THistoryImage, THistoryMessage } from "@bellaclaw/database";
 // POST /api/conversations/:conversationKey/messages body and answer; model: a plain chat's model;
 // images: what uploads to the conversation answered
 // GET and PUT /api/personality answer, and PUT /api/personality body (the fields to change, at
@@ -21,7 +21,6 @@ export type { THistoryMessage } from "@bellaclaw/database";
 export type {
   TGatewayAppMessage,
   TGatewayAppMessageAccepted,
-  TGatewayHistoryImage,
   TGatewayModelChoice,
   TGatewayModelState,
   TGatewayModelUpdate,
@@ -75,11 +74,6 @@ export type TAppSessionResponse = TMeResponse & { token: string };
 // POST /api/logout answer
 export type TLogoutResponse = { ok: true };
 
-// PUT /api/device body, from the app only: the device's FCM registration token and its RFC 8291
-// key material, the P-256 public key (65 bytes, an uncompressed point on the curve) and the auth
-// secret (16 bytes), base64url
-export type { TGatewayDeviceRegistration as TDeviceRegistration } from "@bellaclaw/shared";
-
 // PUT and DELETE /api/device answer
 export type TDeviceResponse = { ok: true };
 
@@ -103,14 +97,12 @@ export type TMessageDeletedResponse = TGatewayMessageDeleted;
 // the rows after its newest by cursor; one below it reloads
 export type TConversationRevision = { revision: number; rewriteRevision: number };
 
-// kind bella: the account's Bella conversation; plain: a plain chat. title: a plain chat's, absent
-// until one is written; createdAt: when a plain chat was created, epoch ms; lastMessage: the
-// newest row the app shows, absent while there is none
-export type TConversationSummary = TListedConversation;
-
 // GET /api/conversations answer: the account's Bella conversation first, then its plain chats, the
-// latest active first (by their newest row, else their creation)
-export type TConversationsResponse = { conversations: TConversationSummary[] };
+// latest active first (by their newest row, else their creation). kind bella: the account's Bella
+// conversation; plain: a plain chat. title: a plain chat's, absent until one is written;
+// createdAt: when a plain chat was created, epoch ms; lastMessage: the newest row the app shows,
+// absent while there is none
+export type TConversationsResponse = { conversations: TListedConversation[] };
 
 // POST /api/conversations answer: a new plain chat, listed and empty, at revision 0
 export type TConversationCreatedResponse = TGatewayConversationCreated;

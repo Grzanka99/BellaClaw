@@ -33,11 +33,11 @@ export const FAKE_MODEL_CATALOG: TGatewayModelCatalog = {
 // unreachableCalls: how many next requestLink, getChatLink or getAccount calls answer 502. Links are made active by activate().
 // sends: every message sent, accepted as the assistant does, without a turn. streams: the stream
 // opened by each openStream call, oldest first; push writes an event to the newest, drop closes it.
-// personalities: by account id. uploads: every image streamed on, with its bytes; the fake answers
-// it with the id `media-<n>`, and a download of that id with the bytes. devices: by device id, as
-// the assistant keeps them; unreachableCalls also counts registerDevice, unregisterDevice and
-// unregisterAccountDevices. presence: every set reportPresence delivered, oldest first;
-// failingPresenceReports: how many next reportPresence calls answer 502
+// uploads: every image streamed on, with its bytes; the fake answers it with the id `media-<n>`,
+// and a download of that id with the bytes. devices: by device id, as the assistant keeps them;
+// unreachableCalls also counts registerDevice, unregisterDevice and unregisterAccountDevices.
+// presence: every set reportPresence delivered, oldest first; failingPresenceReports: how many
+// next reportPresence calls answer 502
 export function createFakeAssistant() {
   const personalities = new Map<string, TGatewayPersonality>();
   const defaultPersonality: TGatewayPersonality = {
@@ -289,7 +289,6 @@ export function createFakeAssistant() {
     codeChecks,
     sends,
     uploads,
-    personalities,
     state,
     streams,
     devices,

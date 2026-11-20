@@ -62,20 +62,12 @@ export function verifyGatewayLinkToken(
   return parsed.data;
 }
 
-export const SGatewayReasoningEffort = z.enum([
-  "off",
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-  "max",
-]);
+const SGatewayReasoningEffort = z.enum(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 
 export type TGatewayReasoningEffort = z.infer<typeof SGatewayReasoningEffort>;
 
 // "default" is no tier
-export const SGatewayServiceTier = z.enum(["default", "flex", "priority"]);
+const SGatewayServiceTier = z.enum(["default", "flex", "priority"]);
 
 export type TGatewayServiceTier = z.infer<typeof SGatewayServiceTier>;
 
@@ -170,7 +162,7 @@ export type TGatewayMessageDeleted = z.infer<typeof SGatewayMessageDeleted>;
 
 // the model a plain chat's turn runs on, which the app keeps per chat. provider: one of the model
 // state's `providers`; model: one of that provider's models; effort: one the model supports
-export const SGatewayModelChoice = z
+const SGatewayModelChoice = z
   .object({
     provider: z.string().min(1),
     model: z.string().min(1),
@@ -188,14 +180,6 @@ export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 export const SGatewayMedia = z.object({ id: z.string().min(1), mimeType: z.string() }).strict();
 
 export type TGatewayMedia = z.infer<typeof SGatewayMedia>;
-
-// an image of a history row. mediaId: it downloads from the conversation's media route by this
-// id. An image the conversation no longer keeps, and every image that came through Signal or
-// Discord, is a placeholder without one
-export type TGatewayHistoryImage = {
-  mediaId: TOption<string>;
-  mimeType: string;
-};
 
 // POST /internal/accounts/:accountId/conversations/:conversationKey/messages body: a message the
 // app sends. clientMessageId: the app's id of the message; a second send with the same id in the
@@ -311,7 +295,7 @@ export type TGatewayPresenceAccepted = z.infer<typeof SGatewayPresenceAccepted>;
 // the rejection code of a link request for an address another account owns
 export const ADDRESS_LINKED_ELSEWHERE = "address-linked-elsewhere";
 
-export const SGatewayLinkState = z.enum(["migrating", "active"]);
+const SGatewayLinkState = z.enum(["migrating", "active"]);
 
 export type TGatewayLinkState = z.infer<typeof SGatewayLinkState>;
 
@@ -374,35 +358,17 @@ export type TGatewayActivationCheck = z.infer<typeof SGatewayActivationCheck>;
 // conversation started (true) or ended (false); deleted: the plain chat is gone; reply: a
 // confidential reply to a message sent from the app, never stored, for app streams only. Nothing
 // replays
+const SGatewayStreamEventBase = z.object({ accountId: z.string(), conversationKey: z.string() });
+
 export const SGatewayStreamEvent = z.discriminatedUnion("type", [
-  z
-    .object({
-      type: z.literal("changed"),
-      accountId: z.string(),
-      conversationKey: z.string(),
-      revision: z.number().int(),
-      rewriteRevision: z.number().int(),
-    })
-    .strict(),
-  z
-    .object({
-      type: z.literal("typing"),
-      accountId: z.string(),
-      conversationKey: z.string(),
-      typing: z.boolean(),
-    })
-    .strict(),
-  z
-    .object({ type: z.literal("deleted"), accountId: z.string(), conversationKey: z.string() })
-    .strict(),
-  z
-    .object({
-      type: z.literal("reply"),
-      accountId: z.string(),
-      conversationKey: z.string(),
-      text: z.string(),
-    })
-    .strict(),
+  SGatewayStreamEventBase.extend({
+    type: z.literal("changed"),
+    revision: z.number().int(),
+    rewriteRevision: z.number().int(),
+  }).strict(),
+  SGatewayStreamEventBase.extend({ type: z.literal("typing"), typing: z.boolean() }).strict(),
+  SGatewayStreamEventBase.extend({ type: z.literal("deleted") }).strict(),
+  SGatewayStreamEventBase.extend({ type: z.literal("reply"), text: z.string() }).strict(),
 ]);
 
 export type TGatewayStreamEvent = z.infer<typeof SGatewayStreamEvent>;
@@ -486,7 +452,7 @@ export function gatewayAccountConversationMessagesPath(
   accountId: string,
   conversationKey: string,
 ): string {
-  return `${gatewayAccountPath(accountId)}/conversations/${encodeURIComponent(conversationKey)}/messages`;
+  return `${gatewayAccountConversationPath(accountId, conversationKey)}/messages`;
 }
 
 export function gatewayAccountDevicesPath(accountId: string): string {
