@@ -11,6 +11,7 @@
     <string name="action_done">Done</string>
     <string name="action_save">Save</string>
     <string name="action_reset_default">Reset to default</string>
+    <string name="action_retry">Retry</string>
 
     <string name="home_title">Home</string>
     <string name="home_chats">Chats</string>
@@ -30,13 +31,20 @@
     <string name="effort_low">Low</string>
     <string name="effort_medium">Medium</string>
     <string name="effort_high">High</string>
+    <string name="effort_off">Off</string>
+    <string name="effort_minimal">Minimal</string>
+    <string name="effort_xhigh">Extra high</string>
+    <string name="effort_max">Max</string>
+    <string name="effort_default">Model default</string>
 
     <string name="settings_title">Settings</string>
     <string name="settings_app">App</string>
+    <string name="settings_loading">Loading…</string>
+    <string name="settings_load_failed">Couldn\'t load the settings</string>
     <string name="models_title">Models</string>
     <string name="models_summary">%1$s · %2$s</string>
     <string name="models_roles">Roles</string>
-    <string name="models_custom">Custom</string>
+    <string name="models_verifying">Checking the change with the provider. This can take a few minutes.</string>
     <string name="model_and_effort">%1$s · %2$s</string>
     <string name="role_utility">Utility</string>
     <string name="role_main">Main</string>

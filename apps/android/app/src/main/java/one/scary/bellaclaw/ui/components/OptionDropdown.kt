@@ -25,6 +25,7 @@ fun <T> OptionDropdown(
     optionText: (T) -> String,
     onSelect: (T) -> Unit,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
 ) {
     var expanded by remember { mutableStateOf(false) }
     ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }, modifier = modifier) {
@@ -32,12 +33,13 @@ fun <T> OptionDropdown(
             value = optionText(selected),
             onValueChange = {},
             readOnly = true,
+            enabled = enabled,
             singleLine = true,
             label = { Text(label) },
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
             modifier = Modifier
                 .fillMaxWidth()
-                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
+                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable, enabled),
         )
         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             options.forEach { option ->

@@ -1,7 +1,6 @@
 package one.scary.bellaclaw.ui
 
 import kotlinx.coroutines.test.runTest
-import one.scary.bellaclaw.data.SettingsRepository
 import one.scary.bellaclaw.data.TestServer
 import one.scary.bellaclaw.model.ThemeMode
 import org.junit.Assert.assertEquals
@@ -19,7 +18,7 @@ class AppViewModelTest {
 
     @Test
     fun `theme follows the settings`() = runTest {
-        val repository = SettingsRepository()
+        val repository = gateway.settingsRepository(scope = backgroundScope)
         val viewModel = AppViewModel(repository, gateway.repository())
 
         repository.setThemeMode(ThemeMode.LIGHT)
@@ -30,7 +29,7 @@ class AppViewModelTest {
     @Test
     fun `follows the session, from the stored one on`() = runTest {
         val store = gateway.signedInStore()
-        val viewModel = AppViewModel(SettingsRepository(), gateway.repository(store))
+        val viewModel = AppViewModel(gateway.settingsRepository(scope = backgroundScope), gateway.repository(store))
 
         assertTrue(viewModel.uiState.value.isSignedIn)
 
@@ -42,7 +41,7 @@ class AppViewModelTest {
     @Test
     fun `a login link waits for confirmation without a request`() = runTest {
         val accounts = gateway.repository()
-        val viewModel = AppViewModel(SettingsRepository(), accounts)
+        val viewModel = AppViewModel(gateway.settingsRepository(scope = backgroundScope), accounts)
 
         viewModel.onLoginLink("bellaclaw://login?server=https%3A%2F%2Fbella.example.com&token=t")
 
@@ -52,7 +51,7 @@ class AppViewModelTest {
 
     @Test
     fun `an unusable login link waits too, so the confirmation can say why`() = runTest {
-        val viewModel = AppViewModel(SettingsRepository(), gateway.repository())
+        val viewModel = AppViewModel(gateway.settingsRepository(scope = backgroundScope), gateway.repository())
 
         viewModel.onLoginLink("bellaclaw://login?token=t")
 

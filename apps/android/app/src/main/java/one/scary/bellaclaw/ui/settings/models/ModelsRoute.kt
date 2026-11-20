@@ -14,6 +14,7 @@ fun ModelsRoute(
     ModelsScreen(
         state = state,
         onBack = onBack,
+        onRetry = viewModel::retry,
         onSelectProvider = viewModel::selectProvider,
         onOpenRole = viewModel::openRole,
         editorEvents = RoleEditorEvents(

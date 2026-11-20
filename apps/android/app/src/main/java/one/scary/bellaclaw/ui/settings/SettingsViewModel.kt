@@ -28,9 +28,8 @@ class SettingsViewModel(
         signOut,
     ) { settings, session, signOut ->
         SettingsUiState(
-            providerName = settings.provider.name,
-            mainModel = settings.models.roles.getValue(ModelRole.MAIN).model,
-            personalityInChats = settings.personality.useInChats,
+            models = settings.models.map { ModelsSummary(it.providerId, it.roles[ModelRole.MAIN]?.let { main -> it.modelName(main.model) }.orEmpty()) },
+            personalityInChats = settings.personality.map { it.useInChats },
             themeMode = settings.theme.mode,
             dynamicColor = settings.theme.dynamicColor,
             username = session?.username.orEmpty(),

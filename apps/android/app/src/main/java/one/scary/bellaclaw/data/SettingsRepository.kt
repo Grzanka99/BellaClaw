@@ -1,58 +1,219 @@
 package one.scary.bellaclaw.data
 
+import java.util.concurrent.atomic.AtomicInteger
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
-import one.scary.bellaclaw.data.sample.SampleSettings
+import kotlinx.coroutines.flow.updateAndGet
+import kotlinx.coroutines.launch
+import one.scary.bellaclaw.data.local.ThemeStore
+import one.scary.bellaclaw.data.remote.ApiClient
+import one.scary.bellaclaw.data.remote.ApiResult
+import one.scary.bellaclaw.data.remote.ModelStateBody
+import one.scary.bellaclaw.data.remote.ModelUpdateBody
+import one.scary.bellaclaw.data.remote.PersonalityBody
+import one.scary.bellaclaw.model.AccountError
+import one.scary.bellaclaw.model.Loadable
 import one.scary.bellaclaw.model.ModelRole
-import one.scary.bellaclaw.model.ModelSettings
 import one.scary.bellaclaw.model.Personality
 import one.scary.bellaclaw.model.RoleModel
+import one.scary.bellaclaw.model.Session
 import one.scary.bellaclaw.model.SettingsSnapshot
 import one.scary.bellaclaw.model.ThemeMode
+import one.scary.bellaclaw.model.ThemeSettings
 
 /**
- * Single source of truth for settings: providers and their models, BellaClaw's models, personality
- * and the app theme, held in memory from [SampleSettings] as one [SettingsSnapshot].
+ * Single source of truth for settings, as one [SettingsSnapshot]: the account's models and
+ * personality from the server, loaded when a session starts, and the theme from [themeStore].
+ * A session that ends or changes drops the account's settings; the theme stays. An answer is
+ * applied only while the session that asked is still the current one.
  */
-class SettingsRepository {
-    private val state = MutableStateFlow(SampleSettings.settings)
+class SettingsRepository(
+    private val api: ApiClient,
+    private val session: StateFlow<Session?>,
+    private val themeStore: ThemeStore,
+    private val scope: CoroutineScope,
+) {
+    private val state = MutableStateFlow(SettingsSnapshot(theme = themeStore.theme))
 
     /** Every change replaces the whole snapshot, so readers never see a provider list and selection that disagree. */
-    val settings: StateFlow<SettingsSnapshot> = state
+    val settings: StateFlow<SettingsSnapshot> = state.asStateFlow()
 
-    /** Switches BellaClaw to another provider; every role takes that provider's default. The current provider changes nothing. */
-    suspend fun setProvider(providerId: String) {
-        state.update { current ->
-            if (current.models.providerId == providerId) {
-                current
-            } else {
-                val defaults = SampleSettings.roleDefaults.getValue(providerId)
-                current.copy(models = ModelSettings(providerId, defaults, defaults))
+    /** Model changes started so far; a read that a change overtook drops its answer. */
+    private val modelChanges = AtomicInteger()
+
+    init {
+        // Undispatched, so the current session is seen here, before any screen asks for a load.
+        scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            session.map { it?.token }.distinctUntilChanged().collect { token ->
+                state.update { SettingsSnapshot(theme = it.theme) }
+                if (token != null) {
+                    scope.launch { loadModels() }
+                    scope.launch { loadPersonality() }
+                }
             }
         }
     }
 
-    suspend fun setRoleModel(role: ModelRole, model: RoleModel) {
-        state.update { it.copy(models = it.models.copy(roles = it.models.roles + (role to model))) }
-    }
-
-    suspend fun resetRole(role: ModelRole) {
-        state.update { current ->
-            val models = current.models
-            current.copy(models = models.copy(roles = models.roles + (role to models.defaults.getValue(role))))
+    /**
+     * Reads the models again; a failed load shows loading while it retries. The last refusal stays.
+     * No read starts while a change is verified, and the answer of a read that a change overtook is
+     * dropped: the change's answer is newer.
+     */
+    suspend fun loadModels() {
+        val token = session.value?.token ?: return
+        if (state.value.isChangingModels) {
+            return
+        }
+        val changes = modelChanges.get()
+        updateForSession(token) { it.copy(models = it.models.retrying()) }
+        val result = api.getSignedIn<ModelStateBody>("/api/model")
+        updateForSession(token) {
+            if (modelChanges.get() == changes) {
+                it.copy(models = result.toLoadable { body -> body.toModelSettings() })
+            } else {
+                it
+            }
         }
     }
 
-    suspend fun savePersonality(personality: Personality) {
-        state.update { it.copy(personality = personality) }
+    suspend fun loadPersonality() {
+        val token = session.value?.token ?: return
+        updateForSession(token) { it.copy(personality = it.personality.retrying()) }
+        val result = api.getSignedIn<PersonalityBody>("/api/personality")
+        updateForSession(token) { it.copy(personality = result.toLoadable { body -> body.toPersonality() }) }
+    }
+
+    /** Switches BellaClaw to another provider; the server verifies its models first. The current provider changes nothing. */
+    fun setProvider(providerId: String) {
+        val models = loadedModels() ?: return
+        if (models.providerId != providerId) {
+            changeModels(ModelUpdateBody(aiProvider = providerId))
+        }
+    }
+
+    /** Sends what differs from the role's current model and effort; nothing when nothing does. */
+    fun setRoleModel(role: ModelRole, model: RoleModel) {
+        val current = loadedModels()?.roles?.get(role) ?: return
+        var newModel: String? = null
+        if (model.model != current.model) {
+            newModel = model.model
+        }
+        var effort: String? = null
+        var resetEffort: Boolean? = null
+        if (model.effort != current.effort) {
+            if (model.effort == null) {
+                resetEffort = true
+            } else {
+                effort = model.effort.wireName()
+            }
+        }
+        if (newModel == null && effort == null && resetEffort == null) {
+            return
+        }
+        changeModels(
+            ModelUpdateBody(
+                aiModelPurpose = role.purpose(),
+                aiModel = newModel,
+                aiReasoningEffort = effort,
+                resetAiReasoningEffort = resetEffort,
+            ),
+        )
+    }
+
+    /** Gives the role its provider's default model and effort. */
+    fun resetRole(role: ModelRole) {
+        changeModels(ModelUpdateBody(aiModelPurpose = role.purpose(), resetAiModel = true))
+    }
+
+    /** Stores [personality]; on success the snapshot holds the server's answer. Answers null on success, else why it failed. */
+    suspend fun savePersonality(personality: Personality): AccountError? {
+        val token = session.value?.token
+        val body = PersonalityBody(personality.bellaClaw, personality.useInChats, personality.chats)
+        return when (val result = api.putSignedIn<PersonalityBody, PersonalityBody>("/api/personality", body)) {
+            is ApiResult.Success -> {
+                updateForSession(token) { it.copy(personality = Loadable.Loaded(result.value.toPersonality())) }
+                null
+            }
+            else -> result.error()
+        }
     }
 
     suspend fun setThemeMode(mode: ThemeMode) {
-        state.update { it.copy(theme = it.theme.copy(mode = mode)) }
+        saveTheme { it.copy(mode = mode) }
     }
 
     suspend fun setDynamicColor(enabled: Boolean) {
-        state.update { it.copy(theme = it.theme.copy(dynamicColor = enabled)) }
+        saveTheme { it.copy(dynamicColor = enabled) }
+    }
+
+    private suspend fun saveTheme(change: (ThemeSettings) -> ThemeSettings) {
+        themeStore.save(state.updateAndGet { it.copy(theme = change(it.theme)) }.theme)
+    }
+
+    /**
+     * Sends [body] unless another change is being verified, and keeps it out of the screen's way
+     * until the answer, which can take minutes. It runs in [scope], so leaving the screen does not drop it.
+     */
+    private fun changeModels(body: ModelUpdateBody) {
+        val token = session.value?.token ?: return
+        var started = false
+        state.update {
+            started = !it.isChangingModels
+            if (started) {
+                it.copy(isChangingModels = true, modelsChangeError = null)
+            } else {
+                it
+            }
+        }
+        if (!started) {
+            return
+        }
+        modelChanges.incrementAndGet()
+        scope.launch {
+            val result = api.putSignedInLongWait<ModelUpdateBody, ModelStateBody>("/api/model", body)
+            updateForSession(token) {
+                when (result) {
+                    is ApiResult.Success -> it.copy(models = Loadable.Loaded(result.value.toModelSettings()), isChangingModels = false)
+                    else -> it.copy(isChangingModels = false, modelsChangeError = result.error())
+                }
+            }
+        }
+    }
+
+    private fun loadedModels() = when (val models = state.value.models) {
+        is Loadable.Loaded -> models.value
+        else -> null
+    }
+
+    private fun updateForSession(token: String?, change: (SettingsSnapshot) -> SettingsSnapshot) {
+        state.update {
+            if (token != null && session.value?.token == token) {
+                change(it)
+            } else {
+                it
+            }
+        }
+    }
+
+    private fun <T> Loadable<T>.retrying(): Loadable<T> = when (this) {
+        is Loadable.Failed -> Loadable.Loading
+        else -> this
+    }
+
+    private fun <B, T> ApiResult<B>.toLoadable(transform: (B) -> T): Loadable<T> = when (this) {
+        is ApiResult.Success -> Loadable.Loaded(transform(value))
+        else -> Loadable.Failed(error())
+    }
+
+    /** Why a request that did not succeed failed. */
+    private fun ApiResult<*>.error(): AccountError = when (this) {
+        is ApiResult.ApiError -> AccountError.Server(status, message)
+        else -> AccountError.Network
     }
 }

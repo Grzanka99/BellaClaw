@@ -1,14 +1,19 @@
 package one.scary.bellaclaw.model
 
+/** A reasoning effort; the server names each in lower case. */
 enum class Effort {
+    OFF,
+    MINIMAL,
     LOW,
     MEDIUM,
     HIGH,
+    XHIGH,
+    MAX,
 }
 
+/** A provider whose models are known; [models] are model ids. */
 data class Provider(
     val id: String,
-    val name: String,
     val models: List<String>,
 )
 
@@ -27,16 +32,29 @@ enum class ModelRole {
     SCHEDULED_TASK,
 }
 
-data class RoleModel(
-    val model: String,
-    val effort: Effort,
+/** One model of the active provider, with the efforts it supports. */
+data class AiModel(
+    val id: String,
+    val name: String,
+    val efforts: List<Effort>,
 )
 
-/** BellaClaw's models: one provider, a model and effort per role, and that provider's defaults. */
+/** A role's model id and its effort (null: the model's own default). */
+data class RoleModel(
+    val model: String,
+    val effort: Effort?,
+)
+
+/**
+ * BellaClaw's models as the server has them: the provider [providerId], one of [providers], a model
+ * per role, and that provider's [models].
+ */
 data class ModelSettings(
     val providerId: String,
+    val providers: List<String>,
     val roles: Map<ModelRole, RoleModel>,
-    val defaults: Map<ModelRole, RoleModel>,
+    val models: List<AiModel>,
 ) {
-    fun isCustom(role: ModelRole): Boolean = roles[role] != defaults[role]
+    /** The model's name, or its id when the provider no longer lists it. */
+    fun modelName(id: String): String = models.firstOrNull { it.id == id }?.name ?: id
 }

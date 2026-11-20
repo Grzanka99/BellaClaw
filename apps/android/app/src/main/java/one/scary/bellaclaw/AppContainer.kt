@@ -10,6 +10,7 @@ import one.scary.bellaclaw.data.AccountRepository
 import one.scary.bellaclaw.data.ChatRepository
 import one.scary.bellaclaw.data.SettingsRepository
 import one.scary.bellaclaw.data.local.SessionStore
+import one.scary.bellaclaw.data.local.ThemeStore
 import one.scary.bellaclaw.data.push.FirebasePushTokens
 import one.scary.bellaclaw.data.push.PushRepository
 import one.scary.bellaclaw.data.push.loadDeviceKeys
@@ -25,7 +26,12 @@ class AppContainer(context: Context) {
     private val deviceLock = Mutex()
 
     val chatRepository = ChatRepository(applicationScope)
-    val settingsRepository = SettingsRepository()
+    val settingsRepository = SettingsRepository(
+        apiClient,
+        sessionStore.session,
+        ThemeStore(File(context.filesDir, "theme.json")),
+        applicationScope,
+    )
     val accountRepository = AccountRepository(apiClient, sessionStore, allowCleartext = BuildConfig.DEBUG, deviceLock)
     val pushRepository = PushRepository(
         apiClient,

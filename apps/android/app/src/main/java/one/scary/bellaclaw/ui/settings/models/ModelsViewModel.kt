@@ -8,15 +8,20 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import one.scary.bellaclaw.data.SettingsRepository
 import one.scary.bellaclaw.model.Effort
+import one.scary.bellaclaw.model.Loadable
 import one.scary.bellaclaw.model.ModelRole
+import one.scary.bellaclaw.model.ModelSettings
 import one.scary.bellaclaw.model.RoleModel
 import one.scary.bellaclaw.ui.appContainer
 
+/** Reads the models again when the screen opens; shows what the server answered, never what was asked for. */
 class ModelsViewModel(private val settingsRepository: SettingsRepository) : ViewModel() {
     /** The open role sheet's unsaved choice; the sheet's model list comes from the settings. */
     private data class EditorDraft(val role: ModelRole, val model: RoleModel)
@@ -24,54 +29,104 @@ class ModelsViewModel(private val settingsRepository: SettingsRepository) : View
     private val editor = MutableStateFlow<EditorDraft?>(null)
 
     val uiState: StateFlow<ModelsUiState> = combine(settingsRepository.settings, editor) { settings, editor ->
-        val models = settings.models
-        ModelsUiState(
-            providers = settings.providers,
-            providerId = models.providerId,
-            roles = ModelRole.entries.map { role ->
-                val model = models.roles.getValue(role)
-                RoleRow(role, model.model, model.effort, models.isCustom(role))
-            },
-            editor = editor?.let { RoleEditorState(it.role, settings.provider.models, it.model.model, it.model.effort) },
-        )
+        when (val loaded = settings.models) {
+            Loadable.Loading -> ModelsUiState(isLoading = true)
+            is Loadable.Failed -> ModelsUiState(isLoading = false, loadError = loaded.error)
+            is Loadable.Loaded -> {
+                val models = loaded.value
+                ModelsUiState(
+                    isLoading = false,
+                    providers = models.providers,
+                    providerId = models.providerId,
+                    roles = ModelRole.entries.mapNotNull { role ->
+                        models.roles[role]?.let { RoleRow(role, models.modelName(it.model), it.effort) }
+                    },
+                    isChanging = settings.isChangingModels,
+                    changeError = settings.modelsChangeError,
+                    editor = editor?.let { RoleEditorState(it.role, models.models, it.model.model, it.model.effort) },
+                )
+            }
+        }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ModelsUiState())
 
-    fun selectProvider(providerId: String) {
+    init {
+        retry()
+        // New settings that lack the open sheet's model, or that model's effort, close the sheet.
         viewModelScope.launch {
-            settingsRepository.setProvider(providerId)
+            settingsRepository.settings.map { it.models }.distinctUntilChanged().collect { loaded ->
+                editor.update { draft ->
+                    val models = when (loaded) {
+                        is Loadable.Loaded -> loaded.value.models
+                        else -> emptyList()
+                    }
+                    val model = models.firstOrNull { it.id == draft?.model?.model }
+                    val effort = draft?.model?.effort
+                    if (model == null || (effort != null && effort !in model.efforts)) {
+                        null
+                    } else {
+                        draft
+                    }
+                }
+            }
         }
     }
 
+    fun retry() {
+        viewModelScope.launch {
+            settingsRepository.loadModels()
+        }
+    }
+
+    fun selectProvider(providerId: String) {
+        settingsRepository.setProvider(providerId)
+    }
+
+    /** No sheet opens while a change is being verified. */
     fun openRole(role: ModelRole) {
-        editor.value = EditorDraft(role, settingsRepository.settings.value.models.roles.getValue(role))
+        if (settingsRepository.settings.value.isChangingModels) {
+            return
+        }
+        val model = loadedModels()?.roles?.get(role) ?: return
+        editor.value = EditorDraft(role, model)
     }
 
-    fun onEditorModel(model: String) {
-        editor.update { it?.copy(model = it.model.copy(model = model)) }
+    /** An effort the new model does not support falls back to the model's own default. */
+    fun onEditorModel(modelId: String) {
+        val efforts = loadedModels()?.models?.firstOrNull { it.id == modelId }?.efforts.orEmpty()
+        editor.update { draft ->
+            draft?.let {
+                var effort = it.model.effort
+                if (effort !in efforts) {
+                    effort = null
+                }
+                it.copy(model = it.model.copy(model = modelId, effort = effort))
+            }
+        }
     }
 
-    fun onEditorEffort(effort: Effort) {
+    fun onEditorEffort(effort: Effort?) {
         editor.update { it?.copy(model = it.model.copy(effort = effort)) }
     }
 
     fun saveRole() {
         val current = editor.value ?: return
         editor.value = null
-        viewModelScope.launch {
-            settingsRepository.setRoleModel(current.role, current.model)
-        }
+        settingsRepository.setRoleModel(current.role, current.model)
     }
 
     fun resetRole() {
         val current = editor.value ?: return
         editor.value = null
-        viewModelScope.launch {
-            settingsRepository.resetRole(current.role)
-        }
+        settingsRepository.resetRole(current.role)
     }
 
     fun dismissEditor() {
         editor.value = null
+    }
+
+    private fun loadedModels(): ModelSettings? = when (val models = settingsRepository.settings.value.models) {
+        is Loadable.Loaded -> models.value
+        else -> null
     }
 
     companion object {

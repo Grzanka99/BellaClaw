@@ -13,6 +13,8 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import one.scary.bellaclaw.data.SettingsRepository
+import one.scary.bellaclaw.model.AccountError
+import one.scary.bellaclaw.model.Loadable
 import one.scary.bellaclaw.model.Personality
 import one.scary.bellaclaw.ui.appContainer
 
@@ -21,20 +23,37 @@ class PersonalityViewModel(
     private val settingsRepository: SettingsRepository,
     savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
-    private val draft = savedStateHandle.getMutableStateFlow<Personality?>(DRAFT_KEY, null)
-    private val isSaved = MutableStateFlow(false)
+    private data class Save(val isRunning: Boolean = false, val error: AccountError? = null, val isDone: Boolean = false)
 
-    val uiState: StateFlow<PersonalityUiState> = combine(settingsRepository.settings, draft, isSaved) { settings, draft, isSaved ->
-        val saved = settings.personality
-        val shown = draft ?: saved
-        PersonalityUiState(
-            bellaClaw = shown.bellaClaw,
-            useInChats = shown.useInChats,
-            chats = shown.chats,
-            canSave = draft != null && draft != saved,
-            isSaved = isSaved,
-        )
+    private val draft = savedStateHandle.getMutableStateFlow<Personality?>(DRAFT_KEY, null)
+    private val save = MutableStateFlow(Save())
+
+    val uiState: StateFlow<PersonalityUiState> = combine(settingsRepository.settings, draft, save) { settings, draft, save ->
+        when (val loaded = settings.personality) {
+            Loadable.Loading -> PersonalityUiState(isLoading = true)
+            is Loadable.Failed -> PersonalityUiState(isLoading = false, loadError = loaded.error)
+            is Loadable.Loaded -> {
+                val saved = loaded.value
+                val shown = draft ?: saved
+                PersonalityUiState(
+                    isLoading = false,
+                    bellaClaw = shown.bellaClaw,
+                    useInChats = shown.useInChats,
+                    chats = shown.chats,
+                    canSave = draft != null && draft != saved && !save.isRunning,
+                    isSaving = save.isRunning,
+                    saveError = save.error,
+                    isSaved = save.isDone,
+                )
+            }
+        }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PersonalityUiState())
+
+    fun retry() {
+        viewModelScope.launch {
+            settingsRepository.loadPersonality()
+        }
+    }
 
     fun onBellaClawChange(text: String) {
         edit { it.copy(bellaClaw = text) }
@@ -48,22 +67,42 @@ class PersonalityViewModel(
         edit { it.copy(chats = text) }
     }
 
+    /** A refusal keeps the draft and shows why. */
     fun save() {
         val edited = draft.value ?: return
+        if (save.value.isRunning) {
+            return
+        }
+        save.value = Save(isRunning = true)
         viewModelScope.launch {
-            settingsRepository.savePersonality(edited)
-            draft.value = null
-            isSaved.value = true
+            val error = settingsRepository.savePersonality(edited)
+            if (error == null) {
+                draft.value = null
+                save.value = Save(isDone = true)
+            } else {
+                save.value = Save(error = error)
+            }
         }
     }
 
     /** The screen acted on [PersonalityUiState.isSaved]. */
     fun onSaveHandled() {
-        isSaved.value = false
+        save.value = Save()
     }
 
+    /**
+     * Edits start from the loaded personality; there is nothing to edit before it arrives. None is
+     * taken while a save runs or after it succeeded, until the screen closes.
+     */
     private fun edit(change: (Personality) -> Personality) {
-        val base = draft.value ?: settingsRepository.settings.value.personality
+        if (save.value.isRunning || save.value.isDone) {
+            return
+        }
+        val loaded = settingsRepository.settings.value.personality
+        val base = draft.value ?: when (loaded) {
+            is Loadable.Loaded -> loaded.value
+            else -> return
+        }
         draft.value = change(base)
     }
 

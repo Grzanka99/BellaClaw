@@ -4,6 +4,7 @@ import androidx.lifecycle.SavedStateHandle
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -11,7 +12,7 @@ import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import one.scary.bellaclaw.data.ChatRepository
-import one.scary.bellaclaw.data.SettingsRepository
+import one.scary.bellaclaw.data.TestServer
 import one.scary.bellaclaw.model.Author
 import one.scary.bellaclaw.model.BELLACLAW_CHAT_ID
 import one.scary.bellaclaw.model.ChatKind
@@ -41,11 +42,20 @@ class ChatViewModelTest {
 
     private fun TestScope.chatRepository() = ChatRepository(backgroundScope, Clock.fixed(now, ZoneOffset.UTC))
 
-    private fun viewModel(
+    @get:Rule
+    val gateway = TestServer()
+
+    /** Signed in, with the server's models loaded: provider opencode-go and its models Kimi K3.1 Pro and GLM 5. */
+    private suspend fun TestScope.viewModel(
         chatId: String,
         chatRepository: ChatRepository,
         savedStateHandle: SavedStateHandle = SavedStateHandle(),
-    ) = ChatViewModel(chatId, chatRepository, SettingsRepository(), savedStateHandle, ZoneOffset.UTC)
+    ): ChatViewModel {
+        gateway.route("GET", "/api/model", 200, PICKER_MODELS)
+        val settings = gateway.settingsRepository(gateway.signedInStore(), backgroundScope)
+        settings.settings.first { it.providers.isNotEmpty() }
+        return ChatViewModel(chatId, chatRepository, settings, savedStateHandle, ZoneOffset.UTC)
+    }
 
     private fun ChatUiState.messages() = rows.filterIsInstance<ChatRow.Item>().map { it.message }
 
@@ -190,16 +200,14 @@ class ChatViewModelTest {
         val opened = viewModel.uiState.value.picker
         assertEquals(ModelChoice("opencode-go", "Kimi K3.1 Pro", Effort.LOW), opened?.selection)
 
-        viewModel.onPickerProvider("openai-codex")
-        assertEquals(ModelChoice("openai-codex", "GPT-5.5", Effort.LOW), viewModel.uiState.value.picker?.selection)
-        viewModel.onPickerModel("GPT-5.5 Mini")
+        viewModel.onPickerModel("GLM 5")
         viewModel.onPickerEffort(Effort.HIGH)
         viewModel.confirmModelPicker()
 
         assertNull(viewModel.uiState.value.picker)
         viewModel.openModelPicker()
         assertEquals(
-            ModelChoice("openai-codex", "GPT-5.5 Mini", Effort.HIGH),
+            ModelChoice("opencode-go", "GLM 5", Effort.HIGH),
             viewModel.uiState.value.picker?.selection,
         )
     }
@@ -228,5 +236,12 @@ class ChatViewModelTest {
 
         viewModel.openModelPicker()
         assertEquals(Effort.LOW, viewModel.uiState.value.picker?.effort)
+    }
+
+    private companion object {
+        const val PICKER_MODELS = """{"provider":"opencode-go","providers":["opencode-go"],""" +
+            """"purposes":[{"purpose":"Main","model":"Kimi K3.1 Pro","effort":"low","serviceTier":"default"}],""" +
+            """"availableModels":[{"id":"Kimi K3.1 Pro","name":"Kimi K3.1 Pro","supportedEfforts":["low","high"]},""" +
+            """{"id":"GLM 5","name":"GLM 5","supportedEfforts":["low","high"]}]}"""
     }
 }

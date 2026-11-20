@@ -1,5 +1,6 @@
 package one.scary.bellaclaw.ui.settings.models
 
+import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -23,19 +24,22 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import one.scary.bellaclaw.R
 import one.scary.bellaclaw.model.Effort
-import one.scary.bellaclaw.ui.components.EffortSelector
 import one.scary.bellaclaw.ui.components.OptionDropdown
 import one.scary.bellaclaw.ui.components.label
 
 class RoleEditorEvents(
     val onModel: (String) -> Unit,
-    val onEffort: (Effort) -> Unit,
+    val onEffort: (Effort?) -> Unit,
     val onSave: () -> Unit,
     val onReset: () -> Unit,
     val onDismiss: () -> Unit,
 )
 
-/** One role's model and effort, with Reset to default and Save. */
+/** A role's effort label; null is the model's own default. */
+@StringRes
+fun effortLabel(effort: Effort?): Int = effort?.label ?: R.string.effort_default
+
+/** One role's model and effort (the model's own default or one it supports), with Reset to default and Save. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RoleEditorSheet(state: RoleEditorState, events: RoleEditorEvents) {
@@ -54,19 +58,21 @@ fun RoleEditorSheet(state: RoleEditorState, events: RoleEditorEvents) {
             Spacer(Modifier.height(16.dp))
             OptionDropdown(
                 label = stringResource(R.string.label_model),
-                options = state.models,
+                options = state.models.map { it.id },
                 selected = state.model,
-                optionText = { it },
+                optionText = { id -> state.models.firstOrNull { it.id == id }?.name ?: id },
                 onSelect = events.onModel,
             )
             Spacer(Modifier.height(16.dp))
-            Text(
-                stringResource(R.string.label_effort),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            // Every effort, so a draft's effort the catalog lacks still has its label.
+            val effortLabels = (listOf(null) + Effort.entries).associateWith { stringResource(effortLabel(it)) }
+            OptionDropdown(
+                label = stringResource(R.string.label_effort),
+                options = state.efforts,
+                selected = state.effort,
+                optionText = { effortLabels.getValue(it) },
+                onSelect = events.onEffort,
             )
-            Spacer(Modifier.height(8.dp))
-            EffortSelector(selected = state.effort, onSelect = events.onEffort)
             Spacer(Modifier.height(24.dp))
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 TextButton(onClick = events.onReset) {

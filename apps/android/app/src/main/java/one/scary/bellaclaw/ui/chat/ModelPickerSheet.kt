@@ -59,7 +59,7 @@ fun ModelPickerSheet(state: ModelPickerState, events: ModelPickerEvents) {
                 label = stringResource(R.string.label_provider),
                 options = state.providers,
                 selected = state.provider,
-                optionText = { it.name },
+                optionText = { it.id },
                 onSelect = { events.onProvider(it.id) },
             )
             Spacer(Modifier.height(8.dp))

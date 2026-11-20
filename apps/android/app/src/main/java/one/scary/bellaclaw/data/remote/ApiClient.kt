@@ -28,6 +28,11 @@ class ApiClient(@PublishedApi internal val sessionStore: SessionStore) {
         .readTimeout(READ_TIMEOUT_SECONDS, TimeUnit.SECONDS)
         .build()
 
+    /** [http] with a read timeout for an answer that waits minutes: a model change the assistant verifies with the provider. */
+    private val longWaitHttp = http.newBuilder()
+        .readTimeout(LONG_WAIT_READ_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        .build()
+
     /** POSTs [body] to [path] on [serverUrl] without a session: sign-in and link checks. */
     suspend inline fun <reified B, reified R> post(serverUrl: String, path: String, body: B): ApiResult<R> =
         exchange("POST", serverUrl + path, bearer = null, json.encodeToString(body)) { json.decodeFromString<R>(it) }
@@ -44,14 +49,24 @@ class ApiClient(@PublishedApi internal val sessionStore: SessionStore) {
     suspend inline fun <reified B, reified R> putSignedIn(path: String, body: B): ApiResult<R> =
         signedIn("PUT", path, json.encodeToString(body)) { json.decodeFromString<R>(it) }
 
+    /** PUTs [body] to [path] like [putSignedIn], waiting up to [LONG_WAIT_READ_TIMEOUT_SECONDS] for the answer. */
+    suspend inline fun <reified B, reified R> putSignedInLongWait(path: String, body: B): ApiResult<R> =
+        signedIn("PUT", path, json.encodeToString(body), longWait = true) { json.decodeFromString<R>(it) }
+
     /** DELETEs [path] on the session's server with its token. */
     suspend inline fun <reified R> deleteSignedIn(path: String): ApiResult<R> =
         signedIn("DELETE", path, body = null) { json.decodeFromString<R>(it) }
 
     @PublishedApi
-    internal suspend fun <R> signedIn(method: String, path: String, body: String?, decode: (String) -> R): ApiResult<R> {
+    internal suspend fun <R> signedIn(
+        method: String,
+        path: String,
+        body: String?,
+        longWait: Boolean = false,
+        decode: (String) -> R,
+    ): ApiResult<R> {
         val session = sessionStore.session.value ?: return ApiResult.ApiError(UNAUTHORIZED, null)
-        val result = exchange(method, session.serverUrl + path, session.token, body, decode)
+        val result = exchange(method, session.serverUrl + path, session.token, body, longWait, decode)
         if (result is ApiResult.ApiError && result.status == UNAUTHORIZED) {
             sessionStore.end(session.token)
         }
@@ -64,6 +79,7 @@ class ApiClient(@PublishedApi internal val sessionStore: SessionStore) {
         url: String,
         bearer: String?,
         body: String?,
+        longWait: Boolean = false,
         decode: (String) -> R,
     ): ApiResult<R> {
         val builder = Request.Builder()
@@ -78,7 +94,12 @@ class ApiClient(@PublishedApi internal val sessionStore: SessionStore) {
             // A host that passes checkServerUrl but OkHttp refuses (a label over 63 characters, a bad xn-- label).
             return ApiResult.NetworkFailure
         }
-        val answer = execute(http.newCall(request)) ?: return ApiResult.NetworkFailure
+        val client = if (longWait) {
+            longWaitHttp
+        } else {
+            http
+        }
+        val answer = execute(client.newCall(request)) ?: return ApiResult.NetworkFailure
         val (status, text) = answer
         if (status !in 200..299) {
             return ApiResult.ApiError(status, errorText(text))
@@ -121,6 +142,9 @@ class ApiClient(@PublishedApi internal val sessionStore: SessionStore) {
         const val CLIENT_HEADER = "X-BellaClaw-Client"
         const val UNAUTHORIZED = 401
         private const val READ_TIMEOUT_SECONDS = 70L
+
+        /** Past the gateway's 250 s wait for the assistant and its 255 s idle timeout, so their answer arrives first. */
+        private const val LONG_WAIT_READ_TIMEOUT_SECONDS = 270L
 
         @PublishedApi
         internal val json = Json {

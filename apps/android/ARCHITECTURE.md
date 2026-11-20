@@ -9,12 +9,12 @@ module; every dependency and plugin version lives in `gradle/libs.versions.toml`
 
 | Package (`one.scary.bellaclaw.…`) | Holds |
 | --- | --- |
-| `model` | Plain Kotlin types (`Chat`, `Message`, `ModelChoice`, `ModelSettings`, `Personality`, `SettingsSnapshot`, `Session`, `LoginLink`, `PendingLink`, `LinkStatus`, `AccountError`, …), and every type a ViewModel gets from a repository. No Android or Compose imports. |
-| `data` | One repository per kind of data: `ChatRepository` (chats, messages, typing, stream state), `SettingsRepository` (one `SettingsSnapshot` flow: providers, models, personality, theme), `AccountRepository` (the session, sign-in, sign-out, the pending login link). `ServerUrls.kt`: the server address rule and the login link parser. |
-| `data.remote` | `ApiClient`, the one HTTP client of the gateway's app API (OkHttp, kotlinx.serialization JSON), its request and answer bodies, and `ApiResult`. |
+| `model` | Plain Kotlin types (`Chat`, `Message`, `ModelChoice`, `ModelSettings`, `AiModel`, `Personality`, `SettingsSnapshot`, `Loadable`, `Session`, `LoginLink`, `PendingLink`, `LinkStatus`, `AccountError`, …), and every type a ViewModel gets from a repository. No Android or Compose imports. |
+| `data` | One repository per kind of data: `ChatRepository` (chats, messages, typing, stream state), `SettingsRepository` (one `SettingsSnapshot` flow: the account's models and personality from the server, the phone's theme), `AccountRepository` (the session, sign-in, sign-out, the pending login link). `ServerUrls.kt`: the server address rule and the login link parser. |
+| `data.remote` | `ApiClient`, the one HTTP client of the gateway's app API (OkHttp, kotlinx.serialization JSON), its request and answer bodies (one file per area: `ApiBodies.kt`, `DeviceBodies.kt`, `SettingsBodies.kt`), and `ApiResult`. |
 | `data.push` | `PushRepository` (device registration, decrypted pushes as a flow), the device keys (`loadDeviceKeys`, `DeviceKeys`), RFC 8291 decryption (`decryptPush`), `PushTokens` (FCM's token, `FirebasePushTokens`). |
-| `data.local` | `SessionStore`: the server address, session token and username in one app-private file. |
-| `data.sample` | The in-memory sample data the repositories start from. Only `data` and previews read it. |
+| `data.local` | `SessionStore`: the server address, session token and username in one app-private file. `ThemeStore`: the theme mode and Dynamic color in another. |
+| `data.sample` | The in-memory sample chats `ChatRepository` starts from. Only `data` and previews read it. |
 | `ui.<feature>` | `signin`, `home`, `chat`, `settings`, `settings.models`, `settings.personality`, `settings.theme`. |
 | `ui.components` | Composables and label mappings used by more than one feature. |
 | `ui.theme` | Colour schemes, extra colour tokens, typography, `BellaClawTheme`. |
@@ -86,6 +86,9 @@ whenever it changes, since the app theme can override the device theme.
   its one OkHttp client: it follows no redirect (a redirect answer is an API error like any other
   non-2xx, so no body with a password or token is replayed elsewhere), and its read timeout (70 s)
   covers the server's longest wait (a link request waits up to 60 s for the assistant).
+- A model change (`PUT /api/model`) waits while the assistant verifies the model with the provider,
+  minutes at worst: it alone goes through `putSignedInLongWait`, a second OkHttp client built from the
+  first with a 270 s read timeout, past the gateway's 250 s wait for the assistant and its 255 s idle timeout.
 - The session lives only in `SessionStore` (`files/session.json`, written through
   `session.json.tmp`; both are excluded from cloud backup and device transfer by
   `res/xml/data_extraction_rules.xml`). It is read once when the store is
@@ -136,12 +139,42 @@ else from Firebase; the manifest turns off Firebase's default data collection an
 - Never log a push payload, a key, the auth secret or an FCM token; `DeviceBody` is a plain class.
 - Test seams: `DeviceKeys.agree` (the ECDH step, so JVM tests use a software key) and `PushTokens`.
 
+## Settings
+
+- `SettingsSnapshot` holds the account's `models` and `personality` as `Loadable` (loading until the
+  first answer, then loaded or failed with an `AccountError`) and the `theme`. Settings screens show
+  a loading state, then the settings, or the error with Retry (`LoadingContent`, `LoadFailedContent`).
+  Previews build small values inline.
+- `SettingsRepository` watches the session from its construction: when one starts (a new token) it
+  drops what it held and loads `GET /api/model` and `GET /api/personality`; when it ends (sign-out,
+  a `401`) it drops them back to loading. The theme stays. An answer is applied only while the
+  session that asked is still current. The Models screen reloads the models when it opens; no
+  reload starts while a model change is verified, and a reload's answer is dropped when a change
+  started after it did.
+- `ModelSettings` is the server's model state: the active provider of `providers` (ids), a
+  `RoleModel` per role (model id, effort or null for the model's default) and the active provider's
+  `AiModel`s with the efforts each supports. The server's purposes and efforts map in `SettingsMapping.kt`. `SettingsSnapshot.providers`,
+  the chat's model picker list, holds the active provider and its model ids once loaded.
+- A model change (provider, a role's model and effort, a role's reset) runs in the application
+  scope, so leaving the screen does not drop it. While it is verified, `isChangingModels` is set and
+  no second change starts; the answer replaces the models, a refusal leaves them and sets
+  `modelsChangeError` to the server's text, which stays through reloads until the next change
+  starts. A role change sends only what differs from the server's current selection; an effort the
+  newly picked model lacks falls back to the model's default. New models that lack the open role
+  sheet's model, or its effort, close the sheet; the sheet labels any effort, so no value the
+  catalog lacks breaks it.
+- The personality saves with `PUT /api/personality` (all three fields) from the screen's scope; a
+  refusal keeps the draft and shows the server's text. The fields take no input while the save runs
+  and, after a success, until the screen has closed. The theme is written to `files/theme.json`
+  (through `theme.json.tmp`) and read once when the store is created, so the first frame has it.
+
 ## Wiring
 
 `BellaClawApplication` creates one `AppContainer` on first use, which creates the `SessionStore`,
 the `ApiClient` and each repository once. It also owns
 one application-lifetime `CoroutineScope` and passes it to repositories whose work must outlive a
-screen (`ChatRepository`: the sample typing timer, one per chat, restarted on each send). ViewModel
+screen (`ChatRepository`: the sample typing timer, one per chat, restarted on each send;
+`SettingsRepository`: the session watch and model changes). ViewModel
 factories read it through `CreationExtras.appContainer()`. No DI framework. Repositories are concrete
 classes; add an interface only when a second implementation exists.
 
@@ -159,6 +192,12 @@ loading flag to clear, and read `uiState.value` only before the first request. `
 Push tests run the whole decryption with a software P-256 key (`DeviceKeys.agree`) against the RFC 8291
 Appendix A vector and messages encrypted as the server does, and replace `PushTokens` with a fake.
 
+`TestServer.settingsRepository` adds the real `SettingsRepository`, with a `ThemeStore` that writes in
+place and answers for the two settings reads. `route` answers one method and path every time, so
+concurrent requests get the right body whatever their order; `takeRequest(method, path)` skips the
+others. A repository's work in `backgroundScope` runs only while the test suspends, so a test waits
+with `first { … }` before a blocking `takeRequest`.
+
 ## Extension points
 
 Later chunks change repository internals, not their public `Flow`/`suspend` surface, so ViewModels
@@ -168,7 +207,7 @@ stay as they are:
   repositories (OkHttp also reads the server-sent event stream). It replaces `data.sample`,
   `ChatRepository.isStreamOpen`, `isTyping` and the sample typing timer. Network writes that must
   finish after the screen is gone run in the application scope the repositories already receive.
-- Storage (settings, cached history): a local store in `data.local` behind the same repositories.
+- Storage (cached history): a local store in `data.local` behind the same repositories.
 - Push notifications: collect `PushRepository.pushes` (see Push).
 - Images: upload goes through `ChatRepository.send`; the UI already passes a content URI. Thumbnails
   are decoded by a `ThumbnailLoader` the chat Route builds on the `ContentResolver`; `ImageThumbnail`

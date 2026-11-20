@@ -27,6 +27,7 @@ fun PersonalityRoute(
     PersonalityScreen(
         state = state,
         onBack = onBack,
+        onRetry = viewModel::retry,
         onSave = viewModel::save,
         onBellaClawChange = viewModel::onBellaClawChange,
         onUseInChatsChange = viewModel::onUseInChatsChange,

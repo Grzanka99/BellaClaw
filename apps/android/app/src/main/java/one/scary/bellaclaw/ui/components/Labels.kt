@@ -9,9 +9,13 @@ import one.scary.bellaclaw.model.ThemeMode
 @get:StringRes
 val Effort.label: Int
     get() = when (this) {
+        Effort.OFF -> R.string.effort_off
+        Effort.MINIMAL -> R.string.effort_minimal
         Effort.LOW -> R.string.effort_low
         Effort.MEDIUM -> R.string.effort_medium
         Effort.HIGH -> R.string.effort_high
+        Effort.XHIGH -> R.string.effort_xhigh
+        Effort.MAX -> R.string.effort_max
     }
 
 @get:StringRes
