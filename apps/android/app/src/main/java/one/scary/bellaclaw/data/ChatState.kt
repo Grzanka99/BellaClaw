@@ -2,12 +2,14 @@ package one.scary.bellaclaw.data
 
 import one.scary.bellaclaw.data.remote.ConversationBody
 import one.scary.bellaclaw.data.remote.HistoryRowBody
+import one.scary.bellaclaw.data.remote.MediaBody
 import one.scary.bellaclaw.model.Author
 import one.scary.bellaclaw.model.BELLACLAW_CHAT_ID
 import one.scary.bellaclaw.model.ChatIcon
 import one.scary.bellaclaw.model.Message
 import one.scary.bellaclaw.model.MessageImage
 import one.scary.bellaclaw.model.ModelChoice
+import one.scary.bellaclaw.model.PickedImage
 import one.scary.bellaclaw.model.SendState
 import java.time.Instant
 
@@ -70,16 +72,28 @@ internal data class History(
 /**
  * A message sent from this phone: [SendState.PENDING] until its post is answered, then
  * [SendState.STORED] once accepted or [SendState.FAILED]; a retry sends it again with the same [clientMessageId].
+ * Its [image] shows from the picked file; [uploaded] is the upload's answer, so a retry does not upload it again.
  */
 internal data class PendingSend(
     val clientMessageId: String,
     val text: String,
     val model: ModelChoice?,
     val sentAt: Instant,
+    val image: PickedImage?,
+    val uploaded: MediaBody? = null,
     val state: SendState = SendState.PENDING,
     val failure: String? = null,
 ) {
-    fun toMessage(chatId: String) = Message(clientMessageId, chatId, Author.USER, text, sentAt, sendState = state, failure = failure)
+    fun toMessage(chatId: String) = Message(
+        clientMessageId,
+        chatId,
+        Author.USER,
+        text,
+        sentAt,
+        images = listOfNotNull(image?.let { MessageImage(null, it.mimeType, localUri = it.uri) }),
+        sendState = state,
+        failure = failure,
+    )
 }
 
 /** The app's chat id of a conversation: the Bella conversation is always [BELLACLAW_CHAT_ID]. */

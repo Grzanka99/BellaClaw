@@ -11,6 +11,8 @@ import one.scary.bellaclaw.data.AccountRepository
 import one.scary.bellaclaw.data.ChatRepository
 import one.scary.bellaclaw.data.SettingsRepository
 import one.scary.bellaclaw.data.local.ChatStore
+import one.scary.bellaclaw.data.local.ContentPickedImages
+import one.scary.bellaclaw.data.local.ImageCache
 import one.scary.bellaclaw.data.local.SessionStore
 import one.scary.bellaclaw.data.local.ThemeStore
 import one.scary.bellaclaw.data.push.FirebasePushTokens
@@ -43,6 +45,8 @@ class AppContainer(context: Context) {
         foreground = foreground,
         settings = settingsRepository.settings,
         chatStore = ChatStore(File(context.filesDir, "chats.json")),
+        pickedImages = ContentPickedImages(context.contentResolver),
+        imageCache = ImageCache(File(context.cacheDir, "images")),
         scope = applicationScope,
     )
     val accountRepository = AccountRepository(apiClient, sessionStore, allowCleartext = BuildConfig.DEBUG, deviceLock)

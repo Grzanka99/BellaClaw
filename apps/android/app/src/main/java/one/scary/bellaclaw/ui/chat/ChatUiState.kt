@@ -3,8 +3,10 @@ package one.scary.bellaclaw.ui.chat
 import one.scary.bellaclaw.model.ChatKind
 import one.scary.bellaclaw.model.ChatProvider
 import one.scary.bellaclaw.model.Effort
+import one.scary.bellaclaw.model.ImageRefusal
 import one.scary.bellaclaw.model.Loadable
 import one.scary.bellaclaw.model.Message
+import one.scary.bellaclaw.model.MessageImage
 import one.scary.bellaclaw.model.ModelChoice
 import java.time.LocalDate
 
@@ -18,6 +20,12 @@ data class ChatUiState(
     val isStreamOpen: Boolean = false,
     val draft: String = "",
     val attachmentUri: String? = null,
+    /** Why the last picked image was not attached, until another is picked, it is removed or a send goes. */
+    val attachmentRefusal: ImageRefusal? = null,
+    /** Whether a picked image is being checked; nothing can be sent meanwhile. */
+    val isCheckingAttachment: Boolean = false,
+    /** The image open full screen, or null. */
+    val viewedImage: MessageImage? = null,
     /** The open model picker, or null when it is closed. Only plain chats have one. */
     val picker: ModelPickerState? = null,
     /** True when no chat has this screen's id; the screen then returns to Home. */
@@ -26,7 +34,7 @@ data class ChatUiState(
     val isConversationKnown: Boolean = false,
 ) {
     val canSend: Boolean
-        get() = isConversationKnown && (draft.isNotBlank() || attachmentUri != null)
+        get() = isConversationKnown && !isCheckingAttachment && (draft.isNotBlank() || attachmentUri != null)
 }
 
 /** One row of the conversation: a day label or a message. */

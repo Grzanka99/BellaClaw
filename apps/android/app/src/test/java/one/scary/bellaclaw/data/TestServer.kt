@@ -5,6 +5,7 @@ import java.net.InetAddress
 import java.util.concurrent.ConcurrentHashMap
 import java.nio.file.Files
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -19,6 +20,9 @@ import mockwebserver3.MockWebServer
 import mockwebserver3.QueueDispatcher
 import mockwebserver3.RecordedRequest
 import one.scary.bellaclaw.data.local.ChatStore
+import one.scary.bellaclaw.data.local.ImageCache
+import one.scary.bellaclaw.data.local.PickedFile
+import one.scary.bellaclaw.data.local.PickedImages
 import one.scary.bellaclaw.data.local.SessionStore
 import one.scary.bellaclaw.data.local.ThemeStore
 import one.scary.bellaclaw.data.remote.ApiClient
@@ -44,6 +48,13 @@ class TestServer : ExternalResource() {
 
     val sessionFile: File
         get() = File(folder, "session.json")
+
+    /** The images the photo picker gives, by content URI: type and bytes. */
+    val pickedImages = FakePickedImages()
+
+    /** Where chat repositories keep downloaded images. */
+    val imageCacheDir: File
+        get() = File(folder, "images")
 
     override fun before() {
         server.dispatcher = object : QueueDispatcher() {
@@ -89,7 +100,17 @@ class TestServer : ExternalResource() {
         foreground: Flow<Boolean> = MutableStateFlow(true),
         settings: SettingsRepository = settingsRepository(store, scope),
         retryMillis: Long = 1_000L,
-    ) = ChatRepository(ApiClient(store), store.session, foreground, settings.settings, ChatStore(File(folder, "chats.json")), scope, retryMillis = retryMillis)
+    ) = ChatRepository(
+        ApiClient(store),
+        store.session,
+        foreground,
+        settings.settings,
+        ChatStore(File(folder, "chats.json")),
+        pickedImages,
+        ImageCache(imageCacheDir),
+        scope,
+        retryMillis = retryMillis,
+    )
 
     fun answer(code: Int, body: String, delayMillis: Long = 0) {
         server.enqueue(
@@ -142,6 +163,21 @@ class TestServer : ExternalResource() {
             }
         }
     }
+}
+
+/** Picked images by content URI; one in [sizeUnknown] reports no size, and [opening] holds each check until it completes. */
+class FakePickedImages : PickedImages {
+    val files = ConcurrentHashMap<String, Pair<String, ByteArray>>()
+    val sizeUnknown: MutableSet<String> = ConcurrentHashMap.newKeySet()
+    var opening: CompletableDeferred<Unit>? = null
+
+    override suspend fun describe(uri: String): PickedFile? {
+        opening?.await()
+        val (type, bytes) = files[uri] ?: return null
+        return PickedFile(type, if (uri in sizeUnknown) -1 else bytes.size.toLong())
+    }
+
+    override suspend fun read(uri: String, limit: Int): ByteArray? = files[uri]?.second?.let { it.copyOf(minOf(it.size, limit)) }
 }
 
 fun RecordedRequest.json(): JsonObject = Json.parseToJsonElement(checkNotNull(body).utf8()).jsonObject

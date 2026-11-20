@@ -1,7 +1,9 @@
 package one.scary.bellaclaw.data
 
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
@@ -12,6 +14,7 @@ import mockwebserver3.Dispatcher
 import mockwebserver3.MockResponse
 import mockwebserver3.MockResponseBody
 import mockwebserver3.RecordedRequest
+import okio.Buffer
 import okio.BufferedSink
 
 /**
@@ -48,6 +51,22 @@ class FakeGateway : Dispatcher() {
     /** Statuses of the next history reads, which fail instead of answering. */
     val historyFailures = LinkedBlockingQueue<Int>()
 
+    /** Content type and bytes of the uploads that arrived, in order. */
+    val uploads = LinkedBlockingQueue<Pair<String?, ByteArray>>()
+
+    /** Answers of the next uploads, before they are stored: status and body. */
+    val uploadFailures = LinkedBlockingQueue<Pair<Int, String>>()
+
+    private val nextMediaId = AtomicInteger()
+
+    /** The images kept, by media id. */
+    private val media = ConcurrentHashMap<String, ByteArray>()
+
+    /** How many images were downloaded. */
+    @Volatile
+    var downloads = 0
+        private set
+
     /** How many streams were opened. */
     @Volatile
     var streamsOpened = 0
@@ -70,6 +89,11 @@ class FakeGateway : Dispatcher() {
             conversations.add(1, conversation)
         }
         return row.id
+    }
+
+    /** Keeps [bytes] as the image [id], for download. */
+    fun addMedia(id: String, bytes: ByteArray) {
+        media[id] = bytes
     }
 
     /** Deletes row [id] of [key]: a change that is not an append. */
@@ -107,6 +131,8 @@ class FakeGateway : Dispatcher() {
                 historyFailures.poll()?.let { MockResponse.Builder().code(it).body(errorAnswer("Unavailable")).build() }
                     ?: json(history(segments[2], request.url.queryParameter("before"), request.url.queryParameter("after")))
             segments.size == 4 && segments[3] == "messages" && request.method == "POST" -> send(request)
+            segments.size == 4 && segments[3] == "media" && request.method == "POST" -> upload(request)
+            segments.size == 5 && segments[3] == "media" && request.method == "GET" -> download(segments[4])
             else -> MockResponse.Builder().code(404).body(errorAnswer("Not found")).build()
         }
     }
@@ -116,6 +142,22 @@ class FakeGateway : Dispatcher() {
         sends.put(body)
         sendFailures.poll()?.let { (code, text) -> return MockResponse.Builder().code(code).body(text).build() }
         return json("""{"clientMessageId":${body["clientMessageId"]}}""")
+    }
+
+    private fun upload(request: RecordedRequest): MockResponse {
+        val type = request.headers["Content-Type"]
+        val bytes = checkNotNull(request.body).toByteArray()
+        uploads.put(type to bytes)
+        uploadFailures.poll()?.let { (code, text) -> return MockResponse.Builder().code(code).body(text).build() }
+        val id = "media-${nextMediaId.incrementAndGet()}"
+        media[id] = bytes
+        return json("""{"id":"$id","mimeType":"$type"}""")
+    }
+
+    private fun download(id: String): MockResponse {
+        val bytes = media[id] ?: return MockResponse.Builder().code(410).body(errorAnswer("Gone")).build()
+        downloads++
+        return MockResponse.Builder().setHeader("Content-Type", "image/jpeg").body(Buffer().write(bytes)).build()
     }
 
     @Synchronized

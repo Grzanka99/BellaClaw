@@ -9,11 +9,11 @@ module; every dependency and plugin version lives in `gradle/libs.versions.toml`
 
 | Package (`one.scary.bellaclaw.…`) | Holds |
 | --- | --- |
-| `model` | Plain Kotlin types (`Chat`, `Message`, `MessageImage`, `SendState`, `ModelChoice`, `ModelSettings`, `AiModel`, `ChatProvider`, `Personality`, `SettingsSnapshot`, `Loadable`, `Session`, `LoginLink`, `PendingLink`, `LinkStatus`, `AccountError`, `AppPush`, `ChatNotification`, …), and every type a ViewModel gets from a repository. No Android or Compose imports. |
-| `data` | One repository per kind of data: `ChatRepository` (chats, messages, sends, typing, unread, the live stream; its state and sync in `ChatState` and `ChatSync`), `SettingsRepository` (one `SettingsSnapshot` flow: the account's models and personality and the plain chats' model list from the server, the phone's theme), `AccountRepository` (the session, sign-in, sign-out, the pending login link). `ServerUrls.kt`: the server address rule and the login link parser. |
+| `model` | Plain Kotlin types (`Chat`, `Message`, `MessageImage`, `PickedImage`, `ImageCheck`, `SendState`, `ModelChoice`, `ModelSettings`, `AiModel`, `ChatProvider`, `Personality`, `SettingsSnapshot`, `Loadable`, `Session`, `LoginLink`, `PendingLink`, `LinkStatus`, `AccountError`, `AppPush`, `ChatNotification`, …), and every type a ViewModel gets from a repository. No Android or Compose imports. |
+| `data` | One repository per kind of data: `ChatRepository` (chats, messages, sends and their images, typing, unread, the live stream; its state, sync and images in `ChatState`, `ChatSync` and `ChatImages`), `SettingsRepository` (one `SettingsSnapshot` flow: the account's models and personality and the plain chats' model list from the server, the phone's theme), `AccountRepository` (the session, sign-in, sign-out, the pending login link). `ServerUrls.kt`: the server address rule and the login link parser. |
 | `data.remote` | `ApiClient`, the one HTTP client of the gateway's app API (OkHttp, kotlinx.serialization JSON), its request and answer bodies (one file per area: `ApiBodies.kt`, `ChatBodies.kt` for conversations and the stream, `DeviceBodies.kt`, `SettingsBodies.kt`), and `ApiResult`. |
 | `data.push` | `PushRepository` (device registration, decrypted pushes as a flow), `PushNotifications` (a notification per push, behind the `Notifier` seam), the device keys (`loadDeviceKeys`, `DeviceKeys`), RFC 8291 decryption (`decryptPush`), `PushTokens` (FCM's token, `FirebasePushTokens`). |
-| `data.local` | `SessionStore`: the server address, session token and username in one app-private file. `ThemeStore`: the theme mode and Dynamic color in another. `ChatStore`: per conversation, the model picked for a plain chat and the newest row seen; and the model used last on this phone. |
+| `data.local` | `SessionStore`: the server address, session token and username in one app-private file. `ThemeStore`: the theme mode and Dynamic color in another. `ChatStore`: per conversation, the model picked for a plain chat and the newest row seen; and the model used last on this phone. `ImageCache`: history's images in the cache directory. `PickedImages`: reads a picked image, at most a given number of bytes (`ContentPickedImages`, on the `ContentResolver`). |
 | `ui.<feature>` | `signin`, `home`, `chat`, `settings`, `settings.models`, `settings.personality`, `settings.theme`. |
 | `ui.components` | Composables and label mappings used by more than one feature. |
 | `ui.theme` | Colour schemes, extra colour tokens, typography, `BellaClawTheme`. |
@@ -83,8 +83,8 @@ whenever it changes, since the app theme can override the device theme.
 
 - Only repositories call `ApiClient`; ViewModels see `AccountError` and model types, never
   `ApiResult` or request bodies. Every request carries `X-BellaClaw-Client: app`; a POST or PUT carries a
-  JSON body with a `Content-Length`. `post` goes to a server named by the caller (sign-in, link check);
-  `getSignedIn`, `postSignedIn`, `putSignedIn` and `deleteSignedIn` go to the session's server with
+  body with a `Content-Length`: JSON, or an image upload's bytes (`postBytesSignedIn`). `post` goes to a server named by the caller (sign-in, link check);
+  `getSignedIn`, `getBytesSignedIn` (an image), `postSignedIn`, `postBytesSignedIn`, `putSignedIn` and `deleteSignedIn` go to the session's server with
   `Authorization: Bearer <token>`. `ApiClient` builds
   its one OkHttp client: it follows no redirect (a redirect answer is an API error like any other
   non-2xx, so no body with a password or token is replayed elsewhere), and its read timeout (70 s)
@@ -267,6 +267,35 @@ Everything it holds is one immutable `ChatState` in a `MutableStateFlow`, change
   first). With no usable model there is no selection and Done is off. So a pick the list
   no longer allows stays on the chat until Done stores another, and picking another model keeps the
   effort when it can. A provider that cannot be used now is listed with its reason and cannot be picked.
+- **Images.** The composer's attach button opens Android's photo picker (images only, no permission).
+  A picked image is checked on the phone (`ChatImages.check`: JPEG, PNG, WebP or GIF, 5 MB at most, by
+  the picker's type and size; a file whose size is not reported is read up to one byte past 5 MB to tell);
+  a refused one is not attached and the composer says why. While a pick is checked the composer shows
+  it with Remove and Send is off; a newer pick or a removal cancels the check, so its result never
+  lands. One image per message, with or without text. A conversation's sends go out one at a time, in
+  the order they were sent (`sendLocks`), so a text sent after a photo arrives after it. Its send shows at once with the picked file (`MessageImage.localUri`),
+  uploads it (`POST …/media`, the bytes as the body, read up to one byte past 5 MB), then posts the
+  upload's answer in `images`, unless the session the send started in has ended (its `generation`
+  changed), when the send is dropped; a failed upload, or a file that can no longer be read or has
+  grown past 5 MB, marks the send `FAILED` (the server's text for a `400`, `413` or `415`), and a retry
+  uploads only what did not upload yet. A message's image with a `mediaId` comes from `imageFile`:
+  the cache, else a download (`GET …/media/:mediaId`); one the server no longer keeps (`410`) is not
+  asked for again in the session and shows the placeholder, and so does one without a `mediaId`; a
+  network failure shows it too, until the image's row shows again. An upload's bytes go into the cache
+  under the answer's id, so the history row that replaces the send needs no download.
+- **Showing images.** The composer's thumbnail of a picked image is decoded by a `ThumbnailLoader`, and a
+  message's image by a `MessageImageLoader`; the chat Route builds both: the thumbnail and a send's
+  picked file through the `ContentResolver`, a history image from the file `ChatViewModel.imageFile`
+  returns. Both decode off the main
+  thread with `ImageDecoder`, the longer side at most the size shown: 240 dp in a bubble (keeping the
+  picture's proportions; a 180 dp placeholder while it loads), the screen in the full-screen
+  `ImageViewer` (`ChatUiState.viewedImage`; a tap on the bubble's image opens it, except on a failed
+  send, where the tap retries like the rest of the bubble; Back closes it). `ImageThumbnail` and `BubbleImage` show a
+  result only for their current image, the plain placeholder until then.
+- **Image cache** (`ImageCache`, `cache/images`: Android may clear it, and it is not backed up): one
+  folder per account, named by a hash of its server and username, each image by a hash of its
+  conversation key and media id, so no name holds account data. On every session change only the new
+  session's account folder stays (none when signed out); a download whose session has ended is not kept.
 - **Kept on the phone** (`files/chats.json`, `ChatStore`): per conversation key, the picked model and
   the newest row id seen; and the model a plain chat was last set to or sent with.
 - **After a push** (`catchUp`), in the background too: the list is read and the pushed conversation's
@@ -289,7 +318,8 @@ classes; add an interface only when a second implementation exists.
 JVM unit tests in `app/src/test` for every ViewModel: construct it with real repositories, collect
 its state (`collectIn`), send events, assert the exposed state. Chat tests run the real
 `ChatRepository` against `FakeGateway` (`TestServer.gateway()`): in-memory conversations behind the
-conversation routes, and a stream that opens with `check` and carries what the test pushes. A test
+conversation and media routes, and a stream that opens with `check` and carries what the test pushes;
+the photo picker's files come from `TestServer.pickedImages` (`FakePickedImages`). A test
 waits for a request off the test thread (`withContext(Dispatchers.IO)`), so the repository's work in
 the test scope keeps running. Account tests use `TestServer`: a
 `MockWebServer` on 127.0.0.1 (not `localhost`, which OkHttp tries as `::1` first) plus the real `SessionStore`, `ApiClient` and `AccountRepository` on a session
@@ -320,9 +350,3 @@ Later chunks change repository internals, not their public `Flow`/`suspend` surf
 stay as they are:
 
 - Storage (cached history): a local store in `data.local` behind the same repositories.
-- Images: history keeps each user image (`MessageImage`: `mediaId`, `mimeType`) and the chat shows
-  a placeholder for it. Upload goes through `ChatRepository.send`;
-  the composer's attach button is hidden behind one flag (`SHOW_ATTACH` in `Composer.kt`), and the
-  ViewModel already keeps a picked content URI. Thumbnails of a picked image are decoded by a
-  `ThumbnailLoader` the chat Route builds on the `ContentResolver`; `ImageThumbnail` only shows the
-  result for its current URI.

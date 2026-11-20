@@ -32,16 +32,15 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import one.scary.bellaclaw.R
+import one.scary.bellaclaw.model.ImageRefusal
 
-/** Whether the composer shows the attach button. */
-private const val SHOW_ATTACH = false
-
-/** The message box: attach button, text, the picked image above them, and the send button. */
+/** The message box: attach button, text, the picked image or why it was refused above them, and the send button. */
 @Composable
 fun Composer(
     draft: String,
     placeholder: String,
     attachmentUri: String?,
+    attachmentRefusal: ImageRefusal?,
     canSend: Boolean,
     onDraftChange: (String) -> Unit,
     onAttach: () -> Unit,
@@ -65,11 +64,20 @@ fun Composer(
                 attachmentUri?.let { uri ->
                     AttachmentPreview(uri = uri, loader = thumbnailLoader, onRemove = onRemoveAttachment)
                 }
+                attachmentRefusal?.let { reason ->
+                    Text(
+                        text = when (reason) {
+                            ImageRefusal.TOO_LARGE -> stringResource(R.string.error_image_too_large)
+                            ImageRefusal.UNSUPPORTED_TYPE -> stringResource(R.string.error_image_type)
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(start = 16.dp, top = 12.dp, end = 16.dp),
+                    )
+                }
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (SHOW_ATTACH) {
-                        IconButton(onClick = onAttach, modifier = Modifier.padding(start = 4.dp)) {
-                            Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.action_attach_image))
-                        }
+                    IconButton(onClick = onAttach, modifier = Modifier.padding(start = 4.dp)) {
+                        Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.action_attach_image))
                     }
                     TextField(
                         value = draft,

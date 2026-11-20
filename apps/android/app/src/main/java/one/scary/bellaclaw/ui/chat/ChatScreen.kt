@@ -12,6 +12,7 @@ import one.scary.bellaclaw.R
 import one.scary.bellaclaw.model.Author
 import one.scary.bellaclaw.model.ChatKind
 import one.scary.bellaclaw.model.Message
+import one.scary.bellaclaw.model.MessageImage
 import one.scary.bellaclaw.model.SendState
 import one.scary.bellaclaw.ui.theme.BellaClawTheme
 import java.time.Instant
@@ -30,6 +31,9 @@ fun ChatScreen(
     onLoadOlder: () -> Unit,
     pickerEvents: ModelPickerEvents,
     thumbnailLoader: ThumbnailLoader,
+    imageLoader: MessageImageLoader,
+    onOpenImage: (MessageImage) -> Unit,
+    onCloseImage: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val isBellaClaw = state.kind == ChatKind.BELLACLAW
@@ -55,6 +59,7 @@ fun ChatScreen(
                     stringResource(R.string.composer_hint_chat)
                 },
                 attachmentUri = state.attachmentUri,
+                attachmentRefusal = state.attachmentRefusal,
                 canSend = state.canSend,
                 onDraftChange = onDraftChange,
                 onAttach = onAttach,
@@ -71,16 +76,22 @@ fun ChatScreen(
             assistantInBubbles = isBellaClaw,
             onRetry = onRetry,
             onLoadOlder = onLoadOlder,
+            imageLoader = imageLoader,
+            onOpenImage = onOpenImage,
             modifier = Modifier.padding(padding),
         )
     }
     state.picker?.let { picker ->
         ModelPickerSheet(state = picker, events = pickerEvents)
     }
+    state.viewedImage?.let { image ->
+        ImageViewer(image = image, loader = imageLoader, onClose = onCloseImage)
+    }
 }
 
 private val noPickerEvents = ModelPickerEvents({ _, _ -> }, {}, {}, {}, {})
 private val noThumbnails = ThumbnailLoader { null }
+private val noImages = MessageImageLoader { _, _ -> null }
 
 @Preview
 @Composable
@@ -111,6 +122,9 @@ private fun BellaClawChatPreview() {
             onLoadOlder = {},
             pickerEvents = noPickerEvents,
             thumbnailLoader = noThumbnails,
+            imageLoader = noImages,
+            onOpenImage = {},
+            onCloseImage = {},
         )
     }
 }
@@ -142,6 +156,9 @@ private fun PlainChatPreview() {
             onLoadOlder = {},
             pickerEvents = noPickerEvents,
             thumbnailLoader = noThumbnails,
+            imageLoader = noImages,
+            onOpenImage = {},
+            onCloseImage = {},
         )
     }
 }

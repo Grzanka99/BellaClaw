@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -17,12 +16,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import one.scary.bellaclaw.R
 import one.scary.bellaclaw.model.Author
 import one.scary.bellaclaw.model.Message
+import one.scary.bellaclaw.model.MessageImage
 import one.scary.bellaclaw.model.SendState
 import one.scary.bellaclaw.ui.components.formatTime
 
@@ -33,6 +31,8 @@ fun MessageItem(
     message: Message,
     assistantInBubble: Boolean,
     onRetry: (String) -> Unit,
+    imageLoader: MessageImageLoader,
+    onOpenImage: (MessageImage) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val fromUser = message.author == Author.USER
@@ -63,14 +63,12 @@ fun MessageItem(
             modifier = Modifier.weight(1f, fill = false).clip(BubbleShape).then(retry),
         ) {
             Column(modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 8.dp)) {
-                val imageDescription = stringResource(R.string.image_placeholder)
-                message.images.forEach { _ ->
-                    ImagePlaceholder(
-                        modifier = Modifier
-                            .padding(bottom = 8.dp)
-                            .size(180.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .semantics { contentDescription = imageDescription },
+                message.images.forEach { image ->
+                    BubbleImage(
+                        image = image,
+                        loader = imageLoader,
+                        onOpen = { if (failed) onRetry(message.id) else onOpenImage(image) },
+                        modifier = Modifier.padding(bottom = 8.dp),
                     )
                 }
                 if (message.text.isNotEmpty()) {

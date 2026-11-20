@@ -2,6 +2,7 @@ package one.scary.bellaclaw.ui.chat
 
 import androidx.lifecycle.SavedStateHandle
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -24,6 +25,7 @@ import one.scary.bellaclaw.model.Author
 import one.scary.bellaclaw.model.BELLACLAW_CHAT_ID
 import one.scary.bellaclaw.model.ChatKind
 import one.scary.bellaclaw.model.Effort
+import one.scary.bellaclaw.model.ImageRefusal
 import one.scary.bellaclaw.model.Loadable
 import one.scary.bellaclaw.model.Message
 import one.scary.bellaclaw.model.MessageImage
@@ -32,9 +34,11 @@ import one.scary.bellaclaw.model.PlainChat
 import one.scary.bellaclaw.model.SendState
 import one.scary.bellaclaw.ui.MainDispatcherRule
 import one.scary.bellaclaw.ui.collectIn
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -87,6 +91,132 @@ class ChatViewModelTest {
         assertEquals(listOf(Author.USER, Author.ASSISTANT, Author.USER), state.messages().map { it.author })
         assertEquals(listOf(MessageImage("m1", "image/jpeg"), MessageImage(null, "image/jpeg")), state.messages()[0].images)
         assertFalse(state.isTyping)
+    }
+
+    private suspend fun takeUpload(): Pair<String?, ByteArray> =
+        checkNotNull(withContext(Dispatchers.IO) { gateway.uploads.poll(5, TimeUnit.SECONDS) }) { "no upload arrived" }
+
+    private val photo = byteArrayOf(1, 2, 3)
+
+    @Test
+    fun `an image sends without text, shows at once from the picked file, uploads, then posts with the upload's answer`() = runTest {
+        testServer.pickedImages.files["content://picked/1"] = "image/jpeg" to photo
+        val viewModel = viewModel(BELLACLAW_CHAT_ID, repository())
+        viewModel.uiState.first { it.isConversationKnown }
+
+        viewModel.onAttach("content://picked/1")
+        viewModel.uiState.first { it.attachmentUri == "content://picked/1" && it.canSend }
+        viewModel.send()
+
+        val shown = viewModel.uiState.first { it.messages().size == 1 }
+        assertEquals(listOf(MessageImage(null, "image/jpeg", "content://picked/1")), shown.messages().single().images)
+        assertNull(shown.attachmentUri)
+        val (type, bytes) = takeUpload()
+        assertEquals("image/jpeg", type)
+        assertArrayEquals(photo, bytes)
+        val body = takeSend()
+        assertEquals("", body.getValue("text").jsonPrimitive.content)
+        assertEquals("""[{"id":"media-1","mimeType":"image/jpeg"}]""", body.getValue("images").toString())
+
+        gateway.addRow(BELLA_KEY, "user", "", clientMessageId = body.clientMessageId(), imageIds = listOf("media-1"))
+        gateway.push("changed", """{"conversationKey":"$BELLA_KEY","revision":1,"rewriteRevision":0}""")
+
+        viewModel.uiState.first { it.messages().singleOrNull()?.images?.singleOrNull()?.mediaId == "media-1" }
+        // Kept from the upload, so it shows without a download.
+        assertArrayEquals(photo, viewModel.imageFile("media-1")?.readBytes())
+        assertEquals(0, gateway.downloads)
+    }
+
+    @Test
+    fun `a refused upload shows the server's text, and a retry after a failed post does not upload again`() = runTest {
+        testServer.pickedImages.files["content://picked/1"] = "image/png" to photo
+        gateway.uploadFailures.put(413 to errorAnswer("The image is over 5 MB"))
+        val viewModel = viewModel(BELLACLAW_CHAT_ID, repository())
+        viewModel.uiState.first { it.isConversationKnown }
+        viewModel.onAttach("content://picked/1")
+        viewModel.uiState.first { it.attachmentUri != null && it.canSend }
+        viewModel.send()
+
+        val failed = viewModel.uiState.first { it.messages().singleOrNull()?.sendState == SendState.FAILED }.messages().single()
+        assertEquals("The image is over 5 MB", failed.failure)
+        takeUpload()
+
+        gateway.sendFailures.put(503 to errorAnswer("Unavailable"))
+        viewModel.retry(failed.id)
+        takeUpload()
+        takeSend()
+        viewModel.uiState.first { state -> state.messages().single().let { it.sendState == SendState.FAILED && it.failure == null } }
+
+        viewModel.retry(failed.id)
+        val body = takeSend()
+        viewModel.uiState.first { it.messages().single().sendState == SendState.STORED }
+        assertEquals("""[{"id":"media-1","mimeType":"image/png"}]""", body.getValue("images").toString())
+        assertTrue(gateway.uploads.isEmpty())
+    }
+
+    @Test
+    fun `an image over 5 MB, with or without a reported size, or of a type the server does not take, is refused on the phone`() = runTest {
+        testServer.pickedImages.files["content://picked/ok"] = "image/webp" to photo
+        testServer.pickedImages.files["content://picked/big"] = "image/jpeg" to ByteArray(5 * 1024 * 1024 + 1)
+        testServer.pickedImages.files["content://picked/unsized"] = "image/jpeg" to ByteArray(5 * 1024 * 1024 + 1)
+        testServer.pickedImages.sizeUnknown += "content://picked/unsized"
+        testServer.pickedImages.files["content://picked/heic"] = "image/heic" to photo
+        val viewModel = viewModel(BELLACLAW_CHAT_ID, repository())
+        viewModel.onAttach("content://picked/ok")
+        viewModel.uiState.first { it.attachmentUri == "content://picked/ok" }
+
+        viewModel.onAttach("content://picked/big")
+
+        val tooLarge = viewModel.uiState.first { it.attachmentRefusal == ImageRefusal.TOO_LARGE }
+        assertEquals("content://picked/ok", tooLarge.attachmentUri)
+        viewModel.onAttach("content://picked/heic")
+        viewModel.uiState.first { it.attachmentRefusal == ImageRefusal.UNSUPPORTED_TYPE }
+        viewModel.onAttach("content://picked/unsized")
+        viewModel.uiState.first { it.attachmentRefusal == ImageRefusal.TOO_LARGE }
+        viewModel.onRemoveAttachment()
+        viewModel.uiState.first { it.attachmentUri == null && it.attachmentRefusal == null }
+    }
+
+    @Test
+    fun `Send waits while a picked image is checked, and comes back when the image is removed or attached`() = runTest {
+        testServer.pickedImages.files["content://picked/1"] = "image/jpeg" to photo
+        val viewModel = viewModel(BELLACLAW_CHAT_ID, repository())
+        viewModel.onDraftChange("Look")
+        viewModel.uiState.first { it.canSend }
+        val opening = CompletableDeferred<Unit>()
+        testServer.pickedImages.opening = opening
+
+        viewModel.onAttach("content://picked/1")
+
+        viewModel.uiState.first { it.isCheckingAttachment && !it.canSend }
+        viewModel.onRemoveAttachment()
+        viewModel.uiState.first { !it.isCheckingAttachment && it.canSend }
+        opening.complete(Unit)
+        viewModel.onAttach("content://picked/1")
+        viewModel.uiState.first { it.attachmentUri == "content://picked/1" && it.canSend }
+    }
+
+    @Test
+    fun `history's images download once and stay until the session ends, and a gone one stays a placeholder`() = runTest {
+        gateway.addMedia("m1", photo)
+        gateway.addRow(BELLA_KEY, "user", "Look", imageIds = listOf("m1", "m2"))
+        val store = testServer.signedInStore()
+        val viewModel = viewModel(BELLACLAW_CHAT_ID, testServer.chatRepository(store, backgroundScope))
+        viewModel.uiState.first { it.messages().size == 1 }
+
+        val file = checkNotNull(viewModel.imageFile("m1"))
+        assertArrayEquals(photo, file.readBytes())
+        assertEquals(file, viewModel.imageFile("m1"))
+        assertEquals(1, gateway.downloads)
+        assertNull(viewModel.imageFile("m2"))
+
+        store.end("t0")
+
+        withContext(Dispatchers.IO) {
+            while (file.exists()) {
+                Thread.sleep(10)
+            }
+        }
     }
 
     @Test

@@ -16,13 +16,14 @@ import okhttp3.Callback
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import one.scary.bellaclaw.data.local.SessionStore
 
 /**
  * The one client of the gateway's app API. Every request carries `X-BellaClaw-Client: app`; a POST or
- * PUT carries a JSON body with a `Content-Length`; a signed-in request also carries the session's
+ * PUT carries a body with a `Content-Length`: JSON, or an image upload's bytes; a signed-in request also carries the session's
  * bearer token, and its `401` ends the session in [sessionStore]. Redirects are not followed: a redirect answer is an API
  * error, so a body holding a password or a token never goes to another address. The read timeout covers
  * the server's longest wait (a link waits up to 60 seconds for the assistant).
@@ -41,27 +42,34 @@ class ApiClient(@PublishedApi internal val sessionStore: SessionStore) {
 
     /** POSTs [body] to [path] on [serverUrl] without a session: sign-in and link checks. */
     suspend inline fun <reified B, reified R> post(serverUrl: String, path: String, body: B): ApiResult<R> =
-        exchange("POST", serverUrl + path, bearer = null, json.encodeToString(body)) { json.decodeFromString<R>(it) }
+        exchange("POST", serverUrl + path, bearer = null, jsonBody(json.encodeToString(body))) { json.decodeFromString<R>(it.decodeToString()) }
 
     /** GETs [path] on the session's server with its token; a missing session answers as a `401` would, here and below. */
     suspend inline fun <reified R> getSignedIn(path: String): ApiResult<R> =
-        signedIn("GET", path, body = null) { json.decodeFromString<R>(it) }
+        signedIn("GET", path, body = null) { json.decodeFromString<R>(it.decodeToString()) }
+
+    /** GETs the bytes at [path] on the session's server with its token: an image. */
+    suspend fun getBytesSignedIn(path: String): ApiResult<ByteArray> = signedIn("GET", path, body = null) { it }
 
     /** POSTs [body] to [path] on the session's server with its token. */
     suspend inline fun <reified B, reified R> postSignedIn(path: String, body: B): ApiResult<R> =
-        signedIn("POST", path, json.encodeToString(body)) { json.decodeFromString<R>(it) }
+        signedIn("POST", path, jsonBody(json.encodeToString(body))) { json.decodeFromString<R>(it.decodeToString()) }
+
+    /** POSTs [bytes] of [contentType] to [path] on the session's server with its token: an image upload. */
+    suspend inline fun <reified R> postBytesSignedIn(path: String, bytes: ByteArray, contentType: String): ApiResult<R> =
+        signedIn("POST", path, bytes.toRequestBody(contentType.toMediaType())) { json.decodeFromString<R>(it.decodeToString()) }
 
     /** PUTs [body] to [path] on the session's server with its token. */
     suspend inline fun <reified B, reified R> putSignedIn(path: String, body: B): ApiResult<R> =
-        signedIn("PUT", path, json.encodeToString(body)) { json.decodeFromString<R>(it) }
+        signedIn("PUT", path, jsonBody(json.encodeToString(body))) { json.decodeFromString<R>(it.decodeToString()) }
 
     /** PUTs [body] to [path] like [putSignedIn], waiting up to [LONG_WAIT_READ_TIMEOUT_SECONDS] for the answer. */
     suspend inline fun <reified B, reified R> putSignedInLongWait(path: String, body: B): ApiResult<R> =
-        signedIn("PUT", path, json.encodeToString(body), longWait = true) { json.decodeFromString<R>(it) }
+        signedIn("PUT", path, jsonBody(json.encodeToString(body)), longWait = true) { json.decodeFromString<R>(it.decodeToString()) }
 
     /** DELETEs [path] on the session's server with its token. */
     suspend inline fun <reified R> deleteSignedIn(path: String): ApiResult<R> =
-        signedIn("DELETE", path, body = null) { json.decodeFromString<R>(it) }
+        signedIn("DELETE", path, body = null) { json.decodeFromString<R>(it.decodeToString()) }
 
     /**
      * Reads the server-sent event stream at [path] on the session's server with its token, handing each
@@ -128,9 +136,9 @@ class ApiClient(@PublishedApi internal val sessionStore: SessionStore) {
     internal suspend fun <R> signedIn(
         method: String,
         path: String,
-        body: String?,
+        body: RequestBody?,
         longWait: Boolean = false,
-        decode: (String) -> R,
+        decode: (ByteArray) -> R,
     ): ApiResult<R> {
         val session = sessionStore.session.value ?: return ApiResult.ApiError(UNAUTHORIZED, null)
         val result = exchange(method, session.serverUrl + path, session.token, body, longWait, decode)
@@ -145,13 +153,13 @@ class ApiClient(@PublishedApi internal val sessionStore: SessionStore) {
         method: String,
         url: String,
         bearer: String?,
-        body: String?,
+        body: RequestBody?,
         longWait: Boolean = false,
-        decode: (String) -> R,
+        decode: (ByteArray) -> R,
     ): ApiResult<R> {
         val builder = Request.Builder()
             .header(CLIENT_HEADER, "app")
-            .method(method, body?.toRequestBody(JSON))
+            .method(method, body)
         if (bearer != null) {
             builder.header("Authorization", "Bearer $bearer")
         }
@@ -167,20 +175,20 @@ class ApiClient(@PublishedApi internal val sessionStore: SessionStore) {
             http
         }
         val answer = execute(client.newCall(request)) ?: return ApiResult.NetworkFailure
-        val (status, text) = answer
+        val (status, bytes) = answer
         if (status !in 200..299) {
-            return ApiResult.ApiError(status, errorText(text))
+            return ApiResult.ApiError(status, errorText(bytes.decodeToString()))
         }
         return try {
-            ApiResult.Success(decode(text))
+            ApiResult.Success(decode(bytes))
         } catch (_: IllegalArgumentException) {
             // SerializationException included.
             ApiResult.ApiError(status, null)
         }
     }
 
-    /** The status and body text of the answer, or null when there was none. */
-    private suspend fun execute(call: Call): Pair<Int, String>? = suspendCancellableCoroutine { continuation ->
+    /** The status and body of the answer, or null when there was none. */
+    private suspend fun execute(call: Call): Pair<Int, ByteArray>? = suspendCancellableCoroutine { continuation ->
         continuation.invokeOnCancellation { call.cancel() }
         call.enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
@@ -189,7 +197,7 @@ class ApiClient(@PublishedApi internal val sessionStore: SessionStore) {
 
             override fun onResponse(call: Call, response: Response) {
                 val answer = try {
-                    response.use { it.code to it.body.string() }
+                    response.use { it.code to it.body.bytes() }
                 } catch (_: IOException) {
                     null
                 }
@@ -220,5 +228,8 @@ class ApiClient(@PublishedApi internal val sessionStore: SessionStore) {
         }
 
         private val JSON = "application/json; charset=utf-8".toMediaType()
+
+        @PublishedApi
+        internal fun jsonBody(text: String): RequestBody = text.toRequestBody(JSON)
     }
 }

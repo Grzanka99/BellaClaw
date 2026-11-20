@@ -23,6 +23,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import one.scary.bellaclaw.R
+import one.scary.bellaclaw.model.MessageImage
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
@@ -33,7 +34,8 @@ private const val TYPING_KEY = "typing"
  * The conversation, newest at the bottom. [rows] come newest first. [assistantInBubbles] draws
  * assistant replies in bubbles (BellaClaw); otherwise they are plain full-width text (plain chats).
  * A new bottom item scrolls into view when the reader was at the bottom; otherwise the list stays put.
- * Reaching the oldest row asks for older ones with [onLoadOlder]; a failed send retries on [onRetry].
+ * Reaching the oldest row asks for older ones with [onLoadOlder]; a failed send retries on [onRetry];
+ * a tapped image opens with [onOpenImage].
  */
 @Composable
 fun MessageList(
@@ -42,6 +44,8 @@ fun MessageList(
     assistantInBubbles: Boolean,
     onRetry: (String) -> Unit,
     onLoadOlder: () -> Unit,
+    imageLoader: MessageImageLoader,
+    onOpenImage: (MessageImage) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val listState = rememberLazyListState()
@@ -83,7 +87,7 @@ fun MessageList(
         items(rows, key = { it.key }) { row ->
             when (row) {
                 is ChatRow.Day -> DayChip(row.date)
-                is ChatRow.Item -> MessageItem(row.message, assistantInBubbles, onRetry)
+                is ChatRow.Item -> MessageItem(row.message, assistantInBubbles, onRetry, imageLoader, onOpenImage)
             }
         }
     }

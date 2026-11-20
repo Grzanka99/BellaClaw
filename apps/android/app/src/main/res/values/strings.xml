@@ -20,6 +20,8 @@
     <string name="composer_hint_bellaclaw">Message BellaClaw</string>
     <string name="composer_hint_chat">Ask anything</string>
     <string name="attached_image">Attached image</string>
+    <string name="error_image_too_large">Images can be up to 5 MB.</string>
+    <string name="error_image_type">Only JPEG, PNG, WebP and GIF images can be sent.</string>
     <string name="typing">Typing</string>
     <string name="day_today">Today</string>
     <string name="day_yesterday">Yesterday</string>

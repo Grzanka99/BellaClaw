@@ -44,9 +44,13 @@ data class HistoryBody(
     val nextAfter: Long? = null,
 )
 
-/** POST /api/conversations/{key}/messages; [model] only for a plain chat. */
+/** POST /api/conversations/{key}/messages; [model] only for a plain chat; [images] as their uploads answered. */
 @Serializable
-class SendBody(val clientMessageId: String, val text: String, val model: ModelBody? = null)
+class SendBody(val clientMessageId: String, val text: String, val model: ModelBody? = null, val images: List<MediaBody>? = null)
+
+/** The answer of POST /api/conversations/{key}/media: the uploaded image, as a send names it. */
+@Serializable
+data class MediaBody(val id: String, val mimeType: String)
 
 /** A plain chat's model for one send; [effort] in the server's lower-case names. */
 @Serializable
