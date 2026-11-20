@@ -80,6 +80,7 @@
     "packages/database": {
       "name": "@bellaclaw/database",
       "dependencies": {
+        "@bellaclaw/shared": "workspace:*",
         "drizzle-orm": "^0.45.2",
       },
       "devDependencies": {

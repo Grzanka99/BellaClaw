@@ -1,6 +1,6 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { AppLogger, EBehaviorLogLevel, type TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
-import { EEventType, messageAuthorizationsTable } from "@bellaclaw/database";
+import { EEventType, findOwnedConversation, messageAuthorizationsTable } from "@bellaclaw/database";
 import type { TOption } from "@bellaclaw/shared";
 import { createLogger, type TLogger } from "@bellaclaw/shared";
 import { eq } from "drizzle-orm";
@@ -9,6 +9,7 @@ import { DatabaseConnector, type TDatabaseHandle } from "../database";
 import { ESubscriptionMode, EventBus, type TEventContext } from "../events";
 import type { TEvent } from "../events/catalog";
 import { IdentityService } from "../identity";
+import { EMessagePlatform } from "../messaging/types";
 import {
   EAuthorizationDecision,
   EAuthorizationStatus,
@@ -194,6 +195,12 @@ export class AuthorizationService {
     ctx: TEventContext,
   ): Promise<void> {
     const { channel, replyAddress, content } = event.payload;
+
+    if (channel === EMessagePlatform.App) {
+      await this.authorizeAppMessage(event, ctx);
+      return;
+    }
+
     // NOTE: a channel message arrives under the chat key of its address, which the gate
     // authorizes; an address linked to an account resolves to the account's Bella conversation
     const chatId = event.payload.conversationKey;
@@ -267,6 +274,44 @@ export class AuthorizationService {
     }
 
     logAuthorizationDecision(event.trace, result);
+  }
+
+  // NOTE: an app message is sent by the account the dashboard verified, as its owner key, under
+  // the conversation key the app named. The session stands for the activation gate; the message
+  // passes only when the conversation belongs to that account, and is dropped alike for a
+  // conversation of another account and one that does not exist. Held like a channel message
+  // while the account is being linked
+  private async authorizeAppMessage(
+    event: TEvent<EEventType.MessageReceived>,
+    ctx: TEventContext,
+  ): Promise<void> {
+    const { conversationKey, ownerKey } = event.payload;
+
+    if (!(await IdentityService.instance.waitWhileLinking(ownerKey, event.occurredAt))) {
+      throw new Error("The link of this account did not complete in time");
+    }
+
+    const account = await IdentityService.instance.resolve(ownerKey);
+    if (account === undefined) {
+      throw new Error(`Unknown owner key ${ownerKey}`);
+    }
+
+    const owned = await ctx.complete(async (tx, emit) => {
+      if ((await findOwnedConversation(tx, conversationKey, account)) === undefined) {
+        return false;
+      }
+
+      // on the conversation's lane
+      emit(EEventType.MessageAuthorized, event.payload, undefined, conversationKey);
+      return true;
+    });
+
+    if (!owned) {
+      this.logger.warning("An app message for a conversation its account does not own is dropped");
+      return;
+    }
+
+    logMessageReceived(event.trace, EMessagePlatform.App, event.payload.content.length, []);
   }
 
   private load(): Promise<void> {

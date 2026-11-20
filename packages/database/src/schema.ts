@@ -62,7 +62,7 @@ export const memoriesTable = sqliteTable(
     id: integer("id").primaryKey({ autoIncrement: true }),
     chatId: text("chatId").notNull(),
     // the channel the message came in or went out on
-    channel: text("channel", { enum: ["signal", "discord"] }).notNull(),
+    channel: text("channel", { enum: ["signal", "discord", "app"] }).notNull(),
     author: text("author", { enum: ["system", "user", "assistant", "toolResult"] }).notNull(),
     message: text("message").notNull(),
     modelMessage: text("modelMessage"),

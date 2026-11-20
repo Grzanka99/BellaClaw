@@ -1,7 +1,9 @@
 import { randomBytes } from "node:crypto";
+import type { THistoryCursor, TOwnedConversation } from "@bellaclaw/database";
 import {
   ADDRESS_LINKED_ELSEWHERE,
   createLogger,
+  SDashboardAppMessage,
   SDashboardModelUpdate,
   type TDashboardLinkToken,
   type TOption,
@@ -22,6 +24,8 @@ import {
 import type {
   TApiError,
   TAppSessionResponse,
+  TConversationsResponse,
+  THistoryResponse,
   TLinkCheckResponse,
   TLinkConfirmRequest,
   TLinkLoginRequest,
@@ -93,6 +97,12 @@ const SLoginBody: z.ZodType<TLoginRequest> = z.object({
   token: z.string().optional(),
 });
 const SMessageId = z.coerce.number().int().positive();
+const SHistoryQuery = z
+  .object({ after: SMessageId.optional(), before: SMessageId.optional() })
+  .refine(
+    (query) => query.after === undefined || query.before === undefined,
+    "Send after or before, not both",
+  );
 
 export type TDashboardConfig = {
   // the origin of BELLACLAW_DASHBOARD_PUBLIC_URL
@@ -247,6 +257,22 @@ export function createApp({
     }
 
     return c.json<TApiError>({ error: result.error }, result.status);
+  }
+
+  // The conversation's revisions when the signed-in account owns it, by the keys the assistant
+  // names for the account; undefined for a conversation of another account or one that does not
+  // exist, alike
+  async function findConversation(
+    c: Context<TEnv>,
+    conversationKey: string,
+  ): Promise<TInternalApiResult<TOption<TOwnedConversation>>> {
+    const account = await internalApi.getAccount(c.var.account.publicId);
+
+    if ("error" in account) {
+      return account;
+    }
+
+    return { data: await reader.findConversation(conversationKey, account.data) };
   }
 
   // NOTE: an app request is served by its bearer token alone, and names no account: the account
@@ -725,6 +751,107 @@ export function createApp({
     }
 
     return c.json(buildFactGraph(await reader.listFacts(account.data.ownerKey)));
+  });
+
+  // NOTE: the conversations of the app. A conversation key from the client is used only after the
+  // registry's rule says the signed-in account owns it; any other key is answered like one that
+  // does not exist. The assistant checks a send again
+  app.get("/api/conversations", requireSession, async (c) => {
+    const account = await internalApi.getAccount(c.var.account.publicId);
+
+    if ("error" in account) {
+      return c.json<TApiError>({ error: account.error }, account.status);
+    }
+
+    const { conversationKey } = account.data;
+    const revisions = await reader.findConversation(conversationKey, account.data);
+
+    if (revisions === undefined) {
+      throw new Error("Unknown conversation");
+    }
+
+    return c.json<TConversationsResponse>({
+      conversations: [{ conversationKey, kind: "bella", ...revisions }],
+    });
+  });
+
+  app.get("/api/conversations/:conversationKey/messages", requireSession, async (c) => {
+    const query = SHistoryQuery.safeParse({
+      after: c.req.query("after"),
+      before: c.req.query("before"),
+    });
+
+    if (!query.success) {
+      return c.json(invalidBody(query.error), 400);
+    }
+
+    const conversationKey = c.req.param("conversationKey");
+    // NOTE: the revisions are read before the rows, so a change between the two reads leaves the
+    // client behind the rows it got, never ahead of them
+    const owned = await findConversation(c, conversationKey);
+
+    if ("error" in owned) {
+      return c.json<TApiError>({ error: owned.error }, owned.status);
+    }
+
+    if (owned.data === undefined) {
+      return c.json<TApiError>({ error: "Not found" }, 404);
+    }
+
+    let cursor: TOption<THistoryCursor>;
+
+    if (query.data.after !== undefined) {
+      cursor = { direction: "after", id: query.data.after };
+    } else if (query.data.before !== undefined) {
+      cursor = { direction: "before", id: query.data.before };
+    }
+
+    // one row more than a page tells whether another page follows
+    const messages = await reader.listHistory(conversationKey, cursor, MESSAGES_PAGE_SIZE + 1);
+    const response: THistoryResponse = { ...owned.data, messages };
+
+    if (messages.length > MESSAGES_PAGE_SIZE) {
+      if (cursor?.direction === "after") {
+        response.messages = messages.slice(0, MESSAGES_PAGE_SIZE);
+        response.nextAfter = response.messages.at(-1)?.id;
+      } else {
+        response.messages = messages.slice(1);
+        response.nextBefore = response.messages[0]?.id;
+      }
+    }
+
+    return c.json(response);
+  });
+
+  app.post("/api/conversations/:conversationKey/messages", requireSession, async (c) => {
+    const conversationKey = c.req.param("conversationKey");
+    const owned = await findConversation(c, conversationKey);
+
+    if ("error" in owned) {
+      return c.json<TApiError>({ error: owned.error }, owned.status);
+    }
+
+    if (owned.data === undefined) {
+      return c.json<TApiError>({ error: "Not found" }, 404);
+    }
+
+    const body = await parseBody(c.req.raw, SDashboardAppMessage);
+
+    if (!body.success) {
+      return c.json(invalidBody(body.error), 400);
+    }
+
+    const result = await internalApi.sendMessage(
+      c.var.account.publicId,
+      conversationKey,
+      body.data,
+    );
+
+    if ("error" in result) {
+      return c.json<TApiError>({ error: result.error }, result.status);
+    }
+
+    return c.json(result.data);
   });
 
   app.get("/api/model", requireSession, async (c) => {

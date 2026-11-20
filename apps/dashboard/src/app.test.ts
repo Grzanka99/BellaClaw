@@ -3,10 +3,14 @@ import { expect, setSystemTime, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { conversationsTable, MIGRATIONS_FOLDER, memoriesTable } from "@bellaclaw/database";
 import { createDashboardLinkToken } from "@bellaclaw/shared";
+import { drizzle } from "drizzle-orm/libsql";
+import { migrate } from "drizzle-orm/libsql/migrator";
 import { ACCOUNT_HEADER } from "./account-header";
 import { AccountStore } from "./account-store";
 import { CLIENT_HEADER, createApp } from "./app";
+import { createChatReader, type TChatReader } from "./chat-reader";
 import { createFakeAssistant } from "./test-utils";
 
 const ORIGIN = "https://dashboard.test";
@@ -14,15 +18,15 @@ const SECRET = "test-secret";
 const PASSWORD = "correct horse battery";
 
 // an app on a store at path, in memory by default, and a fake assistant; reads collects the keys
-// the reader got
-function createTestApp(path = ":memory:") {
+// the fake reader got. reader: a real one instead
+function createTestApp(path = ":memory:", reader?: TChatReader) {
   const reads: string[] = [];
   const assistant = createFakeAssistant();
   const store = new AccountStore(path);
   const app = createApp({
     config: { publicOrigin: ORIGIN, secret: SECRET },
     store,
-    reader: {
+    reader: reader ?? {
       listMessages: async (conversationKey) => {
         reads.push(conversationKey);
 
@@ -33,6 +37,8 @@ function createTestApp(path = ":memory:") {
 
         return [];
       },
+      findConversation: async () => undefined,
+      listHistory: async () => [],
     },
     internalApi: assistant.internalApi,
     serveClient: async () => new Response("client"),
@@ -858,4 +864,244 @@ test("every account route serves the bearer token without Origin, for its own ac
   });
   expect(noOrigin.status).toBe(403);
   expect((await send("PUT", "/api/model", {}, alice.cookie)).status).not.toBe(403);
+});
+
+// the assistant's database in a temporary file, migrated, with the reader the dashboard uses on it
+async function createAssistantDatabase() {
+  const dir = await mkdtemp(join(tmpdir(), "bellaclaw-dashboard-history-"));
+  const url = `file:${join(dir, "assistant.db")}`;
+  const db = drizzle({ connection: { url } });
+  await migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
+
+  // rows as the assistant writes them; createdAt: epoch ms
+  function insertRow(
+    chatId: string,
+    author: "user" | "assistant",
+    kind: "message" | "tool" | "display",
+    message: string,
+    clientMessageId?: string,
+  ) {
+    return db
+      .insert(memoriesTable)
+      .values({
+        chatId,
+        channel: "app",
+        author,
+        kind,
+        message,
+        createdAt: new Date(1_000),
+        clientMessageId,
+      })
+      .returning({ id: memoriesTable.id })
+      .get();
+  }
+
+  function setRevision(
+    conversationKey: string,
+    ownerKey: string,
+    revision: number,
+    rewriteRevision: number,
+  ) {
+    return db
+      .insert(conversationsTable)
+      .values({ conversationKey, ownerKey, revision, rewriteRevision })
+      .onConflictDoUpdate({
+        target: conversationsTable.conversationKey,
+        set: { revision, rewriteRevision },
+      });
+  }
+
+  return {
+    reader: createChatReader(url, ""),
+    insertRow,
+    setRevision,
+    remove: () => rm(dir, { recursive: true, force: true }),
+  };
+}
+
+// registers an app account with the activation code; its bearer token and public id
+async function registerApp(
+  sendApp: ReturnType<typeof createTestApp>["sendApp"],
+  store: AccountStore,
+  username: string,
+) {
+  const response = await sendApp("POST", "/api/register", {
+    username,
+    password: PASSWORD,
+    activationCode: "open-sesame",
+  });
+  expect(response.status).toBe(200);
+  const body = await response.json();
+
+  return { token: String(body.token), publicId: String(store.findCredentials(username)?.publicId) };
+}
+
+test("an app account with no chat lists its Bella conversation, sends, and reads its history by cursor with the revisions", async () => {
+  const database = await createAssistantDatabase();
+
+  try {
+    const { sendApp, assistant, store } = createTestApp(":memory:", database.reader);
+    const alice = await registerApp(sendApp, store, "alice");
+    const conversationKey = `bella:${alice.publicId}`;
+    const path = `/api/conversations/${encodeURIComponent(conversationKey)}/messages`;
+
+    // before its first message the conversation is listed, empty, at revision 0
+    const list = await sendApp("GET", "/api/conversations", undefined, alice.token);
+    expect(await list.json()).toEqual({
+      conversations: [{ conversationKey, kind: "bella", revision: 0, rewriteRevision: 0 }],
+    });
+    expect(await (await sendApp("GET", path, undefined, alice.token)).json()).toEqual({
+      revision: 0,
+      rewriteRevision: 0,
+      messages: [],
+    });
+
+    // the same message twice: forwarded with the client's id, answered the same
+    const message = { clientMessageId: "m-1", text: "Hello" };
+    const first = await sendApp("POST", path, message, alice.token);
+    const second = await sendApp("POST", path, message, alice.token);
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(await first.json()).toEqual({ clientMessageId: "m-1" });
+    expect(await second.json()).toEqual({ clientMessageId: "m-1" });
+    expect(assistant.sends).toEqual([
+      { accountId: alice.publicId, conversationKey, message },
+      { accountId: alice.publicId, conversationKey, message },
+    ]);
+
+    // the assistant stores the turn and its reply, and raises the revision
+    const user = await database.insertRow(conversationKey, "user", "message", "Hello", "m-1");
+    await database.insertRow(conversationKey, "assistant", "tool", "a tool call");
+    const reply = await database.insertRow(conversationKey, "assistant", "message", "Hi");
+    await database.setRevision(conversationKey, `account:${alice.publicId}`, 2, 0);
+
+    const history = await sendApp("GET", path, undefined, alice.token);
+    expect(await history.json()).toEqual({
+      revision: 2,
+      rewriteRevision: 0,
+      messages: [
+        {
+          id: user.id,
+          author: "user",
+          kind: "message",
+          channel: "app",
+          text: "Hello",
+          createdAt: 1_000,
+          clientMessageId: "m-1",
+        },
+        {
+          id: reply.id,
+          author: "assistant",
+          kind: "message",
+          channel: "app",
+          text: "Hi",
+          createdAt: 1_000,
+        },
+      ],
+    });
+
+    // a command and its reply are display rows; a fetch by cursor returns only the missing rows
+    const command = await database.insertRow(conversationKey, "user", "display", "!help", "m-2");
+    const answer = await database.insertRow(conversationKey, "assistant", "display", "Commands");
+    await database.setRevision(conversationKey, `account:${alice.publicId}`, 3, 0);
+    const appended = await (
+      await sendApp("GET", `${path}?after=${reply.id}`, undefined, alice.token)
+    ).json();
+    expect(appended.revision).toBe(3);
+    expect(appended.rewriteRevision).toBe(0);
+    expect(
+      appended.messages.map((row: { id: number; kind: string }) => [row.id, row.kind]),
+    ).toEqual([
+      [command.id, "display"],
+      [answer.id, "display"],
+    ]);
+
+    const both = await sendApp("GET", `${path}?after=1&before=9`, undefined, alice.token);
+    expect(both.status).toBe(400);
+  } finally {
+    await database.remove();
+  }
+});
+
+test("history pages older rows by before and newer rows by after", async () => {
+  const database = await createAssistantDatabase();
+
+  try {
+    const { sendApp, store } = createTestApp(":memory:", database.reader);
+    const alice = await registerApp(sendApp, store, "alice");
+    const conversationKey = `bella:${alice.publicId}`;
+    const path = `/api/conversations/${encodeURIComponent(conversationKey)}/messages`;
+    const ids: number[] = [];
+
+    for (let index = 0; index < 52; index++) {
+      ids.push((await database.insertRow(conversationKey, "user", "message", `m${index}`)).id);
+    }
+
+    await database.setRevision(conversationKey, `account:${alice.publicId}`, 52, 0);
+    const idsOf = (body: { messages: { id: number }[] }) => body.messages.map((row) => row.id);
+
+    const newest = await (await sendApp("GET", path, undefined, alice.token)).json();
+    expect(idsOf(newest)).toEqual(ids.slice(2));
+    expect(newest.nextBefore).toBe(ids[2]);
+
+    const older = await (
+      await sendApp("GET", `${path}?before=${newest.nextBefore}`, undefined, alice.token)
+    ).json();
+    expect(idsOf(older)).toEqual(ids.slice(0, 2));
+    expect(older.nextBefore).toBeUndefined();
+
+    const after = await (
+      await sendApp("GET", `${path}?after=${ids[0]}`, undefined, alice.token)
+    ).json();
+    expect(idsOf(after)).toEqual(ids.slice(1, 51));
+    expect(after.nextAfter).toBe(ids[50]);
+  } finally {
+    await database.remove();
+  }
+});
+
+test("another account's conversation is answered like one that does not exist, for reading and sending", async () => {
+  const database = await createAssistantDatabase();
+
+  try {
+    const { sendApp, assistant, store } = createTestApp(":memory:", database.reader);
+    const alice = await registerApp(sendApp, store, "alice");
+    const bob = await registerApp(sendApp, store, "bob");
+    const aliceConversation = `bella:${alice.publicId}`;
+    await database.insertRow(aliceConversation, "user", "message", "secret");
+    await database.setRevision(aliceConversation, `account:${alice.publicId}`, 1, 0);
+    // an unlinked Signal chat owns itself
+    await database.insertRow("signal:+100", "user", "message", "other secret");
+    await database.setRevision("signal:+100", "signal:+100", 1, 0);
+    const message = { clientMessageId: "m-1", text: "Hello" };
+    const answers: [number, unknown][] = [];
+
+    for (const conversationKey of [aliceConversation, "signal:+100", "bella:nobody"]) {
+      const path = `/api/conversations/${encodeURIComponent(conversationKey)}/messages`;
+
+      for (const response of [
+        await sendApp("GET", path, undefined, bob.token),
+        await sendApp("GET", `${path}?after=1`, undefined, bob.token),
+        await sendApp("POST", path, message, bob.token),
+      ]) {
+        answers.push([response.status, await response.json()]);
+      }
+    }
+
+    expect(answers).toEqual(Array(9).fill([404, { error: "Not found" }]));
+    expect(assistant.sends).toEqual([]);
+
+    // the list names only the account's own conversation
+    const list = await (await sendApp("GET", "/api/conversations", undefined, bob.token)).json();
+    expect(
+      list.conversations.map((row: { conversationKey: string }) => row.conversationKey),
+    ).toEqual([`bella:${bob.publicId}`]);
+
+    // no session, no conversation
+    const path = `/api/conversations/${encodeURIComponent(aliceConversation)}/messages`;
+    expect((await sendApp("GET", path, undefined, "not-a-session")).status).toBe(401);
+    expect((await sendApp("POST", path, message, "not-a-session")).status).toBe(401);
+  } finally {
+    await database.remove();
+  }
 });

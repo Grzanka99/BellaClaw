@@ -1,9 +1,11 @@
 import type { TOption } from "@bellaclaw/shared";
 import { z } from "zod";
 
+// app: the BellaClaw app, a destination with nothing to send: its transcript row is the delivery
 export enum EMessagePlatform {
   Discord = "discord",
   Signal = "signal",
+  App = "app",
 }
 
 // NOTE: a pointer to a file the chat platform keeps; the bytes are never stored or put on events.

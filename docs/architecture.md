@@ -34,14 +34,19 @@ Services talk through one durable event log in SQLite; see the
 Requesters are conversation tools, slash commands, scheduling and the internal API the dashboard calls; command owners are cron, automations, memory, settings, calendar, conversation, mcp-auth and ai-auth. Reads from the allow-list (settings and authorization caches, read tools, drivers) are direct calls and are not drawn.
 
 1. A Discord or Signal transport publishes `message.received` with a dedupe key per platform
-   message.
-2. Authorization decides activation and lockout, then publishes `message.authorized`.
+   message. The internal API publishes a message of the app as `message.received` with channel
+   `app`, keyed by its conversation, with the app's message id as the dedupe key.
+2. Authorization decides activation and lockout, then publishes `message.authorized`. An app
+   message skips the activation gate and passes only when the conversation belongs to the account
+   the dashboard verified.
 3. Commands answers a `!command` with `reply.ready`, or publishes `turn.requested`.
 4. Conversation runs the turn on the chat's lane: it saves the user message with a `turn.started`
    checkpoint, runs Main with the structured replay, and commits the turn with `reply.ready` and
    `turn.completed`. Tool writes go out as commands to their owning service. Compaction runs after
    the reply is committed, and the chat's next turn starts only after it finishes.
-5. Outbound sends the reply and records `message.sent`. From it Conversation stores a command with
+5. Outbound sends the reply and records `message.sent`; for the app it has nothing to send and
+   records it at once. A reminder or notice of an account with no linked chat goes to the app too.
+   From it Conversation stores a command with
    its reply, a notice or a failure reply as display-only rows, shown in history and never
    replayed to the model; a confidential reply, such as a login link, is not stored. Every
    transcript change emits `conversation.changed` with the conversation's new revision and the

@@ -1,8 +1,16 @@
 // The JSON shapes of the dashboard's HTTP API, for the browser. Types only: import with
 // `import type`, so no server code reaches the client bundle.
+import type { THistoryMessage } from "@bellaclaw/database";
 import type { TDashboardLinkState, TDashboardMessageDeleted } from "@bellaclaw/shared";
 
+// a row the app shows: a message, or a display row (a command with its reply, a notice, a failure
+// reply). channel: where it came in or went out; clientMessageId: the id the app gave a message it
+// sent; createdAt: epoch ms
+export type { THistoryMessage } from "@bellaclaw/database";
+// POST /api/conversations/:conversationKey/messages body and answer
 export type {
+  TDashboardAppMessage,
+  TDashboardAppMessageAccepted,
   TDashboardModelState,
   TDashboardModelUpdate,
   TDashboardReasoningEffort,
@@ -67,6 +75,31 @@ export type TMessagesResponse = { messages: TChatMessage[]; nextBefore?: number 
 
 // DELETE /api/messages/:messageId answer
 export type TMessageDeletedResponse = TDashboardMessageDeleted;
+
+// revision: raised on every change of the conversation's transcript; rewriteRevision: the revision
+// of its latest change that was not an append. A client synced at or above rewriteRevision fetches
+// the rows after its newest by cursor; one below it reloads
+export type TConversationRevision = { revision: number; rewriteRevision: number };
+
+// kind bella: the account's Bella conversation
+export type TConversationSummary = TConversationRevision & {
+  conversationKey: string;
+  kind: "bella";
+};
+
+// GET /api/conversations answer: the account's conversations
+export type TConversationsResponse = { conversations: TConversationSummary[] };
+
+// GET /api/conversations/:conversationKey/messages answer, oldest first: the newest rows, the rows
+// below `before`, or the rows above `after`. nextBefore: the `before` of the older page, when one
+// exists; nextAfter: the `after` of the next newer page, when the rows above `after` fill more
+// than one page. The revisions are read before the rows, so rows may be newer than them, never
+// older
+export type THistoryResponse = TConversationRevision & {
+  messages: THistoryMessage[];
+  nextBefore?: number;
+  nextAfter?: number;
+};
 
 // createdAt: epoch ms
 export type TFactNode = { id: number; text: string; createdAt: number };

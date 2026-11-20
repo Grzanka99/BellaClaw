@@ -116,7 +116,9 @@ bus.subscribe({
 - `authorization` → `identity`: a message held while its address or its account is being linked.
   It waits on Identity's read model (`waitWhileLinking`), bounded from the message's arrival
 - `internal-api` → `settings`, `conversation`, `identity`. An HTTP request is on no lane: it publishes the
-  command and awaits the outcome through live subscriptions.
+  command and awaits the outcome through live subscriptions. An app send publishes
+  `message.received` (channel `app`, the client's message id as the dedupe key) and waits for
+  nothing.
 
 A new wait is a new edge there; the test fails on a cycle.
 
@@ -152,6 +154,12 @@ and emits `conversation.changed` with it, in the same transaction. A change that
 carries it: a client synced at or above it fetches by cursor, below it reloads. Conversation writes the rows
 of a sent reply, notice or delivery from `message.sent`; a reply with neither `transcript` nor
 `display` is not stored, which keeps a confidential one out of history.
+
+The app is a channel with nothing to send: Outbound reports `message.sent` at once, so the
+transcript row is the delivery. Who owns a conversation is one rule, `findOwnedConversation` in
+`@bellaclaw/database`: the registry's owner, or, before its first row, the account whose Bella
+conversation it is. The dashboard's reads, the internal API's send and Authorization's gate for an
+app message all use it.
 
 ## Adding a fact or command
 

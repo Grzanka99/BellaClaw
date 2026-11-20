@@ -1,4 +1,12 @@
-import { factsTable, memoriesTable } from "@bellaclaw/database";
+import {
+  factsTable,
+  findOwnedConversation,
+  listHistory,
+  memoriesTable,
+  type THistoryCursor,
+  type THistoryMessage,
+  type TOwnedConversation,
+} from "@bellaclaw/database";
 import type { TOption } from "@bellaclaw/shared";
 import { and, desc, eq, inArray, isNull, lt } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/libsql";
@@ -14,6 +22,18 @@ export type TChatReader = {
   ): Promise<TChatMessage[]>;
   // the owner's live facts
   listFacts(ownerKey: string): Promise<TFact[]>;
+  // the conversation's revisions when it belongs to the account, by the rule the assistant
+  // checks too. account: the keys the assistant names for the account
+  findConversation(
+    conversationKey: string,
+    account: { conversationKey: string; ownerKey: string },
+  ): Promise<TOption<TOwnedConversation>>;
+  // what the app shows of a conversation, oldest first
+  listHistory(
+    conversationKey: string,
+    cursor: TOption<THistoryCursor>,
+    limit: number,
+  ): Promise<THistoryMessage[]>;
 };
 
 // NOTE: the assistant's database. The dashboard only reads it; writes go through the internal API.
@@ -59,6 +79,12 @@ export function createChatReader(url: string, authToken: string): TChatReader {
 
       return messages;
     },
+
+    findConversation: (conversationKey, account) =>
+      findOwnedConversation(db, conversationKey, account),
+
+    listHistory: (conversationKey, cursor, limit) =>
+      listHistory(db, conversationKey, cursor, limit),
 
     async listFacts(ownerKey) {
       const rows = await db

@@ -6,7 +6,7 @@ import { DatabaseConnector } from "../database";
 import { ESubscriptionMode, EventBus } from "../events";
 import { ERejectionCode, type TIdentityLinkKeys } from "../events/catalog";
 import { createCanonicalChatKey, parseCanonicalChatKey } from "../messaging/chat-key";
-import type { EMessagePlatform } from "../messaging/types";
+import { EMessagePlatform } from "../messaging/types";
 import {
   EIdentityLinkOwner,
   EIdentityLinkState,
@@ -225,7 +225,8 @@ export class IdentityService {
 
   // NOTE: the one place that builds and reads account keys and turns a chat key into an address.
   // key: an account's owner key or Bella conversation key, or a chat key. An address with an
-  // active link means the account's Bella conversation; any other chat key means its own chat
+  // active link means the account's Bella conversation; any other chat key means its own chat.
+  // An account's destination is its oldest active link, else the link being made, else the app
   public async resolve(key: string): Promise<TOption<TResolvedChat>> {
     await this.load();
     let accountId: TOption<string>;
@@ -261,14 +262,18 @@ export class IdentityService {
         return this.addressKey(left).localeCompare(this.addressKey(right));
       })[0];
 
-      if (first === undefined) {
-        return undefined;
+      // NOTE: an account with no link has no main channel yet: its messages go to the app, where
+      // the transcript row is the delivery
+      let destination: TChatAddress = { channel: EMessagePlatform.App, address: accountId };
+
+      if (first !== undefined) {
+        destination = { channel: first.channel, address: first.address };
       }
 
       return {
         conversationKey: `${BELLA_CONVERSATION_PREFIX}${accountId}`,
         ownerKey: `${ACCOUNT_OWNER_PREFIX}${accountId}`,
-        destination: { channel: first.channel, address: first.address },
+        destination,
       };
     }
 

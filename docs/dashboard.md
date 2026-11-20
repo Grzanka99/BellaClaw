@@ -106,6 +106,29 @@ Ways in:
   `POST /api/register` and `token`, or is linked with `POST /api/login` and `token`, or with
   `POST /api/link` when signed in.
 
+Conversations:
+
+- `GET /api/conversations`: the account's Bella conversation:
+  `conversationKey`, `kind: "bella"`, `revision` and `rewriteRevision`. An account with no message
+  yet has revision 0.
+- `GET /api/conversations/:conversationKey/messages`: the rows the app shows, oldest first, with
+  `revision` and `rewriteRevision`. Messages and display rows (commands and their replies,
+  notices, failure replies), never tool rows; each has `id`, `author`, `kind`, `channel`, `text`,
+  `createdAt` and the app's `clientMessageId`. Without a cursor, the newest 50 rows; `before=<id>`
+  pages older rows, `nextBefore` names the next older page; `after=<id>` returns the rows after the
+  newest one the app has, `nextAfter` names the next page. A client synced at or above
+  `rewriteRevision` fetches with `after`; below it, a delete or a merged history changed rows it
+  shows, and it reloads.
+- `POST /api/conversations/:conversationKey/messages` with `clientMessageId` and `text`: answers
+  `{ clientMessageId }` once the assistant stored the message, before the reply. A repeated send
+  with the same id is the same message and is answered the same, for as long as the assistant
+  keeps the message's event: 30 days. A client that still holds a pending send after that looks
+  for its `clientMessageId` in history before sending again. The reply appears in history.
+
+A conversation of another account answers `404 { "error": "Not found" }`, exactly like one that
+does not exist. The dashboard checks ownership in the assistant's conversation registry
+(`findOwnedConversation` in `@bellaclaw/database`); the assistant checks it again on a send.
+
 ## Tabs
 
 | Tab | Action |
@@ -144,8 +167,8 @@ Not exposed:
   is only on the Compose network. Outside Compose it binds `127.0.0.1`.
 - The log viewer.
 
-The dashboard reads message history and facts directly from the assistant's libSQL/Turso database
-and never writes to it. Every change goes through the internal listener, which has a few fixed
+The dashboard reads message history, the conversation registry and facts directly from the
+assistant's libSQL/Turso database and never writes to it. Every change goes through the internal listener, which has a few fixed
 endpoints and requires `Authorization: Bearer BELLACLAW_DASHBOARD_SECRET`.
 
 The secret also signs link tokens. Anyone who has it can create links for any chat and call the

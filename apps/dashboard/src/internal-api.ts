@@ -2,12 +2,14 @@ import {
   createLogger,
   DASHBOARD_ACTIVATION_CHECK_PATH,
   DASHBOARD_LINKS_PATH,
+  dashboardAccountConversationMessagesPath,
   dashboardAccountMessagePath,
   dashboardAccountModelPath,
   dashboardAccountPath,
   dashboardChatLinkPath,
   SDashboardAccount,
   SDashboardActivationCheck,
+  SDashboardAppMessageAccepted,
   SDashboardChatLink,
   SDashboardError,
   SDashboardLinkStarted,
@@ -16,6 +18,8 @@ import {
   type TDashboardAccount,
   type TDashboardActivationCheck,
   type TDashboardActivationCheckRequest,
+  type TDashboardAppMessage,
+  type TDashboardAppMessageAccepted,
   type TDashboardChatLink,
   type TDashboardLinkRequest,
   type TDashboardLinkStarted,
@@ -34,10 +38,11 @@ const UNAVAILABLE = "The assistant is unavailable";
 const logger = createLogger("INTERNAL-API");
 
 // status 400 carries the assistant's own error, and code the stable code of a rejected
-// command; 502 is an unreachable or broken assistant
+// command; 404 is a conversation the account does not own; 502 is an unreachable or broken
+// assistant
 export type TInternalApiResult<T> =
   | { data: T }
-  | { error: string; status: 400 | 502; code?: string };
+  | { error: string; status: 400 | 404 | 502; code?: string };
 
 // accountId: an account's public id; chatKey: an address, as a link token carries it
 export type TInternalApi = {
@@ -58,6 +63,12 @@ export type TInternalApi = {
     accountId: string,
     messageId: number,
   ): Promise<TInternalApiResult<TDashboardMessageDeleted>>;
+  // answers once the message is stored, before its turn runs
+  sendMessage(
+    accountId: string,
+    conversationKey: string,
+    message: TDashboardAppMessage,
+  ): Promise<TInternalApiResult<TDashboardAppMessageAccepted>>;
 };
 
 // The assistant's internal API. baseUrl has no trailing slash.
@@ -66,7 +77,12 @@ export function createInternalApi(baseUrl: string, secret: string): TInternalApi
     method: string,
     path: string,
     schema: z.ZodType<T>,
-    body: TOption<TDashboardModelUpdate | TDashboardLinkRequest | TDashboardActivationCheckRequest>,
+    body: TOption<
+      | TDashboardModelUpdate
+      | TDashboardLinkRequest
+      | TDashboardActivationCheckRequest
+      | TDashboardAppMessage
+    >,
   ): Promise<TInternalApiResult<T>> {
     let status: number;
     let payload: unknown;
@@ -94,7 +110,7 @@ export function createInternalApi(baseUrl: string, secret: string): TInternalApi
       }
     }
 
-    if (status === 400) {
+    if (status === 400 || status === 404) {
       const failure = SDashboardError.safeParse(payload);
 
       if (failure.success) {
@@ -126,6 +142,13 @@ export function createInternalApi(baseUrl: string, secret: string): TInternalApi
         dashboardAccountMessagePath(accountId, messageId),
         SDashboardMessageDeleted,
         undefined,
+      ),
+    sendMessage: (accountId, conversationKey, message) =>
+      call(
+        "POST",
+        dashboardAccountConversationMessagesPath(accountId, conversationKey),
+        SDashboardAppMessageAccepted,
+        message,
       ),
   };
 }

@@ -6,7 +6,7 @@ import { startSpan } from "../app-logger/span";
 import { ESubscriptionMode, EventBus, type TEventContext } from "../events";
 import type { TDeliveryTranscript, TDisplay, TEvent } from "../events/catalog";
 import { IdentityService, type TChatAddress } from "../identity";
-import type { EMessagePlatform, TAttachmentRef, TMessageTransport } from "./types";
+import { EMessagePlatform, type TAttachmentRef, type TMessageTransport } from "./types";
 
 export class MessagingAdapter {
   private static _instance: TOption<MessagingAdapter>;
@@ -118,11 +118,15 @@ export class MessagingAdapter {
       throw new Error("Unknown chat platform");
     }
 
-    // retried with the outbound backoff until the transport registers
-    const transport = this.transport(destination.channel);
-    const failure = await this.sendText(transport, destination.address, text, event.trace);
-    if (failure !== undefined) {
-      throw new Error(failure);
+    // NOTE: the app has nothing to send: the transcript row that message.sent writes is the
+    // delivery. Any other channel is retried with the outbound backoff until its transport
+    // registers
+    if (destination.channel !== EMessagePlatform.App) {
+      const transport = this.transport(destination.channel);
+      const failure = await this.sendText(transport, destination.address, text, event.trace);
+      if (failure !== undefined) {
+        throw new Error(failure);
+      }
     }
 
     await ctx.complete(async (_tx, emit) => {

@@ -128,6 +128,24 @@ export const SDashboardMessageDeleted = z.object({ deletedMessageIds: z.array(z.
 
 export type TDashboardMessageDeleted = z.infer<typeof SDashboardMessageDeleted>;
 
+// POST /internal/accounts/:accountId/conversations/:conversationKey/messages body: a message the
+// app sends. clientMessageId: the app's id of the message; a second send with the same id in the
+// same conversation is the same message
+export const SDashboardAppMessage = z
+  .object({
+    clientMessageId: z.string().min(1).max(128),
+    text: z.string().refine((text) => text.trim().length > 0, "The message is empty"),
+  })
+  .strict();
+
+export type TDashboardAppMessage = z.infer<typeof SDashboardAppMessage>;
+
+// POST /internal/accounts/:accountId/conversations/:conversationKey/messages response: the message
+// is stored and its turn will run
+export const SDashboardAppMessageAccepted = z.object({ clientMessageId: z.string() });
+
+export type TDashboardAppMessageAccepted = z.infer<typeof SDashboardAppMessageAccepted>;
+
 // the rejection code of a link request for an address another account owns
 export const ADDRESS_LINKED_ELSEWHERE = "address-linked-elsewhere";
 
@@ -169,7 +187,8 @@ export const SDashboardAccount = z.object({
 export type TDashboardAccount = z.infer<typeof SDashboardAccount>;
 
 // body of a 400 (invalid input or rejected command), 401 (bad or missing bearer) or 404 (unknown
-// route). code: the stable error code of a rejected command that has one
+// route, or a conversation the account does not own). code: the stable error code of a rejected
+// command that has one
 export const SDashboardError = z.object({ error: z.string(), code: z.string().optional() });
 
 export type TDashboardError = z.infer<typeof SDashboardError>;
@@ -205,4 +224,11 @@ export function dashboardAccountModelPath(accountId: string): string {
 
 export function dashboardAccountMessagePath(accountId: string, messageId: number): string {
   return `${dashboardAccountPath(accountId)}/messages/${messageId}`;
+}
+
+export function dashboardAccountConversationMessagesPath(
+  accountId: string,
+  conversationKey: string,
+): string {
+  return `${dashboardAccountPath(accountId)}/conversations/${encodeURIComponent(conversationKey)}/messages`;
 }

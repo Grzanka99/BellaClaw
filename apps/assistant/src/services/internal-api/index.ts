@@ -1,18 +1,25 @@
 import { createHash, timingSafeEqual } from "node:crypto";
-import { createSystemTurnId, type TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
-import { EEventType } from "@bellaclaw/database";
+import {
+  createMessageTurnId,
+  createSystemTurnId,
+  type TBehaviorTraceContext,
+} from "@bellaclaw/behavior-logs";
+import { EEventType, findOwnedConversation } from "@bellaclaw/database";
 import {
   DASHBOARD_ACTIVATION_CHECK_PATH,
   DASHBOARD_LINKS_PATH,
+  dashboardAccountConversationMessagesPath,
   dashboardAccountMessagePath,
   dashboardAccountModelPath,
   dashboardAccountPath,
   dashboardChatLinkPath,
   SDashboardActivationCheckRequest,
+  SDashboardAppMessage,
   SDashboardLinkRequest,
   SDashboardModelUpdate,
   type TDashboardAccount,
   type TDashboardActivationCheck,
+  type TDashboardAppMessageAccepted,
   type TDashboardChatLink,
   type TDashboardError,
   type TDashboardLinkStarted,
@@ -38,10 +45,12 @@ import {
 import { EAiProvider, EModelPurpose, SAiProvider } from "../ai/types";
 import { sanitizeErrorMessage } from "../app-logger/sanitizers";
 import { AuthorizationService } from "../authorization";
+import { DatabaseConnector } from "../database";
 import { CommandRejectedError, ESubscriptionMode, EventBus } from "../events";
 import type { TEventPayloads } from "../events/catalog";
 import { IdentityService, type TAccountKeys } from "../identity";
 import { parseCanonicalChatKey } from "../messaging/chat-key";
+import { EMessagePlatform } from "../messaging/types";
 import { SettingsService, type TConfigUpdate } from "../settings";
 import { EConfigKey, type TConfigRecord } from "../settings/schema";
 
@@ -257,13 +266,16 @@ export async function handleInternalApiRequest(
   // ["", "internal", "activation-code", "check"], ["", "internal", "links"],
   // ["", "internal", "links", chatKey],
   // ["", "internal", "accounts", accountId], ["", "internal", "accounts", accountId, "model"] or
-  // ["", "internal", "accounts", accountId, "messages", messageId]
+  // ["", "internal", "accounts", accountId, "messages", messageId] or
+  // ["", "internal", "accounts", accountId, "conversations", conversationKey, "messages"]
   const segments = pathname.split("/");
   const messageId = Number(segments[5]);
   let key = "";
+  let conversationKey = "";
 
   try {
     key = decodeURIComponent(segments[3] ?? "");
+    conversationKey = decodeURIComponent(segments[5] ?? "");
   } catch {
     // a malformed escape is an unknown route
   }
@@ -283,6 +295,11 @@ export async function handleInternalApiRequest(
     key.length > 0 &&
     Number.isSafeInteger(messageId) &&
     pathname === dashboardAccountMessagePath(key, messageId);
+  const appMessageRoute =
+    request.method === "POST" &&
+    key.length > 0 &&
+    conversationKey.length > 0 &&
+    pathname === dashboardAccountConversationMessagesPath(key, conversationKey);
 
   if (
     !activationRoute &&
@@ -290,7 +307,8 @@ export async function handleInternalApiRequest(
     !chatLinkRoute &&
     !accountRoute &&
     !modelRoute &&
-    !messageDeleteRoute
+    !messageDeleteRoute &&
+    !appMessageRoute
   ) {
     return errorResponse("Not found", 404, undefined);
   }
@@ -343,6 +361,53 @@ export async function handleInternalApiRequest(
           linkedAt: link.linkedAt.getTime(),
         })),
       };
+
+      return Response.json(body);
+    }
+
+    // NOTE: the send answers once message.received is stored and waits for no outcome. The client's
+    // id is the dedupe key, so a repeated send stores nothing and answers the same. Authorization
+    // checks the ownership again before the message reaches a turn
+    if (appMessageRoute) {
+      const owned = await DatabaseConnector.instance.run((db) =>
+        findOwnedConversation(db, conversationKey, account),
+      );
+
+      if (owned === undefined) {
+        return errorResponse("Not found", 404, undefined);
+      }
+
+      const message = SDashboardAppMessage.safeParse(await request.json());
+
+      if (!message.success) {
+        throw new Error(message.error.issues[0]?.message ?? "Invalid message");
+      }
+
+      const { clientMessageId, text } = message.data;
+      await EventBus.instance.publish({
+        type: EEventType.MessageReceived,
+        source: "internal-api",
+        key: conversationKey,
+        trace: {
+          turnId: createMessageTurnId(),
+          chatId: conversationKey,
+          platform: EMessagePlatform.App,
+        },
+        // the app has no address; the account stands for it
+        payload: {
+          conversationKey,
+          ownerKey: account.ownerKey,
+          channel: EMessagePlatform.App,
+          replyAddress: key,
+          content: text,
+          attachments: [],
+          receivedAt: Date.now(),
+          clientMessageId,
+        },
+        causationId: undefined,
+        dedupeKey: `app:${conversationKey}:${clientMessageId}`,
+      });
+      const body: TDashboardAppMessageAccepted = { clientMessageId };
 
       return Response.json(body);
     }
