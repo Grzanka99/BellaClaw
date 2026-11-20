@@ -43,6 +43,7 @@ The package scripts include the Signal profile:
 | --- | --- |
 | `bun run server:init` | Build, rebuild embeddings, and start all services. |
 | `bun run server:update` | Rebuild without cache, recreate all services, and remove dangling BellaClaw images. The assistant applies the new image's database migrations before it starts. |
+| `bun run server:migrate-to-gateway` | Once, on a server whose `.env` still has `BELLACLAW_DASHBOARD_*` settings: rename them to `BELLACLAW_GATEWAY_*`, remove the old `bellaclaw-dashboard` container (its data volume stays), then run `server:update`. |
 | `bun run server:rebuild-embeddings` | Stop the assistant, pull the embedding model, re-embed all facts, and start the assistant on the current image. |
 | `bun run server:down` | Stop all services, including the Signal profile. |
 
