@@ -112,6 +112,22 @@ export const appMediaTable = sqliteTable(
   (table) => [index("app_media_conversation_idx").on(table.conversationKey)],
 );
 
+// the app's devices, one per app session, by the id the edge made for the session; accountId: the
+// session's account. fcmToken: its FCM registration token; publicKey and authSecret: its RFC 8291
+// key material, the P-256 public key and the auth secret, base64url
+export const appDevicesTable = sqliteTable(
+  "app_devices",
+  {
+    id: text("id").primaryKey(),
+    accountId: text("accountId").notNull(),
+    fcmToken: text("fcmToken").notNull(),
+    publicKey: text("publicKey").notNull(),
+    authSecret: text("authSecret").notNull(),
+    registeredAt: integer("registeredAt", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [index("app_devices_account_idx").on(table.accountId)],
+);
+
 export const conversationSummariesTable = sqliteTable("conversation_summaries", {
   chatId: text("chatId").primaryKey(),
   summary: text("summary").notNull(),

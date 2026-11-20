@@ -1,6 +1,7 @@
 import { EEventType } from "@bellaclaw/database";
 import type { TOption } from "@bellaclaw/shared";
 import { z } from "zod";
+import { AppChannel } from "../app";
 import { AuthorizationService } from "../authorization";
 import { ESubscriptionMode, EventBus, type TEventContext } from "../events";
 import { EEventKind, EVENT_KINDS } from "../events/catalog";
@@ -125,9 +126,7 @@ export class Notices {
       return;
     }
 
-    const chatIds = await IdentityService.instance.listNoticeRecipients(
-      await AuthorizationService.instance.listAuthorizedChatIds(),
-    );
+    const chatIds = await this.listGlobalRecipients();
 
     await EventBus.instance.transact(async (_tx, emit) => {
       for (const chatId of chatIds) {
@@ -145,15 +144,31 @@ export class Notices {
   }
 
   private async notifyAll(ctx: TEventContext, text: string): Promise<void> {
-    const chatIds = await IdentityService.instance.listNoticeRecipients(
-      await AuthorizationService.instance.listAuthorizedChatIds(),
-    );
+    const chatIds = await this.listGlobalRecipients();
 
     await ctx.complete(async (_tx, emit) => {
       for (const chatId of chatIds) {
         emit(EEventType.NoticeReady, { chatId, text }, chatId, chatId);
       }
     });
+  }
+
+  // Identity's recipients of a global notice, and the Bella conversation of every account with a
+  // registered device, once
+  private async listGlobalRecipients(): Promise<string[]> {
+    const chatIds = await IdentityService.instance.listNoticeRecipients(
+      await AuthorizationService.instance.listAuthorizedChatIds(),
+    );
+
+    for (const accountId of await AppChannel.instance.listDeviceAccounts()) {
+      const { conversationKey } = await IdentityService.instance.account(accountId);
+
+      if (!chatIds.includes(conversationKey)) {
+        chatIds.push(conversationKey);
+      }
+    }
+
+    return chatIds;
   }
 
   // recipient: an owner, conversation or address key; the notice goes to its conversation, on

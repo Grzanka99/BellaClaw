@@ -5,9 +5,9 @@ import type { TInternalApi } from "./internal-api";
 type TAppStreamListener = (event: TAppStreamEvent) => void;
 
 export type TLiveStream = {
-  // listener: called with every event of the account while its stream is open. Returns what
-  // closes it
-  subscribe(accountId: string, listener: TAppStreamListener): () => void;
+  // listener: called with every event of the account while its stream is open; app: whether the
+  // stream is an app session's, which counts toward presence. Returns what closes it
+  subscribe(accountId: string, listener: TAppStreamListener, app: boolean): () => void;
 };
 
 const logger = createLogger("LIVE-STREAM");
@@ -15,11 +15,43 @@ const logger = createLogger("LIVE-STREAM");
 // NOTE: one stream from the assistant for every account, fanned out to the app streams of each
 // account. Nothing replays: whenever that stream opens or drops, every app stream is told to
 // check revisions, because events of the time between are lost and typing may have stopped unseen.
-// retryMs: the wait before connecting again; silenceMs: how long the stream may send nothing, not
-// even a keep-alive, before it counts as lost
+// The assistant learns which accounts have an open app session stream here: the whole set, sent on
+// each connection and whenever an account's first such stream opens or its last one closes, one
+// report at a time; a failed report is sent again after retryMs. retryMs: the wait before
+// connecting or reporting again; silenceMs: how long the stream may send nothing, not even a
+// keep-alive, before it counts as lost
 export function createLiveStream(internalApi: TInternalApi, retryMs: number, silenceMs: number) {
   // by account public id
   const listeners = new Map<string, Set<TAppStreamListener>>();
+  // the number of open app session streams, by account public id
+  const appStreams = new Map<string, number>();
+  const presence = { connected: false, reporting: false, changed: false };
+
+  // NOTE: the assistant forgets the set when the connection drops, so nothing is sent without one
+  async function reportPresence(): Promise<void> {
+    if (!presence.connected) {
+      return;
+    }
+
+    if (presence.reporting) {
+      presence.changed = true;
+      return;
+    }
+
+    presence.reporting = true;
+
+    do {
+      presence.changed = false;
+      const reported = await internalApi.reportPresence([...appStreams.keys()]);
+
+      if ("error" in reported) {
+        presence.changed = true;
+        await Bun.sleep(retryMs);
+      }
+    } while (presence.changed && presence.connected);
+
+    presence.reporting = false;
+  }
 
   function checkAll(): void {
     for (const accountListeners of listeners.values()) {
@@ -92,7 +124,7 @@ export function createLiveStream(internalApi: TInternalApi, retryMs: number, sil
   }
 
   return {
-    subscribe(accountId: string, listener: TAppStreamListener): () => void {
+    subscribe(accountId: string, listener: TAppStreamListener, app: boolean): () => void {
       let accountListeners = listeners.get(accountId);
 
       if (accountListeners === undefined) {
@@ -102,11 +134,39 @@ export function createLiveStream(internalApi: TInternalApi, retryMs: number, sil
 
       accountListeners.add(listener);
 
+      if (app) {
+        const count = appStreams.get(accountId) ?? 0;
+        appStreams.set(accountId, count + 1);
+
+        if (count === 0) {
+          void reportPresence();
+        }
+      }
+
+      let open = true;
+
+      // NOTE: a stream may release its subscription more than once
       return () => {
+        if (!open) {
+          return;
+        }
+
+        open = false;
         accountListeners.delete(listener);
 
         if (accountListeners.size === 0 && listeners.get(accountId) === accountListeners) {
           listeners.delete(accountId);
+        }
+
+        if (app) {
+          const count = (appStreams.get(accountId) ?? 1) - 1;
+
+          if (count === 0) {
+            appStreams.delete(accountId);
+            void reportPresence();
+          } else {
+            appStreams.set(accountId, count);
+          }
         }
       };
     },
@@ -117,8 +177,11 @@ export function createLiveStream(internalApi: TInternalApi, retryMs: number, sil
         const opened = await internalApi.openStream(signal);
 
         if ("data" in opened) {
+          presence.connected = true;
+          void reportPresence();
           checkAll();
           await read(opened.data);
+          presence.connected = false;
           checkAll();
 
           if (!signal.aborted) {

@@ -2,12 +2,15 @@ import {
   createLogger,
   DASHBOARD_ACTIVATION_CHECK_PATH,
   DASHBOARD_LINKS_PATH,
+  DASHBOARD_PRESENCE_PATH,
   DASHBOARD_STREAM_PATH,
   dashboardAccountConversationMediaFilePath,
   dashboardAccountConversationMediaPath,
   dashboardAccountConversationMessagesPath,
   dashboardAccountConversationPath,
   dashboardAccountConversationsPath,
+  dashboardAccountDevicePath,
+  dashboardAccountDevicesPath,
   dashboardAccountMessagePath,
   dashboardAccountModelPath,
   dashboardAccountPath,
@@ -19,12 +22,15 @@ import {
   SDashboardChatLink,
   SDashboardConversationCreated,
   SDashboardConversationDeleted,
+  SDashboardDevice,
+  SDashboardDevicesRemoved,
   SDashboardError,
   SDashboardLinkStarted,
   SDashboardMedia,
   SDashboardMessageDeleted,
   SDashboardModelState,
   SDashboardPersonality,
+  SDashboardPresenceAccepted,
   type TDashboardAccount,
   type TDashboardActivationCheck,
   type TDashboardActivationCheckRequest,
@@ -33,6 +39,9 @@ import {
   type TDashboardChatLink,
   type TDashboardConversationCreated,
   type TDashboardConversationDeleted,
+  type TDashboardDevice,
+  type TDashboardDeviceRegistration,
+  type TDashboardDevicesRemoved,
   type TDashboardLinkRequest,
   type TDashboardLinkStarted,
   type TDashboardMedia,
@@ -41,6 +50,8 @@ import {
   type TDashboardModelUpdate,
   type TDashboardPersonality,
   type TDashboardPersonalityUpdate,
+  type TDashboardPresence,
+  type TDashboardPresenceAccepted,
   type TOption,
 } from "@bellaclaw/shared";
 import type { z } from "zod";
@@ -114,6 +125,23 @@ export type TInternalApi = {
   // the assistant's live stream for every account, lines of JSON, open until either side closes
   // it; signal closes it
   openStream(signal: AbortSignal): Promise<TInternalApiResult<ReadableStream<Uint8Array>>>;
+  // every account with an open app stream here, the whole set
+  reportPresence(accountIds: string[]): Promise<TInternalApiResult<TDashboardPresenceAccepted>>;
+  // the device of an app session of the account, its token and keys replacing any it had
+  registerDevice(
+    accountId: string,
+    deviceId: string,
+    registration: TDashboardDeviceRegistration,
+  ): Promise<TInternalApiResult<TDashboardDevice>>;
+  // 404 for a device the account does not hold
+  unregisterDevice(
+    accountId: string,
+    deviceId: string,
+  ): Promise<TInternalApiResult<TDashboardDevice>>;
+  // every device of the account
+  unregisterAccountDevices(
+    accountId: string,
+  ): Promise<TInternalApiResult<TDashboardDevicesRemoved>>;
 };
 
 // The assistant's internal API. baseUrl has no trailing slash.
@@ -128,6 +156,8 @@ export function createInternalApi(baseUrl: string, secret: string): TInternalApi
       | TDashboardLinkRequest
       | TDashboardActivationCheckRequest
       | TDashboardAppMessage
+      | TDashboardPresence
+      | TDashboardDeviceRegistration
     >,
   ): Promise<TInternalApiResult<T>> {
     return send(method, path, schema, "application/json", JSON.stringify(body));
@@ -273,6 +303,14 @@ export function createInternalApi(baseUrl: string, secret: string): TInternalApi
         SDashboardConversationDeleted,
         undefined,
       ),
+    reportPresence: (accountIds) =>
+      call("POST", DASHBOARD_PRESENCE_PATH, SDashboardPresenceAccepted, { accountIds }),
+    registerDevice: (accountId, deviceId, registration) =>
+      call("PUT", dashboardAccountDevicePath(accountId, deviceId), SDashboardDevice, registration),
+    unregisterDevice: (accountId, deviceId) =>
+      call("DELETE", dashboardAccountDevicePath(accountId, deviceId), SDashboardDevice, undefined),
+    unregisterAccountDevices: (accountId) =>
+      call("DELETE", dashboardAccountDevicesPath(accountId), SDashboardDevicesRemoved, undefined),
     // NOTE: no timeout: the stream stays open, and the assistant's keep-alives hold it
     openStream: async (signal) => {
       try {

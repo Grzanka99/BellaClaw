@@ -14,29 +14,39 @@ import {
   CONVERSATION_NOT_FOUND,
   DASHBOARD_ACTIVATION_CHECK_PATH,
   DASHBOARD_LINKS_PATH,
+  DASHBOARD_PRESENCE_PATH,
   DASHBOARD_STREAM_PATH,
+  DEVICE_NOT_FOUND,
   dashboardAccountConversationMediaFilePath,
   dashboardAccountConversationMediaPath,
   dashboardAccountConversationMessagesPath,
   dashboardAccountConversationPath,
   dashboardAccountConversationsPath,
+  dashboardAccountDevicePath,
+  dashboardAccountDevicesPath,
   dashboardAccountMessagePath,
   dashboardAccountModelPath,
   dashboardAccountPath,
   dashboardAccountPersonalityPath,
   dashboardChatLinkPath,
+  isP256PublicKey,
   MAX_IMAGE_BYTES,
   SDashboardActivationCheckRequest,
   SDashboardAppMessage,
+  SDashboardDeviceId,
+  SDashboardDeviceRegistration,
   SDashboardLinkRequest,
   SDashboardModelUpdate,
   SDashboardPersonalityUpdate,
+  SDashboardPresence,
   type TDashboardAccount,
   type TDashboardActivationCheck,
   type TDashboardAppMessageAccepted,
   type TDashboardChatLink,
   type TDashboardConversationCreated,
   type TDashboardConversationDeleted,
+  type TDashboardDevice,
+  type TDashboardDevicesRemoved,
   type TDashboardError,
   type TDashboardLinkStarted,
   type TDashboardMedia,
@@ -44,6 +54,7 @@ import {
   type TDashboardModelChoice,
   type TDashboardModelState,
   type TDashboardPersonality,
+  type TDashboardPresenceAccepted,
   type TOption,
 } from "@bellaclaw/shared";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
@@ -102,6 +113,8 @@ const pendingDeletes = new Map<string, PromiseWithResolvers<number[]>>();
 const pendingLinks = new Map<string, PromiseWithResolvers<void>>();
 const pendingCreates = new Map<string, PromiseWithResolvers<TDashboardConversationCreated>>();
 const pendingConversationDeletes = new Map<string, PromiseWithResolvers<void>>();
+const pendingDeviceRegistrations = new Map<string, PromiseWithResolvers<void>>();
+const pendingDeviceUnregistrations = new Map<string, PromiseWithResolvers<void>>();
 let server: TOption<ReturnType<typeof Bun.serve>>;
 
 // NOTE: a request is no bus handler, so it has no ctx.request. It publishes the command under a
@@ -157,6 +170,24 @@ export function setupInternalApi(): void {
   });
   bus.subscribe({
     consumer: "internal-api",
+    type: EEventType.AppDeviceRegistered,
+    mode: ESubscriptionMode.Live,
+    backoffMs: [],
+    handler: async (event) => {
+      pendingDeviceRegistrations.get(event.trace.turnId)?.resolve();
+    },
+  });
+  bus.subscribe({
+    consumer: "internal-api",
+    type: EEventType.AppDeviceUnregistered,
+    mode: ESubscriptionMode.Live,
+    backoffMs: [],
+    handler: async (event) => {
+      pendingDeviceUnregistrations.get(event.trace.turnId)?.resolve();
+    },
+  });
+  bus.subscribe({
+    consumer: "internal-api",
     type: EEventType.CommandRejected,
     mode: ESubscriptionMode.Live,
     backoffMs: [],
@@ -168,6 +199,8 @@ export function setupInternalApi(): void {
       pendingLinks.get(event.trace.turnId)?.reject(error);
       pendingCreates.get(event.trace.turnId)?.reject(error);
       pendingConversationDeletes.get(event.trace.turnId)?.reject(error);
+      pendingDeviceRegistrations.get(event.trace.turnId)?.reject(error);
+      pendingDeviceUnregistrations.get(event.trace.turnId)?.reject(error);
     },
   });
 }
@@ -380,7 +413,8 @@ async function requestLink(body: unknown): Promise<TDashboardLinkStarted> {
 }
 
 // The edge's one live stream for every account: each event of the app stream as a line of JSON,
-// and an empty line as a keep-alive. Closing the connection releases the listener and the timer
+// and an empty line as a keep-alive. Closing the connection releases the listener and the timer,
+// and ends the presence the edge reported while it was open
 function openStream(request: Request): Response {
   const encoder = new TextEncoder();
   let release = () => {};
@@ -389,12 +423,14 @@ function openStream(request: Request): Response {
       const close = AppStream.instance.listen((event) => {
         controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
       });
+      const endPresence = AppChannel.instance.openEdgeConnection();
       const keepAlive = setInterval(() => {
         controller.enqueue(encoder.encode("\n"));
       }, STREAM_KEEP_ALIVE_MS);
       release = () => {
         clearInterval(keepAlive);
         close();
+        endPresence();
       };
       request.signal.addEventListener("abort", release, { once: true });
       // the first line sends the response's headers, so the edge sees the stream open at once
@@ -463,7 +499,9 @@ export async function handleInternalApiRequest(
   // ["", "internal", "accounts", accountId, "conversations", conversationKey] or
   // ["", "internal", "accounts", accountId, "conversations", conversationKey, "messages"] or
   // ["", "internal", "accounts", accountId, "conversations", conversationKey, "media"] or
-  // ["", "internal", "accounts", accountId, "conversations", conversationKey, "media", mediaId]
+  // ["", "internal", "accounts", accountId, "conversations", conversationKey, "media", mediaId] or
+  // ["", "internal", "accounts", accountId, "devices"] or
+  // ["", "internal", "accounts", accountId, "devices", deviceId], ["", "internal", "presence"]
   const segments = pathname.split("/");
   const messageId = Number(segments[5]);
   let key = "";
@@ -481,6 +519,7 @@ export async function handleInternalApiRequest(
   const activationRoute = request.method === "POST" && pathname === DASHBOARD_ACTIVATION_CHECK_PATH;
   const linkRequestRoute = request.method === "POST" && pathname === DASHBOARD_LINKS_PATH;
   const streamRoute = request.method === "GET" && pathname === DASHBOARD_STREAM_PATH;
+  const presenceRoute = request.method === "POST" && pathname === DASHBOARD_PRESENCE_PATH;
   const chatLinkRoute =
     request.method === "GET" && key.length > 0 && pathname === dashboardChatLinkPath(key);
   const accountRoute =
@@ -524,11 +563,20 @@ export async function handleInternalApiRequest(
     conversationKey.length > 0 &&
     mediaId.length > 0 &&
     pathname === dashboardAccountConversationMediaFilePath(key, conversationKey, mediaId);
+  // segment 5 is the device id here
+  const deviceRoute =
+    (request.method === "PUT" || request.method === "DELETE") &&
+    key.length > 0 &&
+    conversationKey.length > 0 &&
+    pathname === dashboardAccountDevicePath(key, conversationKey);
+  const accountDevicesRoute =
+    request.method === "DELETE" && key.length > 0 && pathname === dashboardAccountDevicesPath(key);
 
   if (
     !activationRoute &&
     !linkRequestRoute &&
     !streamRoute &&
+    !presenceRoute &&
     !chatLinkRoute &&
     !accountRoute &&
     !modelRoute &&
@@ -538,7 +586,9 @@ export async function handleInternalApiRequest(
     !conversationCreateRoute &&
     !conversationDeleteRoute &&
     !mediaUploadRoute &&
-    !mediaDownloadRoute
+    !mediaDownloadRoute &&
+    !deviceRoute &&
+    !accountDevicesRoute
   ) {
     return errorResponse("Not found", 404, undefined);
   }
@@ -571,6 +621,19 @@ export async function handleInternalApiRequest(
 
     if (streamRoute) {
       return openStream(request);
+    }
+
+    if (presenceRoute) {
+      const presence = SDashboardPresence.safeParse(await request.json());
+
+      if (!presence.success) {
+        throw new Error("Invalid presence");
+      }
+
+      AppChannel.instance.reportPresence(presence.data.accountIds);
+      const body: TDashboardPresenceAccepted = { ok: true };
+
+      return Response.json(body);
     }
 
     if (linkRequestRoute) {
@@ -749,6 +812,100 @@ export async function handleInternalApiRequest(
       return new Response(media.file, {
         headers: { "Content-Type": media.mimeType, "Cache-Control": "no-store" },
       });
+    }
+
+    // NOTE: on the global lane, so a device's registers and unregisters apply in order. An
+    // unregister of a device the account does not hold is a 404
+    if (deviceRoute) {
+      const deviceId = SDashboardDeviceId.safeParse(conversationKey);
+
+      if (!deviceId.success) {
+        throw new Error("Invalid device id");
+      }
+
+      const trace = {
+        turnId: createSystemTurnId(),
+        chatId: account.conversationKey,
+        platform: undefined,
+      };
+      const body: TDashboardDevice = { deviceId: deviceId.data };
+
+      if (request.method === "PUT") {
+        const registration = SDashboardDeviceRegistration.safeParse(await request.json());
+
+        if (!registration.success) {
+          throw new Error(registration.error.issues[0]?.message ?? "Invalid device");
+        }
+
+        if (!(await isP256PublicKey(registration.data.publicKey))) {
+          throw new Error("Expected a P-256 public key");
+        }
+
+        await requestOutcome(
+          pendingDeviceRegistrations,
+          trace,
+          "global",
+          EEventType.AppDeviceRegisterRequested,
+          { deviceId: deviceId.data, accountId: key, ...registration.data },
+          COMMAND_TIMEOUT_MS,
+          "Registering the device timed out",
+        );
+
+        return Response.json(body);
+      }
+
+      try {
+        await requestOutcome(
+          pendingDeviceUnregistrations,
+          trace,
+          "global",
+          EEventType.AppDeviceUnregisterRequested,
+          { deviceId: deviceId.data, accountId: key },
+          COMMAND_TIMEOUT_MS,
+          "Unregistering the device timed out",
+        );
+      } catch (error) {
+        if (error instanceof CommandRejectedError && error.errorCode === DEVICE_NOT_FOUND) {
+          return errorResponse("Not found", 404, undefined);
+        }
+
+        throw error;
+      }
+
+      return Response.json(body);
+    }
+
+    // every device of the account, one unregister each; one gone meanwhile counts as removed
+    if (accountDevicesRoute) {
+      const body: TDashboardDevicesRemoved = {
+        deviceIds: await AppChannel.instance.listDeviceIds(key),
+      };
+
+      for (const deviceId of body.deviceIds) {
+        const trace = {
+          turnId: createSystemTurnId(),
+          chatId: account.conversationKey,
+          platform: undefined,
+        };
+
+        try {
+          await requestOutcome(
+            pendingDeviceUnregistrations,
+            trace,
+            "global",
+            EEventType.AppDeviceUnregisterRequested,
+            { deviceId, accountId: key },
+            COMMAND_TIMEOUT_MS,
+            "Unregistering the device timed out",
+          );
+        } catch (error) {
+          if (!(error instanceof CommandRejectedError && error.errorCode === DEVICE_NOT_FOUND)) {
+            throw error;
+          }
+        }
+      }
+
+      return Response.json(body);
     }
 
     if (conversationCreateRoute) {

@@ -219,6 +219,73 @@ export type TDashboardConversationDeleted = z.infer<typeof SDashboardConversatio
 // the rejection code of a delete of a conversation that is no plain chat of the account
 export const CONVERSATION_NOT_FOUND = "conversation-not-found";
 
+// the rejection code of an unregister of a device the account does not hold
+export const DEVICE_NOT_FOUND = "device-not-found";
+
+// the id the edge made for an app session's device, a path segment
+export const SDashboardDeviceId = z.string().regex(/^[A-Za-z0-9_-]{1,128}$/, "Invalid device id");
+
+// base64url, without padding, of exactly length bytes
+function base64UrlOfLength(length: number) {
+  return z
+    .string()
+    .regex(/^[A-Za-z0-9_-]+$/, "Expected base64url")
+    .refine((value) => Buffer.from(value, "base64url").byteLength === length, {
+      message: `Expected ${length} bytes`,
+    });
+}
+
+// PUT /internal/accounts/:accountId/devices/:deviceId body, and PUT /api/device of the edge.
+// fcmToken: the device's FCM registration token. publicKey: its P-256 public key, an uncompressed
+// point, which isP256PublicKey checks; authSecret: its auth secret; both base64url, as RFC 8291
+// names them
+export const SDashboardDeviceRegistration = z
+  .object({
+    fcmToken: z.string().min(1).max(4096),
+    publicKey: base64UrlOfLength(65),
+    authSecret: base64UrlOfLength(16),
+  })
+  .strict();
+
+export type TDashboardDeviceRegistration = z.infer<typeof SDashboardDeviceRegistration>;
+
+// whether publicKey, base64url, is a point on the P-256 curve
+export async function isP256PublicKey(publicKey: string): Promise<boolean> {
+  try {
+    await crypto.subtle.importKey(
+      "raw",
+      Buffer.from(publicKey, "base64url"),
+      { name: "ECDH", namedCurve: "P-256" },
+      false,
+      [],
+    );
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// the answer to a device's register and unregister
+export const SDashboardDevice = z.object({ deviceId: z.string() });
+
+export type TDashboardDevice = z.infer<typeof SDashboardDevice>;
+
+// the answer to the unregister of every device of an account: the ids it removed
+export const SDashboardDevicesRemoved = z.object({ deviceIds: z.array(z.string()) });
+
+export type TDashboardDevicesRemoved = z.infer<typeof SDashboardDevicesRemoved>;
+
+// POST /internal/presence body: every account with an open app stream at the edge, the whole set
+export const SDashboardPresence = z.object({ accountIds: z.array(z.string().min(1)) }).strict();
+
+export type TDashboardPresence = z.infer<typeof SDashboardPresence>;
+
+// POST /internal/presence response
+export const SDashboardPresenceAccepted = z.object({ ok: z.literal(true) });
+
+export type TDashboardPresenceAccepted = z.infer<typeof SDashboardPresenceAccepted>;
+
 // the rejection code of a link request for an address another account owns
 export const ADDRESS_LINKED_ELSEWHERE = "address-linked-elsewhere";
 
@@ -314,6 +381,8 @@ export const DASHBOARD_ACTIVATION_CHECK_PATH = "/internal/activation-code/check"
 
 export const DASHBOARD_LINKS_PATH = "/internal/links";
 
+export const DASHBOARD_PRESENCE_PATH = "/internal/presence";
+
 export function dashboardChatLinkPath(chatKey: string): string {
   return `${DASHBOARD_LINKS_PATH}/${encodeURIComponent(chatKey)}`;
 }
@@ -365,4 +434,12 @@ export function dashboardAccountConversationMessagesPath(
   conversationKey: string,
 ): string {
   return `${dashboardAccountPath(accountId)}/conversations/${encodeURIComponent(conversationKey)}/messages`;
+}
+
+export function dashboardAccountDevicesPath(accountId: string): string {
+  return `${dashboardAccountPath(accountId)}/devices`;
+}
+
+export function dashboardAccountDevicePath(accountId: string, deviceId: string): string {
+  return `${dashboardAccountDevicesPath(accountId)}/${encodeURIComponent(deviceId)}`;
 }

@@ -80,7 +80,7 @@ const ALLOWED: Record<string, string> = {
   "internal-api -> identity": "IdentityService.link, account and addressKey, a cached read model",
   "internal-api -> app-stream": "AppStream.listen: live listeners an event cannot carry",
   "internal-api -> app":
-    "AppChannel.store, open and findAttachments: an upload's bytes, which no event may carry, go to the App channel's store; reads of it",
+    "AppChannel.store, open and findAttachments: an upload's bytes, which no event may carry, go to the App channel's store; reads of it. openEdgeConnection and reportPresence: the edge's presence, live state an event cannot carry. listDeviceIds, a cached read model that prepares the unregister commands",
   "internal-api -> messaging/chat-key": "pure functions",
   "mcp -> ai/llm": "driver helper",
   "mcp -> identity": "IdentityService.resolve for a connection's trace, a cached read model",
@@ -98,9 +98,13 @@ const ALLOWED: Record<string, string> = {
     "IdentityService.linkedAccount and waitWhileLinking, a cached read model; plainConversationKey, isPlainConversation and accountIdOf, pure functions",
   "message-handler -> messaging":
     "fetchAttachment and deleteAttachment: driver calls, no stored state",
-  "messaging -> identity": "IdentityService.resolve, a cached read model",
+  "messaging -> identity":
+    "IdentityService.resolve, a cached read model, and accountIdOf, a pure function",
+  "messaging -> app": "AppChannel.hasDevice, a cached read model: the app is the main channel",
   "notices -> authorization": "listAuthorizedChatIds, a cached read model",
-  "notices -> identity": "listNoticeRecipients, a cached read model",
+  "notices -> identity": "listNoticeRecipients and account, a cached read model",
+  "notices -> app":
+    "AppChannel.listDeviceAccounts, a cached read model: an account with a device hears global notices",
   "scheduling -> ai/agent-harness": "runScheduledTask, the stateless engine",
   "scheduling -> ai/instructions/base-system.xml": "prompt text",
   "scheduling -> ai/instructions/platform": "pure prompt helper",
@@ -129,7 +133,7 @@ const ALLOWED_WAITS: Record<string, string[]> = {
   // a message held while its address or account is being linked
   authorization: ["identity"],
   // an HTTP request, on no lane: it awaits the outcome through live subscriptions
-  "internal-api": ["settings", "conversation", "identity"],
+  "internal-api": ["settings", "conversation", "identity", "app"],
 };
 
 const STATIC_IMPORT =
@@ -287,7 +291,7 @@ describe("boundaries", () => {
       McpService.instance.setup();
       setupInternalApi();
       AppStream.instance.setup();
-      AppChannel.instance.setup();
+      await AppChannel.instance.setup();
       await IdentityService.instance.setup();
       await AuthorizationService.instance.setup();
       await CalendarService.instance.setup();

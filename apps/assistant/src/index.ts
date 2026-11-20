@@ -67,7 +67,7 @@ async function init(): Promise<void> {
     McpService.instance.setup();
     setupInternalApi();
     AppStream.instance.setup();
-    AppChannel.instance.setup();
+    await AppChannel.instance.setup();
     if (Bun.env.BELLACLAW_MCP_PUBLIC_URL?.trim()) {
       startMcpAuthServer();
     }

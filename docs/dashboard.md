@@ -93,6 +93,28 @@ link login then answer with the account and `token`, the bearer token of a new a
 session has no idle expiry. `POST /api/logout` with the token ends it, and a new password set
 through a login link ends it too.
 
+Device, for notifications:
+
+- Each app session has its own device id, a random value the dashboard makes with the session.
+  The app never chooses or sees it.
+- `PUT /api/device` with `{ fcmToken, publicKey, authSecret }`: registers the session's device for
+  the signed-in account and answers `{ ok: true }`. `fcmToken` is its FCM registration token (at
+  most 4096 characters); `publicKey` (the P-256 public key, 65 bytes uncompressed, a point on the
+  curve) and `authSecret` (16 bytes) are the RFC 8291 key material, base64url. Registering again
+  replaces the token and keys, as after a refreshed FCM token. Only an app session has a device;
+  the web client gets 403.
+- `DELETE /api/device`: unregisters it and answers `{ ok: true }`; 404 when it is not registered.
+  The web client gets 403.
+- Logout unregisters the session's device before it ends the session; when the assistant cannot
+  be reached, logout answers 502 and the session stays, so the app can try again. A new password
+  set through a login link first unregisters every device of the account; when the assistant
+  cannot, it answers 502 and changes nothing. Once the sessions have ended it removes the
+  account's devices again, for one that registered in between.
+- While the account has a registered device, the app is its main channel: reminders, scheduled
+  task results and notices are stored in the Bella conversation and sent nowhere else. Without
+  one they go to the oldest linked chat, and to the app when there is none. A reply always goes
+  back to the channel its message came from.
+
 Ways in:
 
 - **Activation code**: `POST /api/register` with `username`, `password` and `activationCode`
@@ -190,6 +212,12 @@ Live stream, while the app is in the foreground:
 - The dashboard holds one stream from the assistant for every account (`GET /internal/stream`,
   lines of JSON with the account id). When it drops, the dashboard sends `check` to every open
   stream, connects again after 2 seconds, and sends `check` again once it is back.
+- While that stream is open, the dashboard tells the assistant which accounts have an app stream
+  open (`POST /internal/presence` with `{ accountIds }`, the whole set): on each connection, and
+  when an account's first app stream opens or its last one closes. A failed report is sent again
+  after 2 seconds until one succeeds. Only app sessions' streams count; a browser's stream still
+  gets every event. The assistant keeps it in memory: when the stream drops, or the assistant
+  restarts, every account reads closed until the next report.
 
 A conversation of another account answers `404 { "error": "Not found" }`, exactly like one that
 does not exist, for reading, sending, deleting, uploading and downloading. The dashboard checks ownership in the
@@ -265,8 +293,9 @@ State:
 
 | Data | Location |
 | --- | --- |
-| Accounts, password hashes, web and app sessions, chat links, used link tokens | Dashboard SQLite file, `BELLACLAW_DASHBOARD_DB_PATH` |
+| Accounts, password hashes, web and app sessions (with each app session's device id), chat links, used link tokens | Dashboard SQLite file, `BELLACLAW_DASHBOARD_DB_PATH` |
 | Messages, facts, settings | Assistant database |
+| App devices: FCM token and RFC 8291 key material | Assistant database, `app_devices` |
 | Images uploaded from the app | Assistant's data volume, `BELLACLAW_APP_MEDIA_DIR`, listed in the assistant database |
 
 Web sessions last 30 days from the last request; app sessions last until logout. Only a hash of

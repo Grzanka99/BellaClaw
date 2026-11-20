@@ -48,7 +48,10 @@ Requesters are conversation tools, slash commands, scheduling and the internal A
    `turn.completed`. Tool writes go out as commands to their owning service. Compaction runs after
    the reply is committed, and the chat's next turn starts only after it finishes.
 5. Outbound sends the reply and records `message.sent`; for the app it has nothing to send and
-   records it at once. A reminder or notice of an account with no linked chat goes to the app too.
+   records it at once. A reply goes back to the channel its message came from. A reminder,
+   scheduled task result or notice of an account goes to its main channel, decided at each
+   attempt: the app while the account has a registered device, else its oldest linked chat, else
+   the app.
    From it Conversation stores a command with
    its reply, a notice or a failure reply as display-only rows, shown in history and never
    replayed to the model; a confidential reply, such as a login link, is not stored. Every
@@ -68,6 +71,18 @@ uploads an image through the dashboard to the internal API's media route; the Ap
 serves it for download. It is the `app` attachment store for fetch and delete, so the cleanup of
 images older than three compactions and a message delete remove app files too, and its durable
 consumer of `conversation.deleted` removes a deleted plain chat's images, sent or only uploaded.
+
+The App channel also owns the app's devices (`app_devices`: the id the dashboard made for an app
+session, the account, the FCM token and the RFC 8291 key material). Its durable consumer `app` handles
+`app.device.register.requested` (answered by `app.device.registered`) and
+`app.device.unregister.requested` (answered by `app.device.unregistered`, or `command.rejected`
+with `device-not-found`), both on the `global` lane. The internal API unregisters every device of
+an account, as a new password at the dashboard asks, with one unregister command per device. Its
+live consumer `app-cache` keeps which account has a device, loaded at boot, for Outbound and for
+the audience of a global notice, which also holds the Bella conversation of every account with a
+device. It also keeps in memory which accounts have an
+open stream at the dashboard, as the dashboard reports it over its live connection; a dropped
+connection or a restart reads closed for every account.
 
 Discord and Signal use separate chat keys. Their histories and scheduled deliveries do not merge.
 

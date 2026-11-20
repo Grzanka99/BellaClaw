@@ -75,6 +75,14 @@ export type TAppSessionResponse = TMeResponse & { token: string };
 // POST /api/logout answer
 export type TLogoutResponse = { ok: true };
 
+// PUT /api/device body, from the app only: the device's FCM registration token and its RFC 8291
+// key material, the P-256 public key (65 bytes, an uncompressed point on the curve) and the auth
+// secret (16 bytes), base64url
+export type { TDashboardDeviceRegistration as TDeviceRegistration } from "@bellaclaw/shared";
+
+// PUT and DELETE /api/device answer
+export type TDeviceResponse = { ok: true };
+
 // createdAt: epoch ms
 export type TChatMessage = {
   id: number;

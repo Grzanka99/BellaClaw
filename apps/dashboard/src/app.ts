@@ -3,7 +3,9 @@ import type { THistoryCursor, TOwnedConversation } from "@bellaclaw/database";
 import {
   ADDRESS_LINKED_ELSEWHERE,
   createLogger,
+  isP256PublicKey,
   SDashboardAppMessage,
+  SDashboardDeviceRegistration,
   SDashboardModelUpdate,
   SDashboardPersonalityUpdate,
   type TDashboardLinkToken,
@@ -29,6 +31,7 @@ import type {
   TConversationCreatedResponse,
   TConversationDeletedResponse,
   TConversationsResponse,
+  TDeviceResponse,
   THistoryResponse,
   TLinkCheckResponse,
   TLinkConfirmRequest,
@@ -448,10 +451,30 @@ export function createApp({
       kind = "bearer";
     }
 
+    // a new password ends every app session, so the account's devices go first: when the
+    // assistant cannot remove them nothing changes, and the reset can be tried again
+    if (passwordHash !== undefined) {
+      const unregistered = await internalApi.unregisterAccountDevices(account.publicId);
+
+      if ("error" in unregistered) {
+        return c.json<TApiError>({ error: unregistered.error }, unregistered.status);
+      }
+    }
+
     const session = store.redeemLoginLink(account.id, link, passwordHash, kind, Date.now());
 
     if (session === undefined) {
       return c.json<TApiError>({ error: INVALID_LINK }, 400);
+    }
+
+    // NOTE: a device that registered between the removal above and the end of its session goes
+    // now: an ended session registers no more
+    if (passwordHash !== undefined) {
+      const swept = await internalApi.unregisterAccountDevices(account.publicId);
+
+      if ("error" in swept) {
+        logger.error(`Devices of ended sessions not removed: ${swept.error}`);
+      }
     }
 
     if (kind === "bearer") {
@@ -688,9 +711,28 @@ export function createApp({
     return describeAccount(c, c.var.account);
   });
 
-  app.post("/api/logout", (c) => {
+  // NOTE: an app session's device is unregistered first, so the main channel is back on the linked
+  // chat once logout answers. When the assistant cannot do it the session stays, and the app can
+  // log out again
+  app.post("/api/logout", async (c) => {
     if (isAppRequest(c)) {
       const bearer = bearerToken(c);
+      let deviceId: TOption<string>;
+      let account: TOption<TAccount>;
+
+      if (bearer !== undefined) {
+        deviceId = store.findAppSessionDevice(bearer);
+        account = store.findAppSession(bearer);
+      }
+
+      if (deviceId !== undefined && account !== undefined) {
+        const unregistered = await internalApi.unregisterDevice(account.publicId, deviceId);
+
+        // 404: the assistant holds no device of this session
+        if ("error" in unregistered && unregistered.status !== 404) {
+          return c.json<TApiError>({ error: unregistered.error }, unregistered.status);
+        }
+      }
 
       if (bearer !== undefined) {
         store.deleteAppSession(bearer);
@@ -723,6 +765,71 @@ export function createApp({
   });
 
   app.get("/api/me", requireSession, (c) => describeAccount(c, c.var.account));
+
+  // NOTE: the device of the app session, by the id the session was made with: registering again
+  // replaces its token and keys, and logout unregisters it. The web client has no device
+  app.put("/api/device", requireSession, async (c) => {
+    const bearer = bearerToken(c);
+
+    if (bearer === undefined) {
+      return c.json<TApiError>({ error: "Only the app registers a device" }, 403);
+    }
+
+    const deviceId = store.findAppSessionDevice(bearer);
+
+    if (deviceId === undefined) {
+      return c.json<TApiError>({ error: "Unauthorized" }, 401);
+    }
+
+    const body = await parseBody(c.req.raw, SDashboardDeviceRegistration);
+
+    if (!body.success) {
+      return c.json(invalidBody(body.error), 400);
+    }
+
+    if (!(await isP256PublicKey(body.data.publicKey))) {
+      return c.json<TApiError>({ error: "Expected a P-256 public key" }, 400);
+    }
+
+    const result = await internalApi.registerDevice(c.var.account.publicId, deviceId, body.data);
+
+    if ("error" in result) {
+      return c.json<TApiError>({ error: result.error }, result.status);
+    }
+
+    // a logout or a new password that ended the session meanwhile may have run before this
+    // register reached the assistant
+    if (store.findAppSession(bearer) === undefined) {
+      await internalApi.unregisterDevice(c.var.account.publicId, deviceId);
+
+      return c.json<TApiError>({ error: "Unauthorized" }, 401);
+    }
+
+    return c.json<TDeviceResponse>({ ok: true });
+  });
+
+  // 404 when the session's device is not registered
+  app.delete("/api/device", requireSession, async (c) => {
+    const bearer = bearerToken(c);
+
+    if (bearer === undefined) {
+      return c.json<TApiError>({ error: "Only the app registers a device" }, 403);
+    }
+
+    const deviceId = store.findAppSessionDevice(bearer);
+
+    if (deviceId === undefined) {
+      return c.json<TApiError>({ error: "Unauthorized" }, 401);
+    }
+
+    const result = await internalApi.unregisterDevice(c.var.account.publicId, deviceId);
+
+    if ("error" in result) {
+      return c.json<TApiError>({ error: result.error }, result.status);
+    }
+
+    return c.json<TDeviceResponse>({ ok: true });
+  });
 
   // NOTE: every account route reaches only the signed-in account's data, by the keys the
   // assistant names for its public id
@@ -1021,7 +1128,7 @@ export function createApp({
         const send = ({ type, ...data }: TAppStreamEvent) => {
           write(`event: ${type}\ndata: ${JSON.stringify(data)}\n\n`);
         };
-        const close = liveStream.subscribe(accountId, send);
+        const close = liveStream.subscribe(accountId, send, isAppRequest(c));
         const keepAlive = setInterval(() => {
           write(": keep-alive\n\n");
         }, STREAM_KEEP_ALIVE_MS);

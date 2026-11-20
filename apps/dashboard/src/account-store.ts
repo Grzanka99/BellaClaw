@@ -11,7 +11,7 @@ export type TAccount = { id: number; publicId: string; username: string };
 export type TRegistration = { account: TAccount } | { failure: "usernameTaken" | "linkUsed" };
 
 // cookie: a session of the web client, which ends SESSION_TTL_MS after its last request; bearer: a
-// session of the app, which lasts until logout or a new password
+// session of the app, which lasts until logout or a new password, and has its own device id
 export type TSessionKind = "cookie" | "bearer";
 
 // a row of account_chats: its chat, and its account's row id and public id
@@ -49,7 +49,8 @@ export class AccountStore {
       CREATE TABLE IF NOT EXISTS app_sessions (
         tokenHash TEXT PRIMARY KEY,
         accountId INTEGER NOT NULL,
-        createdAt INTEGER NOT NULL
+        createdAt INTEGER NOT NULL,
+        deviceId TEXT NOT NULL
       );
       CREATE TABLE IF NOT EXISTS used_link_tokens (
         nonce TEXT PRIMARY KEY,
@@ -276,13 +277,16 @@ export class AccountStore {
     this.db.query("DELETE FROM sessions WHERE tokenHash = ?").run(hashSessionToken(token));
   }
 
-  // Returns the bearer token of a new app session, which has no expiry.
+  // Returns the bearer token of a new app session, which has no expiry, and makes its device id,
+  // which only the assistant learns
   public createAppSession(accountId: number, now: number): string {
     const token = randomBytes(32).toString("base64url");
 
     this.db
-      .query("INSERT INTO app_sessions (tokenHash, accountId, createdAt) VALUES (?, ?, ?)")
-      .run(hashSessionToken(token), accountId, now);
+      .query(
+        "INSERT INTO app_sessions (tokenHash, accountId, createdAt, deviceId) VALUES (?, ?, ?, ?)",
+      )
+      .run(hashSessionToken(token), accountId, now, randomBytes(32).toString("base64url"));
 
     return token;
   }
@@ -297,6 +301,17 @@ export class AccountStore {
            WHERE app_sessions.tokenHash = ?`,
         )
         .get(hashSessionToken(token)) ?? undefined
+    );
+  }
+
+  // The device id of an app session that has not been ended
+  public findAppSessionDevice(token: string): TOption<string> {
+    return (
+      this.db
+        .query<{ deviceId: string }, [string]>(
+          "SELECT deviceId FROM app_sessions WHERE tokenHash = ?",
+        )
+        .get(hashSessionToken(token))?.deviceId ?? undefined
     );
   }
 

@@ -26,7 +26,8 @@ export type TChatAddress = {
   address: string;
 };
 
-// destination: where a message of the conversation goes when it answers no inbound message
+// destination: where a message of the conversation goes when it answers no inbound message, unless
+// the account has a registered device: Outbound then sends it to the app
 export type TResolvedChat = {
   conversationKey: string;
   ownerKey: string;

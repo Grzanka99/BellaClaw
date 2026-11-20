@@ -1388,9 +1388,9 @@ async function openAppStream(sendApp: ReturnType<typeof createTestApp>["sendApp"
 function countSubscriptions(liveStream: ReturnType<typeof createLiveStream>) {
   const counter = { open: 0 };
   const subscribe = liveStream.subscribe;
-  liveStream.subscribe = (accountId, listener) => {
+  liveStream.subscribe = (accountId, listener, app) => {
     counter.open += 1;
-    const close = subscribe(accountId, listener);
+    const close = subscribe(accountId, listener, app);
 
     return () => {
       counter.open -= 1;
@@ -1506,7 +1506,7 @@ test("a phone that reconnects is told to check, sees the revision differ, and fe
     const reply = await database.insertRow(conversationKey, "assistant", "message", "Reply");
     await database.setRevision(conversationKey, ownerKey, 3, 0);
     const seen: unknown[] = [];
-    const stopWatching = liveStream.subscribe(accountId, (event) => seen.push(event));
+    const stopWatching = liveStream.subscribe(accountId, (event) => seen.push(event), false);
     assistant.push({
       type: "changed",
       accountId,
@@ -1853,4 +1853,258 @@ test("history lists a user message's images: an app image while the assistant ke
   } finally {
     await database.remove();
   }
+});
+
+// real P-256 public keys, uncompressed, base64url
+const PUBLIC_KEYS = [
+  "BA45xSmkpu16iOb3SDdemng3MY0BBUBpXQTZ9_u_XrgBhMbbDrSUSmJs3hm6zHVYq1DuFSV7hLcvavZQMDe4UkM",
+  "BK0NaeMoGRCI4PAxQ1dSlLqaFvREgqUAxC-3HUWgt3y8p-tA24e65EW5mBBtfZ4psKk118_YVeyD9_YEMuKyxWM",
+];
+
+// RFC 8291 key material of PUBLIC_KEYS[index], base64url
+function deviceKeys(index: number) {
+  return {
+    fcmToken: `token-${index}`,
+    publicKey: PUBLIC_KEYS[index] ?? "",
+    authSecret: Buffer.from(new Uint8Array(16).fill(index + 1)).toString("base64url"),
+  };
+}
+
+test("each app session registers its own device and unregisters it; the web client and malformed or off-curve keys are refused", async () => {
+  const { send, sendApp, register, store, assistant } = createTestApp();
+  const alice = await registerApp(sendApp, store, "alice");
+  const web = await register("bob", "signal:+100");
+  const deviceId = store.findAppSessionDevice(alice.token) ?? "";
+
+  const registered = await sendApp("PUT", "/api/device", deviceKeys(0), alice.token);
+  expect(registered.status).toBe(200);
+  expect(await registered.json()).toEqual({ ok: true });
+  // again with a refreshed token: the assistant replaces it
+  expect((await sendApp("PUT", "/api/device", deviceKeys(1), alice.token)).status).toBe(200);
+  expect([...assistant.devices]).toEqual([
+    [deviceId, { accountId: alice.publicId, registration: deviceKeys(1) }],
+  ]);
+
+  // another session of the account is another device
+  const phone = (
+    await (await sendApp("POST", "/api/login", { username: "alice", password: PASSWORD })).json()
+  ).token;
+  expect((await sendApp("PUT", "/api/device", deviceKeys(0), phone)).status).toBe(200);
+  expect(assistant.devices.size).toBe(2);
+  expect(store.findAppSessionDevice(phone)).not.toBe(deviceId);
+
+  expect((await send("PUT", "/api/device", deviceKeys(0), web.cookie)).status).toBe(403);
+  expect((await send("DELETE", "/api/device", undefined, web.cookie)).status).toBe(403);
+  const offCurve = new Uint8Array(65);
+  offCurve[0] = 0x04;
+  for (const body of [
+    { ...deviceKeys(0), publicKey: deviceKeys(0).authSecret },
+    { ...deviceKeys(0), publicKey: Buffer.from(offCurve).toString("base64url") },
+    { ...deviceKeys(0), authSecret: deviceKeys(0).publicKey },
+    { ...deviceKeys(0), fcmToken: "" },
+  ]) {
+    expect((await sendApp("PUT", "/api/device", body, alice.token)).status).toBe(400);
+  }
+  expect(assistant.devices.get(deviceId)?.registration).toEqual(deviceKeys(1));
+
+  expect((await sendApp("DELETE", "/api/device", undefined, alice.token)).status).toBe(200);
+  expect(assistant.devices.has(deviceId)).toBe(false);
+  expect((await sendApp("DELETE", "/api/device", undefined, alice.token)).status).toBe(404);
+});
+
+test("logout unregisters the session's device; when the assistant cannot, the session stays for another try", async () => {
+  const { sendApp, store, assistant } = createTestApp();
+  const alice = await registerApp(sendApp, store, "alice");
+  const deviceId = store.findAppSessionDevice(alice.token) ?? "";
+  await sendApp("PUT", "/api/device", deviceKeys(0), alice.token);
+
+  assistant.state.unreachableCalls = 1;
+  expect((await sendApp("POST", "/api/logout", undefined, alice.token)).status).toBe(502);
+  expect(assistant.devices.has(deviceId)).toBe(true);
+  expect((await sendApp("GET", "/api/me", undefined, alice.token)).status).toBe(200);
+
+  expect((await sendApp("POST", "/api/logout", undefined, alice.token)).status).toBe(200);
+  expect(assistant.devices.has(deviceId)).toBe(false);
+  expect((await sendApp("GET", "/api/me", undefined, alice.token)).status).toBe(401);
+
+  // a session that registered no device logs out too
+  const bob = await registerApp(sendApp, store, "bob");
+  expect((await sendApp("POST", "/api/logout", undefined, bob.token)).status).toBe(200);
+});
+
+test("a register that a logout overtook is undone", async () => {
+  const { sendApp, store, assistant } = createTestApp();
+  const alice = await registerApp(sendApp, store, "alice");
+  const registerDevice = assistant.internalApi.registerDevice;
+  assistant.internalApi.registerDevice = async (accountId, deviceId, registration) => {
+    const result = await registerDevice(accountId, deviceId, registration);
+    store.deleteAppSession(alice.token);
+
+    return result;
+  };
+
+  expect((await sendApp("PUT", "/api/device", deviceKeys(0), alice.token)).status).toBe(401);
+  expect(assistant.devices.size).toBe(0);
+});
+
+test("a new password set through a login link unregisters the account's devices first; when the assistant cannot, nothing changes", async () => {
+  const { sendApp, register, token, store, assistant } = createTestApp();
+  await register("alice", "signal:+100");
+  const phone = (
+    await (await sendApp("POST", "/api/login", { username: "alice", password: PASSWORD })).json()
+  ).token;
+  await sendApp("PUT", "/api/device", deviceKeys(0), phone);
+  const plain = (
+    await (await sendApp("POST", "/api/link/login", { token: token("signal:+100") })).json()
+  ).token;
+  await sendApp("PUT", "/api/device", deviceKeys(1), plain);
+  const bob = await registerApp(sendApp, store, "bob");
+  await sendApp("PUT", "/api/device", deviceKeys(0), bob.token);
+  const passwordHash = store.findCredentials("alice")?.passwordHash;
+
+  // a login link without a password ends nothing
+  await sendApp("POST", "/api/link/login", { token: token("signal:+100") });
+  expect(assistant.devices.size).toBe(3);
+
+  const unregisterAccountDevices = assistant.internalApi.unregisterAccountDevices;
+  assistant.internalApi.unregisterAccountDevices = async () => ({
+    error: "The assistant is unavailable",
+    status: 502,
+  });
+  const link = token("signal:+100");
+  const refused = await sendApp("POST", "/api/link/login", {
+    token: link,
+    password: "a brand new password",
+  });
+  expect(refused.status).toBe(502);
+  expect(store.findCredentials("alice")?.passwordHash).toBe(passwordHash);
+  expect((await sendApp("GET", "/api/me", undefined, phone)).status).toBe(200);
+  expect((await sendApp("GET", "/api/me", undefined, plain)).status).toBe(200);
+  expect(assistant.devices.size).toBe(3);
+
+  assistant.internalApi.unregisterAccountDevices = unregisterAccountDevices;
+  const reset = await sendApp("POST", "/api/link/login", {
+    token: link,
+    password: "a brand new password",
+  });
+  expect(reset.status).toBe(200);
+  expect((await sendApp("GET", "/api/me", undefined, phone)).status).toBe(401);
+  expect([...assistant.devices.values()].map((device) => device.accountId)).toEqual([bob.publicId]);
+});
+
+test("a device that registers while a new password is being set does not outlive its session", async () => {
+  const { sendApp, register, token, assistant } = createTestApp();
+  await register("alice", "signal:+100");
+  const phone = (
+    await (await sendApp("POST", "/api/login", { username: "alice", password: PASSWORD })).json()
+  ).token;
+  const unregisterAccountDevices = assistant.internalApi.unregisterAccountDevices;
+  let late = true;
+  // the phone registers after the account's devices were listed and before its session ends
+  assistant.internalApi.unregisterAccountDevices = async (accountId) => {
+    const removed = await unregisterAccountDevices(accountId);
+
+    if (late) {
+      late = false;
+      await sendApp("PUT", "/api/device", deviceKeys(0), phone);
+    }
+
+    return removed;
+  };
+
+  const reset = await sendApp("POST", "/api/link/login", {
+    token: token("signal:+100"),
+    password: "a brand new password",
+  });
+  expect(reset.status).toBe(200);
+  expect((await sendApp("GET", "/api/me", undefined, phone)).status).toBe(401);
+  expect(assistant.devices.size).toBe(0);
+});
+
+test("the edge reports every account with an open stream on each connection and when an account's first stream opens or last closes", async () => {
+  const following = new AbortController();
+  const { sendApp, assistant, store, liveStream } = createTestApp();
+  const alice = await registerApp(sendApp, store, "alice");
+  const bob = await registerApp(sendApp, store, "bob");
+  // no connection yet: nothing is reported
+  const early = await openAppStream(sendApp, alice.token);
+  expect(assistant.presence).toEqual([]);
+
+  const follow = liveStream.follow(following.signal);
+  await waitUntil(() => assistant.presence.length === 1);
+  expect(assistant.presence).toEqual([[alice.publicId]]);
+
+  const second = await openAppStream(sendApp, alice.token);
+  const other = await openAppStream(sendApp, bob.token);
+  await waitUntil(() => assistant.presence.length === 2);
+  expect(assistant.presence[1]).toEqual([alice.publicId, bob.publicId]);
+
+  // alice still has a stream open
+  await early.close();
+  await Bun.sleep(5);
+  expect(assistant.presence).toHaveLength(2);
+  await other.close();
+  await waitUntil(() => assistant.presence.length === 3);
+  expect(assistant.presence[2]).toEqual([alice.publicId]);
+
+  // a new connection reports the whole set again
+  assistant.drop();
+  await waitUntil(() => assistant.presence.length === 4);
+  expect(assistant.presence[3]).toEqual([alice.publicId]);
+
+  await second.close();
+  await waitUntil(() => assistant.presence.length === 5);
+  expect(assistant.presence[4]).toEqual([]);
+
+  following.abort();
+  await follow;
+});
+
+test("a browser's stream receives events but does not count toward presence", async () => {
+  const following = new AbortController();
+  const { send, register, assistant, liveStream } = createTestApp();
+  const web = await register("bob", "signal:+100");
+  const follow = liveStream.follow(following.signal);
+  await waitUntil(() => assistant.presence.length === 1);
+
+  const response = await send("GET", "/api/stream", undefined, web.cookie);
+  expect(response.status).toBe(200);
+  const reader = response.body?.getReader();
+  const decoder = new TextDecoder();
+  let received = "";
+  assistant.push({
+    type: "changed",
+    accountId: web.publicId ?? "",
+    conversationKey: "bella:bob",
+    revision: 1,
+    rewriteRevision: 0,
+  });
+  while (!received.includes("event: changed")) {
+    const chunk = await reader?.read();
+    received += decoder.decode(chunk?.value);
+  }
+  await Bun.sleep(5);
+  expect(assistant.presence).toEqual([[]]);
+
+  await reader?.cancel();
+  following.abort();
+  await follow;
+});
+
+test("a failed presence report is sent again until one succeeds", async () => {
+  const following = new AbortController();
+  const { sendApp, assistant, store, liveStream } = createTestApp();
+  const alice = await registerApp(sendApp, store, "alice");
+  const follow = liveStream.follow(following.signal);
+  await waitUntil(() => assistant.presence.length === 1);
+
+  assistant.state.failingPresenceReports = 1;
+  const stream = await openAppStream(sendApp, alice.token);
+  await waitUntil(() => assistant.presence.length === 2);
+  expect(assistant.presence[1]).toEqual([alice.publicId]);
+  expect(assistant.state.failingPresenceReports).toBe(0);
+
+  await stream.close();
+  following.abort();
+  await follow;
 });

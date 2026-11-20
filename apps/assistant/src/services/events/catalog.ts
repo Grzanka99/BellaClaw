@@ -524,6 +524,26 @@ const SConversationDeleted = z
   .object({ conversationKey: z.string(), ownerKey: z.string() })
   .strict();
 
+// the device of an app session of the account, by the id the edge made for the session; the token
+// and keys replace any it had. publicKey and authSecret: base64url (RFC 8291)
+const SAppDeviceRegisterRequested = z
+  .object({
+    deviceId: z.string(),
+    accountId: z.string(),
+    fcmToken: z.string(),
+    publicKey: z.string(),
+    authSecret: z.string(),
+  })
+  .strict();
+
+// registeredAt: epoch ms
+const SAppDeviceRegistered = z
+  .object({ deviceId: z.string(), accountId: z.string(), registeredAt: z.number().int() })
+  .strict();
+
+// a device the account holds; another account's device is left alone
+const SAppDevice = z.object({ deviceId: z.string(), accountId: z.string() }).strict();
+
 // errorCode: the handler's stable code for an expected failure, such as job-not-found
 const SCommandRejected = z
   .object({
@@ -625,6 +645,10 @@ export type TEventPayloads = {
   [EEventType.IdentityLinkQuiet]: TIdentityLinkKeys;
   [EEventType.IdentityLinkMoved]: z.infer<typeof SIdentityLinkProgress>;
   [EEventType.IdentityLinked]: z.infer<typeof SIdentityLinked>;
+  [EEventType.AppDeviceRegisterRequested]: z.infer<typeof SAppDeviceRegisterRequested>;
+  [EEventType.AppDeviceRegistered]: z.infer<typeof SAppDeviceRegistered>;
+  [EEventType.AppDeviceUnregisterRequested]: z.infer<typeof SAppDevice>;
+  [EEventType.AppDeviceUnregistered]: z.infer<typeof SAppDevice>;
   [EEventType.ConversationSummariesFused]: TFusedSummary;
   [EEventType.ConversationChanged]: z.infer<typeof SConversationChanged>;
   [EEventType.ConversationCreateRequested]: z.infer<typeof SConversationCreateRequested>;
@@ -714,6 +738,10 @@ export const EVENT_SCHEMAS: { [K in EEventType]: z.ZodType<TEventPayloads[K]> } 
   [EEventType.IdentityLinkQuiet]: SIdentityLinkStarted,
   [EEventType.IdentityLinkMoved]: SIdentityLinkProgress,
   [EEventType.IdentityLinked]: SIdentityLinked,
+  [EEventType.AppDeviceRegisterRequested]: SAppDeviceRegisterRequested,
+  [EEventType.AppDeviceRegistered]: SAppDeviceRegistered,
+  [EEventType.AppDeviceUnregisterRequested]: SAppDevice,
+  [EEventType.AppDeviceUnregistered]: SAppDevice,
   [EEventType.ConversationSummariesFused]: SConversationSummariesFused,
   [EEventType.ConversationChanged]: SConversationChanged,
   [EEventType.ConversationCreateRequested]: SConversationCreateRequested,
@@ -801,6 +829,10 @@ export const EVENT_KINDS: Record<EEventType, EEventKind> = {
   [EEventType.IdentityLinkQuiet]: EEventKind.Event,
   [EEventType.IdentityLinkMoved]: EEventKind.Event,
   [EEventType.IdentityLinked]: EEventKind.Event,
+  [EEventType.AppDeviceRegisterRequested]: EEventKind.Command,
+  [EEventType.AppDeviceRegistered]: EEventKind.Event,
+  [EEventType.AppDeviceUnregisterRequested]: EEventKind.Command,
+  [EEventType.AppDeviceUnregistered]: EEventKind.Event,
   [EEventType.ConversationSummariesFused]: EEventKind.Event,
   [EEventType.ConversationChanged]: EEventKind.Event,
   [EEventType.ConversationCreateRequested]: EEventKind.Command,
@@ -820,6 +852,7 @@ export const EVENT_SCRUBBED: ReadonlySet<EEventType> = new Set([
   EEventType.MessageReceived,
   EEventType.MessageAuthorized,
   EEventType.McpAuthTokenSaveRequested,
+  EEventType.AppDeviceRegisterRequested,
   EEventType.TestSecret,
 ]);
 

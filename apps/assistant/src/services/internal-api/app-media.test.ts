@@ -157,7 +157,7 @@ async function start(
     },
     llm: { completeText: mock(async () => "Title") },
   });
-  AppChannel.instance.setup();
+  await AppChannel.instance.setup();
   MessageHandler.instance.setup();
   Commands.instance.setup();
   MessagingAdapter.instance.setup();

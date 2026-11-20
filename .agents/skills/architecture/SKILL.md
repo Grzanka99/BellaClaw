@@ -115,9 +115,9 @@ bus.subscribe({
 - `ai-auth` → `settings`
 - `authorization` → `identity`: a message held while its address or its account is being linked.
   It waits on Identity's read model (`waitWhileLinking`), bounded from the message's arrival
-- `internal-api` → `settings`, `conversation`, `identity`. An HTTP request is on no lane: it publishes the
-  command (a settings update, a message delete, a plain chat's create or delete, a link) and
-  awaits the outcome through live subscriptions. An app send publishes
+- `internal-api` → `settings`, `conversation`, `identity`, `app`. An HTTP request is on no lane: it publishes the
+  command (a settings update, a message delete, a plain chat's create or delete, a link, a
+  device's register or unregister) and awaits the outcome through live subscriptions. An app send publishes
   `message.received` (channel `app`, the client's message id as the dedupe key) and waits for
   nothing. Its stream (`/internal/stream`) forwards what `AppStream.listen` hears.
 
@@ -133,12 +133,17 @@ A call across services is allowed only when it changes no state:
   `matchesActivationToken` (the configured code, for the dashboard's registration),
   `IdentityService.resolve`, `linkedAccount`, `link`, `account`,
   `waitWhileLinking` and `listNoticeRecipients`
-  (loaded from `identity_links`, fed by `identity.link.started` and `identity.linked`).
+  (loaded from `identity_links`, fed by `identity.link.started` and `identity.linked`),
+  `AppChannel.hasDevice`, `listDeviceIds` and `listDeviceAccounts` (loaded from `app_devices`, fed
+  by `app.device.registered` and `app.device.unregistered`): Outbound reads which account has a
+  device to pick the main channel, Notices adds those accounts to a global notice's audience, and
+  the internal API lists an account's devices to unregister each.
 - Drivers: `LlmClient`, `EmbeddingClient`, `aiModels`, the Discord and Signal clients, `gws`.
 - The stateless engine: `AgentHarness.runMain`, `runPlain`, `runScheduledTask`,
   `compactConversation`.
 - Live state an event cannot carry: `McpService.open`, `McpRunRegistry`, `AppStream.listen`
-  (the dashboard's open streams).
+  (the dashboard's open streams), `AppChannel.openEdgeConnection`, `reportPresence` and
+  `hasOpenStream` (which accounts have an open stream at the dashboard, in memory only).
 - Bytes an event must not carry: the internal API hands an app upload to `AppChannel.store` and
   reads it back with `open`; `findAttachments` checks a send's named images.
 - Reads, including reads that prepare a command (`AutomationService.resolveNames`,
@@ -175,7 +180,8 @@ reply was already sent.
 Table owners: `memories`, `conversation_summaries`, `conversations` → Conversation · `facts`,
 `fact_distillation_state` → Memory · `cron_engine_jobs` → Cron · `automations`,
 `automation_drafts` → Automations · `user_configs` → Settings · `calendars` → Calendar ·
-`message_authorizations` → Authorization · `identity_links` → Identity · `app_media` → App channel ·
+`message_authorizations` → Authorization · `identity_links` → Identity · `app_media`,
+`app_devices` → App channel ·
 `events`, `event_deliveries` → EventBus.
 
 Every change of a transcript (`memories`), and a plain chat's title, raises the conversation's
@@ -195,7 +201,17 @@ app compares revisions on every connect. Its handlers do not await before sendin
 conversation's events reach the stream in log order.
 
 The app is a channel with nothing to send: Outbound reports `message.sent` at once, so the
-transcript row is the delivery. Who owns a conversation is one rule, `findOwnedConversation` in
+transcript row is the delivery. A reply goes back to its origin. A delivery or notice has none and
+goes to the main channel, decided at each attempt: the app while the account has a registered
+device, else Identity's destination (the oldest active link, else the app; an unlinked chat's own
+address).
+
+The App channel owns the app's devices: its durable consumer `app` answers
+`app.device.register.requested` with `app.device.registered` (insert or replace by the device id,
+which the dashboard makes per app session) and `app.device.unregister.requested` with `app.device.unregistered`, or `command.rejected` with
+`device-not-found` for a device the account does not hold; both on the `global` lane. The register
+command carries the key material and is in `EVENT_SCRUBBED`. Its live consumer `app-cache` feeds
+the device read model. Who owns a conversation is one rule, `findOwnedConversation` in
 `@bellaclaw/database`: the registry's owner, or, before its first row, the account whose Bella
 conversation it is. The dashboard's reads, the internal API's send and Authorization's gate for an
 app message all use it.

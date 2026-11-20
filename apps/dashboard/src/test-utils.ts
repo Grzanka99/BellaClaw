@@ -2,6 +2,7 @@ import {
   ADDRESS_LINKED_ELSEWHERE,
   type TDashboardAppMessage,
   type TDashboardChatLink,
+  type TDashboardDeviceRegistration,
   type TDashboardLinkState,
   type TDashboardPersonality,
   type TDashboardStreamEvent,
@@ -15,7 +16,10 @@ import type { TInternalApi } from "./internal-api";
 // sends: every message sent, accepted as the assistant does, without a turn. streams: the stream
 // opened by each openStream call, oldest first; push writes an event to the newest, drop closes it.
 // personalities: by account id. uploads: every image streamed on, with its bytes; the fake answers
-// it with the id `media-<n>`, and a download of that id with the bytes
+// it with the id `media-<n>`, and a download of that id with the bytes. devices: by device id, as
+// the assistant keeps them; unreachableCalls also counts registerDevice, unregisterDevice and
+// unregisterAccountDevices. presence: every set reportPresence delivered, oldest first;
+// failingPresenceReports: how many next reportPresence calls answer 502
 export function createFakeAssistant() {
   const personalities = new Map<string, TDashboardPersonality>();
   const defaultPersonality: TDashboardPersonality = {
@@ -26,9 +30,14 @@ export function createFakeAssistant() {
   const links = new Map<string, { accountId: string; state: TDashboardLinkState }>();
   const requests: { accountId: string; chatKey: string }[] = [];
   const calls: { method: string; accountId: string }[] = [];
-  const state: { unreachableCalls: number; activationCode: TOption<string> } = {
+  const state: {
+    unreachableCalls: number;
+    activationCode: TOption<string>;
+    failingPresenceReports: number;
+  } = {
     unreachableCalls: 0,
     activationCode: "open-sesame",
+    failingPresenceReports: 0,
   };
   const codeChecks: string[] = [];
   const sends: { accountId: string; conversationKey: string; message: TDashboardAppMessage }[] = [];
@@ -40,6 +49,11 @@ export function createFakeAssistant() {
   }[] = [];
   const unavailable = { error: "The assistant is unavailable", status: 502 as const };
   const streams: ReadableStreamDefaultController<Uint8Array>[] = [];
+  const devices = new Map<
+    string,
+    { accountId: string; registration: TDashboardDeviceRegistration }
+  >();
+  const presence: string[][] = [];
   const encoder = new TextEncoder();
 
   function reachable(): boolean {
@@ -179,6 +193,53 @@ export function createFakeAssistant() {
 
       return { data: { conversationKey } };
     },
+    reportPresence: async (accountIds) => {
+      if (state.failingPresenceReports > 0) {
+        state.failingPresenceReports -= 1;
+        return unavailable;
+      }
+
+      presence.push(accountIds);
+
+      return { data: { ok: true } };
+    },
+    registerDevice: async (accountId, deviceId, registration) => {
+      if (!reachable()) {
+        return unavailable;
+      }
+
+      devices.set(deviceId, { accountId, registration });
+
+      return { data: { deviceId } };
+    },
+    unregisterDevice: async (accountId, deviceId) => {
+      if (!reachable()) {
+        return unavailable;
+      }
+
+      if (devices.get(deviceId)?.accountId !== accountId) {
+        return { error: "Not found", status: 404 };
+      }
+
+      devices.delete(deviceId);
+
+      return { data: { deviceId } };
+    },
+    unregisterAccountDevices: async (accountId) => {
+      if (!reachable()) {
+        return unavailable;
+      }
+
+      const deviceIds = [...devices]
+        .filter(([, device]) => device.accountId === accountId)
+        .map(([deviceId]) => deviceId);
+
+      for (const deviceId of deviceIds) {
+        devices.delete(deviceId);
+      }
+
+      return { data: { deviceIds } };
+    },
     openStream: async (signal) => {
       const body = new ReadableStream<Uint8Array>({
         start(controller) {
@@ -208,6 +269,8 @@ export function createFakeAssistant() {
     personalities,
     state,
     streams,
+    devices,
+    presence,
     push(event: TDashboardStreamEvent) {
       streams.at(-1)?.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
     },

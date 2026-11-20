@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
-import { EEventType, eventsTable, identityLinksTable } from "@bellaclaw/database";
+import { appDevicesTable, EEventType, eventsTable, identityLinksTable } from "@bellaclaw/database";
 import { eq } from "drizzle-orm";
+import { AppChannel } from "../app";
 import { AuthorizationService } from "../authorization";
 import { DatabaseConnector } from "../database";
 import { resetEventTables, resetIdentityLinksTable } from "../database/test-utils";
@@ -117,6 +118,46 @@ describe("Notices", () => {
       ["+100", "Updated to abc1234"],
       ["+200", "Updated to abc1234"],
     ]);
+  });
+
+  test("a supervisor notice reaches an app-only account with a device and a linked account with a device in their Bella conversations, once each", async () => {
+    await resetIdentityLinksTable();
+    await DatabaseConnector.instance.database.insert(identityLinksTable).values({
+      channel: EMessagePlatform.Signal,
+      address: "+300",
+      accountId: "acct-1",
+      state: EIdentityLinkState.Active,
+      linkedAt: new Date(1_000),
+    });
+    const device = { fcmToken: "token", publicKey: "key", authSecret: "secret" };
+    await DatabaseConnector.instance.database.insert(appDevicesTable).values([
+      { ...device, id: "device-1", accountId: "acct-1", registeredAt: new Date(1_000) },
+      { ...device, id: "device-2", accountId: "acct-2", registeredAt: new Date(1_000) },
+      { ...device, id: "device-3", accountId: "acct-2", registeredAt: new Date(1_000) },
+    ]);
+    Object.assign(IdentityService, { _instance: undefined });
+    Object.assign(AppChannel, { _instance: undefined });
+    const authorized = spyOn(
+      AuthorizationService.instance,
+      "listAuthorizedChatIds",
+    ).mockResolvedValue(["signal:+300"]);
+
+    try {
+      await Notices.instance.handleSupervisorMessage({ type: "notice", text: "Updated" });
+      await bus.idle();
+    } finally {
+      authorized.mockRestore();
+      await resetIdentityLinksTable();
+      await DatabaseConnector.instance.database.delete(appDevicesTable);
+      Object.assign(IdentityService, { _instance: undefined });
+      Object.assign(AppChannel, { _instance: undefined });
+    }
+
+    const notices = await DatabaseConnector.instance.database
+      .select()
+      .from(eventsTable)
+      .where(eq(eventsTable.type, EEventType.NoticeReady));
+    expect(notices.map((row) => row.key)).toEqual(["bella:acct-1", "bella:acct-2"]);
   });
 
   test("login outcomes become chat notices", async () => {

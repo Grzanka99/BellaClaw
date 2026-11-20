@@ -1,8 +1,14 @@
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
-import { appMediaTable, EEventType, findOwnedConversation } from "@bellaclaw/database";
+import {
+  appDevicesTable,
+  appMediaTable,
+  EEventType,
+  findOwnedConversation,
+} from "@bellaclaw/database";
 import {
   createLogger,
+  DEVICE_NOT_FOUND,
   repositoryPath,
   type TDashboardMedia,
   type TLogger,
@@ -12,6 +18,7 @@ import type { BunFile } from "bun";
 import { and, eq, inArray } from "drizzle-orm";
 import { DatabaseConnector, type TDatabaseHandle } from "../database";
 import { ESubscriptionMode, EventBus } from "../events";
+import { ERejectionCode } from "../events/catalog";
 import type { TAccountKeys } from "../identity";
 import { MessagingAdapter } from "../messaging";
 import { EMessagePlatform, type TAttachmentRef, type TAttachmentStore } from "../messaging/types";
@@ -41,11 +48,20 @@ export function imageTypeOf(data: Uint8Array): TOption<string> {
 }
 
 // NOTE: the App channel: the images the app uploads, kept on the assistant's data volume, one
-// file per id, listed in app_media. It is the app's attachment store; the app has nothing to send
+// file per id, listed in app_media. It is the app's attachment store; the app has nothing to send.
+// It also keeps the app's devices in app_devices, and which accounts have an open app stream at
+// the edge
 export class AppChannel implements TAttachmentStore {
   private static _instance: TOption<AppChannel>;
   private logger: TLogger = createLogger("APP");
   public readonly platform = EMessagePlatform.App;
+  // the account of each device, by device id: loaded from app_devices, fed by
+  // app.device.registered and app.device.unregistered
+  private devices = new Map<string, string>();
+  private loadPromise: TOption<Promise<void>>;
+  // what the edge last reported, while its live connection is open; memory only
+  private openStreams = new Set<string>();
+  private edgeConnections = 0;
 
   private constructor() {}
 
@@ -62,7 +78,9 @@ export class AppChannel implements TAttachmentStore {
     return Bun.env.BELLACLAW_APP_MEDIA_DIR?.trim() || repositoryPath(".data", "app-media");
   }
 
-  public setup(): void {
+  // NOTE: the read model has its own live consumer, so its update never waits behind a command
+  // on the app consumer's lanes
+  public setup(): Promise<void> {
     MessagingAdapter.instance.registerAttachmentStore(this);
 
     // a deleted plain chat leaves no image behind, sent or only uploaded
@@ -89,6 +107,165 @@ export class AppChannel implements TAttachmentStore {
         this.logger.info(`Deleted ${rows.length} images of ${conversationKey}`);
       },
     });
+
+    EventBus.instance.subscribe({
+      consumer: "app",
+      type: EEventType.AppDeviceRegisterRequested,
+      mode: ESubscriptionMode.Durable,
+      backoffMs: [],
+      handler: async (event, ctx) => {
+        const { deviceId, accountId, fcmToken, publicKey, authSecret } = event.payload;
+        const registeredAt = new Date();
+
+        await ctx.complete(async (tx, emit) => {
+          await tx
+            .insert(appDevicesTable)
+            .values({ id: deviceId, accountId, fcmToken, publicKey, authSecret, registeredAt })
+            .onConflictDoUpdate({
+              target: appDevicesTable.id,
+              set: { accountId, fcmToken, publicKey, authSecret, registeredAt },
+            });
+          emit(
+            EEventType.AppDeviceRegistered,
+            { deviceId, accountId, registeredAt: registeredAt.getTime() },
+            undefined,
+            undefined,
+          );
+        });
+      },
+    });
+    EventBus.instance.subscribe({
+      consumer: "app",
+      type: EEventType.AppDeviceUnregisterRequested,
+      mode: ESubscriptionMode.Durable,
+      backoffMs: [],
+      handler: async (event, ctx) => {
+        const { deviceId, accountId } = event.payload;
+
+        await ctx.complete(async (tx, emit) => {
+          const deleted = await tx
+            .delete(appDevicesTable)
+            .where(and(eq(appDevicesTable.id, deviceId), eq(appDevicesTable.accountId, accountId)))
+            .returning({ id: appDevicesTable.id });
+
+          if (deleted.length === 0) {
+            emit(
+              EEventType.CommandRejected,
+              {
+                commandType: event.type,
+                code: ERejectionCode.Invalid,
+                message: "The account holds no such device",
+                errorCode: DEVICE_NOT_FOUND,
+              },
+              undefined,
+              undefined,
+            );
+            return;
+          }
+
+          emit(EEventType.AppDeviceUnregistered, { deviceId, accountId }, undefined, undefined);
+        });
+      },
+    });
+    EventBus.instance.subscribe({
+      consumer: "app-cache",
+      type: EEventType.AppDeviceRegistered,
+      mode: ESubscriptionMode.Live,
+      backoffMs: [],
+      handler: async (event) => {
+        this.devices.set(event.payload.deviceId, event.payload.accountId);
+      },
+    });
+    EventBus.instance.subscribe({
+      consumer: "app-cache",
+      type: EEventType.AppDeviceUnregistered,
+      mode: ESubscriptionMode.Live,
+      backoffMs: [],
+      handler: async (event) => {
+        this.devices.delete(event.payload.deviceId);
+      },
+    });
+
+    return this.load();
+  }
+
+  // whether the account has a registered device: the app is then its main channel
+  public async hasDevice(accountId: string): Promise<boolean> {
+    await this.load();
+
+    return [...this.devices.values()].includes(accountId);
+  }
+
+  // the ids of the account's registered devices
+  public async listDeviceIds(accountId: string): Promise<string[]> {
+    await this.load();
+
+    return [...this.devices]
+      .filter(([, deviceAccountId]) => deviceAccountId === accountId)
+      .map(([deviceId]) => deviceId);
+  }
+
+  // every account with a registered device, once
+  public async listDeviceAccounts(): Promise<string[]> {
+    await this.load();
+
+    return [...new Set(this.devices.values())];
+  }
+
+  // NOTE: presence holds only while the edge's live connection is open: the edge reports again on
+  // every connection, and a dropped one reads closed for every account. Returns what ends it
+  public openEdgeConnection(): () => void {
+    let open = true;
+    this.edgeConnections += 1;
+
+    return () => {
+      if (!open) {
+        return;
+      }
+
+      open = false;
+      this.edgeConnections -= 1;
+
+      if (this.edgeConnections === 0) {
+        this.openStreams.clear();
+      }
+    };
+  }
+
+  // accountIds: every account with an open app stream, as the edge reports it; ignored while the
+  // edge has no live connection
+  public reportPresence(accountIds: string[]): void {
+    if (this.edgeConnections === 0) {
+      return;
+    }
+
+    this.openStreams = new Set(accountIds);
+  }
+
+  // whether the account has an open app stream at the edge; false after a restart until the edge
+  // reports
+  public hasOpenStream(accountId: string): boolean {
+    return this.openStreams.has(accountId);
+  }
+
+  private load(): Promise<void> {
+    if (this.loadPromise === undefined) {
+      this.loadPromise = this.loadDevices();
+    }
+
+    return this.loadPromise;
+  }
+
+  private async loadDevices(): Promise<void> {
+    const rows = await DatabaseConnector.instance.run((db) =>
+      db
+        .select({ id: appDevicesTable.id, accountId: appDevicesTable.accountId })
+        .from(appDevicesTable),
+    );
+
+    for (const row of rows) {
+      this.devices.set(row.id, row.accountId);
+    }
   }
 
   // NOTE: the file is written before its row, so a listed image has its bytes. Check the bytes

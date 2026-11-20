@@ -2,6 +2,7 @@ import { EBehaviorLogLevel, type TBehaviorTraceContext } from "@bellaclaw/behavi
 import { EEventType } from "@bellaclaw/database";
 import type { TOption } from "@bellaclaw/shared";
 import { createLogger, type TLogger } from "@bellaclaw/shared";
+import { AppChannel } from "../app";
 import { startSpan } from "../app-logger/span";
 import { ESubscriptionMode, EventBus, type TEventContext } from "../events";
 import type { TDeliveryTranscript, TDisplay, TEvent } from "../events/catalog";
@@ -112,7 +113,9 @@ export class MessagingAdapter {
   }
 
   // key: the conversation the message belongs to, possibly the old key of a linked address;
-  // origin: where a reply goes. A message without one goes where Identity resolves the key
+  // origin: where a reply goes. A message without one, a delivery or a notice, goes to the main
+  // channel, decided at each attempt: the app while the account has a registered device, else
+  // where Identity resolves the key
   private async send(
     key: string,
     origin: TOption<TChatAddress>,
@@ -124,7 +127,15 @@ export class MessagingAdapter {
   ): Promise<void> {
     const resolved = await IdentityService.instance.resolve(key);
     const chatId = resolved?.conversationKey ?? key;
-    const destination = origin ?? resolved?.destination;
+    let destination = origin ?? resolved?.destination;
+
+    if (origin === undefined && resolved !== undefined) {
+      const accountId = IdentityService.instance.accountIdOf(resolved.ownerKey);
+
+      if (accountId !== undefined && (await AppChannel.instance.hasDevice(accountId))) {
+        destination = { channel: EMessagePlatform.App, address: accountId };
+      }
+    }
 
     if (destination === undefined) {
       throw new Error("Unknown chat platform");
