@@ -12,6 +12,7 @@ import one.scary.bellaclaw.data.push.Notifier
 import one.scary.bellaclaw.model.BELLACLAW_CHAT_ID
 import one.scary.bellaclaw.model.ChatNotification
 import one.scary.bellaclaw.ui.MainActivity
+import one.scary.bellaclaw.ui.components.styledText
 
 /**
  * The notifications in Android: one per conversation, tagged with its key, on the BellaClaw channel or
@@ -40,6 +41,7 @@ class AndroidNotifier(private val context: Context) : Notifier {
         } else {
             notification.title ?: context.getString(R.string.new_chat_title)
         }
+        val text = styledText(notification.text).text
         val channel = if (isBellaClaw) BELLACLAW_CHANNEL else CHATS_CHANNEL
         val open = Intent(context, MainActivity::class.java).putExtra(MainActivity.EXTRA_CHAT_ID, notification.chatId)
         val tap = PendingIntent.getActivity(
@@ -51,8 +53,8 @@ class AndroidNotifier(private val context: Context) : Notifier {
         val shown = Notification.Builder(context, channel)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(title)
-            .setContentText(notification.text)
-            .setStyle(Notification.BigTextStyle().bigText(notification.text))
+            .setContentText(text)
+            .setStyle(Notification.BigTextStyle().bigText(text))
             .setCategory(Notification.CATEGORY_MESSAGE)
             .setContentIntent(tap)
             .setAutoCancel(true)

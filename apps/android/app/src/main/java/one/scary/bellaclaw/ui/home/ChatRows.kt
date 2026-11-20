@@ -18,6 +18,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -33,6 +34,7 @@ import one.scary.bellaclaw.ui.components.BellaClawAvatar
 import one.scary.bellaclaw.ui.components.Dot
 import one.scary.bellaclaw.ui.components.formatListTime
 import one.scary.bellaclaw.ui.components.imageVector
+import one.scary.bellaclaw.ui.components.styledText
 
 @Composable
 fun BellaClawRow(summary: BellaClawSummary, onClick: () -> Unit, modifier: Modifier = Modifier) {
@@ -103,7 +105,7 @@ private fun ChatRowLayout(
             Text(text = title, style = titleStyle, maxLines = 1, overflow = TextOverflow.Ellipsis)
             summary.preview?.let {
                 Text(
-                    text = it.ifEmpty { stringResource(R.string.image) },
+                    text = remember(it) { styledText(it).text }.ifEmpty { stringResource(R.string.image) },
                     style = MaterialTheme.typography.bodyMedium,
                     color = mutedColor,
                     maxLines = 1,

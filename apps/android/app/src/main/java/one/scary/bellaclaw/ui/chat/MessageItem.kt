@@ -12,10 +12,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import one.scary.bellaclaw.R
 import one.scary.bellaclaw.model.Author
@@ -23,6 +25,7 @@ import one.scary.bellaclaw.model.Message
 import one.scary.bellaclaw.model.MessageImage
 import one.scary.bellaclaw.model.SendState
 import one.scary.bellaclaw.ui.components.formatTime
+import one.scary.bellaclaw.ui.components.styledText
 
 private val BubbleShape = RoundedCornerShape(20.dp)
 
@@ -38,7 +41,7 @@ fun MessageItem(
     val fromUser = message.author == Author.USER
     if (!fromUser && !assistantInBubble) {
         Text(
-            text = message.text,
+            text = remember(message.text) { styledText(message.text) },
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurface,
             modifier = modifier.fillMaxWidth().padding(horizontal = 4.dp),
@@ -72,7 +75,12 @@ fun MessageItem(
                     )
                 }
                 if (message.text.isNotEmpty()) {
-                    Text(text = message.text, style = MaterialTheme.typography.bodyLarge)
+                    val text = if (fromUser) {
+                        AnnotatedString(message.text)
+                    } else {
+                        remember(message.text) { styledText(message.text) }
+                    }
+                    Text(text = text, style = MaterialTheme.typography.bodyLarge)
                 }
                 message.failure?.let {
                     Text(text = it, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 4.dp))
