@@ -79,10 +79,10 @@ class SettingsRepository(
      */
     private suspend fun loadModels() {
         val token = session.value?.token ?: return
+        val changes = modelChanges.get()
         if (state.value.isChangingModels) {
             return
         }
-        val changes = modelChanges.get()
         val read = modelReads.incrementAndGet()
         updateForSession(token) { it.copy(models = it.models.retrying()) }
         val result = api.getSignedIn<ModelStateBody>("/api/model")
