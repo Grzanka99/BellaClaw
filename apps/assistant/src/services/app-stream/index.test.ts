@@ -96,11 +96,11 @@ async function openStream() {
   const response = await internalRequest("GET", GATEWAY_STREAM_PATH);
   expect(response.status).toBe(200);
   expect(response.headers.get("Content-Type")).toBe("application/x-ndjson");
-  const reader = response.body?.getReader();
-
-  if (reader === undefined) {
+  if (response.body === null) {
     throw new Error("The stream has no body");
   }
+
+  const reader = response.body.getReader();
 
   const decoder = new TextDecoder();
   // read from the stream, not returned yet
