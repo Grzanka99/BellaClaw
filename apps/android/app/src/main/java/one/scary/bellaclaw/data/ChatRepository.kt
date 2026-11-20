@@ -43,8 +43,9 @@ import one.scary.bellaclaw.model.SettingsSnapshot
 /**
  * The account's conversations from the gateway: the list, history, sends and the live stream, held in
  * memory for the current [session] and dropped when it changes. The stream is open while signed in and
- * [foreground]. [chatStore] keeps each plain chat's model and what was last seen; a chat with no picked
- * model uses the [settings]' provider and Main model, and has none while those are not loaded. [scope] lives as long as the application; network
+ * [foreground]. [chatStore] keeps each plain chat's model, the model used last and what was last seen; a
+ * chat with no picked model uses the model used last, else the [settings]' provider and Main model, and
+ * has none while neither is known. [scope] lives as long as the application; network
  * work runs in it, so leaving a screen does not stop a send. A dropped stream and a failed read are
  * tried again after [retryMillis], doubling to 30 s.
  */
@@ -152,7 +153,7 @@ class ChatRepository(
 
     /**
      * Shows [text] at once as pending and sends it with a fresh client message id; a plain chat's send
-     * names its model. Accepted, it shows as sent until history's row with that id replaces it. False,
+     * names its model, which stays the chat's pick and becomes the model used last. Accepted, it shows as sent until history's row with that id replaces it. False,
      * and nothing sent, while the chat's conversation is not known, or a plain chat has no model.
      */
     fun send(chatId: String, text: String): Boolean {
@@ -164,6 +165,9 @@ class ChatRepository(
         }
         val message = PendingSend(UUID.randomUUID().toString(), text, model, clock.instant())
         state.update { it.copy(pending = it.pending + (key to it.pending[key].orEmpty() + message)) }
+        if (model != null) {
+            scope.launch { chatStore.setModel(key, model) }
+        }
         scope.launch { post(key, message) }
         return true
     }
@@ -279,11 +283,19 @@ class ChatRepository(
         }
 
     /**
-     * The model picked for [key], else the account's provider and Main model at Main's effort; for the
-     * model's default effort, MEDIUM if the model lists it, else its first. Null while the models are not loaded.
+     * The model picked for [key], else the model used last unless the loaded list refuses it, else the account's provider and Main model at
+     * Main's effort; for the model's default effort, MEDIUM if the model lists it, else its first. Null
+     * while none of them is known.
      */
     private fun modelOf(key: String, local: LocalChats, settings: SettingsSnapshot): ModelChoice? {
         local.models[key]?.let { return it }
+        val catalog = (settings.chatModels as? Loadable.Loaded)?.value
+        local.lastModel?.takeIf { last ->
+            catalog == null || catalog.any { provider ->
+                provider.isUsable && provider.id == last.providerId &&
+                    provider.models.any { it.id == last.model && last.effort in it.efforts }
+            }
+        }?.let { return it }
         val models = (settings.models as? Loadable.Loaded)?.value ?: return null
         val main = models.roles[ModelRole.MAIN] ?: return null
         val efforts = models.models.firstOrNull { it.id == main.model }?.efforts.orEmpty()

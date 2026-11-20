@@ -108,12 +108,16 @@ class TestServer : ExternalResource() {
     fun themeStore() = ThemeStore(File(folder, "theme.json"), Dispatchers.Unconfined)
 
     /**
-     * The real settings repository on [store]'s session, running its work in [scope]. The model and
-     * personality reads answer [modelAnswer] and [personalityAnswer] unless a test routed them already.
+     * The real settings repository on [store]'s session, running its work in [scope]. The model, model
+     * list and personality reads answer [modelAnswer], [chatModelsAnswer] and [personalityAnswer] unless
+     * a test routed them already.
      */
     fun settingsRepository(store: SessionStore = store(), scope: CoroutineScope): SettingsRepository {
         if (!routes.containsKey("GET /api/model")) {
             route("GET", "/api/model", 200, modelAnswer())
+        }
+        if (!routes.containsKey("GET /api/models")) {
+            route("GET", "/api/models", 200, chatModelsAnswer())
         }
         if (!routes.containsKey("GET /api/personality")) {
             route("GET", "/api/personality", 200, personalityAnswer())
@@ -160,6 +164,20 @@ fun modelAnswer(mainModel: String = "kimi-k3.1-pro"): String {
         """"availableModels":[""" +
         """{"id":"kimi-k3.1-pro","name":"Kimi K3.1 Pro","supportedEfforts":["low","medium","high"],"supportsServiceTier":false},""" +
         """{"id":"glm-5","name":"GLM 5","supportedEfforts":["low","high"],"supportsServiceTier":false}]}"""
+}
+
+/**
+ * GET /api/models: opencode-go, usable, with Kimi K3.1 Pro (low to high) and GLM 5 (low, high); then
+ * openai-codex, usable when [codexReason] is null, with GPT 5.5 (low to xhigh).
+ */
+fun chatModelsAnswer(codexReason: String? = "The OpenAI Codex login is not connected"): String {
+    val codex = if (codexReason == null) """"usable":true""" else """"usable":false,"reason":"$codexReason""""
+    return """{"providers":[""" +
+        """{"id":"opencode-go","usable":true,"models":[""" +
+        """{"id":"kimi-k3.1-pro","name":"Kimi K3.1 Pro","supportedEfforts":["low","medium","high"]},""" +
+        """{"id":"glm-5","name":"GLM 5","supportedEfforts":["low","high"]}]},""" +
+        """{"id":"openai-codex",$codex,"models":[""" +
+        """{"id":"gpt-5.5","name":"GPT 5.5","supportedEfforts":["low","medium","high","xhigh"]}]}]}"""
 }
 
 /** GET and PUT /api/personality. */

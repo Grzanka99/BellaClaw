@@ -14,6 +14,7 @@ import kotlinx.coroutines.launch
 import one.scary.bellaclaw.data.local.ThemeStore
 import one.scary.bellaclaw.data.remote.ApiClient
 import one.scary.bellaclaw.data.remote.ApiResult
+import one.scary.bellaclaw.data.remote.ModelCatalogBody
 import one.scary.bellaclaw.data.remote.ModelStateBody
 import one.scary.bellaclaw.data.remote.ModelUpdateBody
 import one.scary.bellaclaw.data.remote.PersonalityBody
@@ -29,7 +30,8 @@ import one.scary.bellaclaw.model.ThemeSettings
 
 /**
  * Single source of truth for settings, as one [SettingsSnapshot]: the account's models and
- * personality from the server, loaded when a session starts, and the theme from [themeStore].
+ * personality and the plain chats' model list from the server, loaded when a session starts, and the
+ * theme from [themeStore].
  * A session that ends or changes drops the account's settings; the theme stays. An answer is
  * applied only while the session that asked is still the current one.
  */
@@ -55,6 +57,7 @@ class SettingsRepository(
                 if (token != null) {
                     scope.launch { loadModels() }
                     scope.launch { loadPersonality() }
+                    scope.launch { loadChatModels() }
                 }
             }
         }
@@ -76,6 +79,34 @@ class SettingsRepository(
         updateForSession(token) {
             if (modelChanges.get() == changes) {
                 it.copy(models = result.toLoadable { body -> body.toModelSettings() })
+            } else {
+                it
+            }
+        }
+    }
+
+    /**
+     * Reads again, in [scope], what a plain chat's model needs and failed to load: the account's
+     * models and the model list. With [refresh], the list is read even when one is held.
+     */
+    fun reloadChatModels(refresh: Boolean) {
+        val current = state.value
+        if (current.models is Loadable.Failed) {
+            scope.launch { loadModels() }
+        }
+        if (refresh || current.chatModels is Loadable.Failed) {
+            scope.launch { loadChatModels() }
+        }
+    }
+
+    /** Reads the model list; a held list stays while it is read and when the read fails. */
+    private suspend fun loadChatModels() {
+        val token = session.value?.token ?: return
+        updateForSession(token) { it.copy(chatModels = it.chatModels.retrying()) }
+        val result = api.getSignedIn<ModelCatalogBody>("/api/models")
+        updateForSession(token) {
+            if (result is ApiResult.Success || it.chatModels !is Loadable.Loaded) {
+                it.copy(chatModels = result.toLoadable { body -> body.toChatProviders() })
             } else {
                 it
             }

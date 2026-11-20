@@ -79,7 +79,7 @@ fun ChatScreen(
     }
 }
 
-private val noPickerEvents = ModelPickerEvents({}, {}, {}, {}, {})
+private val noPickerEvents = ModelPickerEvents({ _, _ -> }, {}, {}, {}, {})
 private val noThumbnails = ThumbnailLoader { null }
 
 @Preview

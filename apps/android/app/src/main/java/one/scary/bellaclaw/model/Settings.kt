@@ -34,8 +34,8 @@ sealed interface Loadable<out T> {
 }
 
 /**
- * Every setting as one value: the account's [models] and [personality] from the server, and the
- * phone's [theme].
+ * Every setting as one value: the account's [models] and [personality] from the server, the
+ * providers and models a plain chat may use ([chatModels]), and the phone's [theme].
  */
 data class SettingsSnapshot(
     val models: Loadable<ModelSettings> = Loadable.Loading,
@@ -44,12 +44,7 @@ data class SettingsSnapshot(
     /** Why the server refused the last change of [models]. */
     val modelsChangeError: AccountError? = null,
     val personality: Loadable<Personality> = Loadable.Loading,
+    /** Every provider a plain chat may use, in the server's order; a held list stays while it is read again. */
+    val chatModels: Loadable<List<ChatProvider>> = Loadable.Loading,
     val theme: ThemeSettings = ThemeSettings(),
-) {
-    /** The providers whose models are known, for a plain chat's model: the active one, once loaded. */
-    val providers: List<Provider>
-        get() = when (models) {
-            is Loadable.Loaded -> listOf(Provider(models.value.providerId, models.value.models.map { it.id }))
-            else -> emptyList()
-        }
-}
+)

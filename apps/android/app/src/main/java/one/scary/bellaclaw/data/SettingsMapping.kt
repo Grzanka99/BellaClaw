@@ -1,8 +1,11 @@
 package one.scary.bellaclaw.data
 
+import one.scary.bellaclaw.data.remote.AvailableModelBody
+import one.scary.bellaclaw.data.remote.ModelCatalogBody
 import one.scary.bellaclaw.data.remote.ModelStateBody
 import one.scary.bellaclaw.data.remote.PersonalityBody
 import one.scary.bellaclaw.model.AiModel
+import one.scary.bellaclaw.model.ChatProvider
 import one.scary.bellaclaw.model.Effort
 import one.scary.bellaclaw.model.ModelRole
 import one.scary.bellaclaw.model.ModelSettings
@@ -32,7 +35,13 @@ internal fun ModelStateBody.toModelSettings() = ModelSettings(
         val role = ModelRole.entries.firstOrNull { it.purpose() == purpose.purpose } ?: return@mapNotNull null
         role to RoleModel(purpose.model, effortOf(purpose.effort))
     }.toMap(),
-    models = availableModels.map { model -> AiModel(model.id, model.name, model.supportedEfforts.mapNotNull(::effortOf)) },
+    models = availableModels.map { it.toAiModel() },
 )
+
+internal fun ModelCatalogBody.toChatProviders() = providers.map { provider ->
+    ChatProvider(provider.id, provider.usable, provider.reason, provider.models.map { it.toAiModel() })
+}
+
+private fun AvailableModelBody.toAiModel() = AiModel(id, name, supportedEfforts.mapNotNull(::effortOf))
 
 internal fun PersonalityBody.toPersonality() = Personality(bellaPersona, plainChatsUseBellaPersona, plainChatsPersona)

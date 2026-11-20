@@ -17,9 +17,12 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import one.scary.bellaclaw.data.ChatRepository
 import one.scary.bellaclaw.data.SettingsRepository
+import one.scary.bellaclaw.model.BELLACLAW_CHAT_ID
 import one.scary.bellaclaw.model.BellaClawChat
 import one.scary.bellaclaw.model.ChatKind
+import one.scary.bellaclaw.model.ChatProvider
 import one.scary.bellaclaw.model.Effort
+import one.scary.bellaclaw.model.Loadable
 import one.scary.bellaclaw.model.ModelChoice
 import one.scary.bellaclaw.model.PlainChat
 import one.scary.bellaclaw.ui.appContainer
@@ -33,15 +36,25 @@ class ChatViewModel(
     savedStateHandle: SavedStateHandle,
     private val zone: ZoneId = ZoneId.systemDefault(),
 ) : ViewModel() {
-    /** What only this screen knows besides the draft: the picked image and the open picker's selection. */
+    /**
+     * What only this screen knows besides the draft: the picked image, whether the picker is open and
+     * its selection as last set; the picker shows it made valid for the model list.
+     */
     private data class LocalState(
         val attachmentUri: String? = null,
+        val isPickerOpen: Boolean = false,
         val pickerSelection: ModelChoice? = null,
     )
 
     /** The composer's text, kept in [savedStateHandle] across process death. */
     private val draft = savedStateHandle.getMutableStateFlow(DRAFT_KEY, "")
     private val local = MutableStateFlow(LocalState())
+
+    init {
+        if (chatId != BELLACLAW_CHAT_ID) {
+            settingsRepository.reloadChatModels(refresh = false)
+        }
+    }
 
     private val chatState = combine(
         chatRepository.chat(chatId),
@@ -71,10 +84,10 @@ class ChatViewModel(
         local,
         settingsRepository.settings,
     ) { chat, draft, local, settings ->
-        val picker = local.pickerSelection?.let { selection ->
-            settings.providers.firstOrNull { it.id == selection.providerId }?.let { provider ->
-                ModelPickerState(settings.providers, provider, selection)
-            }
+        val picker = if (local.isPickerOpen) {
+            ModelPickerState(settings.chatModels, validSelection(local.pickerSelection, settings.chatModels))
+        } else {
+            null
         }
         chat.copy(draft = draft, attachmentUri = local.attachmentUri, picker = picker)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ChatUiState())
@@ -113,29 +126,25 @@ class ChatViewModel(
         chatRepository.loadOlder(chatId)
     }
 
+    /** Opens the picker on the chat's model and reads the model list again, and the account's models if they failed. */
     fun openModelPicker() {
+        settingsRepository.reloadChatModels(refresh = true)
         viewModelScope.launch {
             val chat = chatRepository.chat(chatId).first()
-            if (chat is PlainChat && chat.model != null) {
-                local.update { it.copy(pickerSelection = chat.model) }
+            if (chat is PlainChat) {
+                local.update { it.copy(isPickerOpen = true, pickerSelection = chat.model) }
             }
         }
     }
 
-    /** Switching to another provider selects its first model and keeps the effort; the current provider changes nothing. */
-    fun onPickerProvider(providerId: String) {
-        updatePicker { selection ->
-            val provider = settingsRepository.settings.value.providers.firstOrNull { it.id == providerId }
-            if (provider == null || provider.id == selection.providerId) {
-                selection
-            } else {
-                selection.copy(providerId = provider.id, model = provider.models.first())
-            }
-        }
+    /** Reads the model list again after it failed. */
+    fun retryModelPicker() {
+        settingsRepository.reloadChatModels(refresh = true)
     }
 
-    fun onPickerModel(model: String) {
-        updatePicker { it.copy(model = model) }
+    /** Picks [model] of [providerId]; the effort stays if the model supports it. */
+    fun onPickerModel(providerId: String, model: String) {
+        updatePicker { it.copy(providerId = providerId, model = model) }
     }
 
     fun onPickerEffort(effort: Effort) {
@@ -143,19 +152,26 @@ class ChatViewModel(
     }
 
     fun confirmModelPicker() {
-        val selection = local.value.pickerSelection ?: return
-        local.update { it.copy(pickerSelection = null) }
+        val selection = validSelection(local.value.pickerSelection, settingsRepository.settings.value.chatModels) ?: return
         viewModelScope.launch {
             chatRepository.setModel(chatId, selection)
+            local.update { it.copy(isPickerOpen = false, pickerSelection = null) }
         }
     }
 
     fun dismissModelPicker() {
-        local.update { it.copy(pickerSelection = null) }
+        local.update { it.copy(isPickerOpen = false, pickerSelection = null) }
     }
 
+    /** Changes the selection the picker shows. */
     private fun updatePicker(change: (ModelChoice) -> ModelChoice) {
-        local.update { state -> state.copy(pickerSelection = state.pickerSelection?.let(change)) }
+        val chatModels = settingsRepository.settings.value.chatModels
+        local.update { state -> state.copy(pickerSelection = validSelection(state.pickerSelection, chatModels)?.let(change)) }
+    }
+
+    private fun validSelection(selection: ModelChoice?, chatModels: Loadable<List<ChatProvider>>): ModelChoice? = when (chatModels) {
+        is Loadable.Loaded -> pickerSelection(selection, chatModels.value)
+        else -> null
     }
 
     companion object {

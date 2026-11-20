@@ -9,11 +9,11 @@ module; every dependency and plugin version lives in `gradle/libs.versions.toml`
 
 | Package (`one.scary.bellaclaw.…`) | Holds |
 | --- | --- |
-| `model` | Plain Kotlin types (`Chat`, `Message`, `MessageImage`, `SendState`, `ModelChoice`, `ModelSettings`, `AiModel`, `Personality`, `SettingsSnapshot`, `Loadable`, `Session`, `LoginLink`, `PendingLink`, `LinkStatus`, `AccountError`, …), and every type a ViewModel gets from a repository. No Android or Compose imports. |
-| `data` | One repository per kind of data: `ChatRepository` (chats, messages, sends, typing, unread, the live stream; its state and sync in `ChatState` and `ChatSync`), `SettingsRepository` (one `SettingsSnapshot` flow: the account's models and personality from the server, the phone's theme), `AccountRepository` (the session, sign-in, sign-out, the pending login link). `ServerUrls.kt`: the server address rule and the login link parser. |
+| `model` | Plain Kotlin types (`Chat`, `Message`, `MessageImage`, `SendState`, `ModelChoice`, `ModelSettings`, `AiModel`, `ChatProvider`, `Personality`, `SettingsSnapshot`, `Loadable`, `Session`, `LoginLink`, `PendingLink`, `LinkStatus`, `AccountError`, …), and every type a ViewModel gets from a repository. No Android or Compose imports. |
+| `data` | One repository per kind of data: `ChatRepository` (chats, messages, sends, typing, unread, the live stream; its state and sync in `ChatState` and `ChatSync`), `SettingsRepository` (one `SettingsSnapshot` flow: the account's models and personality and the plain chats' model list from the server, the phone's theme), `AccountRepository` (the session, sign-in, sign-out, the pending login link). `ServerUrls.kt`: the server address rule and the login link parser. |
 | `data.remote` | `ApiClient`, the one HTTP client of the gateway's app API (OkHttp, kotlinx.serialization JSON), its request and answer bodies (one file per area: `ApiBodies.kt`, `ChatBodies.kt` for conversations and the stream, `DeviceBodies.kt`, `SettingsBodies.kt`), and `ApiResult`. |
 | `data.push` | `PushRepository` (device registration, decrypted pushes as a flow), the device keys (`loadDeviceKeys`, `DeviceKeys`), RFC 8291 decryption (`decryptPush`), `PushTokens` (FCM's token, `FirebasePushTokens`). |
-| `data.local` | `SessionStore`: the server address, session token and username in one app-private file. `ThemeStore`: the theme mode and Dynamic color in another. `ChatStore`: per conversation, the model picked for a plain chat and the newest row seen. |
+| `data.local` | `SessionStore`: the server address, session token and username in one app-private file. `ThemeStore`: the theme mode and Dynamic color in another. `ChatStore`: per conversation, the model picked for a plain chat and the newest row seen; and the model used last on this phone. |
 | `ui.<feature>` | `signin`, `home`, `chat`, `settings`, `settings.models`, `settings.personality`, `settings.theme`. |
 | `ui.components` | Composables and label mappings used by more than one feature. |
 | `ui.theme` | Colour schemes, extra colour tokens, typography, `BellaClawTheme`. |
@@ -143,20 +143,26 @@ else from Firebase; the manifest turns off Firebase's default data collection an
 
 ## Settings
 
-- `SettingsSnapshot` holds the account's `models` and `personality` as `Loadable` (loading until the
-  first answer, then loaded or failed with an `AccountError`) and the `theme`. Settings screens show
+- `SettingsSnapshot` holds the account's `models` and `personality` and the plain chats' model list
+  (`chatModels`) as `Loadable` (loading until the first answer, then loaded or failed with an
+  `AccountError`) and the `theme`. Settings screens show
   a loading state, then the settings, or the error with Retry (`LoadingContent`, `LoadFailedContent`).
   Previews build small values inline.
 - `SettingsRepository` watches the session from its construction: when one starts (a new token) it
-  drops what it held and loads `GET /api/model` and `GET /api/personality`; when it ends (sign-out,
+  drops what it held and loads `GET /api/model`, `GET /api/personality` and `GET /api/models`; when it ends (sign-out,
   a `401`) it drops them back to loading. The theme stays. An answer is applied only while the
   session that asked is still current. The Models screen reloads the models when it opens; no
   reload starts while a model change is verified, and a reload's answer is dropped when a change
   started after it did.
 - `ModelSettings` is the server's model state: the active provider of `providers` (ids), a
   `RoleModel` per role (model id, effort or null for the model's default) and the active provider's
-  `AiModel`s with the efforts each supports. The server's purposes and efforts map in `SettingsMapping.kt`. `SettingsSnapshot.providers`,
-  the chat's model picker list, holds the active provider and its model ids once loaded.
+  `AiModel`s with the efforts each supports. The server's purposes and efforts map in `SettingsMapping.kt`.
+- `chatModels`, the chat's model picker list (`GET /api/models`), is every provider a plain chat may use
+  (`ChatProvider`): whether it can be used now, the server's reason when not, and its `AiModel`s. It is
+  read when a session starts and each time the picker opens (`reloadChatModels`, in the application
+  scope). A held list stays while it is read again and when that read fails, so the picker shows it at
+  once. Opening a plain chat, or its picker, also reads again the
+  account's models or the list when their last read failed.
 - A model change (provider, a role's model and effort, a role's reset) runs in the application
   scope, so leaving the screen does not drop it. While it is verified, `isChangingModels` is set and
   no second change starts; the answer replaces the models, a refusal leaves them and sets
@@ -219,12 +225,21 @@ Everything it holds is one immutable `ChatState` in a `MutableStateFlow`, change
   row with that id replaces it. One history never gets (a confidential command such as `!ai-auth`,
   whose reply comes as a `reply` event) stays in memory like a reply. A refused or failed post marks it `FAILED` (with the server's text for a
   `400`), and a retry posts the same id, text and model again. A plain chat's send names its model by ids: the one picked
-  (`ChatStore`), else the account's provider and Main model at Main's effort, where the model's
-  default effort becomes MEDIUM if the model lists it, else the first effort it lists (a send never
-  says `default`). While the account's models are not loaded (loading or failed) a plain chat with no
-  pick has no model, so its picker does not open and Send waits. The Bella conversation's send names none.
+  (`ChatStore`), else the model used last on this phone unless the loaded list refuses it, else the account's provider and Main model at
+  Main's effort, where the model's default effort becomes MEDIUM if the model lists it, else the first
+  effort it lists (a send never says `default`). A send stores its model as the chat's pick and as the
+  model used last, so a chat keeps the model it started with. While none of these is known (no pick,
+  none used last, the account's models loading or failed) a plain chat has no model and Send waits.
+  The Bella conversation's send names none.
+- **The model picker** opens on the chat's model, if it has one, and shows `chatModels`: loading, or
+  the error with Retry, until a list is held. Its selection is always made valid for the list
+  (`pickerSelection`): a usable provider (the chat's, else the first usable), a model it lists (the
+  chat's, else its first), an effort the model supports (the chat's, else MEDIUM if listed, else the
+  first). With no usable model there is no selection and Done is off. So a pick the list
+  no longer allows stays on the chat until Done stores another, and picking another model keeps the
+  effort when it can. A provider that cannot be used now is listed with its reason and cannot be picked.
 - **Kept on the phone** (`files/chats.json`, `ChatStore`): per conversation key, the picked model and
-  the newest row id seen.
+  the newest row id seen; and the model a plain chat was last set to or sent with.
 
 ## Wiring
 
@@ -256,7 +271,7 @@ Push tests run the whole decryption with a software P-256 key (`DeviceKeys.agree
 Appendix A vector and messages encrypted as the server does, and replace `PushTokens` with a fake.
 
 `TestServer.settingsRepository` adds the real `SettingsRepository`, with a `ThemeStore` that writes in
-place and answers for the two settings reads; `TestServer.chatRepository` reads the models from one
+place and answers for the three settings reads; `TestServer.chatRepository` reads the models from one
 unless the test passes its own. `route` answers one method and path every time, ahead of the queue
 and of `FakeGateway`, so
 concurrent requests get the right body whatever their order; `takeRequest(method, path)` skips the

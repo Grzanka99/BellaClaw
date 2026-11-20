@@ -17,10 +17,14 @@ import kotlinx.serialization.json.Json
 import one.scary.bellaclaw.model.Effort
 import one.scary.bellaclaw.model.ModelChoice
 
-/** What the phone keeps per conversation key: the model picked for a plain chat, and the newest row id seen with its screen open. */
+/**
+ * What the phone keeps per conversation key: the model picked for a plain chat, and the newest row id
+ * seen with its screen open; and the model a plain chat was last set to or sent with ([lastModel]).
+ */
 data class LocalChats(
     val models: Map<String, ModelChoice> = emptyMap(),
     val lastSeen: Map<String, Long> = emptyMap(),
+    val lastModel: ModelChoice? = null,
 )
 
 /** [LocalChats] as JSON in [file], written through a temporary file. A missing or unreadable file holds nothing. */
@@ -33,8 +37,9 @@ class ChatStore(
 
     val chats: StateFlow<LocalChats> = state.asStateFlow()
 
+    /** Picks [model] for the chat; it becomes the model used last. */
     suspend fun setModel(conversationKey: String, model: ModelChoice) {
-        change { it.copy(models = it.models + (conversationKey to model)) }
+        change { it.copy(models = it.models + (conversationKey to model), lastModel = model) }
     }
 
     /** Raises the chat's last seen row to [rowId]; a lower id changes nothing. */
@@ -49,7 +54,7 @@ class ChatStore(
     }
 
     suspend fun forget(conversationKey: String) {
-        change { LocalChats(it.models - conversationKey, it.lastSeen - conversationKey) }
+        change { it.copy(models = it.models - conversationKey, lastSeen = it.lastSeen - conversationKey) }
     }
 
     private suspend fun change(transform: (LocalChats) -> LocalChats) {
@@ -59,8 +64,9 @@ class ChatStore(
                 return
             }
             val stored = StoredChats(
-                models = next.models.mapValues { (_, model) -> StoredModel(model.providerId, model.model, model.effort) },
+                models = next.models.mapValues { (_, model) -> model.stored() },
                 lastSeen = next.lastSeen,
+                lastModel = next.lastModel?.stored(),
             )
             withContext(ioDispatcher) {
                 val temporary = File(file.parentFile, "${file.name}.tmp")
@@ -83,17 +89,21 @@ class ChatStore(
             // SerializationException included.
             return LocalChats()
         }
-        val models = stored.models.mapValues { (_, model) -> ModelChoice(model.providerId, model.model, model.effort) }
-        return LocalChats(models, stored.lastSeen)
+        return LocalChats(stored.models.mapValues { (_, model) -> model.choice() }, stored.lastSeen, stored.lastModel?.choice())
     }
 
+    private fun ModelChoice.stored() = StoredModel(providerId, model, effort)
+
     @Serializable
-    private class StoredModel(val providerId: String, val model: String, val effort: Effort)
+    private class StoredModel(val providerId: String, val model: String, val effort: Effort) {
+        fun choice() = ModelChoice(providerId, model, effort)
+    }
 
     @Serializable
     private class StoredChats(
         val models: Map<String, StoredModel> = emptyMap(),
         val lastSeen: Map<String, Long> = emptyMap(),
+        val lastModel: StoredModel? = null,
     )
 
     private companion object {

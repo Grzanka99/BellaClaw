@@ -17,6 +17,7 @@ import one.scary.bellaclaw.data.FakeGateway.Companion.BELLA_KEY
 import one.scary.bellaclaw.data.FakeGateway.Companion.clientMessageId
 import one.scary.bellaclaw.data.SettingsRepository
 import one.scary.bellaclaw.data.TestServer
+import one.scary.bellaclaw.data.chatModelsAnswer
 import one.scary.bellaclaw.data.errorAnswer
 import one.scary.bellaclaw.data.modelAnswer
 import one.scary.bellaclaw.model.Author
@@ -261,17 +262,28 @@ class ChatViewModelTest {
         assertEquals(2, gateway.streamsOpened)
     }
 
+    private fun ModelPickerState?.loaded() = (this?.providers as? Loadable.Loaded)?.value
+
     @Test
-    fun `the picked model is kept on the phone and goes with the chat's sends`() = runTest {
+    fun `the picker lists every provider's models, and the pick is kept on the phone and goes with the chat's sends`() = runTest {
+        testServer.route("GET", "/api/models", 200, chatModelsAnswer(codexReason = null))
         gateway.addChat("plain:ada:k1", "Kotlin")
         val repository = repository()
         val viewModel = viewModel("plain:ada:k1", repository)
         viewModel.uiState.first { it.title == "Kotlin" && it.isConversationKnown }
 
         viewModel.openModelPicker()
-        val opened = viewModel.uiState.first { it.picker != null }.picker
-        assertEquals(ModelChoice("opencode-go", "kimi-k3.1-pro", Effort.MEDIUM), opened?.selection)
-        viewModel.onPickerModel("glm-5")
+        val opened = viewModel.uiState.first { it.picker.loaded() != null }.picker!!
+        assertEquals(listOf("opencode-go", "openai-codex"), opened.loaded()?.map { it.id })
+        assertEquals(listOf("Kimi K3.1 Pro", "GLM 5"), opened.loaded()?.first()?.models?.map { it.name })
+        assertEquals(ModelChoice("opencode-go", "kimi-k3.1-pro", Effort.MEDIUM), opened.selection)
+        // Another provider's model keeps the effort it supports; GLM 5 has no medium, so its first.
+        viewModel.onPickerModel("openai-codex", "gpt-5.5")
+        assertEquals(Effort.MEDIUM, viewModel.uiState.first { it.picker?.selection?.model == "gpt-5.5" }.picker?.selection?.effort)
+        viewModel.onPickerModel("opencode-go", "glm-5")
+        val glm = viewModel.uiState.first { it.picker?.selection?.model == "glm-5" }.picker!!
+        assertEquals(Effort.LOW, glm.selection?.effort)
+        assertEquals(listOf(Effort.LOW, Effort.HIGH), glm.efforts)
         viewModel.onPickerEffort(Effort.HIGH)
         viewModel.confirmModelPicker()
         val picked = ModelChoice("opencode-go", "glm-5", Effort.HIGH)
@@ -281,7 +293,7 @@ class ChatViewModelTest {
         val restarted = viewModel("plain:ada:k1", repository())
         restarted.uiState.first { it.title == "Kotlin" }
         restarted.openModelPicker()
-        assertEquals(picked, restarted.uiState.first { it.picker != null }.picker?.selection)
+        assertEquals(picked, restarted.uiState.first { it.picker.loaded() != null }.picker?.selection)
         restarted.dismissModelPicker()
         restarted.onDraftChange("Hi")
         restarted.send()
@@ -289,30 +301,101 @@ class ChatViewModelTest {
     }
 
     @Test
-    fun `reselecting the picker's current provider keeps the model, and dismissing drops the draft`() = runTest {
+    fun `a chat with no pick starts with the model used last on this phone`() = runTest {
         gateway.addChat("plain:ada:k1", "Kotlin")
+        gateway.addChat("plain:ada:k2", "Rust")
+        val repository = repository()
+        val first = viewModel("plain:ada:k1", repository)
+        first.uiState.first { it.title == "Kotlin" && it.isConversationKnown }
+        first.openModelPicker()
+        first.uiState.first { it.picker.loaded() != null }
+        first.onPickerModel("opencode-go", "glm-5")
+        first.confirmModelPicker()
+        repository.chat("plain:ada:k1").first { (it as? PlainChat)?.model?.model == "glm-5" }
+
+        val second = viewModel("plain:ada:k2", repository)
+        second.uiState.first { it.title == "Rust" && it.isConversationKnown }
+        second.onDraftChange("Hi")
+        second.send()
+
+        assertEquals("""{"provider":"opencode-go","model":"glm-5","effort":"low"}""", takeSend().getValue("model").toString())
+    }
+
+    @Test
+    fun `a pick the list no longer allows stays on the chat, and the picker starts from a valid choice`() = runTest {
+        testServer.route("GET", "/api/models", 200, chatModelsAnswer(codexReason = null))
+        gateway.addChat("plain:ada:k1", "Kotlin")
+        val repository = repository()
+        val viewModel = viewModel("plain:ada:k1", repository)
+        viewModel.uiState.first { it.title == "Kotlin" && it.isConversationKnown }
+        viewModel.openModelPicker()
+        viewModel.uiState.first { it.picker.loaded() != null }
+        viewModel.onPickerModel("openai-codex", "gpt-5.5")
+        viewModel.onPickerEffort(Effort.XHIGH)
+        viewModel.confirmModelPicker()
+        val codex = ModelChoice("openai-codex", "gpt-5.5", Effort.XHIGH)
+        repository.chat("plain:ada:k1").first { (it as? PlainChat)?.model == codex }
+
+        testServer.route("GET", "/api/models", 200, chatModelsAnswer())
+        viewModel.openModelPicker()
+
+        val reopened = viewModel.uiState.first { state -> state.picker.loaded()?.any { !it.isUsable } == true }.picker!!
+        val unusable = reopened.loaded()!!.single { !it.isUsable }
+        assertEquals("openai-codex", unusable.id)
+        assertEquals("The OpenAI Codex login is not connected", unusable.reason)
+        assertEquals(ModelChoice("opencode-go", "kimi-k3.1-pro", Effort.MEDIUM), reopened.selection)
+        viewModel.dismissModelPicker()
+        viewModel.uiState.first { it.picker == null }
+        assertEquals(codex, (repository.chat("plain:ada:k1").first() as PlainChat).model)
+    }
+
+    @Test
+    fun `the picker shows the list it holds at once while reading it again`() = runTest {
+        gateway.addChat("plain:ada:k1", "Kotlin")
+        val store = testServer.signedInStore()
+        val settings = testServer.settingsRepository(store, backgroundScope)
+        val viewModel = viewModel("plain:ada:k1", testServer.chatRepository(store, backgroundScope, settings = settings), settings = settings)
+        viewModel.uiState.first { it.title == "Kotlin" && it.isConversationKnown }
+        settings.settings.first { it.chatModels is Loadable.Loaded }
+        testServer.route("GET", "/api/models", 200, chatModelsAnswer(codexReason = null), delayMillis = 1_000)
+
+        viewModel.openModelPicker()
+
+        val held = viewModel.uiState.first { it.picker != null }.picker
+        assertEquals(false, held.loaded()?.last()?.isUsable)
+        viewModel.uiState.first { it.picker.loaded()?.last()?.isUsable == true }
+    }
+
+    @Test
+    fun `a failed read of the list shows in the picker until Retry reads it`() = runTest {
+        gateway.addChat("plain:ada:k1", "Kotlin")
+        testServer.route("GET", "/api/models", 503, errorAnswer("Unavailable"))
         val viewModel = viewModel("plain:ada:k1", repository())
         viewModel.uiState.first { it.title == "Kotlin" && it.isConversationKnown }
 
         viewModel.openModelPicker()
-        viewModel.uiState.first { it.picker != null }
-        viewModel.onPickerModel("glm-5")
-        viewModel.onPickerProvider("opencode-go")
-        assertEquals(ModelChoice("opencode-go", "glm-5", Effort.MEDIUM), viewModel.uiState.first { it.picker?.selection?.model == "glm-5" }.picker?.selection)
 
-        viewModel.dismissModelPicker()
-        viewModel.uiState.first { it.picker == null }
-        viewModel.openModelPicker()
-        assertEquals("kimi-k3.1-pro", viewModel.uiState.first { it.picker != null }.picker?.selection?.model)
+        val failed = viewModel.uiState.first { it.picker?.providers is Loadable.Failed }.picker
+        assertNull(failed?.selection)
+        testServer.route("GET", "/api/models", 200, chatModelsAnswer())
+        viewModel.retryModelPicker()
+        val loaded = viewModel.uiState.first { it.picker.loaded() != null }.picker
+        assertEquals(ModelChoice("opencode-go", "kimi-k3.1-pro", Effort.MEDIUM), loaded?.selection)
     }
 
     @Test
-    fun `a plain chat waits for the account's models, then sends Main's model at an effort it supports`() = runTest {
+    fun `a plain chat waits for the account's models, read again when the chat or picker opens, then sends Main's model at an effort it supports`() = runTest {
         gateway.addChat("plain:ada:k1", "Kotlin")
         testServer.route("GET", "/api/model", 503, errorAnswer("Unavailable"))
         val store = testServer.signedInStore()
         val settings = testServer.settingsRepository(store, backgroundScope)
+        settings.settings.first { it.models is Loadable.Failed }
         val viewModel = viewModel("plain:ada:k1", testServer.chatRepository(store, backgroundScope, settings = settings), settings = settings)
+        // The read at sign-in and the one the chat's opening started.
+        withContext(Dispatchers.IO) {
+            testServer.takeRequest("GET", "/api/model")
+            testServer.takeRequest("GET", "/api/model")
+        }
         settings.settings.first { it.models is Loadable.Failed }
         viewModel.uiState.first { it.title == "Kotlin" }
         viewModel.onDraftChange("Hello")
@@ -323,8 +406,9 @@ class ChatViewModelTest {
 
         // GLM 5 lists low and high, no medium.
         testServer.route("GET", "/api/model", 200, modelAnswer(mainModel = "glm-5"))
-        settings.loadModels()
+        viewModel.openModelPicker()
         viewModel.uiState.first { it.canSend }
+        viewModel.dismissModelPicker()
         viewModel.send()
 
         assertEquals("""{"provider":"opencode-go","model":"glm-5","effort":"low"}""", takeSend().getValue("model").toString())

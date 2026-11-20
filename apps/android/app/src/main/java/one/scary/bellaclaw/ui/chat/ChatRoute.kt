@@ -57,9 +57,9 @@ fun ChatRoute(
         onRetry = viewModel::retry,
         onLoadOlder = viewModel::loadOlder,
         pickerEvents = ModelPickerEvents(
-            onProvider = viewModel::onPickerProvider,
             onModel = viewModel::onPickerModel,
             onEffort = viewModel::onPickerEffort,
+            onRetry = viewModel::retryModelPicker,
             onDone = viewModel::confirmModelPicker,
             onDismiss = viewModel::dismissModelPicker,
         ),

@@ -1,27 +1,26 @@
 package one.scary.bellaclaw.ui.components
 
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
 import one.scary.bellaclaw.model.Effort
 
+/** One chip per effort of [efforts], wrapping onto more lines when they do not fit the width. */
 @Composable
-fun EffortSelector(selected: Effort, onSelect: (Effort) -> Unit, modifier: Modifier = Modifier) {
-    val efforts = Effort.entries
-    SingleChoiceSegmentedButtonRow(modifier = modifier.fillMaxWidth()) {
-        efforts.forEachIndexed { index, effort ->
-            SegmentedButton(
+fun EffortSelector(efforts: List<Effort>, selected: Effort, onSelect: (Effort) -> Unit, modifier: Modifier = Modifier) {
+    FlowRow(modifier = modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        efforts.forEach { effort ->
+            FilterChip(
                 selected = effort == selected,
                 onClick = { onSelect(effort) },
-                shape = SegmentedButtonDefaults.itemShape(index, efforts.size),
-            ) {
-                Text(stringResource(effort.label))
-            }
+                label = { Text(stringResource(effort.label)) },
+            )
         }
     }
 }

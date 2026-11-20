@@ -2,7 +2,7 @@ package one.scary.bellaclaw.data.remote
 
 import kotlinx.serialization.Serializable
 
-// Request and answer bodies of the account's settings: /api/model and /api/personality. Efforts
+// Request and answer bodies of the account's settings: /api/model, /api/models and /api/personality. Efforts
 // and purposes stay the server's strings here; SettingsRepository maps them.
 
 /** The answer of GET and PUT /api/model: [availableModels] are the models of the active [provider]. */
@@ -20,6 +20,19 @@ data class PurposeBody(val purpose: String, val model: String, val effort: Strin
 
 @Serializable
 data class AvailableModelBody(val id: String, val name: String, val supportedEfforts: List<String>)
+
+/** The answer of GET /api/models: every provider a plain chat may use. */
+@Serializable
+data class ModelCatalogBody(val providers: List<CatalogProviderBody>)
+
+/** [reason] says why a send cannot use the provider now; absent when it is [usable]. */
+@Serializable
+data class CatalogProviderBody(
+    val id: String,
+    val usable: Boolean,
+    val reason: String? = null,
+    val models: List<AvailableModelBody>,
+)
 
 /** PUT /api/model; a null field is left out. */
 @Serializable

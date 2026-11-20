@@ -1,10 +1,11 @@
 package one.scary.bellaclaw.ui.chat
 
 import one.scary.bellaclaw.model.ChatKind
+import one.scary.bellaclaw.model.ChatProvider
 import one.scary.bellaclaw.model.Effort
+import one.scary.bellaclaw.model.Loadable
 import one.scary.bellaclaw.model.Message
 import one.scary.bellaclaw.model.ModelChoice
-import one.scary.bellaclaw.model.Provider
 import java.time.LocalDate
 
 data class ChatUiState(
@@ -42,15 +43,20 @@ sealed interface ChatRow {
     }
 }
 
-/** The picker's unsaved selection of one of [providers]; Done stores it on the chat. */
+/**
+ * The picker's providers, the last list read while it is read again, and its unsaved [selection],
+ * one of their usable models at an effort it supports (null while the list is not loaded or none is
+ * usable). Done stores it on the chat.
+ */
 data class ModelPickerState(
-    val providers: List<Provider>,
-    val provider: Provider,
-    val selection: ModelChoice,
+    val providers: Loadable<List<ChatProvider>>,
+    val selection: ModelChoice?,
 ) {
-    val models: List<String>
-        get() = provider.models
-
-    val effort: Effort
-        get() = selection.effort
+    /** The efforts the selected model supports. */
+    val efforts: List<Effort>
+        get() {
+            val loaded = providers as? Loadable.Loaded ?: return emptyList()
+            val provider = loaded.value.firstOrNull { it.id == selection?.providerId }
+            return provider?.models?.firstOrNull { it.id == selection?.model }?.efforts.orEmpty()
+        }
 }

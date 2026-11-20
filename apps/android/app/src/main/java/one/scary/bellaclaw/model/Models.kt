@@ -11,10 +11,12 @@ enum class Effort {
     MAX,
 }
 
-/** A provider whose models are known; [models] are model ids. */
-data class Provider(
+/** A provider a plain chat may use, with its [models]; [reason] says why a send cannot use it now when it is not [isUsable]. */
+data class ChatProvider(
     val id: String,
-    val models: List<String>,
+    val isUsable: Boolean,
+    val reason: String?,
+    val models: List<AiModel>,
 )
 
 /** Provider, model and effort picked for one plain chat. */
@@ -32,7 +34,7 @@ enum class ModelRole {
     SCHEDULED_TASK,
 }
 
-/** One model of the active provider, with the efforts it supports. */
+/** One model of a provider, with the efforts it supports. */
 data class AiModel(
     val id: String,
     val name: String,
