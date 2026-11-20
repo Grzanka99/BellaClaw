@@ -2,12 +2,14 @@ import { EEventType } from "@bellaclaw/database";
 import type { TDashboardStreamEvent, TOption } from "@bellaclaw/shared";
 import { ESubscriptionMode, EventBus } from "../events";
 import { IdentityService } from "../identity";
+import { EMessagePlatform } from "../messaging/types";
 
 type TAppStreamListener = (event: TDashboardStreamEvent) => void;
 
-// NOTE: the app's live stream: nudges and typing for the edge, which fans them out per account.
-// Live only: a stream that was not open misses nothing that matters, because the app compares
-// revisions on every connect. Only account conversations reach it
+// NOTE: the app's live stream: nudges, typing and confidential replies for the edge, which fans
+// them out per account. Live only: a stream that was not open misses nothing it can get back,
+// because the app compares revisions on every connect and a confidential reply is never stored.
+// Only account conversations reach it
 export class AppStream {
   private static _instance: TOption<AppStream>;
   // the open streams of the edge
@@ -56,6 +58,28 @@ export class AppStream {
 
         if (accountId !== undefined) {
           this.send({ type: "deleted", accountId, conversationKey });
+        }
+      },
+    });
+
+    // a confidential reply to a message sent from the app is shown once and never stored; one ready
+    // while no app stream is open is lost
+    bus.subscribe({
+      consumer: "app-stream",
+      type: EEventType.ReplyReady,
+      mode: ESubscriptionMode.Live,
+      backoffMs: [],
+      handler: async (event) => {
+        const { conversationKey, ownerKey, channel, text, confidential } = event.payload;
+
+        if (confidential !== true || channel !== EMessagePlatform.App) {
+          return;
+        }
+
+        const accountId = IdentityService.instance.accountIdOf(ownerKey);
+
+        if (accountId !== undefined) {
+          this.send({ type: "reply", accountId, conversationKey, text });
         }
       },
     });

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, mock, test } from "bun:test";
 import {
   EConversationKind,
   EEventType,
+  eventsTable,
   identityLinksTable,
   listHistory,
 } from "@bellaclaw/database";
@@ -11,6 +12,7 @@ import {
   type TDashboardStreamEvent,
 } from "@bellaclaw/shared";
 import { fauxAssistantMessage, type Message } from "@earendil-works/pi-ai";
+import { eq } from "drizzle-orm";
 import type { AgentHarness } from "../ai/agent-harness";
 import { AuthorizationService } from "../authorization";
 import { Commands } from "../commands";
@@ -335,6 +337,116 @@ test("a Signal message of a linked address streams under the address's account; 
     { type: "changed", accountId, conversationKey, revision: 2, rewriteRevision: 0 },
   ]);
   await stream.close();
+});
+
+// a message from a Signal address, as the Signal channel publishes it
+async function sendSignal(address: string, text: string) {
+  const chatKey = `signal:${address}`;
+  await EventBus.instance.publish({
+    type: EEventType.MessageReceived,
+    source: "signal",
+    key: chatKey,
+    trace: { turnId: `test:${chatKey}`, chatId: chatKey, platform: EMessagePlatform.Signal },
+    payload: {
+      conversationKey: chatKey,
+      ownerKey: chatKey,
+      channel: EMessagePlatform.Signal,
+      replyAddress: address,
+      content: text,
+      attachments: [],
+      receivedAt: Date.now(),
+    },
+    causationId: undefined,
+    dedupeKey: undefined,
+  });
+  await EventBus.instance.idle();
+}
+
+async function linkSignal(accountId: string, address: string) {
+  await DatabaseConnector.instance.database.insert(identityLinksTable).values({
+    channel: EMessagePlatform.Signal,
+    address,
+    accountId,
+    state: EIdentityLinkState.Active,
+    linkedAt: new Date(1_000),
+  });
+}
+
+test("a confidential command reply to an app message streams once as a reply and is neither stored nor nudged; on Signal it is sent and streams nothing", async () => {
+  const accountId = `acct-${crypto.randomUUID()}`;
+  const conversationKey = `bella:${accountId}`;
+  const address = `+${Date.now()}`;
+  const usage =
+    "Usage: !mcp-auth connect|disconnect|status PROFILE or !mcp-auth token PROFILE TOKEN";
+  await linkSignal(accountId, address);
+  const { sendText } = await start();
+  const stream = await openStream();
+
+  await sendApp(accountId, "!mcp-auth", "m-1");
+
+  expect(await stream.drain()).toEqual([
+    { type: "reply", accountId, conversationKey, text: usage },
+  ]);
+  expect(
+    await listHistory(DatabaseConnector.instance.database, conversationKey, undefined, 50),
+  ).toEqual([]);
+  expect(
+    await DatabaseConnector.instance.database
+      .select()
+      .from(eventsTable)
+      .where(eq(eventsTable.type, EEventType.ConversationChanged)),
+  ).toEqual([]);
+
+  await sendSignal(address, "!mcp-auth");
+
+  expect(sendText.mock.calls).toEqual([[address, usage]]);
+  // drain returns every event read so far: the app reply alone
+  expect(await stream.drain()).toHaveLength(1);
+  await stream.close();
+});
+
+test("!app and !dashboard from the app answer with a stored plain reply and no link; from Signal they send a confidential link", async () => {
+  const originalUrl = Bun.env.BELLACLAW_DASHBOARD_PUBLIC_URL;
+  const originalSecret = Bun.env.BELLACLAW_DASHBOARD_SECRET;
+  Bun.env.BELLACLAW_DASHBOARD_PUBLIC_URL = "https://dashboard.test";
+  Bun.env.BELLACLAW_DASHBOARD_SECRET = "dashboard-secret";
+
+  try {
+    const accountId = `acct-${crypto.randomUUID()}`;
+    const conversationKey = `bella:${accountId}`;
+    const address = `+${Date.now()}`;
+    await linkSignal(accountId, address);
+    const { sendText } = await start();
+    const stream = await openStream();
+
+    await sendApp(accountId, "!app", "m-1");
+    await sendApp(accountId, "!dashboard", "m-2");
+
+    expect(await stream.drain()).toEqual([
+      { type: "changed", accountId, conversationKey, revision: 1, rewriteRevision: 0 },
+      { type: "changed", accountId, conversationKey, revision: 2, rewriteRevision: 0 },
+    ]);
+    const texts = (
+      await listHistory(DatabaseConnector.instance.database, conversationKey, undefined, 50)
+    ).map((message) => message.text);
+    expect(texts).toHaveLength(4);
+    expect(texts).toContain("!app");
+    expect(texts).toContain("!dashboard");
+    expect(texts.filter((text) => text.startsWith("This app is signed in"))).toHaveLength(2);
+    expect(texts.join("\n")).not.toContain("token=");
+
+    await sendSignal(address, "!app");
+    await sendSignal(address, "!dashboard");
+
+    expect(sendText.mock.calls.map((call) => call[0])).toEqual([address, address]);
+    expect(sendText.mock.calls[0]?.[1]).toStartWith("https://dashboard.test/app?token=");
+    expect(sendText.mock.calls[1]?.[1]).toStartWith("https://dashboard.test/link?token=");
+    expect(await stream.drain()).toHaveLength(2);
+    await stream.close();
+  } finally {
+    Bun.env.BELLACLAW_DASHBOARD_PUBLIC_URL = originalUrl;
+    Bun.env.BELLACLAW_DASHBOARD_SECRET = originalSecret;
+  }
 });
 
 test("a message deleted in the dashboard streams a nudge whose rewrite revision moved", async () => {

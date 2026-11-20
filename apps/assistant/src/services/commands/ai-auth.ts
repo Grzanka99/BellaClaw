@@ -9,7 +9,7 @@ export const aiAuthCommand: TCommand = {
   name: "ai-auth",
   description: "Log in to, check, or log out of an AI provider subscription.",
   usage: "!ai-auth login|status|logout PROVIDER",
-  handler: async (chatId, args, ctx, addressKey) => {
+  handler: async (chatId, args, ctx, address) => {
     const [action, provider, extra] = args.trim().split(/\s+/);
 
     if (
@@ -28,7 +28,7 @@ export const aiAuthCommand: TCommand = {
     }
 
     // The login is shared, so it must not be changeable while the activation gate is disabled.
-    if (!(await AuthorizationService.instance.listAuthorizedChatIds()).includes(addressKey)) {
+    if (!(await AuthorizationService.instance.isActivated(address))) {
       return "AI authentication requires BELLACLAW_ACTIVATION_TOKEN and an activated chat.";
     }
 

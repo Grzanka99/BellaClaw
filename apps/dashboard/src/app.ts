@@ -1099,10 +1099,10 @@ export function createApp({
   });
 
   // NOTE: the app's live stream: nudges and typing of the signed-in account only, keys and
-  // revisions. It opens with a check, so the client compares revisions for whatever changed
-  // before it connected. It belongs to the session that opened it: before each event and
-  // keep-alive the session is read, without sliding it, and a session that ended closes the
-  // stream. Closing the connection releases the listener and the timer. HEAD opens no stream.
+  // revisions, and to an app session the account's confidential replies. It opens with a check,
+  // so the client compares revisions for whatever changed before it connected. It belongs to the
+  // session that opened it: before each event and keep-alive the session is read, without sliding
+  // it, and a session that ended closes the stream. Closing the connection releases the listener and the timer. HEAD opens no stream.
   // An account holds MAX_ACCOUNT_STREAMS at most: one more ends its oldest, so a phone that
   // reconnects past dead connections is served and no account holds connections without bound
   app.get("/api/stream", requireSession, (c) => {

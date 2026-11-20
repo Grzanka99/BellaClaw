@@ -105,13 +105,15 @@ const STurnFailed = z
   .strict();
 
 // transcript and display: what Conversation stores once the reply is sent. A reply with neither
-// is stored already, as a turn's, or is confidential: it carries a secret or a one-time link
+// is stored already, as a turn's, or is confidential: it carries a secret or a one-time link, is
+// marked confidential and is never stored
 const SReplyReady = z
   .object({
     ...SMessageOrigin,
     text: z.string(),
     transcript: STranscript.optional(),
     display: SDisplay.optional(),
+    confidential: z.literal(true).optional(),
   })
   .strict();
 

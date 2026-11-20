@@ -349,7 +349,9 @@ export type TDashboardActivationCheck = z.infer<typeof SDashboardActivationCheck
 // GET /internal/stream: one line of JSON per event, for every account, live from the assistant;
 // an empty line keeps an idle connection open. accountId: the account the event belongs to.
 // changed: the conversation's transcript changed, with its revisions; typing: a turn of the
-// conversation started (true) or ended (false); deleted: the plain chat is gone. Nothing replays
+// conversation started (true) or ended (false); deleted: the plain chat is gone; reply: a
+// confidential reply to a message sent from the app, never stored, for app streams only. Nothing
+// replays
 export const SDashboardStreamEvent = z.discriminatedUnion("type", [
   z
     .object({
@@ -370,6 +372,14 @@ export const SDashboardStreamEvent = z.discriminatedUnion("type", [
     .strict(),
   z
     .object({ type: z.literal("deleted"), accountId: z.string(), conversationKey: z.string() })
+    .strict(),
+  z
+    .object({
+      type: z.literal("reply"),
+      accountId: z.string(),
+      conversationKey: z.string(),
+      text: z.string(),
+    })
     .strict(),
 ]);
 

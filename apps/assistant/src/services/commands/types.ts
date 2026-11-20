@@ -1,4 +1,5 @@
 import type { TEventContext } from "../events";
+import type { TChatAddress } from "../identity";
 
 export const COMMAND_PREFIX = "!";
 
@@ -11,11 +12,11 @@ export type TCommand = {
   description: string;
   usage: string;
   // chatId: the owner key; ctx: the context of the message.authorized delivery that runs the
-  // command; addressKey: the chat key of the address the command came from, which is activated
+  // command; address: the address the command came from, which activation is checked for
   handler: (
     chatId: string,
     args: string,
     ctx: TEventContext,
-    addressKey: string,
+    address: TChatAddress,
   ) => Promise<TCommandResult>;
 };

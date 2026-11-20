@@ -183,7 +183,7 @@ Conversations:
 - `POST /api/conversations/:conversationKey/messages` with `clientMessageId`, `text`, optionally
   `images` (uploads to this conversation, as the upload answered them; `text` may then be empty)
   and, for a plain chat only, `model: { provider, model, effort }`: answers `{ clientMessageId }` once the
-  assistant stored the message, before the reply. The model applies to this turn of the plain
+  assistant accepted the message, before the reply. The model applies to this turn of the plain
   chat only: the turn runs on its provider, Main on its model and effort, compaction on its model,
   and every other purpose, such as the MCP specialist's, on that provider's saved preference for
   it, else the provider's default. The assistant answers 400 for a plain chat's send without
@@ -196,7 +196,10 @@ Conversations:
   no model, not even another one: it fails with a reply saying so. A repeated send
   with the same id is the same message and is answered the same, for as long as the assistant
   keeps the message's event: 30 days. A client that still holds a pending send after that looks
-  for its `clientMessageId` in history before sending again. The reply appears in history. An
+  for its `clientMessageId` in history before sending again. The reply appears in history. A
+  command whose reply is confidential (`!ai-auth`, `!mcp-auth`) gets no history row for the
+  command or the reply: the reply arrives only as the stream's `reply` event. `!app` and
+  `!dashboard` sent from the app answer with a plain stored reply. An
   image that was not uploaded by this account to this conversation, or is named with another type,
   answers 400 and nothing is sent.
 
@@ -224,10 +227,15 @@ Live stream, while the app is in the foreground:
   `rewriteRevision` of a conversation whose transcript changed; `typing`: `conversationKey` and
   `typing`, on when a turn of the conversation is requested and again when it starts running, and
   off when it completes, fails or is dropped, whatever channel its message came from; `deleted`:
-  `conversationKey` of a plain chat that is gone. A comment line every 25 seconds keeps an idle
-  stream open. After a `changed` the app fetches history. The stream belongs to the session that
-  opened it: once that session ends (logout, a new password, expiry) the stream closes at its next
-  event or keep-alive. An account holds four streams at most: a fifth ends its oldest.
+  `conversationKey` of a plain chat that is gone; `reply`: `conversationKey` and `text` of a
+  confidential reply (provider sign-in instructions, an MCP sign-in link) to a message sent from
+  the app, sent to app sessions' streams only. The app shows a `reply` once in its conversation as a
+  message that is not in history: it is never stored or pushed, and is gone after a reload. It
+  reaches only a stream open when it is ready; the user asks again for one that was missed. A
+  comment line every 25 seconds keeps an idle stream open. After a `changed` the app fetches
+  history. The stream belongs to the session that opened it: once that session ends (logout, a
+  new password, expiry) the stream closes at its next event or keep-alive. An account holds four
+  streams at most: a fifth ends its oldest.
 - The stream opens with `check`, so the app compares revisions for whatever changed while it was
   away. Nothing replays. Within one conversation the events come in the order they happened: a
   `changed` after typing goes off already includes the reply.
@@ -238,8 +246,8 @@ Live stream, while the app is in the foreground:
   open (`POST /internal/presence` with `{ accountIds }`, the whole set): on each connection, and
   when an account's first app stream opens or its last one closes. A failed report is sent again
   after 2 seconds until one succeeds. Only app sessions' streams count; a browser's stream still
-  gets every event. The assistant keeps it in memory: when the stream drops, or the assistant
-  restarts, every account reads closed until the next report.
+  gets every event but `reply`. The assistant keeps it in memory: when the stream drops, or the
+  assistant restarts, every account reads closed until the next report.
 
 A conversation of another account answers `404 { "error": "Not found" }`, exactly like one that
 does not exist, for reading, sending, deleting, uploading and downloading. The dashboard checks ownership in the

@@ -2,7 +2,7 @@ import { EConversationKind, EEventType } from "@bellaclaw/database";
 import { createLogger, type TLogger, type TOption } from "@bellaclaw/shared";
 import { ESubscriptionMode, EventBus, type TEventContext } from "../events";
 import type { TEvent } from "../events/catalog";
-import { IdentityService } from "../identity";
+import type { TChatAddress } from "../identity";
 import { MessagingAdapter } from "../messaging";
 import { aiAuthCommand } from "./ai-auth";
 import { calendarAddReadCommand, calendarAddWriteCommand } from "./calendar-add";
@@ -32,7 +32,7 @@ export function formatCommandList(): string {
 
 export async function runCommand(
   chatId: string,
-  addressKey: string,
+  address: TChatAddress,
   content: string,
   ctx: TEventContext,
 ): Promise<TOption<TCommandResult>> {
@@ -60,7 +60,7 @@ export async function runCommand(
     return undefined;
   }
 
-  return command.handler(chatId, args, ctx, addressKey);
+  return command.handler(chatId, args, ctx, address);
 }
 
 export class Commands {
@@ -99,10 +99,7 @@ export class Commands {
     if (origin.kind === EConversationKind.Bella) {
       result = await runCommand(
         origin.ownerKey,
-        IdentityService.instance.addressKey({
-          channel: origin.channel,
-          address: origin.replyAddress,
-        }),
+        { channel: origin.channel, address: origin.replyAddress },
         content,
         ctx,
       );
@@ -124,7 +121,12 @@ export class Commands {
       }
 
       if (result !== undefined && "confidential" in result) {
-        emit(EEventType.ReplyReady, { ...origin, text: result.confidential }, undefined, undefined);
+        emit(
+          EEventType.ReplyReady,
+          { ...origin, text: result.confidential, confidential: true },
+          undefined,
+          undefined,
+        );
         return;
       }
 

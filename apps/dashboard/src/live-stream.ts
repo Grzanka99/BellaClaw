@@ -13,16 +13,17 @@ export type TLiveStream = {
 const logger = createLogger("LIVE-STREAM");
 
 // NOTE: one stream from the assistant for every account, fanned out to the app streams of each
-// account. Nothing replays: whenever that stream opens or drops, every app stream is told to
-// check revisions, because events of the time between are lost and typing may have stopped unseen.
+// account; a reply goes to its account's app session streams only. Nothing replays: whenever that
+// stream opens or drops, every app stream is told to check revisions, because events of the time
+// between are lost and typing may have stopped unseen.
 // The assistant learns which accounts have an open app session stream here: the whole set, sent on
 // each connection and whenever an account's first such stream opens or its last one closes, one
 // report at a time; a failed report is sent again after retryMs. retryMs: the wait before
 // connecting or reporting again; silenceMs: how long the stream may send nothing, not even a
 // keep-alive, before it counts as lost
 export function createLiveStream(internalApi: TInternalApi, retryMs: number, silenceMs: number) {
-  // by account public id
-  const listeners = new Map<string, Set<TAppStreamListener>>();
+  // by account public id: each listener with whether its stream is an app session's
+  const listeners = new Map<string, Map<TAppStreamListener, boolean>>();
   // the number of open app session streams, by account public id
   const appStreams = new Map<string, number>();
   const presence = { connected: false, reporting: false, changed: false };
@@ -55,7 +56,7 @@ export function createLiveStream(internalApi: TInternalApi, retryMs: number, sil
 
   function checkAll(): void {
     for (const accountListeners of listeners.values()) {
-      for (const listener of accountListeners) {
+      for (const listener of accountListeners.keys()) {
         listener({ type: "check" });
       }
     }
@@ -80,8 +81,10 @@ export function createLiveStream(internalApi: TInternalApi, retryMs: number, sil
 
     const { accountId, ...event } = parsed.data;
 
-    for (const listener of listeners.get(accountId) ?? []) {
-      listener(event);
+    for (const [listener, app] of listeners.get(accountId) ?? []) {
+      if (event.type !== "reply" || app) {
+        listener(event);
+      }
     }
   }
 
@@ -128,11 +131,11 @@ export function createLiveStream(internalApi: TInternalApi, retryMs: number, sil
       let accountListeners = listeners.get(accountId);
 
       if (accountListeners === undefined) {
-        accountListeners = new Set();
+        accountListeners = new Map();
         listeners.set(accountId, accountListeners);
       }
 
-      accountListeners.add(listener);
+      accountListeners.set(listener, app);
 
       if (app) {
         const count = appStreams.get(accountId) ?? 0;

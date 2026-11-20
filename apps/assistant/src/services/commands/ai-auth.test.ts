@@ -10,13 +10,13 @@ import { EAiProvider } from "../ai/types";
 import { AuthorizationService } from "../authorization";
 import { DatabaseConnector } from "../database";
 import { resetEventTables, resetUserConfigsTable } from "../database/test-utils";
-import { ESubscriptionMode, EventBus } from "../events";
+import { ESubscriptionMode, EventBus, type TEventContext } from "../events";
 import type { TEvent } from "../events/catalog";
-import { testMessageOrigin } from "../events/test-utils";
+import { testMessageOrigin, withEventContext } from "../events/test-utils";
 import { EMessagePlatform } from "../messaging/types";
 import { SettingsService } from "../settings";
 import { EConfigKey } from "../settings/schema";
-import { Commands } from ".";
+import { Commands, runCommand } from ".";
 
 let previousProvider: TOption<Provider>;
 let bus: EventBus;
@@ -239,4 +239,26 @@ test("a linked address logs in for its account, checked by the address's activat
   expect((await SettingsService.instance.getAll("account:acct-1"))[EConfigKey.AiProvider]).toBe(
     EAiProvider.OpenaiCodex,
   );
+});
+
+test("an app message passes the activation check exactly when an activation token is configured", async () => {
+  const originalToken = Bun.env.BELLACLAW_ACTIVATION_TOKEN;
+  const app = { channel: EMessagePlatform.App, address: "acct-1" };
+  const status = (ctx: TEventContext) =>
+    runCommand("account:acct-1", app, "!ai-auth status openai-codex", ctx);
+
+  try {
+    Bun.env.BELLACLAW_ACTIVATION_TOKEN = "";
+    Object.assign(AuthorizationService, { _instance: undefined });
+    expect(await withEventContext(status)).toBe(
+      "AI authentication requires BELLACLAW_ACTIVATION_TOKEN and an activated chat.",
+    );
+
+    Bun.env.BELLACLAW_ACTIVATION_TOKEN = "open-sesame";
+    Object.assign(AuthorizationService, { _instance: undefined });
+    expect(await withEventContext(status)).toBe("openai-codex: not connected.");
+  } finally {
+    Bun.env.BELLACLAW_ACTIVATION_TOKEN = originalToken;
+    Object.assign(AuthorizationService, { _instance: undefined });
+  }
 });

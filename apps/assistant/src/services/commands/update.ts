@@ -5,10 +5,10 @@ export const updateCommand: TCommand = {
   name: "update",
   description: "Check for a new version now and install it.",
   usage: "!update",
-  handler: async (_ownerKey, _args, _ctx, addressKey) => {
+  handler: async (_ownerKey, _args, _ctx, address) => {
     // An update restarts the bot for everyone, so only an activated chat may ask for one, even
     // with the activation gate disabled.
-    if (!(await AuthorizationService.instance.listAuthorizedChatIds()).includes(addressKey)) {
+    if (!(await AuthorizationService.instance.isActivated(address))) {
       return "Updating requires BELLACLAW_ACTIVATION_TOKEN and an activated chat.";
     }
 

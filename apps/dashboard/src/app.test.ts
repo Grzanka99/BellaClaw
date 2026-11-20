@@ -1323,6 +1323,66 @@ test("a deleted plain chat reaches the phone's stream", async () => {
   }
 });
 
+test("a confidential reply reaches the account's app streams only", async () => {
+  const following = new AbortController();
+
+  try {
+    const { send, sendApp, register, assistant, store, liveStream } = createTestApp();
+    const alice = await register("alice", "signal:+100");
+    const loggedIn = await sendApp("POST", "/api/login", { username: "alice", password: PASSWORD });
+    const aliceToken = String((await loggedIn.json()).token);
+    const bob = await registerApp(sendApp, store, "bob");
+    const follow = liveStream.follow(following.signal);
+    await waitUntil(() => assistant.streams.length === 1);
+
+    const aliceApp = await openAppStream(sendApp, aliceToken);
+    const bobApp = await openAppStream(sendApp, bob.token);
+    const browser = await send("GET", "/api/stream", undefined, alice.cookie);
+    const browserReader = browser.body?.getReader();
+    expect(await aliceApp.drain()).toEqual([{ type: "check" }]);
+    expect(await bobApp.drain()).toEqual([{ type: "check" }]);
+
+    const conversationKey = `bella:${alice.publicId}`;
+    assistant.push({
+      type: "reply",
+      accountId: alice.publicId ?? "",
+      conversationKey,
+      text: "https://example.test/login",
+    });
+    // the browser's stream reads up to this nudge, after the reply
+    assistant.push({
+      type: "changed",
+      accountId: alice.publicId ?? "",
+      conversationKey,
+      revision: 1,
+      rewriteRevision: 0,
+    });
+
+    expect((await aliceApp.drain())[0]).toEqual({
+      type: "reply",
+      conversationKey,
+      text: "https://example.test/login",
+    });
+    expect(await bobApp.drain()).toEqual([]);
+
+    const decoder = new TextDecoder();
+    let received = "";
+    while (!received.includes("event: changed")) {
+      const chunk = await browserReader?.read();
+      received += decoder.decode(chunk?.value);
+    }
+    expect(received).not.toContain("event: reply");
+
+    await aliceApp.close();
+    await bobApp.close();
+    await browserReader?.cancel();
+    following.abort();
+    await follow;
+  } finally {
+    following.abort();
+  }
+});
+
 // polls until check holds; a few seconds at most
 async function waitUntil(check: () => boolean) {
   for (let attempt = 0; attempt < 1_000 && !check(); attempt++) {

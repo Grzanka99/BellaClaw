@@ -54,13 +54,15 @@ Requesters are conversation tools, slash commands, scheduling and the internal A
    the app.
    From it Conversation stores a command with
    its reply, a notice or a failure reply as display-only rows, shown in history and never
-   replayed to the model; a confidential reply, such as a login link, is not stored. Every
+   replayed to the model; a confidential reply, such as a login link, is marked `confidential`
+   and not stored. Every
    transcript change emits `conversation.changed` with the conversation's new revision and the
    revision of its latest change that was not an append (`rewriteRevision`), below which a client
    reloads instead of fetching by cursor. Memory distills facts from `turn.completed`, except a
    plain chat's, and its boot catch-up skips plain chats. The live
    consumer `app-stream` turns `conversation.changed` and the turn facts of account conversations
-   into nudges and typing on the dashboard's stream (see `docs/dashboard.md`), and the App
+   into nudges and typing on the dashboard's stream (see `docs/dashboard.md`), and a confidential
+   `reply.ready` to an app message into a `reply` the app shows once. The App
    channel's durable consumer `app` pushes the new rows of the app channel to an account with no
    open stream.
 6. After a restart, unfinished deliveries replay. A turn that was interrupted mid-model gets one

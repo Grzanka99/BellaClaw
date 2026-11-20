@@ -42,7 +42,8 @@ The default provider is `opencode-go`. You can ask BellaClaw in chat to switch b
 - `ollama`
 
 `opencode-go` and `openai-codex` use subscription OAuth instead of API keys. Log in from any
-activated chat. `!ai-auth` needs `BELLACLAW_ACTIVATION_TOKEN`, because the login is shared:
+activated chat or from the app. `!ai-auth` needs `BELLACLAW_ACTIVATION_TOKEN`, because the login
+is shared:
 
 ```text
 !ai-auth login opencode-go

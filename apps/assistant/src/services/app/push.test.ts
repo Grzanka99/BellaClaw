@@ -507,7 +507,7 @@ describe("AppChannel push", () => {
     await ask(EMessagePlatform.Signal, "From Signal");
     expect(signal.mock.calls).toEqual([["+100", "Reply"]]);
 
-    // a login link: a reply with neither transcript nor display
+    // a login link: a confidential reply, with neither transcript nor display
     await publish(
       EEventType.ReplyReady,
       {
@@ -517,6 +517,7 @@ describe("AppChannel push", () => {
         replyAddress: "acct-1",
         kind: EConversationKind.Bella,
         text: "https://dashboard.test/app?token=secret",
+        confidential: true,
       },
       "confidential",
     );

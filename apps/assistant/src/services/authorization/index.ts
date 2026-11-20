@@ -14,7 +14,7 @@ import { z } from "zod";
 import { DatabaseConnector, type TDatabaseHandle } from "../database";
 import { ESubscriptionMode, EventBus, type TEventContext } from "../events";
 import type { TEvent } from "../events/catalog";
-import { IdentityService } from "../identity";
+import { IdentityService, type TChatAddress } from "../identity";
 import { EMessagePlatform } from "../messaging/types";
 import {
   EAuthorizationDecision,
@@ -86,6 +86,20 @@ export class AuthorizationService {
     return [...this.cache.values()]
       .filter((state) => state.status === EAuthorizationStatus.Authorized)
       .map((state) => state.chatId);
+  }
+
+  // NOTE: an app message counts as activated exactly when an activation token is configured: then
+  // every account came through the gate, by the activation code at registration or by a link only
+  // an activated chat is answered with; with none, anyone can get an account, as anyone is
+  // answered in a chat. A chat counts when its address is authorized
+  public async isActivated(address: TChatAddress): Promise<boolean> {
+    if (address.channel === EMessagePlatform.App) {
+      return this.activationToken !== undefined;
+    }
+
+    return (await this.listAuthorizedChatIds()).includes(
+      IdentityService.instance.addressKey(address),
+    );
   }
 
   // Whether the code, trimmed as a chat message is, is the activation token; undefined when none is

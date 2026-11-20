@@ -194,11 +194,15 @@ carries it: a client synced at or above it fetches by cursor, below it reloads. 
 the assistant row of a reply (a turn's last row), a delivery or a notice also carries that row's
 `messageId`. Conversation writes the rows
 of a sent reply, notice or delivery from `message.sent`; a reply with neither `transcript` nor
-`display` is not stored, which keeps a confidential one out of history.
+`display` is not stored, which keeps a confidential one out of history. Commands marks a
+confidential reply with `confidential: true`.
 
 The live consumer `app-stream` turns `conversation.changed`, `conversation.deleted` and
 `turn.requested`, `turn.started`, `turn.completed`, `turn.failed` and `event.dead_lettered` of an
 account's conversations into nudges, deletes and typing for the dashboard's one stream, tagged with the account id.
+It turns a `reply.ready` marked `confidential` whose channel is the app into a `reply` with its text,
+which the dashboard sends to that account's app sessions only: the only copy of the reply, lost
+when no stream is open.
 Typing goes on at `turn.requested` and again at `turn.started`, which carries the keys the turn
 runs under: a turn queued behind another starts after that one's typing off. Nothing replays: the
 app compares revisions on every connect. Its handlers do not await before sending, so a

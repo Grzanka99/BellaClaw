@@ -14,6 +14,7 @@ import { EMessagePlatform, type TAttachmentRef } from "../messaging/types";
 import { Commands, runCommand } from ".";
 
 const originalMcpConfig = Bun.env.BELLACLAW_MCP_CONFIG;
+const signal = { channel: EMessagePlatform.Signal, address: "+100" };
 
 async function rowsOf(type: EEventType) {
   return DatabaseConnector.instance.database
@@ -139,10 +140,24 @@ describe("commands consumer", () => {
 
     try {
       expect(
-        await withEventContext((ctx) => runCommand("discord:owner", "discord:100", "!update", ctx)),
+        await withEventContext((ctx) =>
+          runCommand(
+            "discord:owner",
+            { channel: EMessagePlatform.Discord, address: "100" },
+            "!update",
+            ctx,
+          ),
+        ),
       ).toBe("Self-update is unavailable: the bot is not running under its supervisor.");
       expect(
-        await withEventContext((ctx) => runCommand("discord:100", "discord:999", "!update", ctx)),
+        await withEventContext((ctx) =>
+          runCommand(
+            "discord:100",
+            { channel: EMessagePlatform.Discord, address: "999" },
+            "!update",
+            ctx,
+          ),
+        ),
       ).toBe("Updating requires BELLACLAW_ACTIVATION_TOKEN and an activated chat.");
     } finally {
       activated.mockRestore();
@@ -157,7 +172,7 @@ describe("commands consumer", () => {
 
     try {
       const reply = await withEventContext((ctx) =>
-        runCommand("account:acct-1", "signal:+100", "!dashboard", ctx),
+        runCommand("account:acct-1", signal, "!dashboard", ctx),
       );
       let text = "";
       if (typeof reply === "object" && "confidential" in reply) {
@@ -182,7 +197,7 @@ describe("commands consumer", () => {
 
     try {
       const reply = await withEventContext((ctx) =>
-        runCommand("account:acct-1", "signal:+100", "!app", ctx),
+        runCommand("account:acct-1", signal, "!app", ctx),
       );
       let text = "";
       if (typeof reply === "object" && "confidential" in reply) {
@@ -196,7 +211,7 @@ describe("commands consumer", () => {
 
       Bun.env.BELLACLAW_DASHBOARD_SECRET = "";
       expect(
-        await withEventContext((ctx) => runCommand("account:acct-1", "signal:+100", "!app", ctx)),
+        await withEventContext((ctx) => runCommand("account:acct-1", signal, "!app", ctx)),
       ).toBe("The dashboard is not configured.");
     } finally {
       Bun.env.BELLACLAW_DASHBOARD_PUBLIC_URL = originalUrl;

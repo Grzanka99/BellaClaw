@@ -136,13 +136,15 @@ export type THistoryResponse = TConversationRevision & {
 // GET /api/stream server-sent events, data as JSON, each of the signed-in account only. check:
 // compare revisions now, sent on connect and whenever the edge's stream to the assistant opens or
 // drops, and stop showing typing; changed: the conversation's transcript changed; typing: a turn of
-// the conversation started (true) or ended (false); deleted: the plain chat is gone. A client that
-// missed a delete finds the chat gone from the list
+// the conversation started (true) or ended (false); deleted: the plain chat is gone; reply: a
+// confidential reply to a message sent from the app, shown once and never stored, sent to app
+// sessions' streams only. A client that missed a delete finds the chat gone from the list
 export type TAppStreamEvent =
   | { type: "check" }
   | ({ type: "changed"; conversationKey: string } & TConversationRevision)
   | { type: "typing"; conversationKey: string; typing: boolean }
-  | { type: "deleted"; conversationKey: string };
+  | { type: "deleted"; conversationKey: string }
+  | { type: "reply"; conversationKey: string; text: string };
 
 // createdAt: epoch ms
 export type TFactNode = { id: number; text: string; createdAt: number };
