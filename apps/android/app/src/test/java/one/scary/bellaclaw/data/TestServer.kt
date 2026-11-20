@@ -1,6 +1,7 @@
 package one.scary.bellaclaw.data
 
 import java.io.File
+import java.net.InetAddress
 import java.util.concurrent.ConcurrentHashMap
 import java.nio.file.Files
 import java.util.concurrent.TimeUnit
@@ -24,6 +25,8 @@ import one.scary.bellaclaw.data.remote.ApiClient
 import one.scary.bellaclaw.model.Session
 import org.junit.rules.ExternalResource
 
+private const val LOOPBACK = "127.0.0.1"
+
 /** A mock gateway on localhost, and the real store, client and repository on it with a session file in a fresh folder. */
 class TestServer : ExternalResource() {
     val server = MockWebServer()
@@ -32,9 +35,12 @@ class TestServer : ExternalResource() {
     /** Answers by `METHOD path`, every time, ahead of the queue of [answer]. */
     private val routes = ConcurrentHashMap<String, MockResponse>()
 
-    /** The server's address, as checkServerUrl leaves it. */
+    /**
+     * The server's address, as checkServerUrl leaves it. By IP, not `localhost`: OkHttp tries `::1` first, where
+     * another process (the emulator) may listen on the same port and never answer.
+     */
     val url: String
-        get() = server.url("/").toString().trimEnd('/')
+        get() = "http://$LOOPBACK:${server.port}"
 
     val sessionFile: File
         get() = File(folder, "session.json")
@@ -44,7 +50,7 @@ class TestServer : ExternalResource() {
             override fun dispatch(request: RecordedRequest): MockResponse =
                 routes["${request.method} ${request.url.encodedPath}"] ?: super.dispatch(request)
         }
-        server.start()
+        server.start(InetAddress.getByName(LOOPBACK), 0)
         folder = Files.createTempDirectory("bellaclaw-test").toFile()
     }
 
