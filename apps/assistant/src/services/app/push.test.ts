@@ -569,9 +569,7 @@ describe("AppChannel push", () => {
     await reminder("Stretch");
 
     expect(signal).not.toHaveBeenCalled();
-    expect((await pushesOf(phone)).map((push) => push.text)).toEqual([
-      "[CRON REMINDER daily]: Stretch",
-    ]);
+    expect((await pushesOf(phone)).map((push) => push.text)).toEqual(["Stretch"]);
 
     await testEventRequester.request(
       EEventType.AppDeviceUnregisterRequested,
@@ -590,7 +588,21 @@ describe("AppChannel push", () => {
     const history = await listHistory(DatabaseConnector.instance.database, BELLA, undefined, 50);
     expect(
       history.filter((message) => message.author === "assistant").map((message) => message.text),
-    ).toEqual(["[CRON REMINDER daily]: Stretch", "[CRON REMINDER daily]: Drink water"]);
+    ).toEqual(["Stretch", "Drink water"]);
+  });
+
+  test("a reminder comes back from history without its scheduler label; a user message that starts with the label keeps it", async () => {
+    await start("Reply");
+
+    await reminder("Stretch");
+    await ask(EMessagePlatform.App, "[CRON REMINDER daily]: Stretch");
+
+    const history = await listHistory(DatabaseConnector.instance.database, BELLA, undefined, 50);
+    expect(history.map((message) => [message.author, message.text])).toEqual([
+      ["assistant", "Stretch"],
+      ["user", "[CRON REMINDER daily]: Stretch"],
+      ["assistant", "Reply"],
+    ]);
   });
 
   test("with FCM unreachable the reminder is still stored and readable, and the push gives up with no dead letter and no notice", async () => {
@@ -605,7 +617,7 @@ describe("AppChannel push", () => {
     await reminder("Stretch");
 
     const history = await listHistory(DatabaseConnector.instance.database, BELLA, undefined, 50);
-    expect(history.map((message) => message.text)).toEqual(["[CRON REMINDER daily]: Stretch"]);
+    expect(history.map((message) => message.text)).toEqual(["Stretch"]);
     expect(pushed).toEqual([]);
     expect(await eventsOf([EEventType.EventDeadLettered, EEventType.NoticeReady])).toEqual([]);
     // the push's delivery ended acked on its third attempt
@@ -666,9 +678,7 @@ describe("AppChannel push", () => {
     await reminder("Stretch");
 
     expect(refused).toBe(1);
-    expect((await pushesOf(phone)).map((push) => push.text)).toEqual([
-      "[CRON REMINDER daily]: Stretch",
-    ]);
+    expect((await pushesOf(phone)).map((push) => push.text)).toEqual(["Stretch"]);
     expect(
       (await DatabaseConnector.instance.database.select().from(appDevicesTable)).map(
         (device) => device.id,

@@ -1,5 +1,5 @@
 import { AppLogger, type TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
-import { EEventType } from "@bellaclaw/database";
+import { EEventType, ESchedulerLabel } from "@bellaclaw/database";
 import type { TOption } from "@bellaclaw/shared";
 import { createLogger, type TLogger } from "@bellaclaw/shared";
 import { AgentHarness } from "../ai/agent-harness";
@@ -168,11 +168,11 @@ export class ScheduledDelivery {
   ): Promise<TCronMessage[]> {
     const messages: TCronMessage[] = [];
     let text: TOption<string>;
-    let memoryPrefix = "CRON REMINDER";
+    let memoryPrefix = ESchedulerLabel.Reminder;
     let toolCallCount: TOption<number>;
 
     if (interrupted) {
-      memoryPrefix = "CRON TASK";
+      memoryPrefix = ESchedulerLabel.Task;
 
       // only a task has fallback text
       if (job.content.kind === "task") {
@@ -180,7 +180,7 @@ export class ScheduledDelivery {
         toolCallCount = 0;
       }
     } else if (job.automationIds.length > 0) {
-      memoryPrefix = "CRON TASK";
+      memoryPrefix = ESchedulerLabel.Task;
       let result: TOption<TCronAutomationsResult>;
 
       try {
@@ -270,7 +270,7 @@ export class ScheduledDelivery {
         trace,
       );
       text = taskResult.text;
-      memoryPrefix = "CRON TASK";
+      memoryPrefix = ESchedulerLabel.Task;
       toolCallCount = taskResult.toolCallCount;
       logCronTaskCompleted(trace, taskResult);
     } else {
@@ -312,7 +312,7 @@ export class ScheduledDelivery {
 
 function createCronMessage(
   job: TCronFiredPayload,
-  memoryPrefix: string,
+  memoryPrefix: ESchedulerLabel,
   text: string,
   notice: string,
 ): TCronMessage {
