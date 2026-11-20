@@ -448,42 +448,46 @@ test("an account's fifth stream ends its oldest; another account's streams stay"
 
   // a marker of each account reaches the streams still open, after the edge's check on connecting
   const stopFollowing = await startFollowing();
-  const aliceKey = `bella:${alice.publicId}`;
-  const bobKey = `bella:${bob.publicId}`;
-  assistant.push({
-    type: "typing",
-    accountId: alice.publicId,
-    conversationKey: aliceKey,
-    typing: true,
-  });
-  assistant.push({
-    type: "typing",
-    accountId: bob.publicId,
-    conversationKey: bobKey,
-    typing: true,
-  });
 
-  expect(await bobStream.next(2)).toEqual([
-    { type: "check" },
-    { type: "typing", conversationKey: bobKey, typing: true },
-  ]);
+  try {
+    const aliceKey = `bella:${alice.publicId}`;
+    const bobKey = `bella:${bob.publicId}`;
+    assistant.push({
+      type: "typing",
+      accountId: alice.publicId,
+      conversationKey: aliceKey,
+      typing: true,
+    });
+    assistant.push({
+      type: "typing",
+      accountId: bob.publicId,
+      conversationKey: bobKey,
+      typing: true,
+    });
 
-  for (const stream of streams.slice(1)) {
-    expect(await stream.next(2)).toEqual([
+    expect(await bobStream.next(2)).toEqual([
       { type: "check" },
-      { type: "typing", conversationKey: aliceKey, typing: true },
+      { type: "typing", conversationKey: bobKey, typing: true },
     ]);
-  }
 
-  expect(await streams[0]?.next(1)).toEqual([]);
-  expect(streams[0]?.state.ended).toBe(true);
+    for (const stream of streams.slice(1)) {
+      expect(await stream.next(2)).toEqual([
+        { type: "check" },
+        { type: "typing", conversationKey: aliceKey, typing: true },
+      ]);
+    }
 
-  for (const stream of [bobStream, ...streams.slice(1)]) {
-    await stream.close();
+    expect(await streams[0]?.next(1)).toEqual([]);
+    expect(streams[0]?.state.ended).toBe(true);
+  } finally {
+    for (const stream of [bobStream, ...streams.slice(1)]) {
+      await stream.close();
+    }
+
+    await stopFollowing();
   }
 
   expect(subscriptions.open).toBe(0);
-  await stopFollowing();
 });
 
 test("HEAD of the stream opens no stream and no subscription", async () => {
