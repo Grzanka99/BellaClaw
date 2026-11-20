@@ -139,6 +139,8 @@ A call across services is allowed only when it changes no state:
   `compactConversation`.
 - Live state an event cannot carry: `McpService.open`, `McpRunRegistry`, `AppStream.listen`
   (the dashboard's open streams).
+- Bytes an event must not carry: the internal API hands an app upload to `AppChannel.store` and
+  reads it back with `open`; `findAttachments` checks a send's named images.
 - Reads, including reads that prepare a command (`AutomationService.resolveNames`,
   `CronScheduler.get`), dry runs, status slash commands, and pure functions such as
   `parseCanonicalChatKey` and `IdentityService.accountIdOf`, `plainConversationKey` and
@@ -173,7 +175,8 @@ reply was already sent.
 Table owners: `memories`, `conversation_summaries`, `conversations` → Conversation · `facts`,
 `fact_distillation_state` → Memory · `cron_engine_jobs` → Cron · `automations`,
 `automation_drafts` → Automations · `user_configs` → Settings · `calendars` → Calendar ·
-`message_authorizations` → Authorization · `identity_links` → Identity · `events`, `event_deliveries` → EventBus.
+`message_authorizations` → Authorization · `identity_links` → Identity · `app_media` → App channel ·
+`events`, `event_deliveries` → EventBus.
 
 Every change of a transcript (`memories`), and a plain chat's title, raises the conversation's
 revision in `conversations` and emits `conversation.changed` with it and the owner key, in the same

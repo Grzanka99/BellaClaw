@@ -1,5 +1,5 @@
 import { AppLogger, EBehaviorLogLevel, type TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
-import { createLogger, type TOption } from "@bellaclaw/shared";
+import { createLogger, MAX_IMAGE_BYTES, type TOption } from "@bellaclaw/shared";
 import type { AgentMessage, AgentTool } from "@earendil-works/pi-agent-core";
 import { Agent } from "@earendil-works/pi-agent-core";
 import {
@@ -62,7 +62,6 @@ import { EModelPurpose } from "../types";
 import type { TAgentRunArgs, TAgentRunResult, TMainAgentRunResult } from "./types";
 
 const SEQUENTIAL: "sequential" = "sequential";
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const NO_VISION_NOTE = "[User sent an image; the current model cannot view images]";
 const TOO_LARGE_NOTE = "[User sent an image; it is larger than 5 MB and was not loaded]";
 const FETCH_FAILED_NOTE = "[User sent an image; it could not be loaded from the chat platform]";

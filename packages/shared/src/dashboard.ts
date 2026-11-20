@@ -158,17 +158,40 @@ export const SDashboardModelChoice = z
 
 export type TDashboardModelChoice = z.infer<typeof SDashboardModelChoice>;
 
+// the largest image the app may upload, and the largest a turn loads from any channel
+export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+
+// POST /internal/accounts/:accountId/conversations/:conversationKey/media response: an image the
+// app uploaded to the conversation, as a send names it
+export const SDashboardMedia = z.object({ id: z.string().min(1), mimeType: z.string() }).strict();
+
+export type TDashboardMedia = z.infer<typeof SDashboardMedia>;
+
+// an image of a history row. mediaId: it downloads from the conversation's media route by this
+// id. An image the conversation no longer keeps, and every image that came through Signal or
+// Discord, is a placeholder without one
+export type TDashboardHistoryImage = {
+  mediaId: TOption<string>;
+  mimeType: string;
+};
+
 // POST /internal/accounts/:accountId/conversations/:conversationKey/messages body: a message the
 // app sends. clientMessageId: the app's id of the message; a second send with the same id in the
 // same conversation is the same message. model: required for a plain chat, refused for the Bella
-// conversation, which runs on the account's settings
+// conversation, which runs on the account's settings. images: uploads to this conversation; a
+// message with images may have no text
 export const SDashboardAppMessage = z
   .object({
     clientMessageId: z.string().min(1).max(128),
-    text: z.string().refine((text) => text.trim().length > 0, "The message is empty"),
+    text: z.string(),
     model: SDashboardModelChoice.optional(),
+    images: z.array(SDashboardMedia).optional(),
   })
-  .strict();
+  .strict()
+  .refine(
+    (message) => message.text.trim().length > 0 || (message.images ?? []).length > 0,
+    "The message is empty",
+  );
 
 export type TDashboardAppMessage = z.infer<typeof SDashboardAppMessage>;
 
@@ -320,6 +343,21 @@ export function dashboardAccountConversationPath(
   conversationKey: string,
 ): string {
   return `${dashboardAccountConversationsPath(accountId)}/${encodeURIComponent(conversationKey)}`;
+}
+
+export function dashboardAccountConversationMediaPath(
+  accountId: string,
+  conversationKey: string,
+): string {
+  return `${dashboardAccountConversationPath(accountId, conversationKey)}/media`;
+}
+
+export function dashboardAccountConversationMediaFilePath(
+  accountId: string,
+  conversationKey: string,
+  mediaId: string,
+): string {
+  return `${dashboardAccountConversationMediaPath(accountId, conversationKey)}/${encodeURIComponent(mediaId)}`;
 }
 
 export function dashboardAccountConversationMessagesPath(

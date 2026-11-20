@@ -4,6 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  appMediaTable,
   conversationsTable,
   EConversationKind,
   MIGRATIONS_FOLDER,
@@ -998,6 +999,7 @@ async function createAssistantDatabase() {
   }
 
   return {
+    db,
     reader: createChatReader(url, ""),
     insertRow,
     setRevision,
@@ -1690,4 +1692,165 @@ test("HEAD of the stream opens no stream and no subscription", async () => {
   expect(response.status).toBe(200);
   expect(response.headers.get("Content-Type")).toBe("text/event-stream");
   expect(subscriptions.open).toBe(0);
+});
+
+test("the app uploads an image through the edge, sends it, downloads it again with a fresh session, and another account reaches none of it", async () => {
+  const database = await createAssistantDatabase();
+
+  try {
+    const { app, sendApp, assistant, store } = createTestApp(":memory:", database.reader);
+    const alice = await registerApp(sendApp, store, "alice");
+    const bob = await registerApp(sendApp, store, "bob");
+    const conversationKey = `bella:${alice.publicId}`;
+    const mediaPath = `/api/conversations/${encodeURIComponent(conversationKey)}/media`;
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
+    const upload = (token: string) =>
+      app.request(mediaPath, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "image/png" },
+        body: png,
+      });
+    const download = (token: string, mediaId: string) =>
+      app.request(`${mediaPath}/${mediaId}`, { headers: { Authorization: `Bearer ${token}` } });
+
+    const uploaded = await upload(alice.token);
+    expect([uploaded.status, await uploaded.json()]).toEqual([
+      200,
+      { id: "media-1", mimeType: "image/png" },
+    ]);
+    // the bytes stream on unchanged, with the declared type
+    expect(assistant.uploads).toMatchObject([
+      { accountId: alice.publicId, conversationKey, mimeType: "image/png" },
+    ]);
+    expect(new Uint8Array(assistant.uploads[0]?.data ?? new ArrayBuffer(0))).toEqual(png);
+
+    const message = {
+      clientMessageId: "m-1",
+      text: "",
+      images: [{ id: "media-1", mimeType: "image/png" }],
+    };
+    const sent = await sendApp(
+      "POST",
+      `/api/conversations/${encodeURIComponent(conversationKey)}/messages`,
+      message,
+      alice.token,
+    );
+    expect(sent.status).toBe(200);
+    expect(assistant.sends).toEqual([{ accountId: alice.publicId, conversationKey, message }]);
+
+    // a new session after a logout downloads the same bytes
+    await sendApp("POST", "/api/logout", undefined, alice.token);
+    expect((await download(alice.token, "media-1")).status).toBe(401);
+    const loggedIn = await sendApp("POST", "/api/login", { username: "alice", password: PASSWORD });
+    const { token } = await loggedIn.json();
+    const again = await download(token, "media-1");
+    expect([again.status, again.headers.get("Content-Type")]).toEqual([200, "image/png"]);
+    expect(new Uint8Array(await again.arrayBuffer())).toEqual(png);
+
+    // an image the assistant no longer keeps is gone
+    const gone = await download(token, "media-9");
+    expect([gone.status, await gone.json()]).toEqual([410, { error: "Gone" }]);
+
+    // another account: its own session, the first account's conversation
+    const bobUpload = await upload(bob.token);
+    const bobDownload = await download(bob.token, "media-1");
+    expect([bobUpload.status, bobDownload.status]).toEqual([404, 404]);
+    expect(assistant.uploads).toHaveLength(1);
+  } finally {
+    await database.remove();
+  }
+});
+
+test("only an upload may carry a body over 64 KiB", async () => {
+  const database = await createAssistantDatabase();
+
+  try {
+    const { app, sendApp, assistant, store } = createTestApp(":memory:", database.reader);
+    const alice = await registerApp(sendApp, store, "alice");
+    const conversationKey = encodeURIComponent(`bella:${alice.publicId}`);
+    const large = new Uint8Array(65_537);
+    const post = (path: string) =>
+      app.request(path, {
+        method: "POST",
+        // as the server receives it; a request built here has no such header
+        headers: {
+          Authorization: `Bearer ${alice.token}`,
+          "Content-Type": "image/png",
+          "Content-Length": String(large.byteLength),
+        },
+        body: large,
+      });
+
+    const message = await post(`/api/conversations/${conversationKey}/messages`);
+    expect([message.status, await message.json()]).toEqual([
+      413,
+      { error: "Request body too large" },
+    ]);
+    expect((await post(`/api/conversations/${conversationKey}/media`)).status).toBe(200);
+    expect(assistant.uploads).toHaveLength(1);
+  } finally {
+    await database.remove();
+  }
+});
+
+test("history lists a user message's images: an app image while the assistant keeps it, else a placeholder, and always a placeholder for a Signal image", async () => {
+  const database = await createAssistantDatabase();
+
+  try {
+    const { sendApp, store } = createTestApp(":memory:", database.reader);
+    const alice = await registerApp(sendApp, store, "alice");
+    const conversationKey = `bella:${alice.publicId}`;
+    const image = (id: string, channel: string) => ({
+      id,
+      mimeType: "image/png",
+      channel,
+      sourceAddress: alice.publicId,
+    });
+    await database.db.insert(memoriesTable).values({
+      chatId: conversationKey,
+      channel: "app",
+      author: "user",
+      kind: "message",
+      message: "Look [Image] [Image] [Image]",
+      attachments: JSON.stringify([
+        image("kept", "app"),
+        image("deleted", "app"),
+        image("signal-1", "signal"),
+      ]),
+      createdAt: new Date(1_000),
+    });
+    await database.insertRow(conversationKey, "assistant", "message", "Nice");
+    await database.db.insert(appMediaTable).values({
+      id: "kept",
+      accountId: alice.publicId,
+      conversationKey,
+      mimeType: "image/png",
+      createdAt: new Date(1_000),
+    });
+
+    const response = await sendApp(
+      "GET",
+      `/api/conversations/${encodeURIComponent(conversationKey)}/messages`,
+      undefined,
+      alice.token,
+    );
+    const { messages } = await response.json();
+    expect(messages).toMatchObject([
+      {
+        author: "user",
+        text: "Look [Image] [Image] [Image]",
+        images: [
+          { mediaId: "kept", mimeType: "image/png" },
+          { mimeType: "image/png" },
+          { mimeType: "image/png" },
+        ],
+      },
+      { author: "assistant", text: "Nice" },
+    ]);
+    expect(messages[0].images[1].mediaId).toBeUndefined();
+    expect(messages[0].images[2].mediaId).toBeUndefined();
+    expect(messages[1].images).toBeUndefined();
+  } finally {
+    await database.remove();
+  }
 });

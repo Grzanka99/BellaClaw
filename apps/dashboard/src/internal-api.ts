@@ -3,6 +3,8 @@ import {
   DASHBOARD_ACTIVATION_CHECK_PATH,
   DASHBOARD_LINKS_PATH,
   DASHBOARD_STREAM_PATH,
+  dashboardAccountConversationMediaFilePath,
+  dashboardAccountConversationMediaPath,
   dashboardAccountConversationMessagesPath,
   dashboardAccountConversationPath,
   dashboardAccountConversationsPath,
@@ -19,6 +21,7 @@ import {
   SDashboardConversationDeleted,
   SDashboardError,
   SDashboardLinkStarted,
+  SDashboardMedia,
   SDashboardMessageDeleted,
   SDashboardModelState,
   SDashboardPersonality,
@@ -32,6 +35,7 @@ import {
   type TDashboardConversationDeleted,
   type TDashboardLinkRequest,
   type TDashboardLinkStarted,
+  type TDashboardMedia,
   type TDashboardMessageDeleted,
   type TDashboardModelState,
   type TDashboardModelUpdate,
@@ -49,11 +53,12 @@ const UNAVAILABLE = "The assistant is unavailable";
 const logger = createLogger("INTERNAL-API");
 
 // status 400 carries the assistant's own error, and code the stable code of a rejected
-// command; 404 is a conversation the account does not own; 502 is an unreachable or broken
-// assistant
+// command; 404 is a conversation the account does not own; 410 an image this conversation does
+// not keep; 413 an image too large, 415 one of an unsupported type or content; 502 is an
+// unreachable or broken assistant
 export type TInternalApiResult<T> =
   | { data: T }
-  | { error: string; status: 400 | 404 | 502; code?: string };
+  | { error: string; status: 400 | 404 | 410 | 413 | 415 | 502; code?: string };
 
 // accountId: an account's public id; chatKey: an address, as a link token carries it
 export type TInternalApi = {
@@ -87,6 +92,20 @@ export type TInternalApi = {
   ): Promise<TInternalApiResult<TDashboardAppMessageAccepted>>;
   // a new plain chat of the account
   createConversation(accountId: string): Promise<TInternalApiResult<TDashboardConversationCreated>>;
+  // streams an image's bytes to the assistant, which checks and stores them; the answer names it
+  // for a send. mimeType: the type the client declared
+  uploadMedia(
+    accountId: string,
+    conversationKey: string,
+    mimeType: string,
+    body: ReadableStream<Uint8Array> | null,
+  ): Promise<TInternalApiResult<TDashboardMedia>>;
+  // the assistant's answer with the image's bytes and type, to pass on
+  downloadMedia(
+    accountId: string,
+    conversationKey: string,
+    mediaId: string,
+  ): Promise<TInternalApiResult<Response>>;
   // a plain chat of the account with its history; 404 for any other conversation
   deleteConversation(
     accountId: string,
@@ -99,7 +118,7 @@ export type TInternalApi = {
 
 // The assistant's internal API. baseUrl has no trailing slash.
 export function createInternalApi(baseUrl: string, secret: string): TInternalApi {
-  async function call<T>(
+  function call<T>(
     method: string,
     path: string,
     schema: z.ZodType<T>,
@@ -111,14 +130,24 @@ export function createInternalApi(baseUrl: string, secret: string): TInternalApi
       | TDashboardAppMessage
     >,
   ): Promise<TInternalApiResult<T>> {
+    return send(method, path, schema, "application/json", JSON.stringify(body));
+  }
+
+  async function send<T>(
+    method: string,
+    path: string,
+    schema: z.ZodType<T>,
+    contentType: string,
+    body: TOption<BodyInit>,
+  ): Promise<TInternalApiResult<T>> {
     let status: number;
     let payload: unknown;
 
     try {
       const response = await fetch(`${baseUrl}${path}`, {
         method,
-        headers: { Authorization: `Bearer ${secret}`, "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        headers: { Authorization: `Bearer ${secret}`, "Content-Type": contentType },
+        body,
         signal: AbortSignal.timeout(INTERNAL_API_TIMEOUT_MS),
       });
       status = response.status;
@@ -137,7 +166,7 @@ export function createInternalApi(baseUrl: string, secret: string): TInternalApi
       }
     }
 
-    if (status === 400 || status === 404) {
+    if (status === 400 || status === 404 || status === 410 || status === 413 || status === 415) {
       const failure = SDashboardError.safeParse(payload);
 
       if (failure.success) {
@@ -181,6 +210,55 @@ export function createInternalApi(baseUrl: string, secret: string): TInternalApi
         SDashboardAppMessageAccepted,
         message,
       ),
+    uploadMedia: (accountId, conversationKey, mimeType, body) =>
+      send(
+        "POST",
+        dashboardAccountConversationMediaPath(accountId, conversationKey),
+        SDashboardMedia,
+        mimeType,
+        body ?? undefined,
+      ),
+    downloadMedia: async (accountId, conversationKey, mediaId) => {
+      let response: Response;
+
+      try {
+        response = await fetch(
+          `${baseUrl}${dashboardAccountConversationMediaFilePath(accountId, conversationKey, mediaId)}`,
+          {
+            headers: { Authorization: `Bearer ${secret}` },
+            signal: AbortSignal.timeout(INTERNAL_API_TIMEOUT_MS),
+          },
+        );
+      } catch (error) {
+        logger.error(`Media request failed: ${error}`);
+
+        return { error: UNAVAILABLE, status: 502 };
+      }
+
+      const status = response.status;
+
+      if (status === 200) {
+        return { data: response };
+      }
+
+      let payload: unknown;
+
+      try {
+        payload = await response.json();
+      } catch {
+        // no JSON fails the schema
+      }
+
+      const failure = SDashboardError.safeParse(payload);
+
+      if ((status === 404 || status === 410) && failure.success) {
+        return { error: failure.data.error, status };
+      }
+
+      logger.error(`Media request answered ${status} with an unexpected body`);
+
+      return { error: UNAVAILABLE, status: 502 };
+    },
     createConversation: (accountId) =>
       call(
         "POST",

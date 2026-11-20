@@ -58,6 +58,7 @@ function makeMemory(id: number, author: ERole, message: string): TSelectMemory {
     kind: "message",
     createdAt: new Date("2026-01-01T00:00:00.000Z"),
     clientMessageId: null,
+    attachments: null,
   };
 }
 
@@ -464,6 +465,7 @@ describe("FactDistiller", () => {
       firstText,
       new Date(),
       undefined,
+      [],
     );
     const second = await ConversationStore.instance.saveUserMessage(
       DatabaseConnector.instance.database,
@@ -473,6 +475,7 @@ describe("FactDistiller", () => {
       secondText,
       new Date(),
       undefined,
+      [],
     );
     const sources = [first, second];
     const facts = [

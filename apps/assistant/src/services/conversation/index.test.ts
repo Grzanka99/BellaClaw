@@ -29,6 +29,7 @@ test("replays native messages after restart; compaction preserves fact source hi
     "Check calendar",
     new Date(),
     undefined,
+    [],
   );
   const call = fauxAssistantMessage(fauxToolCall("calendar", {}, { id: "calendar-1" }));
   call.content.push({
@@ -84,6 +85,7 @@ test("appends later turns, skips rows without replay and reloads the retained ta
     "failed turn",
     new Date(),
     undefined,
+    [],
   );
   expect(await store.load(chatId)).toBeUndefined();
   let state: TConversation | undefined;
@@ -96,6 +98,7 @@ test("appends later turns, skips rows without replay and reloads the retained ta
       text,
       new Date(),
       undefined,
+      [],
     );
     let history: Message[] = [];
     if (state !== undefined) {
@@ -181,6 +184,12 @@ test("after three kept compactions, saveSummary returns the images of the droppe
   const db = DatabaseConnector.instance.database;
   const ids: number[] = [];
   for (const name of ["a", "b", "c", "d"]) {
+    const ref = {
+      id: name,
+      mimeType: "image/png",
+      channel: EMessagePlatform.Signal,
+      sourceAddress: "+100",
+    };
     const row = await store.saveUserMessage(
       db,
       chatId,
@@ -189,13 +198,8 @@ test("after three kept compactions, saveSummary returns the images of the droppe
       "[Image]",
       new Date(),
       undefined,
+      [ref],
     );
-    const ref = {
-      id: name,
-      mimeType: "image/png",
-      channel: EMessagePlatform.Signal,
-      sourceAddress: "+100",
-    };
     await store.saveTurn(
       db,
       chatId,

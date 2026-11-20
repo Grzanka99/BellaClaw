@@ -1,6 +1,6 @@
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { createLogger, repositoryPath } from "@bellaclaw/shared";
+import { createLogger, MAX_IMAGE_BYTES, repositoryPath } from "@bellaclaw/shared";
 import { AccountStore } from "./account-store";
 import { createApp } from "./app";
 import { createChatReader } from "./chat-reader";
@@ -103,8 +103,8 @@ const app = createApp({
 const server = Bun.serve({
   hostname,
   port,
-  // every request body is a small JSON object
-  maxRequestBodySize: 65_536,
+  // an image upload; every other body is held to 64 KiB by the app
+  maxRequestBodySize: MAX_IMAGE_BYTES,
   // NOTE: the maximum. A model change waits for the assistant's provider verification, far beyond
   // the default 10 s.
   idleTimeout: 255,

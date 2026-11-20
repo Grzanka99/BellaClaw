@@ -5,19 +5,23 @@ import type {
   TDashboardConversationCreated,
   TDashboardConversationDeleted,
   TDashboardLinkState,
+  TDashboardMedia,
   TDashboardMessageDeleted,
 } from "@bellaclaw/shared";
 
 // a row the app shows: a message, or a display row (a command with its reply, a notice, a failure
 // reply). channel: where it came in or went out; clientMessageId: the id the app gave a message it
-// sent; createdAt: epoch ms
+// sent; createdAt: epoch ms; images: a user message's images, absent when it has none, each
+// downloadable by its mediaId or a placeholder without one
 export type { THistoryMessage } from "@bellaclaw/database";
-// POST /api/conversations/:conversationKey/messages body and answer; model: a plain chat's model
+// POST /api/conversations/:conversationKey/messages body and answer; model: a plain chat's model;
+// images: what uploads to the conversation answered
 // GET and PUT /api/personality answer, and PUT /api/personality body (the fields to change, at
 // least one): Bella's persona and the persona of the plain chats
 export type {
   TDashboardAppMessage,
   TDashboardAppMessageAccepted,
+  TDashboardHistoryImage,
   TDashboardModelChoice,
   TDashboardModelState,
   TDashboardModelUpdate,
@@ -102,6 +106,10 @@ export type TConversationsResponse = { conversations: TConversationSummary[] };
 
 // POST /api/conversations answer: a new plain chat, listed and empty, at revision 0
 export type TConversationCreatedResponse = TDashboardConversationCreated;
+
+// POST /api/conversations/:conversationKey/media answer: the uploaded image, as a send names it.
+// The body is the image's bytes, Content-Type its type
+export type TMediaUploadedResponse = TDashboardMedia;
 
 // DELETE /api/conversations/:conversationKey answer: the plain chat is gone with its history
 export type TConversationDeletedResponse = TDashboardConversationDeleted;

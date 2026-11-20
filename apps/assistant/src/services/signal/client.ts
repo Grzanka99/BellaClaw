@@ -174,7 +174,11 @@ export class SignalClient {
   }
 
   public async deleteAttachment(id: string): Promise<void> {
-    const response = await fetch(this.attachmentUrl(id), { method: "DELETE" });
+    // a cleanup: its caller holds a lane and goes on without it
+    const response = await fetch(this.attachmentUrl(id), {
+      method: "DELETE",
+      signal: AbortSignal.timeout(10_000),
+    });
     if (!response.ok) {
       throw new Error(`Signal attachment delete failed with status ${response.status}`);
     }

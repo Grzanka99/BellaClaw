@@ -15,6 +15,7 @@ services:
       - BELLACLAW_LOGS_MCP_URL=http://log-viewer:8989/mcp
       - SIGNAL_CLI_RPC_URL=http://signal-cli:8080
       - BELLACLAW_INTERNAL_API_HOSTNAME=0.0.0.0
+      - BELLACLAW_APP_MEDIA_DIR=/app-data/app-media
       - BELLACLAW_RELEASES_DIR=/srv
     depends_on:
       - ollama

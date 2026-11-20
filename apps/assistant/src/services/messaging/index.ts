@@ -6,12 +6,18 @@ import { startSpan } from "../app-logger/span";
 import { ESubscriptionMode, EventBus, type TEventContext } from "../events";
 import type { TDeliveryTranscript, TDisplay, TEvent } from "../events/catalog";
 import { IdentityService, type TChatAddress } from "../identity";
-import { EMessagePlatform, type TAttachmentRef, type TMessageTransport } from "./types";
+import {
+  EMessagePlatform,
+  type TAttachmentRef,
+  type TAttachmentStore,
+  type TMessageTransport,
+} from "./types";
 
 export class MessagingAdapter {
   private static _instance: TOption<MessagingAdapter>;
   private logger: TLogger = createLogger("MESSAGING");
   private transports = new Map<EMessagePlatform, TMessageTransport>();
+  private attachmentStores = new Map<EMessagePlatform, TAttachmentStore>();
   private outboundBackoffMs = [5_000, 30_000, 120_000, 600_000, 1_800_000, 3_600_000, 10_800_000];
 
   private constructor() {}
@@ -26,23 +32,29 @@ export class MessagingAdapter {
 
   public registerTransport(transport: TMessageTransport) {
     this.transports.set(transport.platform, transport);
+    this.attachmentStores.set(transport.platform, transport);
+  }
+
+  // NOTE: the app sends nothing (see send), so it registers only where its files are kept
+  public registerAttachmentStore(store: TAttachmentStore) {
+    this.attachmentStores.set(store.platform, store);
   }
 
   public fetchAttachment(ref: TAttachmentRef, maxBytes: number): Promise<TOption<Uint8Array>> {
-    return this.transport(ref.channel).fetchAttachment(ref, maxBytes);
+    return this.registered(this.attachmentStores, ref.channel).fetchAttachment(ref, maxBytes);
   }
 
   public deleteAttachment(ref: TAttachmentRef): Promise<void> {
-    return this.transport(ref.channel).deleteAttachment(ref);
+    return this.registered(this.attachmentStores, ref.channel).deleteAttachment(ref);
   }
 
-  private transport(channel: EMessagePlatform): TMessageTransport {
-    const transport = this.transports.get(channel);
-    if (transport === undefined) {
-      throw new Error(`No ${channel} transport`);
+  private registered<T>(registry: Map<EMessagePlatform, T>, channel: EMessagePlatform): T {
+    const found = registry.get(channel);
+    if (found === undefined) {
+      throw new Error(`Nothing registered for ${channel}`);
     }
 
-    return transport;
+    return found;
   }
 
   public setup(): void {
@@ -122,7 +134,7 @@ export class MessagingAdapter {
     // delivery. Any other channel is retried with the outbound backoff until its transport
     // registers
     if (destination.channel !== EMessagePlatform.App) {
-      const transport = this.transport(destination.channel);
+      const transport = this.registered(this.transports, destination.channel);
       const failure = await this.sendText(transport, destination.address, text, event.trace);
       if (failure !== undefined) {
         throw new Error(failure);

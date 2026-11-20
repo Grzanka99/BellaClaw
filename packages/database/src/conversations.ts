@@ -1,8 +1,9 @@
-import type { TOption } from "@bellaclaw/shared";
+import type { TDashboardHistoryImage, TOption } from "@bellaclaw/shared";
 import { and, asc, desc, eq, gt, inArray, lt } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
+import { z } from "zod";
 import { EConversationKind } from "./enums";
-import { conversationsTable, memoriesTable } from "./schema";
+import { appMediaTable, conversationsTable, memoriesTable } from "./schema";
 
 // the assistant's handle or transaction, or the dashboard's read-only connection
 type TReadHandle = Pick<BaseSQLiteDatabase<"async", unknown>, "select">;
@@ -22,7 +23,8 @@ export type TListedConversation = TOwnedConversation & {
 // after: the rows above the id, for an append; before: the rows below it, for an older page
 export type THistoryCursor = { direction: "after" | "before"; id: number };
 
-// createdAt: epoch ms; clientMessageId: the id the sending client gave an inbound message
+// createdAt: epoch ms; clientMessageId: the id the sending client gave an inbound message;
+// images: those of a user message, in order, none when it has no image
 export type THistoryMessage = {
   id: number;
   author: "user" | "assistant";
@@ -31,7 +33,14 @@ export type THistoryMessage = {
   text: string;
   createdAt: number;
   clientMessageId: TOption<string>;
+  images: TOption<TDashboardHistoryImage[]>;
 };
+
+// NOTE: a user message's attachment references as the assistant stores them, as much of them as
+// history needs
+const SStoredAttachments = z.array(
+  z.object({ id: z.string(), mimeType: z.string(), channel: z.string() }),
+);
 
 // NOTE: the one ownership rule of a conversation, for the dashboard's reads and the assistant's
 // sends, so the two cannot drift. A conversation belongs to an account when the registry lists it
@@ -167,6 +176,7 @@ export async function listHistory(
       kind: memoriesTable.kind,
       channel: memoriesTable.channel,
       message: memoriesTable.message,
+      attachments: memoriesTable.attachments,
       createdAt: memoriesTable.createdAt,
       clientMessageId: memoriesTable.clientMessageId,
     })
@@ -174,6 +184,38 @@ export async function listHistory(
     .where(and(...conditions))
     .orderBy(order)
     .limit(limit);
+  const imagesById = new Map<number, { id: string; mimeType: string; channel: string }[]>();
+
+  for (const row of rows) {
+    if (row.attachments === null) {
+      continue;
+    }
+
+    const stored = SStoredAttachments.safeParse(JSON.parse(row.attachments));
+
+    if (stored.success && stored.data.length > 0) {
+      imagesById.set(row.id, stored.data);
+    }
+  }
+
+  // an app image downloads while the App channel keeps its file
+  const appIds = [...imagesById.values()]
+    .flat()
+    .filter((ref) => ref.channel === "app")
+    .map((ref) => ref.id);
+  const kept = new Set<string>();
+
+  if (appIds.length > 0) {
+    const media = await db
+      .select({ id: appMediaTable.id })
+      .from(appMediaTable)
+      .where(inArray(appMediaTable.id, appIds));
+
+    for (const row of media) {
+      kept.add(row.id);
+    }
+  }
+
   const messages: THistoryMessage[] = [];
 
   for (const row of rows) {
@@ -190,6 +232,15 @@ export async function listHistory(
         text: row.message,
         createdAt: row.createdAt?.getTime(),
         clientMessageId: row.clientMessageId ?? undefined,
+        images: imagesById.get(row.id)?.map((ref) => {
+          const image: TDashboardHistoryImage = { mediaId: undefined, mimeType: ref.mimeType };
+
+          if (kept.has(ref.id)) {
+            image.mediaId = ref.id;
+          }
+
+          return image;
+        }),
       });
     }
   }

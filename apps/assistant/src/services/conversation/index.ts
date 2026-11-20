@@ -27,15 +27,17 @@ import {
   or,
   sql,
 } from "drizzle-orm";
+import { z } from "zod";
 import { emptyUsage } from "../ai/llm";
 import { ERole } from "../ai/types";
 import { DatabaseConnector, type TDatabaseHandle } from "../database";
 import type { TDisplay, TFusedSummary } from "../events/catalog";
-import type { EMessagePlatform, TAttachmentRef } from "../messaging/types";
-import { SAttachmentBlock, SConversationMessage, type TConversation } from "./types";
+import { type EMessagePlatform, SAttachmentRef, type TAttachmentRef } from "../messaging/types";
+import { SConversationMessage, type TConversation } from "./types";
 
 // NOTE: platform files of the images older than this many compactions are deleted
 const KEPT_COMPACTIONS = 3;
+const SAttachmentRefs = z.array(SAttachmentRef);
 
 export class ConversationStore {
   private static _instance: TOption<ConversationStore>;
@@ -56,10 +58,17 @@ export class ConversationStore {
     message: string,
     createdAt: Date,
     clientMessageId: TOption<string>,
+    attachments: TAttachmentRef[],
   ): Promise<TSelectMemory> {
+    let stored: TOption<string>;
+
+    if (attachments.length > 0) {
+      stored = JSON.stringify(attachments);
+    }
+
     return db
       .insert(memoriesTable)
-      .values({ chatId, channel, author, message, createdAt, clientMessageId })
+      .values({ chatId, channel, author, message, createdAt, clientMessageId, attachments: stored })
       .returning()
       .get();
   }
@@ -534,13 +543,13 @@ export class ConversationStore {
   // Deletes one transcript message. An assistant reply takes the tool rows of its turn with it:
   // the chat's tool rows after the transcript message before it, so no tool call or result stays
   // in the replay without its reply. Display rows stay.
-  // Returns the deleted row ids, or undefined when messageId is no user or assistant transcript
-  // message of this chat.
+  // Returns the deleted row ids and the attachments they referenced, or undefined when messageId
+  // is no user or assistant transcript message of this chat.
   public async deleteMessage(
     db: TDatabaseHandle,
     chatId: string,
     messageId: number,
-  ): Promise<TOption<number[]>> {
+  ): Promise<TOption<{ messageIds: number[]; attachments: TAttachmentRef[] }>> {
     const target = await db
       .select({ author: memoriesTable.author })
       .from(memoriesTable)
@@ -589,11 +598,14 @@ export class ConversationStore {
           ),
         ),
       )
-      .returning({ id: memoriesTable.id });
-    return deleted.map((row) => row.id).sort((a, b) => a - b);
+      .returning({ id: memoriesTable.id, attachments: memoriesTable.attachments });
+    return {
+      messageIds: deleted.map((row) => row.id).sort((a, b) => a - b),
+      attachments: deleted.flatMap((row) => parseAttachments(row.attachments)),
+    };
   }
 
-  // returns the attachments whose platform files are no longer needed
+  // returns the attachments whose files are no longer needed
   public saveSummary(chatId: string, state: TConversation): Promise<TAttachmentRef[]> {
     return this.database.run(async (db) => {
       const existing = await db
@@ -623,7 +635,7 @@ export class ConversationStore {
         return [];
       }
       const rows = await db
-        .select({ modelMessage: memoriesTable.modelMessage })
+        .select({ attachments: memoriesTable.attachments })
         .from(memoriesTable)
         .where(
           and(
@@ -631,23 +643,25 @@ export class ConversationStore {
             eq(memoriesTable.author, ERole.User),
             gt(memoriesTable.id, dropped),
             lte(memoriesTable.id, oldest),
-            isNotNull(memoriesTable.modelMessage),
+            isNotNull(memoriesTable.attachments),
           ),
         );
-      const refs: TAttachmentRef[] = [];
-      for (const row of rows) {
-        const parsed = SConversationMessage.safeParse(JSON.parse(row.modelMessage ?? "null"));
-        if (!parsed.success || typeof parsed.data.content === "string") {
-          continue;
-        }
-        for (const block of parsed.data.content) {
-          const attachment = SAttachmentBlock.safeParse(block);
-          if (attachment.success) {
-            refs.push(attachment.data.attachment);
-          }
-        }
-      }
-      return refs;
+      return rows.flatMap((row) => parseAttachments(row.attachments));
     });
   }
+}
+
+// a row's stored attachment references; none when it has none
+function parseAttachments(stored: TSelectMemory["attachments"]): TAttachmentRef[] {
+  if (stored === null) {
+    return [];
+  }
+
+  const parsed = SAttachmentRefs.safeParse(JSON.parse(stored));
+
+  if (!parsed.success) {
+    throw new Error("Invalid stored attachments");
+  }
+
+  return parsed.data;
 }

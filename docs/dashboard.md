@@ -128,13 +128,17 @@ Conversations:
 - `GET /api/conversations/:conversationKey/messages`: the rows the app shows, oldest first, with
   `revision` and `rewriteRevision`. Messages and display rows (commands and their replies,
   notices, failure replies), never tool rows; each has `id`, `author`, `kind`, `channel`, `text`,
-  `createdAt` and the app's `clientMessageId`. Without a cursor, the newest 50 rows; `before=<id>`
+  `createdAt` and the app's `clientMessageId`. A user message with images also has `images`, in
+  order, each `{ mediaId, mimeType }`: one with a `mediaId` downloads by it; one this conversation
+  does not keep, and every image that came through Signal or Discord, is a placeholder without
+  one. Without a cursor, the newest 50 rows; `before=<id>`
   pages older rows, `nextBefore` names the next older page; `after=<id>` returns the rows after the
   newest one the app has, `nextAfter` names the next page. A client synced at or above
   `rewriteRevision` fetches with `after`; below it, a delete or a merged history changed rows it
   shows, and it reloads.
-- `POST /api/conversations/:conversationKey/messages` with `clientMessageId`, `text` and, for a
-  plain chat only, `model: { provider, model, effort }`: answers `{ clientMessageId }` once the
+- `POST /api/conversations/:conversationKey/messages` with `clientMessageId`, `text`, optionally
+  `images` (uploads to this conversation, as the upload answered them; `text` may then be empty)
+  and, for a plain chat only, `model: { provider, model, effort }`: answers `{ clientMessageId }` once the
   assistant stored the message, before the reply. The model applies to this turn of the plain
   chat only: the turn runs on its provider, Main on its model and effort, compaction on its model,
   and every other purpose, such as the MCP specialist's, on that provider's saved preference for
@@ -148,7 +152,26 @@ Conversations:
   no model, not even another one: it fails with a reply saying so. A repeated send
   with the same id is the same message and is answered the same, for as long as the assistant
   keeps the message's event: 30 days. A client that still holds a pending send after that looks
-  for its `clientMessageId` in history before sending again. The reply appears in history.
+  for its `clientMessageId` in history before sending again. The reply appears in history. An
+  image that was not uploaded by this account to this conversation, or is named with another type,
+  answers 400 and nothing is sent.
+
+Images:
+
+- `POST /api/conversations/:conversationKey/media` with the image's bytes as the body and its type
+  as `Content-Type` (`image/jpeg`, `image/png`, `image/webp` or `image/gif`): the dashboard streams
+  the bytes to the assistant, which checks the type, the size and that the bytes really are that
+  format before it stores anything, and answers `{ id, mimeType }` for a send. A file over 5 MB
+  answers 413, another type or content 415. Only this route takes a body over 64 KiB.
+- `GET /api/conversations/:conversationKey/media/:mediaId`: the image's bytes with its type, for any
+  session of the account. An image this conversation does not keep answers
+  `410 { "error": "Gone" }`.
+- The assistant keeps an image until the cleanup that deletes the files of images older than three
+  compactions of the conversation, until its message is deleted, or until its plain chat is
+  deleted. An image sent with a command is deleted at once: a command takes none. An image
+  uploaded and never sent stays until its plain chat is deleted; in the Bella
+  conversation it stays. Images that came through Signal or Discord are never stored, and history
+  shows them as placeholders.
 
 Live stream, while the app is in the foreground:
 
@@ -169,7 +192,7 @@ Live stream, while the app is in the foreground:
   stream, connects again after 2 seconds, and sends `check` again once it is back.
 
 A conversation of another account answers `404 { "error": "Not found" }`, exactly like one that
-does not exist, for reading, sending and deleting. The dashboard checks ownership in the
+does not exist, for reading, sending, deleting, uploading and downloading. The dashboard checks ownership in the
 assistant's conversation registry (`findOwnedConversation` in `@bellaclaw/database`); the
 assistant checks it again on a send and a delete.
 
@@ -244,6 +267,7 @@ State:
 | --- | --- |
 | Accounts, password hashes, web and app sessions, chat links, used link tokens | Dashboard SQLite file, `BELLACLAW_DASHBOARD_DB_PATH` |
 | Messages, facts, settings | Assistant database |
+| Images uploaded from the app | Assistant's data volume, `BELLACLAW_APP_MEDIA_DIR`, listed in the assistant database |
 
 Web sessions last 30 days from the last request; app sessions last until logout. Only a hash of
 each session token is stored. After five failed logins, a username is locked for 15 minutes.

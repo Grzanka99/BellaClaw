@@ -123,6 +123,7 @@ test("every transcript write stores its channel", async () => {
     "[Image]",
     new Date(),
     undefined,
+    [],
   );
   const ref = {
     id: "message-1:attachment-1",

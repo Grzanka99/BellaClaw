@@ -75,6 +75,9 @@ export const memoriesTable = sqliteTable(
     createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull(),
     // the id the sending client gave the inbound message the row holds
     clientMessageId: text("clientMessageId"),
+    // a user message's attachment references as a JSON array, stored with the row at the turn's
+    // start, so a turn that never completes keeps them too
+    attachments: text("attachments"),
   },
   (table) => [index("memories_chat_id_idx").on(table.chatId, table.id)],
 );
@@ -93,6 +96,21 @@ export const conversationsTable = sqliteTable("conversations", {
   title: text("title"),
   createdAt: integer("createdAt", { mode: "timestamp_ms" }),
 });
+
+// the images the app uploaded, whose bytes the App channel keeps on its data volume under the id;
+// accountId: the uploading account; conversationKey: the conversation it was uploaded to. A row
+// goes with its file
+export const appMediaTable = sqliteTable(
+  "app_media",
+  {
+    id: text("id").primaryKey(),
+    accountId: text("accountId").notNull(),
+    conversationKey: text("conversationKey").notNull(),
+    mimeType: text("mimeType").notNull(),
+    createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [index("app_media_conversation_idx").on(table.conversationKey)],
+);
 
 export const conversationSummariesTable = sqliteTable("conversation_summaries", {
   chatId: text("chatId").primaryKey(),

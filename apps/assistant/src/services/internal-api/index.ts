@@ -15,6 +15,8 @@ import {
   DASHBOARD_ACTIVATION_CHECK_PATH,
   DASHBOARD_LINKS_PATH,
   DASHBOARD_STREAM_PATH,
+  dashboardAccountConversationMediaFilePath,
+  dashboardAccountConversationMediaPath,
   dashboardAccountConversationMessagesPath,
   dashboardAccountConversationPath,
   dashboardAccountConversationsPath,
@@ -23,6 +25,7 @@ import {
   dashboardAccountPath,
   dashboardAccountPersonalityPath,
   dashboardChatLinkPath,
+  MAX_IMAGE_BYTES,
   SDashboardActivationCheckRequest,
   SDashboardAppMessage,
   SDashboardLinkRequest,
@@ -36,6 +39,7 @@ import {
   type TDashboardConversationDeleted,
   type TDashboardError,
   type TDashboardLinkStarted,
+  type TDashboardMedia,
   type TDashboardMessageDeleted,
   type TDashboardModelChoice,
   type TDashboardModelState,
@@ -62,6 +66,7 @@ import {
   validateAiSettingsArgs,
 } from "../ai/tools/update-settings/ai-settings";
 import { EAiProvider, EModelPurpose, SAiProvider } from "../ai/types";
+import { AppChannel, imageTypeOf } from "../app";
 import { sanitizeErrorMessage } from "../app-logger/sanitizers";
 import { AppStream } from "../app-stream";
 import { AuthorizationService } from "../authorization";
@@ -70,7 +75,7 @@ import { CommandRejectedError, ESubscriptionMode, EventBus } from "../events";
 import type { TEventPayloads, TModelChoice } from "../events/catalog";
 import { IdentityService, type TAccountKeys } from "../identity";
 import { parseCanonicalChatKey } from "../messaging/chat-key";
-import { EMessagePlatform } from "../messaging/types";
+import { EMessagePlatform, SUPPORTED_IMAGE_TYPES } from "../messaging/types";
 import { SettingsService, type TConfigUpdate } from "../settings";
 import { EConfigKey, type TConfigRecord } from "../settings/schema";
 
@@ -84,6 +89,9 @@ const SModelUpdate = SDashboardModelUpdate.extend({
   aiProvider: SAiProvider.optional(),
   aiModelPurpose: z.enum(EModelPurpose).optional(),
 });
+
+// every body but an image upload is a small JSON object
+const MAX_JSON_BODY_BYTES = 65_536;
 
 // NOTE: well under both servers' 255 s idle timeout, so an idle stream stays open
 const STREAM_KEEP_ALIVE_MS = 25_000;
@@ -402,6 +410,29 @@ function openStream(request: Request): Response {
   });
 }
 
+// The request's body, read until it passes maxBytes; undefined when it does
+async function readBody(request: Request, maxBytes: number): Promise<TOption<Uint8Array>> {
+  if (request.body === null) {
+    return new Uint8Array();
+  }
+
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+
+  // leaving the loop cancels the rest of the body
+  for await (const chunk of request.body) {
+    size += chunk.byteLength;
+
+    if (size > maxBytes) {
+      return undefined;
+    }
+
+    chunks.push(chunk);
+  }
+
+  return Buffer.concat(chunks);
+}
+
 function errorResponse(error: string, status: number, code: TOption<string>): Response {
   const body: TDashboardError = { error, code };
 
@@ -430,15 +461,19 @@ export async function handleInternalApiRequest(
   // ["", "internal", "accounts", accountId, "messages", messageId] or
   // ["", "internal", "accounts", accountId, "conversations"] or
   // ["", "internal", "accounts", accountId, "conversations", conversationKey] or
-  // ["", "internal", "accounts", accountId, "conversations", conversationKey, "messages"]
+  // ["", "internal", "accounts", accountId, "conversations", conversationKey, "messages"] or
+  // ["", "internal", "accounts", accountId, "conversations", conversationKey, "media"] or
+  // ["", "internal", "accounts", accountId, "conversations", conversationKey, "media", mediaId]
   const segments = pathname.split("/");
   const messageId = Number(segments[5]);
   let key = "";
   let conversationKey = "";
+  let mediaId = "";
 
   try {
     key = decodeURIComponent(segments[3] ?? "");
     conversationKey = decodeURIComponent(segments[5] ?? "");
+    mediaId = decodeURIComponent(segments[7] ?? "");
   } catch {
     // a malformed escape is an unknown route
   }
@@ -478,6 +513,18 @@ export async function handleInternalApiRequest(
     conversationKey.length > 0 &&
     pathname === dashboardAccountConversationPath(key, conversationKey);
 
+  const mediaUploadRoute =
+    request.method === "POST" &&
+    key.length > 0 &&
+    conversationKey.length > 0 &&
+    pathname === dashboardAccountConversationMediaPath(key, conversationKey);
+  const mediaDownloadRoute =
+    request.method === "GET" &&
+    key.length > 0 &&
+    conversationKey.length > 0 &&
+    mediaId.length > 0 &&
+    pathname === dashboardAccountConversationMediaFilePath(key, conversationKey, mediaId);
+
   if (
     !activationRoute &&
     !linkRequestRoute &&
@@ -489,9 +536,16 @@ export async function handleInternalApiRequest(
     !messageDeleteRoute &&
     !appMessageRoute &&
     !conversationCreateRoute &&
-    !conversationDeleteRoute
+    !conversationDeleteRoute &&
+    !mediaUploadRoute &&
+    !mediaDownloadRoute
   ) {
     return errorResponse("Not found", 404, undefined);
+  }
+
+  // NOTE: the server takes a body as large as an image, for the upload
+  if (!mediaUploadRoute && Number(request.headers.get("content-length")) > MAX_JSON_BODY_BYTES) {
+    return errorResponse("Request body too large", 413, undefined);
   }
 
   try {
@@ -573,7 +627,7 @@ export async function handleInternalApiRequest(
         throw new Error(message.error.issues[0]?.message ?? "Invalid message");
       }
 
-      const { clientMessageId, text } = message.data;
+      const { clientMessageId, text, images = [] } = message.data;
       const dedupeKey = `app:${conversationKey}:${clientMessageId}`;
       const body: TDashboardAppMessageAccepted = { clientMessageId };
 
@@ -595,6 +649,15 @@ export async function handleInternalApiRequest(
         throw new Error("The Bella conversation runs on the account's model settings");
       }
 
+      // the message names its images; their bytes stay in the App channel's store
+      const attachments = await DatabaseConnector.instance.run((db) =>
+        AppChannel.instance.findAttachments(db, key, conversationKey, images),
+      );
+
+      if (attachments.length !== images.length) {
+        throw new Error("An image was not uploaded to this chat");
+      }
+
       await EventBus.instance.publish({
         type: EEventType.MessageReceived,
         source: "internal-api",
@@ -611,7 +674,7 @@ export async function handleInternalApiRequest(
           channel: EMessagePlatform.App,
           replyAddress: key,
           content: text,
-          attachments: [],
+          attachments,
           receivedAt: Date.now(),
           clientMessageId,
           model,
@@ -621,6 +684,71 @@ export async function handleInternalApiRequest(
       });
 
       return Response.json(body);
+    }
+
+    // NOTE: everything is checked before anything is stored: the conversation, the declared type,
+    // the size while the body is read, and the format the bytes really have
+    if (mediaUploadRoute) {
+      const owned = await DatabaseConnector.instance.run((db) =>
+        findOwnedConversation(db, conversationKey, account),
+      );
+
+      if (owned === undefined) {
+        return errorResponse("Not found", 404, undefined);
+      }
+
+      const mimeType = request.headers.get("content-type") ?? "";
+
+      if (!SUPPORTED_IMAGE_TYPES.includes(mimeType)) {
+        return errorResponse("Unsupported image type", 415, undefined);
+      }
+
+      const data = await readBody(request, MAX_IMAGE_BYTES);
+
+      if (data === undefined) {
+        return errorResponse("The image is larger than 5 MB", 413, undefined);
+      }
+
+      if (imageTypeOf(data) !== mimeType) {
+        return errorResponse(`The content is not ${mimeType}`, 415, undefined);
+      }
+
+      const body: TOption<TDashboardMedia> = await AppChannel.instance.store(
+        key,
+        account,
+        conversationKey,
+        mimeType,
+        data,
+      );
+
+      // the plain chat was deleted while the body was read
+      if (body === undefined) {
+        return errorResponse("Not found", 404, undefined);
+      }
+
+      return Response.json(body);
+    }
+
+    // 404 for a conversation that is not the account's, 410 for an image this conversation does not
+    // keep
+    if (mediaDownloadRoute) {
+      const owned = await DatabaseConnector.instance.run((db) =>
+        findOwnedConversation(db, conversationKey, account),
+      );
+
+      if (owned === undefined) {
+        return errorResponse("Not found", 404, undefined);
+      }
+
+      const media = await AppChannel.instance.open(conversationKey, mediaId);
+
+      if (media === undefined) {
+        return errorResponse("Gone", 410, undefined);
+      }
+
+      return new Response(media.file, {
+        headers: { "Content-Type": media.mimeType, "Cache-Control": "no-store" },
+      });
     }
 
     if (conversationCreateRoute) {
@@ -753,8 +881,8 @@ export function startInternalApiServer(): void {
   server = Bun.serve({
     hostname: Bun.env.BELLACLAW_INTERNAL_API_HOSTNAME?.trim() || "127.0.0.1",
     port,
-    // every request body is a small JSON object
-    maxRequestBodySize: 65_536,
+    // an image upload; every other body is held to MAX_JSON_BODY_BYTES by its route
+    maxRequestBodySize: MAX_IMAGE_BYTES,
     // NOTE: the maximum. A model change waits for a provider verification, far beyond the
     // default 10 s.
     idleTimeout: 255,

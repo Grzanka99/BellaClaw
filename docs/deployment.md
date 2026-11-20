@@ -42,7 +42,7 @@ The package scripts include the Signal profile:
 | Command | Action |
 | --- | --- |
 | `bun run server:init` | Build, rebuild embeddings, and start all services. |
-| `bun run server:update` | Rebuild without cache, recreate all services, and remove dangling BellaClaw images. |
+| `bun run server:update` | Rebuild without cache, recreate all services, and remove dangling BellaClaw images. The assistant applies the new image's database migrations before it starts. |
 | `bun run server:rebuild-embeddings` | Stop the assistant, pull the embedding model, re-embed all facts, and start the assistant on the current image. |
 | `bun run server:down` | Stop all services, including the Signal profile. |
 
@@ -70,7 +70,7 @@ Every outcome is sent to all authorized chats:
 | Migration failed | Old commit restarted. |
 | New commit does not start, no new migration | Rolled back to the old commit. |
 | New commit does not start after a migration | No rollback and no notice: the container restarts the new commit until it is fixed. Check `podman logs bellaclaw`. |
-| `Containerfile`, `compose.yaml` or the supervisor changed | Held. Run `git pull && bun run server:update` on the server. |
+| `Containerfile`, `compose.yaml` or the supervisor changed | Held. Run `git pull && bun run server:update` on the server; the rebuilt image applies its migrations when it starts. |
 
 A failed commit is not retried until `main` moves or `!update` is sent.
 

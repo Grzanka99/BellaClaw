@@ -148,6 +148,13 @@
       "when": 1795151524289,
       "tag": "0020_plain_chats",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1795163091494,
+      "tag": "0021_app_media",
+      "breakpoints": true
     }
   ]
 }

@@ -136,8 +136,10 @@ See [Behavior Logs](behavior-logs.md).
 | `BELLACLAW_INTERNAL_API_HOSTNAME` | `127.0.0.1` | Assistant's internal listener bind address. Compose sets `0.0.0.0` inside the container. |
 | `BELLACLAW_INTERNAL_API_PORT` | `3081` | Assistant's internal listener port. Never expose it. |
 | `BELLACLAW_INTERNAL_API_URL` | `http://127.0.0.1:3081` | Where the dashboard reaches the internal listener. |
+| `BELLACLAW_APP_MEDIA_DIR` | `.data/app-media` in the repository | Where the assistant keeps images uploaded from the app. |
 
 The assistant and the dashboard both read the public URL and the secret. Leave either blank to
-disable the dashboard. Compose sets `BELLACLAW_INTERNAL_API_URL` and `BELLACLAW_DASHBOARD_DB_PATH`.
+disable the dashboard. Compose sets `BELLACLAW_INTERNAL_API_URL` and `BELLACLAW_DASHBOARD_DB_PATH`,
+and `BELLACLAW_APP_MEDIA_DIR` to `/app-data/app-media` on the assistant's data volume.
 
 See [Dashboard](dashboard.md).

@@ -61,6 +61,14 @@ Requesters are conversation tools, slash commands, scheduling and the internal A
 6. After a restart, unfinished deliveries replay. A turn that was interrupted mid-model gets one
    notice instead of a second model run.
 
+Images never travel on the bus: `message.received` carries references that name their channel
+and source address, and a turn fetches the bytes through that channel's attachment store. The app
+uploads an image through the dashboard to the internal API's media route; the App channel
+(`services/app`) checks and keeps it on the assistant's data volume, lists it in `app_media`, and
+serves it for download. It is the `app` attachment store for fetch and delete, so the cleanup of
+images older than three compactions and a message delete remove app files too, and its durable
+consumer of `conversation.deleted` removes a deleted plain chat's images, sent or only uploaded.
+
 Discord and Signal use separate chat keys. Their histories and scheduled deliveries do not merge.
 
 ## Agent Runtime

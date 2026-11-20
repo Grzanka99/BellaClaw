@@ -34,7 +34,7 @@ import { testEventRequester, testMessageOrigin } from "../events/test-utils";
 import { Memory } from "../memory";
 import { FactDistiller } from "../memory/distill";
 import { MessagingAdapter } from "../messaging";
-import { EMessagePlatform } from "../messaging/types";
+import { EMessagePlatform, type TAttachmentRef } from "../messaging/types";
 import { SettingsService } from "../settings";
 import { DefaultConfigRecord, EConfigKey } from "../settings/schema";
 import { MessageHandler } from ".";
@@ -127,6 +127,7 @@ function mockConversationStore() {
         message: string,
         createdAt: Date,
         clientMessageId: TOption<string>,
+        _attachments: TAttachmentRef[],
       ): Promise<TSelectMemory> => ({
         id: 100,
         chatId,
@@ -137,6 +138,7 @@ function mockConversationStore() {
         kind: "message",
         createdAt,
         clientMessageId: clientMessageId ?? null,
+        attachments: null,
       }),
     ),
     raiseRevision: mock(async () => 1),
@@ -390,6 +392,7 @@ describe("MessageHandler", () => {
           kind: "message",
           createdAt: savedAt,
           clientMessageId: null,
+          attachments: null,
         };
         saved.push(row);
         return row;

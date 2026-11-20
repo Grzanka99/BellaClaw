@@ -14,7 +14,8 @@ import type { TInternalApi } from "./internal-api";
 // unreachableCalls: how many next requestLink, getChatLink or getAccount calls answer 502. Links are made active by activate().
 // sends: every message sent, accepted as the assistant does, without a turn. streams: the stream
 // opened by each openStream call, oldest first; push writes an event to the newest, drop closes it.
-// personalities: by account id
+// personalities: by account id. uploads: every image streamed on, with its bytes; the fake answers
+// it with the id `media-<n>`, and a download of that id with the bytes
 export function createFakeAssistant() {
   const personalities = new Map<string, TDashboardPersonality>();
   const defaultPersonality: TDashboardPersonality = {
@@ -31,6 +32,12 @@ export function createFakeAssistant() {
   };
   const codeChecks: string[] = [];
   const sends: { accountId: string; conversationKey: string; message: TDashboardAppMessage }[] = [];
+  const uploads: {
+    accountId: string;
+    conversationKey: string;
+    mimeType: string;
+    data: ArrayBuffer;
+  }[] = [];
   const unavailable = { error: "The assistant is unavailable", status: 502 as const };
   const streams: ReadableStreamDefaultController<Uint8Array>[] = [];
   const encoder = new TextEncoder();
@@ -143,6 +150,25 @@ export function createFakeAssistant() {
 
       return { data: { clientMessageId: message.clientMessageId } };
     },
+    uploadMedia: async (accountId, conversationKey, mimeType, body) => {
+      const data = await new Response(body).arrayBuffer();
+      uploads.push({ accountId, conversationKey, mimeType, data });
+
+      return { data: { id: `media-${uploads.length}`, mimeType } };
+    },
+    downloadMedia: async (accountId, conversationKey, mediaId) => {
+      const upload = uploads[Number(mediaId.slice("media-".length)) - 1];
+
+      if (
+        upload === undefined ||
+        upload.accountId !== accountId ||
+        upload.conversationKey !== conversationKey
+      ) {
+        return { error: "Gone", status: 410 };
+      }
+
+      return { data: new Response(upload.data, { headers: { "Content-Type": upload.mimeType } }) };
+    },
     createConversation: async (accountId) => {
       calls.push({ method: "createConversation", accountId });
 
@@ -178,6 +204,7 @@ export function createFakeAssistant() {
     calls,
     codeChecks,
     sends,
+    uploads,
     personalities,
     state,
     streams,

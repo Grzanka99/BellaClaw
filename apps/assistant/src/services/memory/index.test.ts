@@ -73,6 +73,7 @@ describe("Memory", () => {
           `Fact source ${index}`,
           new Date(),
           undefined,
+          [],
         );
       }
       await ConversationStore.instance.saveUserMessage(
@@ -83,6 +84,7 @@ describe("Memory", () => {
         "Another chat fact source",
         new Date(),
         undefined,
+        [],
       );
 
       const result = await memory.commitLiveFactWindow({
@@ -186,6 +188,7 @@ describe("Memory", () => {
         "The bicycle is named Comet again.",
         new Date(),
         undefined,
+        [],
       );
       await DatabaseConnector.instance.database.transaction((tx) =>
         memory.rememberFact(
@@ -258,6 +261,7 @@ describe("Memory", () => {
           `Window message ${index}`,
           new Date(),
           undefined,
+          [],
         );
       }
       await ConversationStore.instance.saveUserMessage(
@@ -268,6 +272,7 @@ describe("Memory", () => {
         "Other chat message",
         new Date(),
         undefined,
+        [],
       );
 
       expect(await ConversationStore.instance.findChatIds()).toEqual(["chat-other", "chat-window"]);
@@ -310,6 +315,7 @@ describe("Memory", () => {
         "The bicycle used to be called Spark.",
         new Date(),
         undefined,
+        [],
       );
       const initial = await memory.commitLiveFactWindow({
         chatId: "chat-atomic",
@@ -342,6 +348,7 @@ describe("Memory", () => {
         "The bicycle is now called Comet.",
         new Date(),
         undefined,
+        [],
       );
       const replacement = await memory.commitLiveFactWindow({
         chatId: "chat-atomic",
@@ -370,6 +377,7 @@ describe("Memory", () => {
         "This transaction must roll back.",
         new Date(),
         undefined,
+        [],
       );
       await expect(
         memory.commitLiveFactWindow({
@@ -403,6 +411,7 @@ describe("Memory", () => {
           `Stale source ${index}`,
           new Date(),
           undefined,
+          [],
         );
       }
       await memory.commitLiveFactWindow({
@@ -457,6 +466,7 @@ describe("Memory", () => {
         "Assistant context only",
         new Date(),
         undefined,
+        [],
       );
 
       await expect(
@@ -546,6 +556,7 @@ describe("Memory", () => {
         "My bike is red.",
         new Date(),
         undefined,
+        [],
       );
 
       const remembered = await remember("chat-cmd", "The user's bike is red.", "My bike is red.");
@@ -593,6 +604,7 @@ describe("Memory", () => {
         "My bike is red.",
         new Date(),
         undefined,
+        [],
       );
       const remembered = await remember("chat-cmd", "The user's bike is red.", "My bike is red.");
       const factId = remembered.payload.factId;

@@ -416,6 +416,9 @@ if (role.data === "assistant") {
       await rm(join(root, entry), { recursive: true, force: true });
     }
 
+    // NOTE: a rebuild never runs the migrator. Recorded only after it succeeds, so a failed
+    // migration exits and is tried again on the container's restart
+    await run(["bun", "scripts/migrate.ts"], join(IMAGE_DIR, "apps/assistant"));
     await Bun.write(join(root, IMAGE_FILE), imageSha);
   }
 

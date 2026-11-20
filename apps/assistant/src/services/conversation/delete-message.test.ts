@@ -63,6 +63,7 @@ async function saveTurn(
     text,
     new Date(),
     undefined,
+    [],
   );
   const history = previous?.entries.map((entry) => entry.message) ?? [];
 

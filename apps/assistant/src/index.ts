@@ -2,6 +2,7 @@ import { AppLogger, EBehaviorLogLevel } from "@bellaclaw/behavior-logs";
 import { EEventType } from "@bellaclaw/database";
 import { setupAiAuth } from "./services/ai/auth";
 import { startAiOAuthKeepAlive } from "./services/ai/auth/oauth-keep-alive";
+import { AppChannel } from "./services/app";
 import { AppStream } from "./services/app-stream";
 import { AuthorizationService } from "./services/authorization";
 import { AutomationService } from "./services/automation";
@@ -66,6 +67,7 @@ async function init(): Promise<void> {
     McpService.instance.setup();
     setupInternalApi();
     AppStream.instance.setup();
+    AppChannel.instance.setup();
     if (Bun.env.BELLACLAW_MCP_PUBLIC_URL?.trim()) {
       startMcpAuthServer();
     }

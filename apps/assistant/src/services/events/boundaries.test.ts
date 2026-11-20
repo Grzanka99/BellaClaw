@@ -3,6 +3,7 @@ import { join, relative, resolve } from "node:path";
 import { EEventType } from "@bellaclaw/database";
 import { Glob } from "bun";
 import { setupAiAuth } from "../ai/auth";
+import { AppChannel } from "../app";
 import { AppStream } from "../app-stream";
 import { AuthorizationService } from "../authorization";
 import { AutomationService } from "../automation";
@@ -52,8 +53,10 @@ const ALLOWED: Record<string, string> = {
   "commands -> authorization": "listAuthorizedChatIds, a cached read model",
   "commands -> identity": "IdentityService.addressKey, a pure function",
   "commands -> mcp": "status read: lists a profile's prompts",
+  "commands -> messaging": "deleteAttachment: a driver call, no stored state",
   "commands -> mcp/auth": "status read",
   "commands -> mcp/config": "profile config reads",
+  "app -> messaging": "registerAttachmentStore: boot wiring of the app's files, no stored state",
   "app-stream -> identity":
     "IdentityService.resolve, a cached read model, and accountIdOf, a pure function",
   "authorization -> identity": "IdentityService.resolve, a cached read model",
@@ -76,6 +79,8 @@ const ALLOWED: Record<string, string> = {
     "checks and verification that prepare the settings command",
   "internal-api -> identity": "IdentityService.link, account and addressKey, a cached read model",
   "internal-api -> app-stream": "AppStream.listen: live listeners an event cannot carry",
+  "internal-api -> app":
+    "AppChannel.store, open and findAttachments: an upload's bytes, which no event may carry, go to the App channel's store; reads of it",
   "internal-api -> messaging/chat-key": "pure functions",
   "mcp -> ai/llm": "driver helper",
   "mcp -> identity": "IdentityService.resolve for a connection's trace, a cached read model",
@@ -282,6 +287,7 @@ describe("boundaries", () => {
       McpService.instance.setup();
       setupInternalApi();
       AppStream.instance.setup();
+      AppChannel.instance.setup();
       await IdentityService.instance.setup();
       await AuthorizationService.instance.setup();
       await CalendarService.instance.setup();
@@ -314,6 +320,7 @@ describe("boundaries", () => {
         "McpService.setup",
         "setupInternalApi",
         "AppStream.setup",
+        "AppChannel.setup",
         "IdentityService.setup",
         "AuthorizationService.setup",
         "CalendarService.setup",

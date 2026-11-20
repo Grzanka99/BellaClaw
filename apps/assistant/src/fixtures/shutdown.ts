@@ -17,6 +17,10 @@ for (const [path, name] of [
     mock.module(path, () => ({ [name]: { instance: { setup: async () => undefined } } }));
   }
 }
+mock.module("../services/app", () => ({
+  AppChannel: { instance: { setup: () => undefined } },
+  imageTypeOf: () => undefined,
+}));
 mock.module("../services/message-handler", () => ({
   MessageHandler: { instance: { setup: () => undefined } },
 }));

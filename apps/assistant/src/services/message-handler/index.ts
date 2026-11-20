@@ -199,10 +199,10 @@ export class MessageHandler {
           ownerKey = resolved.ownerKey;
         }
 
-        await ctx.complete(async (tx, emit) => {
-          const messageIds = await this.conversations.deleteMessage(tx, chatId, messageId);
+        const attachments = await ctx.complete(async (tx, emit) => {
+          const deleted = await this.conversations.deleteMessage(tx, chatId, messageId);
 
-          if (messageIds === undefined) {
+          if (deleted === undefined) {
             emit(
               EEventType.CommandRejected,
               {
@@ -213,12 +213,27 @@ export class MessageHandler {
               undefined,
               undefined,
             );
-            return;
+            return [];
           }
 
-          emit(EEventType.ConversationMessageDeleted, { chatId, messageIds }, undefined, undefined);
+          emit(
+            EEventType.ConversationMessageDeleted,
+            { chatId, messageIds: deleted.messageIds },
+            undefined,
+            undefined,
+          );
           await this.changed(tx, emit, chatId, ownerKey, true, undefined);
+          return deleted.attachments;
         });
+
+        // the deleted rows were the only references to these files
+        for (const ref of attachments) {
+          try {
+            await MessagingAdapter.instance.deleteAttachment(ref);
+          } catch (error) {
+            this.logger.warning(`Attachment delete failed: ${String(error)}`);
+          }
+        }
       },
     });
     // NOTE: a consumer of its own, so the title call never holds the chat's next turn. Each
@@ -582,6 +597,7 @@ export class MessageHandler {
             storedText,
             new Date(receivedAt),
             clientMessageId,
+            attachments,
           );
           emit(EEventType.TurnStarted, { ...origin, userMessageId: row.id }, undefined, undefined);
           await this.changed(tx, emit, conversationKey, ownerKey, false, "started");

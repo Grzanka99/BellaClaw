@@ -1,8 +1,9 @@
 import { EConversationKind, EEventType } from "@bellaclaw/database";
-import type { TOption } from "@bellaclaw/shared";
+import { createLogger, type TLogger, type TOption } from "@bellaclaw/shared";
 import { ESubscriptionMode, EventBus, type TEventContext } from "../events";
 import type { TEvent } from "../events/catalog";
 import { IdentityService } from "../identity";
+import { MessagingAdapter } from "../messaging";
 import { aiAuthCommand } from "./ai-auth";
 import { calendarAddReadCommand, calendarAddWriteCommand } from "./calendar-add";
 import { appCommand, dashboardCommand } from "./dashboard";
@@ -64,6 +65,7 @@ export async function runCommand(
 
 export class Commands {
   private static _instance: TOption<Commands>;
+  private logger: TLogger = createLogger("COMMANDS");
 
   private constructor() {}
 
@@ -140,5 +142,16 @@ export class Commands {
         undefined,
       );
     });
+
+    // a command takes no image: nothing references the files its message came with
+    if (result !== undefined) {
+      for (const ref of attachments) {
+        try {
+          await MessagingAdapter.instance.deleteAttachment(ref);
+        } catch (error) {
+          this.logger.warning(`Attachment delete failed: ${String(error)}`);
+        }
+      }
+    }
   }
 }

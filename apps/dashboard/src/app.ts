@@ -36,6 +36,7 @@ import type {
   TLinkRequest,
   TLoginRequest,
   TLogoutResponse,
+  TMediaUploadedResponse,
   TMeResponse,
   TMessagesResponse,
   TRegisterRequest,
@@ -57,6 +58,9 @@ const SESSION_COOKIE_OPTIONS: CookieOptions = {
   maxAge: SESSION_TTL_MS / 1000,
 };
 const MESSAGES_PAGE_SIZE = 50;
+// every body but an image upload is a small JSON object
+const MAX_JSON_BODY_BYTES = 65_536;
+const MEDIA_UPLOAD_PATH = /^\/api\/conversations\/[^/]+\/media$/;
 // NOTE: well under the 255 s idle timeout, and the usual idle limits of a proxy
 const STREAM_KEEP_ALIVE_MS = 25_000;
 const MAX_ACCOUNT_STREAMS = 4;
@@ -344,6 +348,17 @@ export function createApp({
 
     if (!reads && !isAppRequest(c) && c.req.header("Origin") !== config.publicOrigin) {
       return c.json<TApiError>({ error: "Forbidden" }, 403);
+    }
+
+    await next();
+  });
+
+  // NOTE: the server takes a body as large as an image, for the upload
+  app.use(async (c, next) => {
+    const upload = c.req.method === "POST" && MEDIA_UPLOAD_PATH.test(c.req.path);
+
+    if (!upload && Number(c.req.header("Content-Length")) > MAX_JSON_BODY_BYTES) {
+      return c.json<TApiError>({ error: "Request body too large" }, 413);
     }
 
     await next();
@@ -891,6 +906,67 @@ export function createApp({
     }
 
     return c.json(result.data);
+  });
+
+  // NOTE: the image's bytes stream on to the assistant, which checks the declared type
+  // (Content-Type), the size and the format before it stores anything. The answer names the image
+  // for a send to this conversation: 413 for a file over 5 MB, 415 for another type or content
+  app.post("/api/conversations/:conversationKey/media", requireSession, async (c) => {
+    const conversationKey = c.req.param("conversationKey");
+    const owned = await findConversation(c, conversationKey);
+
+    if ("error" in owned) {
+      return c.json<TApiError>({ error: owned.error }, owned.status);
+    }
+
+    if (owned.data === undefined) {
+      return c.json<TApiError>({ error: "Not found" }, 404);
+    }
+
+    const result = await internalApi.uploadMedia(
+      c.var.account.publicId,
+      conversationKey,
+      c.req.header("Content-Type") ?? "",
+      c.req.raw.body,
+    );
+
+    if ("error" in result) {
+      return c.json<TApiError>({ error: result.error }, result.status);
+    }
+
+    return c.json<TMediaUploadedResponse>(result.data);
+  });
+
+  // the image's bytes: 404 for a conversation that is not the account's, 410 for an image this
+  // conversation does not keep
+  app.get("/api/conversations/:conversationKey/media/:mediaId", requireSession, async (c) => {
+    const conversationKey = c.req.param("conversationKey");
+    const owned = await findConversation(c, conversationKey);
+
+    if ("error" in owned) {
+      return c.json<TApiError>({ error: owned.error }, owned.status);
+    }
+
+    if (owned.data === undefined) {
+      return c.json<TApiError>({ error: "Not found" }, 404);
+    }
+
+    const result = await internalApi.downloadMedia(
+      c.var.account.publicId,
+      conversationKey,
+      c.req.param("mediaId"),
+    );
+
+    if ("error" in result) {
+      return c.json<TApiError>({ error: result.error }, result.status);
+    }
+
+    return new Response(result.data.body, {
+      headers: {
+        "Content-Type": result.data.headers.get("Content-Type") ?? "",
+        "Cache-Control": "no-store",
+      },
+    });
   });
 
   // NOTE: the app's live stream: nudges and typing of the signed-in account only, keys and
