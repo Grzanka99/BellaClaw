@@ -35,6 +35,7 @@ import one.scary.bellaclaw.model.PickedImage
 import one.scary.bellaclaw.model.PlainChat
 import one.scary.bellaclaw.model.Session
 import one.scary.bellaclaw.model.SettingsSnapshot
+import one.scary.bellaclaw.model.isNewChatId
 
 /**
  * The account's conversations from the gateway: the list, history, sends and the live stream, held in
@@ -62,7 +63,7 @@ class ChatRepository(
     private val sync = ChatSync(api, state, scope, retryMillis, MAX_RETRY_MILLIS)
     private val stream = ChatStream(api, state, sync, scope, chatStore::forget, clock, retryMillis, MAX_RETRY_MILLIS)
     private val images = ChatImages(api, session, pickedImages, imageCache)
-    private val sends = ChatSends(api, state, scope, images, chatStore, clock) { key ->
+    private val sends = ChatSends(api, state, scope, sync, images, chatStore, clock) { key ->
         modelOf(key, chatStore.chats.value, settings.value)
     }
 
@@ -116,10 +117,19 @@ class ChatRepository(
     /** Whether the live stream to the server is open. */
     val isStreamOpen: Flow<Boolean> = state.map { it.isStreamOpen }.distinctUntilChanged()
 
-    /** The chat once it is known; null when the list has no [chatId]: the chat was deleted. */
+    /**
+     * The chat once it is known; null when the list has no [chatId]: the chat was deleted. A new chat is an
+     * untitled plain chat until its first send creates it, then the created chat, under its own id.
+     */
     fun chat(chatId: String): Flow<Chat?> {
         if (chatId == BELLACLAW_CHAT_ID) {
             return flowOf(BellaClawChat)
+        }
+        if (isNewChatId(chatId)) {
+            return combine(state, chatStore.chats, settings) { current, local, settings ->
+                val key = current.createdChats[chatId] ?: return@combine PlainChat(chatId, null, iconOf(chatId), modelOf(chatId, local, settings))
+                plainChats(current.conversations, local, settings).firstOrNull { it.id == key }
+            }.distinctUntilChanged()
         }
         // The list and whether it loaded come from one snapshot, so a loaded list never shows without its chats.
         val list = state.map { it.conversations to it.isListLoaded }.distinctUntilChanged()
@@ -201,11 +211,13 @@ class ChatRepository(
         return ChatNotification(key, key, title, text)
     }
 
-    /** Creates an empty plain chat and returns its id, or null when the server could not. */
-    suspend fun createChat(): String? = sync.createChat()
-
     suspend fun setModel(chatId: String, model: ModelChoice) {
         chatStore.setModel(chatId, model)
+    }
+
+    /** Forgets the model picked in the new chat [newChatId], closed without a send. */
+    fun forgetNewChat(newChatId: String) {
+        scope.launch { chatStore.forget(newChatId) }
     }
 
     /** The plain chats of [list], in its order. */

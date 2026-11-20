@@ -17,6 +17,7 @@ import one.scary.bellaclaw.data.remote.ConversationsBody
 import one.scary.bellaclaw.data.remote.EmptyBody
 import one.scary.bellaclaw.data.remote.HistoryBody
 import one.scary.bellaclaw.data.remote.HistoryRowBody
+import one.scary.bellaclaw.model.isNewChatId
 
 /**
  * Keeps [ChatRepository]'s [state] in step with the server: the conversation list, every loaded
@@ -82,7 +83,8 @@ internal class ChatSync(
                     conversations = list,
                     isListLoaded = true,
                     histories = histories,
-                    pending = current.pending.filterKeys { it in keys },
+                    // A new chat's sends wait under its own id for the chat to be created.
+                    pending = current.pending.filterKeys { it in keys || isNewChatId(it) },
                     replies = current.replies.filterKeys { it in keys },
                     typing = current.typing.filterTo(HashSet()) { it in keys },
                 )

@@ -1,6 +1,15 @@
 package one.scary.bellaclaw.model
 
+import java.util.UUID
+
 const val BELLACLAW_CHAT_ID = "bellaclaw"
+
+private const val NEW_CHAT_PREFIX = "new:"
+
+/** The id of a plain chat not created yet: its screen shows at once, and its first send creates the chat. */
+fun newChatId(): String = NEW_CHAT_PREFIX + UUID.randomUUID()
+
+fun isNewChatId(chatId: String): Boolean = chatId.startsWith(NEW_CHAT_PREFIX)
 
 enum class ChatKind {
     BELLACLAW,

@@ -11,6 +11,7 @@ import one.scary.bellaclaw.model.MessageImage
 import one.scary.bellaclaw.model.ModelChoice
 import one.scary.bellaclaw.model.PickedImage
 import one.scary.bellaclaw.model.SendState
+import one.scary.bellaclaw.model.isNewChatId
 import java.time.Instant
 
 /**
@@ -31,9 +32,17 @@ internal data class ChatState(
     val replies: Map<String, List<Message>> = emptyMap(),
     val typing: Set<String> = emptySet(),
     val isStreamOpen: Boolean = false,
+    /** New chat ids whose first send created their chat, to its conversation key. */
+    val createdChats: Map<String, String> = emptyMap(),
 ) {
-    /** The conversation key of the app's [chatId], or null while the list has none. */
+    /**
+     * The conversation key of the app's [chatId], or null while the list has none. A new chat's sends are
+     * held under its own id until it is created.
+     */
     fun keyOf(chatId: String): String? {
+        if (isNewChatId(chatId)) {
+            return createdChats[chatId] ?: chatId
+        }
         if (chatId == BELLACLAW_CHAT_ID) {
             return conversations.firstOrNull { it.kind == BELLA }?.conversationKey
         }

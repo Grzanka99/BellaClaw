@@ -14,6 +14,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
 import one.scary.bellaclaw.model.BELLACLAW_CHAT_ID
+import one.scary.bellaclaw.model.newChatId
 import one.scary.bellaclaw.ui.chat.ChatRoute
 import one.scary.bellaclaw.ui.home.HomeRoute
 import one.scary.bellaclaw.ui.settings.SettingsRoute
@@ -64,6 +65,7 @@ fun BellaClawNavHost(hasPendingLink: Boolean, chatToOpen: String?, onChatOpened:
         composable<HomeDestination> { entry ->
             HomeRoute(
                 onOpenChat = { chatId -> entry.ifResumed { navController.navigate(ChatDestination(chatId)) } },
+                onNewChat = { entry.ifResumed { navController.navigate(ChatDestination(newChatId())) } },
                 onOpenSettings = { entry.ifResumed { navController.navigate(SettingsDestination) } },
             )
         }

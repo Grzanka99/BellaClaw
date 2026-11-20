@@ -121,7 +121,6 @@
     <string name="link_other_server">This link is for another server. This app is signed in as %1$s on %2$s.</string>
 
     <string name="error_server_status">The server refused the request (%1$d).</string>
-    <string name="error_new_chat">Couldn\'t create the chat. Try again.</string>
     <string name="error_network">Can\'t reach the server. Check the address and your connection.</string>
     <string name="error_server_url_empty">Enter the server address.</string>
     <string name="error_server_url_invalid">Enter the full address, starting with https://</string>

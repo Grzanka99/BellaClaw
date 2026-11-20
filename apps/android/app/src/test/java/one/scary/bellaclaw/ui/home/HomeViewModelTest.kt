@@ -8,17 +8,14 @@ import one.scary.bellaclaw.data.ChatRepository
 import one.scary.bellaclaw.data.FakeGateway
 import one.scary.bellaclaw.data.FakeGateway.Companion.BELLA_KEY
 import one.scary.bellaclaw.data.TestServer
-import one.scary.bellaclaw.data.errorAnswer
 import one.scary.bellaclaw.data.local.SessionStore
 import one.scary.bellaclaw.model.BELLACLAW_CHAT_ID
-import one.scary.bellaclaw.model.PlainChat
 import one.scary.bellaclaw.model.Session
 import one.scary.bellaclaw.ui.MainDispatcherRule
 import one.scary.bellaclaw.ui.chat.ChatRow
 import one.scary.bellaclaw.ui.chat.ChatViewModel
 import one.scary.bellaclaw.ui.collectIn
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -76,23 +73,6 @@ class HomeViewModelTest {
     }
 
     @Test
-    fun `new chat is created untitled and handed to the screen once`() = runTest {
-        val repository = repository()
-        val viewModel = home(repository)
-
-        viewModel.newChat()
-        viewModel.newChat()
-
-        val created = viewModel.uiState.first { it.createdChatId != null }.createdChatId
-        val chats = repository.chats.first { list -> list.any { it.id == created } }.filterIsInstance<PlainChat>()
-        assertEquals(1, chats.size)
-        assertNull(chats.single().title)
-
-        viewModel.onNewChatOpened()
-        viewModel.uiState.first { it.createdChatId == null }
-    }
-
-    @Test
     fun `an empty plain chat is not listed, and is listed once it has a message`() = runTest {
         gateway.addChat("plain:ada:a")
         gateway.addChat("plain:ada:b", "Regex")
@@ -113,39 +93,6 @@ class HomeViewModelTest {
 
         val listed = viewModel.uiState.first { state -> state.chats.any { it.id == created } }
         assertEquals("Hello", listed.chats.single { it.id == created }.preview)
-    }
-
-    @Test
-    fun `New chat while the account's empty chat exists opens that chat, held once`() = runTest {
-        gateway.addChat("plain:ada:a")
-        testServer.route("POST", "/api/conversations", 200, """{"conversationKey":"plain:ada:a"}""")
-        val repository = repository()
-        val viewModel = home(repository)
-        repository.chats.first { chats -> chats.any { it.id == "plain:ada:a" } }
-
-        repeat(2) {
-            viewModel.newChat()
-            viewModel.uiState.first { it.createdChatId == "plain:ada:a" }
-            viewModel.onNewChatOpened()
-            viewModel.uiState.first { it.createdChatId == null }
-        }
-
-        assertEquals(1, repository.chats.first().count { it.id == "plain:ada:a" })
-    }
-
-    @Test
-    fun `a failed new chat says so until the next tap`() = runTest {
-        testServer.route("POST", "/api/conversations", 500, errorAnswer("Internal error"))
-        val viewModel = home(repository())
-
-        viewModel.newChat()
-
-        viewModel.uiState.first { it.newChatFailed }
-
-        testServer.route("POST", "/api/conversations", 200, """{"conversationKey":"plain:ada:a"}""")
-        viewModel.newChat()
-
-        viewModel.uiState.first { !it.newChatFailed && it.createdChatId == "plain:ada:a" }
     }
 
     @Test

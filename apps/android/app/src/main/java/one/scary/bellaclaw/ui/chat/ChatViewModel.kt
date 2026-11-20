@@ -7,12 +7,14 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import androidx.navigation.toRoute
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -30,16 +32,21 @@ import one.scary.bellaclaw.model.MessageImage
 import one.scary.bellaclaw.model.ModelChoice
 import one.scary.bellaclaw.model.PickedImage
 import one.scary.bellaclaw.model.PlainChat
+import one.scary.bellaclaw.model.isNewChatId
 import one.scary.bellaclaw.ui.appContainer
 import one.scary.bellaclaw.ui.navigation.ChatDestination
 import java.io.File
 import java.time.ZoneId
 
+/**
+ * One chat's screen. A new chat's id (`newChatId`) moves to the created chat's once its first send created
+ * it, kept in [savedStateHandle], so the screen comes back as that chat.
+ */
 class ChatViewModel(
-    private val chatId: String,
+    chatId: String,
     private val chatRepository: ChatRepository,
     private val settingsRepository: SettingsRepository,
-    savedStateHandle: SavedStateHandle,
+    private val savedStateHandle: SavedStateHandle,
     private val zone: ZoneId = ZoneId.systemDefault(),
 ) : ViewModel() {
     /**
@@ -59,6 +66,7 @@ class ChatViewModel(
 
     /** The composer's text, kept in [savedStateHandle] across process death. */
     private val draft = savedStateHandle.getMutableStateFlow(DRAFT_KEY, "")
+    private val chatId = savedStateHandle.getStateFlow(CHAT_ID_KEY, chatId)
     private val local = MutableStateFlow(LocalState())
 
     /** The check of the latest pick, cancelled when another pick replaces it or the image is removed. */
@@ -70,26 +78,33 @@ class ChatViewModel(
         }
     }
 
-    private val chatState = combine(
-        chatRepository.chat(chatId),
-        chatRepository.messages(chatId),
-        chatRepository.isTyping(chatId),
-        chatRepository.isStreamOpen,
-        chatRepository.canSend(chatId),
-    ) { chat, messages, typing, streamOpen, isReadyToSend ->
-        val (kind, title) = when (chat) {
-            null -> return@combine ChatUiState(isMissing = true)
-            is BellaClawChat -> ChatKind.BELLACLAW to null
-            is PlainChat -> ChatKind.PLAIN to chat.title
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private val chatState = this.chatId.flatMapLatest { id ->
+        combine(
+            chatRepository.chat(id),
+            chatRepository.messages(id),
+            chatRepository.isTyping(id),
+            chatRepository.isStreamOpen,
+            chatRepository.canSend(id),
+        ) { chat, messages, typing, streamOpen, isReadyToSend ->
+            val (kind, title) = when (chat) {
+                null -> return@combine ChatUiState(isMissing = true)
+                is BellaClawChat -> ChatKind.BELLACLAW to null
+                is PlainChat -> ChatKind.PLAIN to chat.title
+            }
+            // A new chat was created: the screen follows it to its id.
+            if (chat.id != id) {
+                savedStateHandle[CHAT_ID_KEY] = chat.id
+            }
+            ChatUiState(
+                kind = kind,
+                title = title,
+                rows = chatRows(messages, zone),
+                isTyping = typing,
+                isStreamOpen = streamOpen,
+                isReadyToSend = isReadyToSend,
+            )
         }
-        ChatUiState(
-            kind = kind,
-            title = title,
-            rows = chatRows(messages, zone),
-            isTyping = typing,
-            isStreamOpen = streamOpen,
-            isReadyToSend = isReadyToSend,
-        )
     }
 
     val uiState: StateFlow<ChatUiState> = combine(
@@ -147,14 +162,14 @@ class ChatViewModel(
         if (local.value.checkingUri != null || (text.isBlank() && image == null)) {
             return
         }
-        if (chatRepository.send(chatId, text.trim(), image)) {
+        if (chatRepository.send(chatId.value, text.trim(), image)) {
             draft.value = ""
             local.update { it.copy(attachment = null, attachmentRefusal = null) }
         }
     }
 
     /** The image [mediaId] of this chat as a file on the phone, or null when there is none to show now. */
-    suspend fun imageFile(mediaId: String): File? = chatRepository.imageFile(chatId, mediaId)
+    suspend fun imageFile(mediaId: String): File? = chatRepository.imageFile(chatId.value, mediaId)
 
     fun openImage(image: MessageImage) {
         local.update { it.copy(viewedImage = image) }
@@ -166,19 +181,19 @@ class ChatViewModel(
 
     /** Sends the failed message [messageId] again. */
     fun retry(messageId: String) {
-        chatRepository.retry(chatId, messageId)
+        chatRepository.retry(chatId.value, messageId)
     }
 
     /** The reader reached the oldest loaded row. */
     fun loadOlder() {
-        chatRepository.loadOlder(chatId)
+        chatRepository.loadOlder(chatId.value)
     }
 
     /** Opens the picker on the chat's model and reads the model list again, and the account's models if they failed. */
     fun openModelPicker() {
         settingsRepository.reloadChatModels(refresh = true)
         viewModelScope.launch {
-            val chat = chatRepository.chat(chatId).first()
+            val chat = chatRepository.chat(chatId.value).first()
             if (chat is PlainChat) {
                 local.update { it.copy(isPickerOpen = true, pickerSelection = chat.model) }
             }
@@ -207,13 +222,20 @@ class ChatViewModel(
             return
         }
         viewModelScope.launch {
-            chatRepository.setModel(chatId, selection)
+            chatRepository.setModel(chatId.value, selection)
             local.update { it.copy(isPickerOpen = false, pickerSelection = null) }
         }
     }
 
     fun dismissModelPicker() {
         local.update { it.copy(isPickerOpen = false, pickerSelection = null) }
+    }
+
+    /** A new chat closed for good without a send keeps no pick. */
+    override fun onCleared() {
+        if (isNewChatId(chatId.value)) {
+            chatRepository.forgetNewChat(chatId.value)
+        }
     }
 
     /** Changes the selection the picker shows. */
@@ -227,6 +249,7 @@ class ChatViewModel(
 
     companion object {
         private const val DRAFT_KEY = "draft"
+        private const val CHAT_ID_KEY = "currentChatId"
 
         val Factory = viewModelFactory {
             initializer {

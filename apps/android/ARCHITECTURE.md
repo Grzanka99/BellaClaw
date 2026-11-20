@@ -28,7 +28,7 @@ No domain/use-case layer: add one only for logic that two ViewModels share.
 Each screen has one file per concern:
 
 - `XUiState.kt`: an immutable `data class`, with defaults that render an empty screen.
-- `XViewModel.kt`: exposes exactly one `StateFlow<XUiState>` (`stateIn(viewModelScope, WhileSubscribed(5_000), …)`) and takes events as functions. It owns screen-only state in private `MutableStateFlow`s combined with repository flows. Text drafts (the composer, the personality) live in `SavedStateHandle.getMutableStateFlow` so they survive process death (the composer draft comes back only for a chat that still exists after the restart; a chat created in memory is gone); open sheets, editors and a picked image do not. It has a `Factory` in its companion.
+- `XViewModel.kt`: exposes exactly one `StateFlow<XUiState>` (`stateIn(viewModelScope, WhileSubscribed(5_000), …)`) and takes events as functions. It owns screen-only state in private `MutableStateFlow`s combined with repository flows. Text drafts (the composer, the personality) live in `SavedStateHandle.getMutableStateFlow` so they survive process death (the composer draft comes back only for a chat that still exists after the restart, or a new chat not yet created); open sheets, editors and a picked image do not. It has a `Factory` in its companion.
 - `XRoute.kt`: obtains the ViewModel (`viewModel(factory = XViewModel.Factory)`), collects state with `collectAsStateWithLifecycle`, and wires events. Platform calls (pickers, intents) live here.
 - `XScreen.kt`: the stateless content composable `XScreen(state, event lambdas…)`, plus its `@Preview`s.
 - Sheets, rows and bars of one feature go in their own files in that feature's package, and so do pure
@@ -42,11 +42,9 @@ Split a file when it passes ~250 lines or holds unrelated composables.
 Repository `Flow` → ViewModel `combine` → `StateFlow<UiState>` → Route → Screen. Events go back as
 lambdas → ViewModel function → repository `suspend` call or local state update. Composables hold no
 business logic, never touch a repository, and never see the `NavController`. A one-shot result
-(a chat was created, the personality was saved) is a field in the UI state; the Route acts on it in a
+(the personality was saved) is a field in the UI state; the Route acts on it in a
 `LaunchedEffect` once its entry is resumed (`withResumed`), so the navigation is not dropped, and only
-then tells the ViewModel it was handled. An event that starts such a result (New chat)
-is ignored while one is pending; when it fails, a UI state field says so (`HomeUiState.newChatFailed`)
-until the next such event.
+then tells the ViewModel it was handled.
 
 A state that only lasts while the data says so (a chat id with no chat: `ChatUiState.isMissing`) is a
 plain UI state field; the Route reacts to it (back to Home) without acknowledging it.
@@ -64,7 +62,8 @@ Destinations are `@Serializable` types in `ui.navigation.Destinations`. `MainAct
 two graphs: `SignInNavHost` while signed out (sign-in, create account) and `BellaClawNavHost` while
 signed in. Switching graphs drops the other's back stack, so a session that starts or ends (sign-in,
 sign-out, a `401`) leaves nothing to go back to. `BellaClawNavHost` starts at Home and pushes the
-BellaClaw chat once, so Back from it lands on Home. Both graphs hold the login link confirmation
+BellaClaw chat once, so Back from it lands on Home. New chat pushes the chat destination with a new chat
+id (`newChatId()`) at once, with no request. Both graphs hold the login link confirmation
 (`LinkDestination`, no arguments) and push it whenever a link starts waiting (`PendingLinkEffect`);
 every way out of it (Cancel, Done, Back) dismisses the link, and the screen closes once its link no longer waits.
 A tapped notification names its chat in the intent (`MainActivity.EXTRA_CHAT_ID`); `MainActivity` hands it to
@@ -243,8 +242,16 @@ Everything it holds is one immutable `ChatState` in a `MutableStateFlow`, change
   conversation. Older pages load with `before` when the reader reaches the oldest row (`loadOlder`).
 - **Chat ids.** The Bella conversation is always `BELLACLAW_CHAT_ID` in the app and always listed, so
   its screen never waits; a plain chat's id is its conversation key, and its screen waits for the list
-  before it can be missing. A chat created here is kept whether or not the list has loaded (that is
-  its own fact, `ChatState.isListLoaded`), so its screen shows at once. The server answers the
+  before it can be missing. A new chat (`new:` and a UUID, `isNewChatId`) is an untitled plain
+  chat with no conversation: its screen shows at once and nothing is sent until its first message. Its
+  sends wait under its own id (`keyOf` answers it; list reads keep them); the first one's post creates the
+  chat first (`POST /api/conversations`), moves its sends and model to the new key and records the key in
+  `ChatState.createdChats`, so `chat(newId)` then answers the created chat. `ChatViewModel` keeps the
+  screen's id in its `SavedStateHandle` and moves it to that chat's id, so the screen survives rotation and
+  process death as that chat. A failed create marks the send `FAILED`, and a retry creates, then sends.
+  Left without a message, a new chat creates nothing and its pick is forgotten. Its sends keep their lock
+  (`sendLocks`) under the created key, so they go out in order across the id change. A created chat is kept whether or not the list has
+  loaded (that is its own fact, `ChatState.isListLoaded`). The server answers the
   account's empty plain chat when it has one, so a key the list holds already is not added again. Home
   lists a plain chat only once it has a message (`latestMessages`: the list's newest row, else the
   newest this phone holds, such as a send in progress). `chat(chatId)` reads the list
@@ -255,7 +262,7 @@ Everything it holds is one immutable `ChatState` in a `MutableStateFlow`, change
   history if the chat is known (else the next list read does), and marks its newest
   stored row seen in `ChatStore`. A
   conversation is unread while its newest row (from the list) is newer than the one seen.
-- **Sends** (`ChatSends`). Send is disabled until the chat's conversation is known and, in a plain chat, its model; the composer's draft is
+- **Sends** (`ChatSends`). Send is disabled until the chat's conversation is known (a new chat's is its own id) and, in a plain chat, its model; the composer's draft is
   cleared only once the message is in the repository. A send shows at once as a `PENDING` message
   with a fresh `clientMessageId`, posted in the application scope. It is pending only until the post
   is answered: accepted, it shows as a sent (`STORED`) message among the rows by time, and history's
@@ -305,8 +312,8 @@ Everything it holds is one immutable `ChatState` in a `MutableStateFlow`, change
   folder per account, named by a hash of its server and username, each image by a hash of its
   conversation key and media id, so no name holds account data. On every session change only the new
   session's account folder stays (none when signed out); a download whose session has ended is not kept.
-- **Kept on the phone** (`files/chats.json`, `ChatStore`): per conversation key, the picked model and
-  the newest row id seen; and the model a plain chat was last set to or sent with.
+- **Kept on the phone** (`files/chats.json`, `ChatStore`): per conversation key (a new chat's id until it is
+  created, then its key; a new chat's screen closed for good without a send forgets its id), the picked model and the newest row id seen; and the model a plain chat was last set to or sent with.
 - **After a push** (`catchUp`), in the background too: the list is read and the pushed conversation's
   history synced, as on a `changed`, so a history read this way stays in memory and is kept in step
   like any loaded one. A failed read is retried only while the stream is open. `openConversations` names the

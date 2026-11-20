@@ -19,22 +19,24 @@ import one.scary.bellaclaw.model.BELLACLAW_CHAT_ID
 import one.scary.bellaclaw.model.ModelChoice
 import one.scary.bellaclaw.model.PickedImage
 import one.scary.bellaclaw.model.SendState
+import one.scary.bellaclaw.model.isNewChatId
 
 /**
- * [ChatRepository]'s sends: shows each at once as pending in [state], uploads its image with [images] and
- * posts it in [scope]. [modelOf] gives a plain chat's model by conversation key; [chatStore] keeps it as
- * the chat's pick.
+ * [ChatRepository]'s sends: shows each at once as pending in [state], creates a new chat with [sync] first,
+ * uploads its image with [images] and posts it in [scope]. [modelOf] gives a plain chat's model by
+ * conversation key; [chatStore] keeps it as the chat's pick.
  */
 internal class ChatSends(
     private val api: ApiClient,
     private val state: MutableStateFlow<ChatState>,
     private val scope: CoroutineScope,
+    private val sync: ChatSync,
     private val images: ChatImages,
     private val chatStore: ChatStore,
     private val clock: Clock,
     private val modelOf: (String) -> ModelChoice?,
 ) {
-    /** One per conversation: its sends go out one at a time, in the order they were sent. */
+    /** One per conversation, shared by a new chat and its created key: its sends go out one at a time, in the order they were sent. */
     private val sendLocks = ConcurrentHashMap<String, Mutex>()
 
     /**
@@ -52,8 +54,13 @@ internal class ChatSends(
             modelOf(key) ?: return false
         }
         val message = PendingSend(UUID.randomUUID().toString(), text, model, clock.instant(), image)
-        state.update { it.copy(pending = it.pending + (key to it.pending[key].orEmpty() + message)) }
-        if (model != null) {
+        state.update { current ->
+            // A new chat created meanwhile holds its sends under its key.
+            val queueKey = current.createdChats[key] ?: key
+            current.copy(pending = current.pending + (queueKey to current.pending[queueKey].orEmpty() + message))
+        }
+        // A new chat's model is stored once the chat is created, under its conversation key.
+        if (model != null && !isNewChatId(key)) {
             scope.launch { chatStore.setModel(key, model) }
         }
         scope.launch { post(generation, key, message) }
@@ -70,13 +77,21 @@ internal class ChatSends(
     }
 
     /**
-     * Uploads [message]'s image if it has not been, then posts it; neither request starts once the session of
-     * [generation] has ended. A conversation's sends wait for the one before, so a text sent after a photo
-     * arrives after it.
+     * Creates the chat if [sendKey] is a new chat's id, uploads [message]'s image if it has not been, then
+     * posts it; no request starts once the session of [generation] has ended. A conversation's sends wait for
+     * the one before, so a text sent after a photo arrives after it.
      */
-    private suspend fun post(generation: Int, key: String, message: PendingSend) = sendLocks.getOrPut(key) { Mutex() }.withLock {
+    private suspend fun post(generation: Int, sendKey: String, message: PendingSend) = sendLocks.getOrPut(sendKey) { Mutex() }.withLock {
         if (state.value.generation != generation) {
             return@withLock
+        }
+        val key = if (isNewChatId(sendKey)) {
+            state.value.createdChats[sendKey] ?: createChat(generation, sendKey, message.model)
+        } else {
+            sendKey
+        }
+        if (key == null) {
+            return@withLock markFailed(sendKey, message.clientMessageId, null)
         }
         var uploaded = message.uploaded
         if (message.image != null && uploaded == null) {
@@ -99,6 +114,30 @@ internal class ChatSends(
             is ApiResult.ApiError -> markFailed(key, message.clientMessageId, result)
             ApiResult.NetworkFailure -> markFailed(key, message.clientMessageId, null)
         }
+    }
+
+    /**
+     * Creates the chat of [newChatId], moves its sends there and keeps [model], the first send's, as its pick;
+     * null when the server could not.
+     */
+    private suspend fun createChat(generation: Int, newChatId: String, model: ModelChoice?): String? {
+        val key = sync.createChat() ?: return null
+        if (state.value.generation != generation) {
+            return null
+        }
+        // The created chat's sends keep the new chat's lock, so they stay in order across the id change.
+        sendLocks[key] = sendLocks.getValue(newChatId)
+        state.update { current ->
+            if (current.generation != generation) {
+                current
+            } else {
+                val sends = current.pending[key].orEmpty() + current.pending[newChatId].orEmpty()
+                current.copy(pending = current.pending - newChatId + (key to sends), createdChats = current.createdChats + (newChatId to key))
+            }
+        }
+        model?.let { chatStore.setModel(key, it) }
+        chatStore.forget(newChatId)
+        return key
     }
 
     /** Marks the send failed, with the server's text for a refused request: `400`, and an upload's `413` or `415`. */

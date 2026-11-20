@@ -35,7 +35,9 @@ class FakeGateway : Dispatcher() {
 
     private val conversations = mutableListOf(Conversation(BELLA_KEY, "bella"))
     private var nextRowId = 1L
-    private var createdChats = 0
+    /** How many chats `POST /api/conversations` created. */
+    var createdChats = 0
+        private set
     /** The events of each open stream, not yet written. */
     private val streams = CopyOnWriteArrayList<LinkedBlockingQueue<String>>()
 
