@@ -206,6 +206,34 @@ export const SDashboardActivationCheck = z.object({
 
 export type TDashboardActivationCheck = z.infer<typeof SDashboardActivationCheck>;
 
+// GET /internal/stream: one line of JSON per event, for every account, live from the assistant;
+// an empty line keeps an idle connection open. accountId: the account the event belongs to.
+// changed: the conversation's transcript changed, with its revisions; typing: a turn of the
+// conversation started (true) or ended (false). Nothing replays
+export const SDashboardStreamEvent = z.discriminatedUnion("type", [
+  z
+    .object({
+      type: z.literal("changed"),
+      accountId: z.string(),
+      conversationKey: z.string(),
+      revision: z.number().int(),
+      rewriteRevision: z.number().int(),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("typing"),
+      accountId: z.string(),
+      conversationKey: z.string(),
+      typing: z.boolean(),
+    })
+    .strict(),
+]);
+
+export type TDashboardStreamEvent = z.infer<typeof SDashboardStreamEvent>;
+
+export const DASHBOARD_STREAM_PATH = "/internal/stream";
+
 export const DASHBOARD_ACTIVATION_CHECK_PATH = "/internal/activation-code/check";
 
 export const DASHBOARD_LINKS_PATH = "/internal/links";

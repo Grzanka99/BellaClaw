@@ -378,7 +378,14 @@ describe("linking an address to an account", () => {
           .from(eventsTable)
           .where(eq(eventsTable.type, EEventType.ConversationChanged))
       ).map((event) => event.payload),
-    ).toEqual([{ conversationKey: "bella:acct-9", revision: 1, rewriteRevision: 1 }]);
+    ).toEqual([
+      {
+        conversationKey: "bella:acct-9",
+        ownerKey: "account:acct-9",
+        revision: 1,
+        rewriteRevision: 1,
+      },
+    ]);
     expect((await IdentityService.instance.resolve("signal:+900"))?.conversationKey).toBe(
       "bella:acct-9",
     );
@@ -516,8 +523,18 @@ describe("linking an address to an account", () => {
           .where(eq(eventsTable.type, EEventType.ConversationChanged))
       ).map((event) => event.payload),
     ).toEqual([
-      { conversationKey: "bella:acct-14", revision: 1, rewriteRevision: 0 },
-      { conversationKey: "bella:acct-14", revision: 2, rewriteRevision: 2 },
+      {
+        conversationKey: "bella:acct-14",
+        ownerKey: "account:acct-14",
+        revision: 1,
+        rewriteRevision: 0,
+      },
+      {
+        conversationKey: "bella:acct-14",
+        ownerKey: "account:acct-14",
+        revision: 2,
+        rewriteRevision: 2,
+      },
     ]);
     expect(
       await database()

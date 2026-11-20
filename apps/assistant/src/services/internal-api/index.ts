@@ -8,6 +8,7 @@ import { EEventType, findOwnedConversation } from "@bellaclaw/database";
 import {
   DASHBOARD_ACTIVATION_CHECK_PATH,
   DASHBOARD_LINKS_PATH,
+  DASHBOARD_STREAM_PATH,
   dashboardAccountConversationMessagesPath,
   dashboardAccountMessagePath,
   dashboardAccountModelPath,
@@ -44,6 +45,7 @@ import {
 } from "../ai/tools/update-settings/ai-settings";
 import { EAiProvider, EModelPurpose, SAiProvider } from "../ai/types";
 import { sanitizeErrorMessage } from "../app-logger/sanitizers";
+import { AppStream } from "../app-stream";
 import { AuthorizationService } from "../authorization";
 import { DatabaseConnector } from "../database";
 import { CommandRejectedError, ESubscriptionMode, EventBus } from "../events";
@@ -64,6 +66,9 @@ const SModelUpdate = SDashboardModelUpdate.extend({
   aiProvider: SAiProvider.optional(),
   aiModelPurpose: z.enum(EModelPurpose).optional(),
 });
+
+// NOTE: well under both servers' 255 s idle timeout, so an idle stream stays open
+const STREAM_KEEP_ALIVE_MS = 25_000;
 
 // commands waiting for their outcome, by the turn id of the command
 const pendingUpdates = new Map<string, PromiseWithResolvers<TConfigRecord>>();
@@ -243,6 +248,35 @@ async function requestLink(body: unknown): Promise<TDashboardLinkStarted> {
   return { state: "migrating" };
 }
 
+// The edge's one live stream for every account: each event of the app stream as a line of JSON,
+// and an empty line as a keep-alive. Closing the connection releases the listener and the timer
+function openStream(request: Request): Response {
+  const encoder = new TextEncoder();
+  let release = () => {};
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      const close = AppStream.instance.listen((event) => {
+        controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+      });
+      const keepAlive = setInterval(() => {
+        controller.enqueue(encoder.encode("\n"));
+      }, STREAM_KEEP_ALIVE_MS);
+      release = () => {
+        clearInterval(keepAlive);
+        close();
+      };
+      request.signal.addEventListener("abort", release, { once: true });
+    },
+    cancel() {
+      release();
+    },
+  });
+
+  return new Response(body, {
+    headers: { "Content-Type": "application/x-ndjson", "Cache-Control": "no-store" },
+  });
+}
+
 function errorResponse(error: string, status: number, code: TOption<string>): Response {
   const body: TDashboardError = { error, code };
 
@@ -263,7 +297,8 @@ export async function handleInternalApiRequest(
   }
 
   const { pathname } = new URL(request.url);
-  // ["", "internal", "activation-code", "check"], ["", "internal", "links"],
+  // ["", "internal", "activation-code", "check"], ["", "internal", "stream"],
+  // ["", "internal", "links"],
   // ["", "internal", "links", chatKey],
   // ["", "internal", "accounts", accountId], ["", "internal", "accounts", accountId, "model"] or
   // ["", "internal", "accounts", accountId, "messages", messageId] or
@@ -282,6 +317,7 @@ export async function handleInternalApiRequest(
 
   const activationRoute = request.method === "POST" && pathname === DASHBOARD_ACTIVATION_CHECK_PATH;
   const linkRequestRoute = request.method === "POST" && pathname === DASHBOARD_LINKS_PATH;
+  const streamRoute = request.method === "GET" && pathname === DASHBOARD_STREAM_PATH;
   const chatLinkRoute =
     request.method === "GET" && key.length > 0 && pathname === dashboardChatLinkPath(key);
   const accountRoute =
@@ -304,6 +340,7 @@ export async function handleInternalApiRequest(
   if (
     !activationRoute &&
     !linkRequestRoute &&
+    !streamRoute &&
     !chatLinkRoute &&
     !accountRoute &&
     !modelRoute &&
@@ -332,6 +369,10 @@ export async function handleInternalApiRequest(
       }
 
       return Response.json(body);
+    }
+
+    if (streamRoute) {
+      return openStream(request);
     }
 
     if (linkRequestRoute) {

@@ -101,6 +101,15 @@ export type THistoryResponse = TConversationRevision & {
   nextAfter?: number;
 };
 
+// GET /api/stream server-sent events, data as JSON, each of the signed-in account only. check:
+// compare revisions now, sent on connect and whenever the edge's stream to the assistant opens or
+// drops, and stop showing typing; changed: the conversation's transcript changed; typing: a turn of
+// the conversation started (true) or ended (false)
+export type TAppStreamEvent =
+  | { type: "check" }
+  | ({ type: "changed"; conversationKey: string } & TConversationRevision)
+  | { type: "typing"; conversationKey: string; typing: boolean };
+
 // createdAt: epoch ms
 export type TFactNode = { id: number; text: string; createdAt: number };
 

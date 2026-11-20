@@ -205,7 +205,12 @@ test("a scripted session stores one row per visible message with its channel, a 
     const facts = await changes();
     expect(facts).toHaveLength(seen.length + count);
     for (const fact of facts.slice(seen.length)) {
-      expect(fact).toEqual({ conversationKey: chatId, revision: seen.length + 1, rewriteRevision });
+      expect(fact).toEqual({
+        conversationKey: chatId,
+        ownerKey: chatId,
+        revision: seen.length + 1,
+        rewriteRevision,
+      });
       seen.push(seen.length + 1);
     }
     expect(await revision(chatId)).toEqual({ revision: seen.length, rewriteRevision });
@@ -363,6 +368,7 @@ test("a delete's rows, the revision and conversation.changed commit together or 
   expect(await revision(chatId)).toEqual({ revision: 3, rewriteRevision: 3 });
   expect((await changes()).at(-1)).toEqual({
     conversationKey: chatId,
+    ownerKey: chatId,
     revision: 3,
     rewriteRevision: 3,
   });

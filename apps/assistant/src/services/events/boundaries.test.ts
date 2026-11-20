@@ -3,6 +3,7 @@ import { join, relative, resolve } from "node:path";
 import { EEventType } from "@bellaclaw/database";
 import { Glob } from "bun";
 import { setupAiAuth } from "../ai/auth";
+import { AppStream } from "../app-stream";
 import { AuthorizationService } from "../authorization";
 import { AutomationService } from "../automation";
 import { CalendarService } from "../calendar";
@@ -53,6 +54,8 @@ const ALLOWED: Record<string, string> = {
   "commands -> mcp": "status read: lists a profile's prompts",
   "commands -> mcp/auth": "status read",
   "commands -> mcp/config": "profile config reads",
+  "app-stream -> identity":
+    "IdentityService.resolve, a cached read model, and accountIdOf, a pure function",
   "authorization -> identity": "IdentityService.resolve, a cached read model",
   "cron -> identity": "IdentityService.resolve for a fire's trace, a cached read model",
   "conversation -> ai/instructions/compaction.xml": "prompt text",
@@ -70,6 +73,7 @@ const ALLOWED: Record<string, string> = {
   "internal-api -> ai/tools/update-settings/ai-settings":
     "checks and verification that prepare the settings command",
   "internal-api -> identity": "IdentityService.link, account and addressKey, a cached read model",
+  "internal-api -> app-stream": "AppStream.listen: live listeners an event cannot carry",
   "internal-api -> messaging/chat-key": "pure functions",
   "mcp -> ai/llm": "driver helper",
   "mcp -> identity": "IdentityService.resolve for a connection's trace, a cached read model",
@@ -270,6 +274,7 @@ describe("boundaries", () => {
       setupMcpAuth();
       McpService.instance.setup();
       setupInternalApi();
+      AppStream.instance.setup();
       await IdentityService.instance.setup();
       await AuthorizationService.instance.setup();
       await CalendarService.instance.setup();
@@ -301,6 +306,7 @@ describe("boundaries", () => {
         "setupMcpAuth",
         "McpService.setup",
         "setupInternalApi",
+        "AppStream.setup",
         "IdentityService.setup",
         "AuthorizationService.setup",
         "CalendarService.setup",

@@ -244,24 +244,30 @@ export class AccountStore {
     return token;
   }
 
+  // The account of a live session; its expiry stays as it is.
+  public findSession(token: string, now: number): TOption<TAccount> {
+    return (
+      this.db
+        .query<TAccount, [string, number]>(
+          `SELECT accounts.id, accounts.publicId, accounts.username FROM sessions
+           JOIN accounts ON accounts.id = sessions.accountId
+           WHERE sessions.tokenHash = ? AND sessions.expiresAt > ?`,
+        )
+        .get(hashSessionToken(token), now) ?? undefined
+    );
+  }
+
   // The account of a live session, whose expiry moves a full lifetime ahead.
   public touchSession(token: string, now: number): TOption<TAccount> {
-    const tokenHash = hashSessionToken(token);
-    const account = this.db
-      .query<TAccount, [string, number]>(
-        `SELECT accounts.id, accounts.publicId, accounts.username FROM sessions
-         JOIN accounts ON accounts.id = sessions.accountId
-         WHERE sessions.tokenHash = ? AND sessions.expiresAt > ?`,
-      )
-      .get(tokenHash, now);
+    const account = this.findSession(token, now);
 
-    if (account === null) {
+    if (account === undefined) {
       return undefined;
     }
 
     this.db
       .query("UPDATE sessions SET expiresAt = ? WHERE tokenHash = ?")
-      .run(now + SESSION_TTL_MS, tokenHash);
+      .run(now + SESSION_TTL_MS, hashSessionToken(token));
 
     return account;
   }

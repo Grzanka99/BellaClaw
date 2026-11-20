@@ -2,6 +2,7 @@ import {
   createLogger,
   DASHBOARD_ACTIVATION_CHECK_PATH,
   DASHBOARD_LINKS_PATH,
+  DASHBOARD_STREAM_PATH,
   dashboardAccountConversationMessagesPath,
   dashboardAccountMessagePath,
   dashboardAccountModelPath,
@@ -69,6 +70,9 @@ export type TInternalApi = {
     conversationKey: string,
     message: TDashboardAppMessage,
   ): Promise<TInternalApiResult<TDashboardAppMessageAccepted>>;
+  // the assistant's live stream for every account, lines of JSON, open until either side closes
+  // it; signal closes it
+  openStream(signal: AbortSignal): Promise<TInternalApiResult<ReadableStream<Uint8Array>>>;
 };
 
 // The assistant's internal API. baseUrl has no trailing slash.
@@ -150,5 +154,25 @@ export function createInternalApi(baseUrl: string, secret: string): TInternalApi
         SDashboardAppMessageAccepted,
         message,
       ),
+    // NOTE: no timeout: the stream stays open, and the assistant's keep-alives hold it
+    openStream: async (signal) => {
+      try {
+        const response = await fetch(`${baseUrl}${DASHBOARD_STREAM_PATH}`, {
+          headers: { Authorization: `Bearer ${secret}` },
+          signal,
+        });
+
+        if (response.status === 200 && response.body !== null) {
+          return { data: response.body };
+        }
+
+        logger.error(`Stream request answered ${response.status}`);
+        await response.body?.cancel();
+      } catch (error) {
+        logger.error(`Stream request failed: ${error}`);
+      }
+
+      return { error: UNAVAILABLE, status: 502 };
+    },
   };
 }

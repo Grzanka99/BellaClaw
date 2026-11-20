@@ -118,7 +118,7 @@ bus.subscribe({
 - `internal-api` → `settings`, `conversation`, `identity`. An HTTP request is on no lane: it publishes the
   command and awaits the outcome through live subscriptions. An app send publishes
   `message.received` (channel `app`, the client's message id as the dedupe key) and waits for
-  nothing.
+  nothing. Its stream (`/internal/stream`) forwards what `AppStream.listen` hears.
 
 A new wait is a new edge there; the test fails on a cycle.
 
@@ -130,15 +130,16 @@ A call across services is allowed only when it changes no state:
 - Cached read models: `SettingsService.getAll` (fed by `settings.changed`),
   `AuthorizationService.listAuthorizedChatIds` (fed by `authorization.changed`) and
   `matchesActivationToken` (the configured code, for the dashboard's registration),
-  `IdentityService.resolve`, `linkedAccount`, `link`, `account`, `waitWhileLinking` and
-  `listNoticeRecipients`
+  `IdentityService.resolve`, `linkedAccount`, `link`, `account`,
+  `waitWhileLinking` and `listNoticeRecipients`
   (loaded from `identity_links`, fed by `identity.link.started` and `identity.linked`).
 - Drivers: `LlmClient`, `EmbeddingClient`, `aiModels`, the Discord and Signal clients, `gws`.
 - The stateless engine: `AgentHarness.runMain`, `runScheduledTask`, `compactConversation`.
-- Live state an event cannot carry: `McpService.open`, `McpRunRegistry`.
+- Live state an event cannot carry: `McpService.open`, `McpRunRegistry`, `AppStream.listen`
+  (the dashboard's open streams).
 - Reads, including reads that prepare a command (`AutomationService.resolveNames`,
   `CronScheduler.get`), dry runs, status slash commands, and pure functions such as
-  `parseCanonicalChatKey`.
+  `parseCanonicalChatKey` and `IdentityService.accountIdOf`.
 
 Every other cross-service interaction is a message. The exact import list, with a reason per pair,
 is `ALLOWED` in `events/boundaries.test.ts`.
@@ -149,11 +150,19 @@ Table owners: `memories`, `conversation_summaries`, `conversations` → Conversa
 `message_authorizations` → Authorization · `identity_links` → Identity · `events`, `event_deliveries` → EventBus.
 
 Every change of a transcript (`memories`) raises the conversation's revision in `conversations`
-and emits `conversation.changed` with it, in the same transaction. A change that is not an append
+and emits `conversation.changed` with it and the owner key, in the same transaction. A change that is not an append
 (a delete, or rows moved in by a merge) also sets `rewriteRevision` to that revision, and the fact
 carries it: a client synced at or above it fetches by cursor, below it reloads. Conversation writes the rows
 of a sent reply, notice or delivery from `message.sent`; a reply with neither `transcript` nor
 `display` is not stored, which keeps a confidential one out of history.
+
+The live consumer `app-stream` turns `conversation.changed` and `turn.requested`,
+`turn.started`, `turn.completed`, `turn.failed` and `event.dead_lettered` of an account's
+conversations into nudges and typing for the dashboard's one stream, tagged with the account id.
+Typing goes on at `turn.requested` and again at `turn.started`, which carries the keys the turn
+runs under: a turn queued behind another starts after that one's typing off. Nothing replays: the
+app compares revisions on every connect. Its handlers do not await before sending, so a
+conversation's events reach the stream in log order.
 
 The app is a channel with nothing to send: Outbound reports `message.sent` at once, so the
 transcript row is the delivery. Who owns a conversation is one rule, `findOwnedConversation` in

@@ -481,13 +481,14 @@ const SConversationSummariesFused = z
 
 export type TFusedSummary = z.infer<typeof SConversationSummariesFused>;
 
-// a conversation's transcript changed: rows appended, deleted or merged in; revision: the
-// conversation's new revision, committed with the change; rewriteRevision: the revision of its
-// latest change that was not an append, so a client synced at or above it fetches by cursor and
-// one below it reloads
+// a conversation's transcript changed: rows appended, deleted or merged in; ownerKey: the
+// conversation's owner in the registry; revision: the conversation's new revision, committed with
+// the change; rewriteRevision: the revision of its latest change that was not an append, so a
+// client synced at or above it fetches by cursor and one below it reloads
 const SConversationChanged = z
   .object({
     conversationKey: z.string(),
+    ownerKey: z.string(),
     revision: z.number().int(),
     rewriteRevision: z.number().int(),
   })

@@ -5,6 +5,7 @@ export {
   DASHBOARD_ACTIVATION_CHECK_PATH,
   DASHBOARD_LINK_TOKEN_TTL_MS,
   DASHBOARD_LINKS_PATH,
+  DASHBOARD_STREAM_PATH,
   dashboardAccountConversationMessagesPath,
   dashboardAccountMessagePath,
   dashboardAccountModelPath,
@@ -25,6 +26,7 @@ export {
   SDashboardModelUpdate,
   SDashboardReasoningEffort,
   SDashboardServiceTier,
+  SDashboardStreamEvent,
   type TDashboardAccount,
   type TDashboardActivationCheck,
   type TDashboardActivationCheckRequest,
@@ -41,6 +43,7 @@ export {
   type TDashboardModelUpdate,
   type TDashboardReasoningEffort,
   type TDashboardServiceTier,
+  type TDashboardStreamEvent,
   verifyDashboardLinkToken,
 } from "./dashboard";
 export { createLogger, logger, type TLogger, writeJsonLog } from "./logger";

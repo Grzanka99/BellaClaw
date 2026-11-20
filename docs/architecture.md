@@ -51,7 +51,9 @@ Requesters are conversation tools, slash commands, scheduling and the internal A
    replayed to the model; a confidential reply, such as a login link, is not stored. Every
    transcript change emits `conversation.changed` with the conversation's new revision and the
    revision of its latest change that was not an append (`rewriteRevision`), below which a client
-   reloads instead of fetching by cursor. Memory distills facts from `turn.completed`.
+   reloads instead of fetching by cursor. Memory distills facts from `turn.completed`. The live
+   consumer `app-stream` turns `conversation.changed` and the turn facts of account conversations
+   into nudges and typing on the dashboard's stream (see `docs/dashboard.md`).
 6. After a restart, unfinished deliveries replay. A turn that was interrupted mid-model gets one
    notice instead of a second model run.
 

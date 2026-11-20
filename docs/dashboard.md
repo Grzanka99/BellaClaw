@@ -53,6 +53,8 @@ Bun serves plain HTTP. Terminate TLS in a reverse proxy and forward `443` to `12
   exact origin users open. Requests of the app are exempt; see [The App](#the-app).
 - Set the proxy's read timeout to at least 255 seconds. A model change waits while the assistant
   verifies the model with the provider, which can take minutes.
+- Do not buffer `text/event-stream`: the app's live stream sends each event at once and a
+  keep-alive every 25 seconds. Caddy streams it as is.
 
 Example for Caddy:
 
@@ -124,6 +126,23 @@ Conversations:
   with the same id is the same message and is answered the same, for as long as the assistant
   keeps the message's event: 30 days. A client that still holds a pending send after that looks
   for its `clientMessageId` in history before sending again. The reply appears in history.
+
+Live stream, while the app is in the foreground:
+
+- `GET /api/stream`: server-sent events of the signed-in account only, data as JSON. `check`:
+  compare revisions now and stop showing typing; `changed`: `conversationKey`, `revision` and
+  `rewriteRevision` of a conversation whose transcript changed; `typing`: `conversationKey` and
+  `typing`, on when a turn of the conversation is requested and again when it starts running, and
+  off when it completes, fails or is dropped, whatever channel its message came from. A comment line every 25 seconds keeps an idle
+  stream open. After a `changed` the app fetches history. The stream belongs to the session that
+  opened it: once that session ends (logout, a new password, expiry) the stream closes at its next
+  event or keep-alive. An account holds four streams at most: a fifth ends its oldest.
+- The stream opens with `check`, so the app compares revisions for whatever changed while it was
+  away. Nothing replays. Within one conversation the events come in the order they happened: a
+  `changed` after typing goes off already includes the reply.
+- The dashboard holds one stream from the assistant for every account (`GET /internal/stream`,
+  lines of JSON with the account id). When it drops, the dashboard sends `check` to every open
+  stream, connects again after 2 seconds, and sends `check` again once it is back.
 
 A conversation of another account answers `404 { "error": "Not found" }`, exactly like one that
 does not exist. The dashboard checks ownership in the assistant's conversation registry

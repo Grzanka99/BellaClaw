@@ -547,7 +547,7 @@ export class MessageHandler {
     );
     emit(
       EEventType.ConversationChanged,
-      { conversationKey, revision, rewriteRevision },
+      { conversationKey, ownerKey, revision, rewriteRevision },
       step,
       undefined,
     );

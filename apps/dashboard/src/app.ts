@@ -24,6 +24,7 @@ import {
 import type {
   TApiError,
   TAppSessionResponse,
+  TAppStreamEvent,
   TConversationsResponse,
   THistoryResponse,
   TLinkCheckResponse,
@@ -39,6 +40,7 @@ import type {
 import type { TChatReader } from "./chat-reader";
 import { buildFactGraph } from "./fact-graph";
 import type { TInternalApi, TInternalApiResult } from "./internal-api";
+import type { TLiveStream } from "./live-stream";
 
 export const SESSION_COOKIE = "bellaclaw_dashboard_session";
 // "app" on a request that starts a session asks for a bearer token instead of the cookie
@@ -52,6 +54,9 @@ const SESSION_COOKIE_OPTIONS: CookieOptions = {
   maxAge: SESSION_TTL_MS / 1000,
 };
 const MESSAGES_PAGE_SIZE = 50;
+// NOTE: well under the 255 s idle timeout, and the usual idle limits of a proxy
+const STREAM_KEEP_ALIVE_MS = 25_000;
+const MAX_ACCOUNT_STREAMS = 4;
 const MAX_LOGIN_FAILURES = 5;
 const LOGIN_LOCK_MS = 15 * 60 * 1000;
 // wrong activation codes, counted for every registration together: an anonymous registration has
@@ -116,6 +121,7 @@ export type TDashboardDependencies = {
   store: AccountStore;
   reader: TChatReader;
   internalApi: TInternalApi;
+  liveStream: TLiveStream;
   // answers a path outside /api with the client: its page, or one of its assets
   serveClient: (request: Request) => Promise<Response>;
 };
@@ -157,6 +163,7 @@ export function createApp({
   store,
   reader,
   internalApi,
+  liveStream,
   serveClient,
 }: TDashboardDependencies) {
   const app = new Hono<TEnv>();
@@ -164,6 +171,8 @@ export function createApp({
   const dummyPasswordHash = Bun.password.hash(randomBytes(16).toString("hex"));
   // login attempts since the last success, by lowercase username
   const loginAttempts = new Map<string, { count: number; lastAt: number }>();
+  // what ends each open app stream, by account public id, oldest first
+  const streamEnds = new Map<string, (() => void)[]>();
   // registrations with a wrong activation code, counted until ACTIVATION_LOCK_MS pass with no
   // attempt
   const activationFailures = { count: 0, lastAt: 0 };
@@ -852,6 +861,88 @@ export function createApp({
     }
 
     return c.json(result.data);
+  });
+
+  // NOTE: the app's live stream: nudges and typing of the signed-in account only, keys and
+  // revisions. It opens with a check, so the client compares revisions for whatever changed
+  // before it connected. It belongs to the session that opened it: before each event and
+  // keep-alive the session is read, without sliding it, and a session that ended closes the
+  // stream. Closing the connection releases the listener and the timer. HEAD opens no stream.
+  // An account holds MAX_ACCOUNT_STREAMS at most: one more ends its oldest, so a phone that
+  // reconnects past dead connections is served and no account holds connections without bound
+  app.get("/api/stream", requireSession, (c) => {
+    const headers = { "Content-Type": "text/event-stream", "Cache-Control": "no-store" };
+
+    if (c.req.method === "HEAD") {
+      return new Response(null, { headers });
+    }
+
+    let sessionLive: () => boolean;
+
+    if (isAppRequest(c)) {
+      const bearer = bearerToken(c) ?? "";
+      sessionLive = () => store.findAppSession(bearer) !== undefined;
+    } else {
+      const token = getCookie(c, SESSION_COOKIE) ?? "";
+      sessionLive = () => store.findSession(token, Date.now()) !== undefined;
+    }
+
+    const accountId = c.var.account.publicId;
+    let ends = streamEnds.get(accountId);
+
+    if (ends === undefined) {
+      ends = [];
+      streamEnds.set(accountId, ends);
+    }
+
+    const accountEnds = ends;
+    const encoder = new TextEncoder();
+    let release = () => {};
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        const end = () => {
+          release();
+          controller.close();
+        };
+        const write = (chunk: string) => {
+          if (!sessionLive()) {
+            end();
+            return;
+          }
+
+          controller.enqueue(encoder.encode(chunk));
+        };
+        const send = ({ type, ...data }: TAppStreamEvent) => {
+          write(`event: ${type}\ndata: ${JSON.stringify(data)}\n\n`);
+        };
+        const close = liveStream.subscribe(accountId, send);
+        const keepAlive = setInterval(() => {
+          write(": keep-alive\n\n");
+        }, STREAM_KEEP_ALIVE_MS);
+        release = () => {
+          clearInterval(keepAlive);
+          close();
+          const index = accountEnds.indexOf(end);
+
+          if (index !== -1) {
+            accountEnds.splice(index, 1);
+          }
+        };
+
+        if (accountEnds.length >= MAX_ACCOUNT_STREAMS) {
+          accountEnds[0]?.();
+        }
+
+        accountEnds.push(end);
+        c.req.raw.signal.addEventListener("abort", release, { once: true });
+        send({ type: "check" });
+      },
+      cancel() {
+        release();
+      },
+    });
+
+    return new Response(body, { headers });
   });
 
   app.get("/api/model", requireSession, async (c) => {

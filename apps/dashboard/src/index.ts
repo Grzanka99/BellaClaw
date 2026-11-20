@@ -6,9 +6,13 @@ import { createApp } from "./app";
 import { createChatReader } from "./chat-reader";
 import { createInternalApi } from "./internal-api";
 import { importAccountChats } from "./link-import";
+import { createLiveStream } from "./live-stream";
 
 const PAGE_PATH = "/index.html";
 const LINK_IMPORT_WAIT_MS = 5_000;
+const STREAM_RETRY_MS = 2_000;
+// a little over two keep-alive intervals of the assistant's stream (25 s, in its internal API)
+const STREAM_SILENCE_MS = 60_000;
 
 const logger = createLogger("DASHBOARD");
 
@@ -69,12 +73,14 @@ mkdirSync(dirname(databasePath), { recursive: true });
 let client = await buildClient();
 const store = new AccountStore(databasePath);
 const internalApi = createInternalApi(internalApiUrl.replace(/\/+$/, ""), secret);
+const liveStream = createLiveStream(internalApi, STREAM_RETRY_MS, STREAM_SILENCE_MS);
 
 const app = createApp({
   config: { publicOrigin: new URL(publicUrl).origin, secret },
   store,
   reader,
   internalApi,
+  liveStream,
   serveClient: async (request) => {
     const path = new URL(request.url).pathname;
     const asset = client.get(path);
@@ -106,6 +112,9 @@ const server = Bun.serve({
 });
 
 logger.info(`Dashboard listening on http://${hostname}:${server.port}`);
+
+// the process ends with the server, so the stream from the assistant is never closed
+void liveStream.follow(new AbortController().signal);
 
 // links every row of account_chats through the assistant, then drops the table
 void importAccountChats(store, internalApi, LINK_IMPORT_WAIT_MS).catch((error) => {

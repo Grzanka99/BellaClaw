@@ -5,12 +5,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { conversationsTable, MIGRATIONS_FOLDER, memoriesTable } from "@bellaclaw/database";
 import { createDashboardLinkToken } from "@bellaclaw/shared";
+import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/libsql";
 import { migrate } from "drizzle-orm/libsql/migrator";
 import { ACCOUNT_HEADER } from "./account-header";
 import { AccountStore } from "./account-store";
 import { CLIENT_HEADER, createApp } from "./app";
 import { createChatReader, type TChatReader } from "./chat-reader";
+import { createLiveStream } from "./live-stream";
 import { createFakeAssistant } from "./test-utils";
 
 const ORIGIN = "https://dashboard.test";
@@ -19,10 +21,12 @@ const PASSWORD = "correct horse battery";
 
 // an app on a store at path, in memory by default, and a fake assistant; reads collects the keys
 // the fake reader got. reader: a real one instead
-function createTestApp(path = ":memory:", reader?: TChatReader) {
+function createTestApp(path = ":memory:", reader?: TChatReader, streamSilenceMs = 60_000) {
   const reads: string[] = [];
   const assistant = createFakeAssistant();
   const store = new AccountStore(path);
+  // reconnects after 1 ms, so a test barely waits
+  const liveStream = createLiveStream(assistant.internalApi, 1, streamSilenceMs);
   const app = createApp({
     config: { publicOrigin: ORIGIN, secret: SECRET },
     store,
@@ -41,6 +45,7 @@ function createTestApp(path = ":memory:", reader?: TChatReader) {
       listHistory: async () => [],
     },
     internalApi: assistant.internalApi,
+    liveStream,
     serveClient: async () => new Response("client"),
   });
 
@@ -101,7 +106,18 @@ function createTestApp(path = ":memory:", reader?: TChatReader) {
     return { cookie: cookieOf(response), publicId: store.findCredentials(username)?.publicId };
   }
 
-  return { app, send, sendApp, register, token, cookieOf, reads, assistant, store };
+  return {
+    app,
+    send,
+    sendApp,
+    register,
+    token,
+    cookieOf,
+    reads,
+    assistant,
+    store,
+    liveStream,
+  };
 }
 
 test("registering sends a link request for the new account and uses the token once", async () => {
@@ -915,6 +931,7 @@ async function createAssistantDatabase() {
     reader: createChatReader(url, ""),
     insertRow,
     setRevision,
+    deleteRow: (id: number) => db.delete(memoriesTable).where(eq(memoriesTable.id, id)),
     remove: () => rm(dir, { recursive: true, force: true }),
   };
 }
@@ -1104,4 +1121,375 @@ test("another account's conversation is answered like one that does not exist, f
   } finally {
     await database.remove();
   }
+});
+
+// polls until check holds; a few seconds at most
+async function waitUntil(check: () => boolean) {
+  for (let attempt = 0; attempt < 1_000 && !check(); attempt++) {
+    await Bun.sleep(1);
+  }
+
+  expect(check()).toBe(true);
+}
+
+// a phone's event stream: events holds what was read so far, drain reads what has arrived;
+// state.ended: the stream ended
+async function openAppStream(sendApp: ReturnType<typeof createTestApp>["sendApp"], bearer: string) {
+  const response = await sendApp("GET", "/api/stream", undefined, bearer);
+  expect(response.status).toBe(200);
+  expect(response.headers.get("Content-Type")).toBe("text/event-stream");
+  const reader = response.body?.getReader();
+
+  if (reader === undefined) {
+    throw new Error("The stream has no body");
+  }
+
+  const decoder = new TextDecoder();
+  const events: Record<string, unknown>[] = [];
+  const state = { ended: false };
+  let buffered = "";
+  let pending = reader.read();
+
+  return {
+    events,
+    state,
+    // reads until nothing more arrives within a moment; returns the events read by this call
+    async drain() {
+      const start = events.length;
+
+      while (true) {
+        const chunk = await Promise.race([pending, Bun.sleep(20).then(() => undefined)]);
+
+        if (chunk === undefined || chunk.done) {
+          state.ended = chunk?.done === true;
+          return events.slice(start);
+        }
+
+        pending = reader.read();
+        buffered += decoder.decode(chunk.value);
+        const blocks = buffered.split("\n\n");
+        buffered = blocks.pop() ?? "";
+
+        for (const block of blocks) {
+          const type = /^event: (.*)$/m.exec(block)?.[1];
+          const data = /^data: (.*)$/m.exec(block)?.[1];
+
+          if (type !== undefined && data !== undefined) {
+            events.push({ type, ...JSON.parse(data) });
+          }
+        }
+      }
+    },
+    close: () => reader.cancel(),
+  };
+}
+
+// counts the open subscriptions of the edge's fan-out
+function countSubscriptions(liveStream: ReturnType<typeof createLiveStream>) {
+  const counter = { open: 0 };
+  const subscribe = liveStream.subscribe;
+  liveStream.subscribe = (accountId, listener) => {
+    counter.open += 1;
+    const close = subscribe(accountId, listener);
+
+    return () => {
+      counter.open -= 1;
+      close();
+    };
+  };
+
+  return counter;
+}
+
+test("the phone sees typing start and stop, then a nudge, then the reply in history; another account's stream carries none of it", async () => {
+  const database = await createAssistantDatabase();
+  const following = new AbortController();
+
+  try {
+    const { sendApp, assistant, store, liveStream } = createTestApp(":memory:", database.reader);
+    const subscriptions = countSubscriptions(liveStream);
+    const alice = await registerApp(sendApp, store, "alice");
+    const bob = await registerApp(sendApp, store, "bob");
+    const conversationKey = `bella:${alice.publicId}`;
+    const path = `/api/conversations/${encodeURIComponent(conversationKey)}/messages`;
+    const follow = liveStream.follow(following.signal);
+    await waitUntil(() => assistant.streams.length === 1);
+
+    const aliceStream = await openAppStream(sendApp, alice.token);
+    const bobStream = await openAppStream(sendApp, bob.token);
+    // each opens with a check: compare revisions for what changed before it connected
+    expect(await aliceStream.drain()).toEqual([{ type: "check" }]);
+    expect(await bobStream.drain()).toEqual([{ type: "check" }]);
+    const synced = await (await sendApp("GET", path, undefined, alice.token)).json();
+    expect(synced).toEqual({ revision: 0, rewriteRevision: 0, messages: [] });
+
+    await sendApp("POST", path, { clientMessageId: "m-1", text: "Hello" }, alice.token);
+    // the turn, as the assistant streams it: typing on, the user's row, typing off, the reply
+    const user = await database.insertRow(conversationKey, "user", "message", "Hello", "m-1");
+    await database.setRevision(conversationKey, `account:${alice.publicId}`, 1, 0);
+    const accountId = alice.publicId;
+    assistant.push({ type: "typing", accountId, conversationKey, typing: true });
+    assistant.push({
+      type: "changed",
+      accountId,
+      conversationKey,
+      revision: 1,
+      rewriteRevision: 0,
+    });
+    const reply = await database.insertRow(conversationKey, "assistant", "message", "Hi");
+    await database.setRevision(conversationKey, `account:${alice.publicId}`, 2, 0);
+    assistant.push({ type: "typing", accountId, conversationKey, typing: false });
+    assistant.push({
+      type: "changed",
+      accountId,
+      conversationKey,
+      revision: 2,
+      rewriteRevision: 0,
+    });
+
+    expect(await aliceStream.drain()).toEqual([
+      { type: "typing", conversationKey, typing: true },
+      { type: "changed", conversationKey, revision: 1, rewriteRevision: 0 },
+      { type: "typing", conversationKey, typing: false },
+      { type: "changed", conversationKey, revision: 2, rewriteRevision: 0 },
+    ]);
+    expect(await bobStream.drain()).toEqual([]);
+
+    // synced at 0, at or above the rewrite revision 0: a fetch by cursor has the reply
+    const fetched = await (await sendApp("GET", path, undefined, alice.token)).json();
+    expect(fetched.revision).toBe(2);
+    expect(fetched.messages.map((row: { id: number; text: string }) => [row.id, row.text])).toEqual(
+      [
+        [user.id, "Hello"],
+        [reply.id, "Hi"],
+      ],
+    );
+
+    // closed streams leave no subscription behind
+    expect(subscriptions.open).toBe(2);
+    await aliceStream.close();
+    await bobStream.close();
+    expect(subscriptions.open).toBe(0);
+    following.abort();
+    await follow;
+  } finally {
+    following.abort();
+    await database.remove();
+  }
+});
+
+test("a phone that reconnects is told to check, sees the revision differ, and fetches the rows it missed; a delete is noticed by its rewrite revision", async () => {
+  const database = await createAssistantDatabase();
+  const following = new AbortController();
+
+  try {
+    const { sendApp, assistant, store, liveStream } = createTestApp(":memory:", database.reader);
+    const alice = await registerApp(sendApp, store, "alice");
+    const accountId = alice.publicId;
+    const ownerKey = `account:${accountId}`;
+    const conversationKey = `bella:${accountId}`;
+    const path = `/api/conversations/${encodeURIComponent(conversationKey)}/messages`;
+    const follow = liveStream.follow(following.signal);
+    await waitUntil(() => assistant.streams.length === 1);
+    const first = await database.insertRow(conversationKey, "user", "message", "Hello");
+    await database.setRevision(conversationKey, ownerKey, 1, 0);
+
+    const before = await openAppStream(sendApp, alice.token);
+    expect(await before.drain()).toEqual([{ type: "check" }]);
+    const synced = await (await sendApp("GET", path, undefined, alice.token)).json();
+    expect(synced.revision).toBe(1);
+    await before.close();
+
+    // with the stream closed, a Signal message of the linked address is answered on Signal and
+    // stored in the account's conversation; its events reach no phone
+    await database.insertRow(conversationKey, "user", "message", "Hi from Signal");
+    const reply = await database.insertRow(conversationKey, "assistant", "message", "Reply");
+    await database.setRevision(conversationKey, ownerKey, 3, 0);
+    const seen: unknown[] = [];
+    const stopWatching = liveStream.subscribe(accountId, (event) => seen.push(event));
+    assistant.push({
+      type: "changed",
+      accountId,
+      conversationKey,
+      revision: 3,
+      rewriteRevision: 0,
+    });
+    await waitUntil(() => seen.length === 1);
+    stopWatching();
+
+    const after = await openAppStream(sendApp, alice.token);
+    expect(await after.drain()).toEqual([{ type: "check" }]);
+    const list = await (await sendApp("GET", "/api/conversations", undefined, alice.token)).json();
+    expect(list.conversations[0]).toMatchObject({ revision: 3, rewriteRevision: 0 });
+    // the rewrite revision is at or below the synced revision: fetch by cursor
+    const missed = await (
+      await sendApp("GET", `${path}?after=${synced.messages.at(-1).id}`, undefined, alice.token)
+    ).json();
+    expect(missed.messages.map((row: { text: string }) => row.text)).toEqual([
+      "Hi from Signal",
+      "Reply",
+    ]);
+
+    // a message deleted in the dashboard: a nudge whose rewrite revision passed the synced one
+    await database.deleteRow(reply.id);
+    await database.setRevision(conversationKey, ownerKey, 4, 4);
+    assistant.push({
+      type: "changed",
+      accountId,
+      conversationKey,
+      revision: 4,
+      rewriteRevision: 4,
+    });
+    expect(await after.drain()).toEqual([
+      { type: "changed", conversationKey, revision: 4, rewriteRevision: 4 },
+    ]);
+    // synced at 3, below 4: a reload
+    const reloaded = await (await sendApp("GET", path, undefined, alice.token)).json();
+    expect(reloaded.messages.map((row: { id: number }) => row.id)).not.toContain(reply.id);
+    expect(reloaded.messages[0].id).toBe(first.id);
+
+    await after.close();
+    following.abort();
+    await follow;
+  } finally {
+    following.abort();
+    await database.remove();
+  }
+});
+
+test("when the edge loses the assistant's stream, connected phones are told to check, and the edge connects again", async () => {
+  const following = new AbortController();
+  const { sendApp, assistant, store, liveStream } = createTestApp();
+  const alice = await registerApp(sendApp, store, "alice");
+  const accountId = alice.publicId;
+  const conversationKey = `bella:${accountId}`;
+  const follow = liveStream.follow(following.signal);
+  await waitUntil(() => assistant.streams.length === 1);
+  const stream = await openAppStream(sendApp, alice.token);
+  expect(await stream.drain()).toEqual([{ type: "check" }]);
+
+  assistant.drop();
+  await waitUntil(() => assistant.streams.length === 2);
+  // one check when the stream drops, one when it opens again
+  expect(await stream.drain()).toEqual([{ type: "check" }, { type: "check" }]);
+
+  assistant.push({ type: "typing", accountId, conversationKey, typing: true });
+  expect(await stream.drain()).toEqual([{ type: "typing", conversationKey, typing: true }]);
+
+  await stream.close();
+  following.abort();
+  await follow;
+  expect(assistant.streams).toHaveLength(2);
+});
+
+test("when the assistant's stream stays open but silent, the edge drops it, tells phones to check and connects again", async () => {
+  const following = new AbortController();
+  const { sendApp, assistant, store, liveStream } = createTestApp(":memory:", undefined, 100);
+  const alice = await registerApp(sendApp, store, "alice");
+  const stream = await openAppStream(sendApp, alice.token);
+  const follow = liveStream.follow(following.signal);
+
+  await waitUntil(() => assistant.streams.length === 2);
+  // the phone's own check, then: opened, dropped as silent, opened again
+  expect(await stream.drain()).toEqual([
+    { type: "check" },
+    { type: "check" },
+    { type: "check" },
+    { type: "check" },
+  ]);
+
+  await stream.close();
+  following.abort();
+  await follow;
+});
+
+test("the stream needs a session", async () => {
+  const { sendApp } = createTestApp();
+  const response = await sendApp("GET", "/api/stream", undefined, "not-a-session");
+
+  expect(response.status).toBe(401);
+  expect(await response.json()).toEqual({ error: "Unauthorized" });
+});
+
+test("a stream ends with its session: logout and a new password set through a login link stop its events", async () => {
+  const following = new AbortController();
+  const { sendApp, register, token, assistant, liveStream } = createTestApp();
+  const subscriptions = countSubscriptions(liveStream);
+  const alice = await register("alice", "signal:+100");
+  const login = async () =>
+    String(
+      (
+        await (
+          await sendApp("POST", "/api/login", { username: "alice", password: PASSWORD })
+        ).json()
+      ).token,
+    );
+  const first = await login();
+  const second = await login();
+  const accountId = String(alice.publicId);
+  const conversationKey = `bella:${accountId}`;
+  const follow = liveStream.follow(following.signal);
+  await waitUntil(() => assistant.streams.length === 1);
+  const firstStream = await openAppStream(sendApp, first);
+  const secondStream = await openAppStream(sendApp, second);
+  expect(await firstStream.drain()).toEqual([{ type: "check" }]);
+  expect(await secondStream.drain()).toEqual([{ type: "check" }]);
+
+  expect((await sendApp("POST", "/api/logout", undefined, second)).status).toBe(200);
+  assistant.push({ type: "typing", accountId, conversationKey, typing: true });
+  expect(await secondStream.drain()).toEqual([]);
+  expect(secondStream.state.ended).toBe(true);
+  expect(await firstStream.drain()).toEqual([{ type: "typing", conversationKey, typing: true }]);
+  expect(subscriptions.open).toBe(1);
+
+  const reset = await sendApp("POST", "/api/link/login", {
+    token: token("signal:+100"),
+    password: "a brand new password",
+  });
+  expect(reset.status).toBe(200);
+  assistant.push({ type: "typing", accountId, conversationKey, typing: false });
+  expect(await firstStream.drain()).toEqual([]);
+  expect(firstStream.state.ended).toBe(true);
+  expect(subscriptions.open).toBe(0);
+
+  following.abort();
+  await follow;
+});
+
+test("an account's fifth stream ends its oldest; another account's streams stay", async () => {
+  const { sendApp, store, liveStream } = createTestApp();
+  const subscriptions = countSubscriptions(liveStream);
+  const alice = await registerApp(sendApp, store, "alice");
+  const bob = await registerApp(sendApp, store, "bob");
+  const bobStream = await openAppStream(sendApp, bob.token);
+  const streams = [];
+
+  for (let opened = 0; opened < 5; opened += 1) {
+    streams.push(await openAppStream(sendApp, alice.token));
+  }
+
+  for (const stream of [bobStream, ...streams]) {
+    await stream.drain();
+  }
+
+  expect(streams.map((stream) => stream.state.ended)).toEqual([true, false, false, false, false]);
+  expect(bobStream.state.ended).toBe(false);
+  expect(subscriptions.open).toBe(5);
+
+  for (const stream of [bobStream, ...streams.slice(1)]) {
+    await stream.close();
+  }
+
+  expect(subscriptions.open).toBe(0);
+});
+
+test("HEAD of the stream opens no stream and no subscription", async () => {
+  const { sendApp, store, liveStream } = createTestApp();
+  const subscriptions = countSubscriptions(liveStream);
+  const alice = await registerApp(sendApp, store, "alice");
+
+  const response = await sendApp("HEAD", "/api/stream", undefined, alice.token);
+  expect(response.status).toBe(200);
+  expect(response.headers.get("Content-Type")).toBe("text/event-stream");
+  expect(subscriptions.open).toBe(0);
 });

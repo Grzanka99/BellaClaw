@@ -1,0 +1,123 @@
+import { EEventType } from "@bellaclaw/database";
+import type { TDashboardStreamEvent, TOption } from "@bellaclaw/shared";
+import { ESubscriptionMode, EventBus } from "../events";
+import { IdentityService } from "../identity";
+
+type TAppStreamListener = (event: TDashboardStreamEvent) => void;
+
+// NOTE: the app's live stream: nudges and typing for the edge, which fans them out per account.
+// Live only: a stream that was not open misses nothing that matters, because the app compares
+// revisions on every connect. Only account conversations reach it
+export class AppStream {
+  private static _instance: TOption<AppStream>;
+  // the open streams of the edge
+  private listeners = new Set<TAppStreamListener>();
+
+  private constructor() {}
+
+  public static get instance() {
+    if (!AppStream._instance) {
+      AppStream._instance = new AppStream();
+    }
+
+    return AppStream._instance;
+  }
+
+  // NOTE: the conversation and turn handlers send without awaiting, so on one conversation's lane
+  // the stream follows log order: typing on (requested), typing on (started), the user's row,
+  // typing off, the reply
+  public setup(): void {
+    const bus = EventBus.instance;
+
+    bus.subscribe({
+      consumer: "app-stream",
+      type: EEventType.ConversationChanged,
+      mode: ESubscriptionMode.Live,
+      backoffMs: [],
+      handler: async (event) => {
+        const { conversationKey, ownerKey, revision, rewriteRevision } = event.payload;
+        const accountId = IdentityService.instance.accountIdOf(ownerKey);
+
+        if (accountId !== undefined) {
+          this.send({ type: "changed", accountId, conversationKey, revision, rewriteRevision });
+        }
+      },
+    });
+
+    const turnTypingEvents: [
+      (
+        | EEventType.TurnRequested
+        | EEventType.TurnStarted
+        | EEventType.TurnCompleted
+        | EEventType.TurnFailed
+      ),
+      boolean,
+    ][] = [
+      [EEventType.TurnRequested, true],
+      [EEventType.TurnStarted, true],
+      [EEventType.TurnCompleted, false],
+      [EEventType.TurnFailed, false],
+    ];
+
+    // a turn runs in the account's conversation whatever channel its message came from. Typing
+    // also turns on when the turn starts: a turn queued behind another runs after that one's
+    // typing off, and a turn forwarded during a link was requested under the address's owner
+    for (const [type, typing] of turnTypingEvents) {
+      bus.subscribe({
+        consumer: "app-stream",
+        type,
+        mode: ESubscriptionMode.Live,
+        backoffMs: [],
+        handler: async (event) => {
+          this.typing(event.payload.ownerKey, event.payload.conversationKey, typing);
+        },
+      });
+    }
+
+    // a dead turn request must not leave typing on; its dead letter names only its chat. Other
+    // dead letters say nothing about typing: a later turn of the chat may be running
+    bus.subscribe({
+      consumer: "app-stream",
+      type: EEventType.EventDeadLettered,
+      mode: ESubscriptionMode.Live,
+      backoffMs: [],
+      handler: async (event) => {
+        if (
+          event.payload.eventType !== EEventType.TurnRequested ||
+          event.trace.chatId === undefined
+        ) {
+          return;
+        }
+
+        const resolved = await IdentityService.instance.resolve(event.trace.chatId);
+
+        if (resolved !== undefined) {
+          this.typing(resolved.ownerKey, resolved.conversationKey, false);
+        }
+      },
+    });
+  }
+
+  // listener: called for every event while the stream is open. Returns what closes it
+  public listen(listener: TAppStreamListener): () => void {
+    this.listeners.add(listener);
+
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+
+  private typing(ownerKey: string, conversationKey: string, typing: boolean): void {
+    const accountId = IdentityService.instance.accountIdOf(ownerKey);
+
+    if (accountId !== undefined) {
+      this.send({ type: "typing", accountId, conversationKey, typing });
+    }
+  }
+
+  private send(event: TDashboardStreamEvent): void {
+    for (const listener of this.listeners) {
+      listener(event);
+    }
+  }
+}

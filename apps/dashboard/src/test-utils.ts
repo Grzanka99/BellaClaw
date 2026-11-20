@@ -3,6 +3,7 @@ import {
   type TDashboardAppMessage,
   type TDashboardChatLink,
   type TDashboardLinkState,
+  type TDashboardStreamEvent,
   type TOption,
 } from "@bellaclaw/shared";
 import type { TInternalApi } from "./internal-api";
@@ -10,7 +11,8 @@ import type { TInternalApi } from "./internal-api";
 // An in-memory stand-in for the assistant's internal API, for tests. links: by chat key.
 // activationCode: the configured code, undefined for none; codeChecks: every code checked.
 // unreachableCalls: how many next requestLink, getChatLink or getAccount calls answer 502. Links are made active by activate().
-// sends: every message sent, accepted as the assistant does, without a turn
+// sends: every message sent, accepted as the assistant does, without a turn. streams: the stream
+// opened by each openStream call, oldest first; push writes an event to the newest, drop closes it
 export function createFakeAssistant() {
   const links = new Map<string, { accountId: string; state: TDashboardLinkState }>();
   const requests: { accountId: string; chatKey: string }[] = [];
@@ -22,6 +24,8 @@ export function createFakeAssistant() {
   const codeChecks: string[] = [];
   const sends: { accountId: string; conversationKey: string; message: TDashboardAppMessage }[] = [];
   const unavailable = { error: "The assistant is unavailable", status: 502 as const };
+  const streams: ReadableStreamDefaultController<Uint8Array>[] = [];
+  const encoder = new TextEncoder();
 
   function reachable(): boolean {
     if (state.unreachableCalls > 0) {
@@ -118,6 +122,22 @@ export function createFakeAssistant() {
 
       return { data: { clientMessageId: message.clientMessageId } };
     },
+    openStream: async (signal) => {
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          streams.push(controller);
+          signal.addEventListener("abort", () => {
+            try {
+              controller.close();
+            } catch {
+              // dropped already
+            }
+          });
+        },
+      });
+
+      return { data: body };
+    },
   };
 
   return {
@@ -128,6 +148,13 @@ export function createFakeAssistant() {
     codeChecks,
     sends,
     state,
+    streams,
+    push(event: TDashboardStreamEvent) {
+      streams.at(-1)?.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+    },
+    drop() {
+      streams.at(-1)?.close();
+    },
     activate(chatKey: string) {
       const link = links.get(chatKey);
 

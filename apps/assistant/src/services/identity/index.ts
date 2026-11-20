@@ -357,6 +357,15 @@ export class IdentityService {
     return promise;
   }
 
+  // the account id of an account's owner key; undefined for an address's own key
+  public accountIdOf(ownerKey: string): TOption<string> {
+    if (!ownerKey.startsWith(ACCOUNT_OWNER_PREFIX)) {
+      return undefined;
+    }
+
+    return ownerKey.slice(ACCOUNT_OWNER_PREFIX.length);
+  }
+
   // the chat key of an address
   public addressKey(address: TChatAddress): string {
     return createCanonicalChatKey(address.channel, address.address);
