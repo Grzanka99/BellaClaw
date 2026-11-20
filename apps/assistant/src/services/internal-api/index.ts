@@ -266,6 +266,8 @@ function openStream(request: Request): Response {
         close();
       };
       request.signal.addEventListener("abort", release, { once: true });
+      // the first line sends the response's headers, so the edge sees the stream open at once
+      controller.enqueue(encoder.encode("\n"));
     },
     cancel() {
       release();
