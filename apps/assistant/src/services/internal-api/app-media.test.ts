@@ -340,7 +340,7 @@ test("the image downloads again until the third compaction deletes it; then the 
 
   expect((await history(conversationKey))[0]).toMatchObject({
     author: "user",
-    text: "[Image]",
+    text: "",
     images: [{ mediaId: media.id, mimeType: "image/png" }],
   });
 

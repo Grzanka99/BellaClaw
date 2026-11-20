@@ -8,6 +8,9 @@ import { appMediaTable, conversationsTable, memoriesTable } from "./schema";
 // the assistant's handle or transaction, or the gateway's read-only connection
 type TReadHandle = Pick<BaseSQLiteDatabase<"async", unknown>, "select">;
 
+// the text the assistant stores for each image of a user message, appended to what the user typed
+export const IMAGE_MARKER = "[Image]";
+
 export type TOwnedConversation = { revision: number; rewriteRevision: number };
 
 // a conversation as the app's home lists it. title: a plain chat's, once written; createdAt: when
@@ -23,6 +26,7 @@ export type TListedConversation = TOwnedConversation & {
 // after: the rows above the id, for an append; before: the rows below it, for an older page
 export type THistoryCursor = { direction: "after" | "before"; id: number };
 
+// text: of a user message with images, what the user typed, without the stored image markers;
 // createdAt: epoch ms; clientMessageId: the id the sending client gave an inbound message;
 // images: those of a user message, in order, none when it has no image
 export type THistoryMessage = {
@@ -224,12 +228,21 @@ export async function listHistory(
       (row.author === "user" || row.author === "assistant") &&
       (row.kind === "message" || row.kind === "display")
     ) {
+      const refs = imagesById.get(row.id) ?? [];
+      let text = row.message;
+
+      for (const _ of refs) {
+        if (text.endsWith(IMAGE_MARKER)) {
+          text = text.slice(0, -IMAGE_MARKER.length).trimEnd();
+        }
+      }
+
       messages.push({
         id: row.id,
         author: row.author,
         kind: row.kind,
         channel: row.channel,
-        text: row.message,
+        text,
         createdAt: row.createdAt?.getTime(),
         clientMessageId: row.clientMessageId ?? undefined,
         images: imagesById.get(row.id)?.map((ref) => {

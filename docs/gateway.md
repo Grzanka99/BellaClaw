@@ -177,7 +177,9 @@ Conversations:
   `createdAt` and the app's `clientMessageId`. A user message with images also has `images`, in
   order, each `{ mediaId, mimeType }`: one with a `mediaId` downloads by it; one this conversation
   does not keep, and every image that came through Signal or Discord, is a placeholder without
-  one. Without a cursor, the newest 50 rows; `before=<id>`
+  one. Its `text` is what the user typed, without the `[Image]` markers the server stores after it
+  (one per image), so a message of images only has an empty `text`. Without a cursor, the newest
+  50 rows; `before=<id>`
   pages older rows, `nextBefore` names the next older page; `after=<id>` returns the rows after the
   newest one the app has, `nextAfter` names the next page. A client synced at or above
   `rewriteRevision` fetches with `after`; below it, a delete or a merged history changed rows it

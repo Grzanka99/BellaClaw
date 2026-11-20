@@ -88,7 +88,7 @@ private fun ChatRowLayout(
             Text(text = title, style = titleStyle, maxLines = 1, overflow = TextOverflow.Ellipsis)
             summary.preview?.let {
                 Text(
-                    text = it,
+                    text = it.ifEmpty { stringResource(R.string.image_placeholder) },
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,

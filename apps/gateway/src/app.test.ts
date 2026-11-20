@@ -1742,7 +1742,7 @@ test("history lists a user message's images: an app image while the assistant ke
     expect(messages).toMatchObject([
       {
         author: "user",
-        text: "Look [Image] [Image] [Image]",
+        text: "Look",
         images: [
           { mediaId: "kept", mimeType: "image/png" },
           { mimeType: "image/png" },

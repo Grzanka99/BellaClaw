@@ -1,5 +1,10 @@
 import type { TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
-import { EConversationKind, EEventType, type TSelectMemory } from "@bellaclaw/database";
+import {
+  EConversationKind,
+  EEventType,
+  IMAGE_MARKER,
+  type TSelectMemory,
+} from "@bellaclaw/database";
 import type { TOption } from "@bellaclaw/shared";
 import { CONVERSATION_NOT_FOUND, createLogger } from "@bellaclaw/shared";
 import { AgentHarness } from "../ai/agent-harness";
@@ -10,7 +15,7 @@ import { EModelPurpose, ERole } from "../ai/types";
 import { logHandlerStarted, startHandlerSpan, startMemorySaveSpan } from "../app-logger/operations";
 import { startSpan } from "../app-logger/span";
 import { ConversationStore } from "../conversation";
-import { IMAGE_MARKER, type TConversation } from "../conversation/types";
+import type { TConversation } from "../conversation/types";
 import type { TDatabaseHandle } from "../database";
 import {
   ESubscriptionMode,

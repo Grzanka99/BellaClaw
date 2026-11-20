@@ -3,7 +3,10 @@ package one.scary.bellaclaw.ui.home
 import one.scary.bellaclaw.model.ChatIcon
 import java.time.Instant
 
-/** One row of the chat list. [preview] and [lastActivity] are null for a chat with no messages. */
+/**
+ * One row of the chat list. [preview] and [lastActivity] are null for a chat with no messages; [preview] is
+ * empty when the newest message is images only.
+ */
 sealed interface ChatSummary {
     val id: String
     val preview: String?

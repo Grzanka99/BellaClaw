@@ -1,6 +1,7 @@
 export {
   findConversationKind,
   findOwnedConversation,
+  IMAGE_MARKER,
   listConversations,
   listHistory,
   type THistoryCursor,
