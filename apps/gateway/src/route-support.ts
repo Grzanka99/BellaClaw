@@ -5,10 +5,10 @@ import type { Context } from "hono";
 import { getCookie, setCookie } from "hono/cookie";
 import { createMiddleware } from "hono/factory";
 import type { CookieOptions } from "hono/utils/cookie";
-import type { z } from "zod";
+import { z } from "zod";
 import { ACCOUNT_HEADER } from "./account-header";
 import { type AccountStore, SESSION_TTL_MS, type TAccount } from "./account-store";
-import type { TApiError } from "./api-types";
+import type { TApiError, TMeResponse } from "./api-types";
 import type { TChatReader } from "./chat-reader";
 import type { TInternalApi, TInternalApiResult } from "./internal-api";
 import type { TLiveStream } from "./live-stream";
@@ -28,6 +28,12 @@ export const SESSION_COOKIE_OPTIONS: CookieOptions = {
 export const MAX_JSON_BODY_BYTES = 65_536;
 export const LINKED_ELSEWHERE = "This chat is linked to another account";
 export const OTHER_ACCOUNT = "You are signed in to another account now";
+export const WRONG_CREDENTIALS = "Wrong username or password";
+
+export const SNewPassword = z
+  .string()
+  .min(10, "Password must be at least 10 characters")
+  .max(256, "Password must be at most 256 characters");
 
 export type TGatewayConfig = {
   // the origin of BELLACLAW_GATEWAY_PUBLIC_URL
@@ -113,6 +119,21 @@ export function respond<T>(c: Context, result: TInternalApiResult<T>) {
   } else {
     return c.json(result.data);
   }
+}
+
+// the account's name and linked chats, which the assistant knows
+export async function describeAccount(
+  c: Context,
+  internalApi: TInternalApi,
+  account: TAccount,
+): Promise<Response> {
+  const result = await internalApi.getAccount(account.publicId);
+
+  if ("error" in result) {
+    return apiFailed(c, result);
+  }
+
+  return c.json<TMeResponse>({ username: account.username, chats: result.data.links });
 }
 
 // NOTE: an app request is served by its bearer token alone, and names no account: the account

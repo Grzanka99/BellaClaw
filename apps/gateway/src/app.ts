@@ -1,8 +1,9 @@
 import { createLogger } from "@bellaclaw/shared";
 import { Hono } from "hono";
+import { registerAccountRoutes } from "./account-routes";
 import type { TApiError } from "./api-types";
-import { registerAuthRoutes } from "./auth-routes";
 import { registerConversationRoutes } from "./conversation-routes";
+import { registerLinkRoutes } from "./link-routes";
 import {
   isAppRequest,
   MAX_JSON_BODY_BYTES,
@@ -54,7 +55,8 @@ export function createApp(dependencies: TGatewayDependencies) {
     return c.json<TApiError>({ error: "Internal error" }, 500);
   });
 
-  registerAuthRoutes(app, dependencies);
+  registerLinkRoutes(app, dependencies);
+  registerAccountRoutes(app, dependencies);
   registerConversationRoutes(app, dependencies);
   registerStreamRoute(app, dependencies);
 
