@@ -13,6 +13,7 @@ import {
   gatewayAccountDevicesPath,
   gatewayAccountMessagePath,
   gatewayAccountModelPath,
+  gatewayAccountModelsPath,
   gatewayAccountPath,
   gatewayAccountPersonalityPath,
   gatewayChatLinkPath,
@@ -28,6 +29,7 @@ import {
   SGatewayLinkStarted,
   SGatewayMedia,
   SGatewayMessageDeleted,
+  SGatewayModelCatalog,
   SGatewayModelState,
   SGatewayPersonality,
   SGatewayPresenceAccepted,
@@ -46,6 +48,7 @@ import {
   type TGatewayLinkStarted,
   type TGatewayMedia,
   type TGatewayMessageDeleted,
+  type TGatewayModelCatalog,
   type TGatewayModelState,
   type TGatewayModelUpdate,
   type TGatewayPersonality,
@@ -83,6 +86,7 @@ export type TInternalApi = {
     accountId: string,
     update: TGatewayModelUpdate,
   ): Promise<TInternalApiResult<TGatewayModelState>>;
+  getModels(accountId: string): Promise<TInternalApiResult<TGatewayModelCatalog>>;
   getPersonality(accountId: string): Promise<TInternalApiResult<TGatewayPersonality>>;
   updatePersonality(
     accountId: string,
@@ -217,6 +221,8 @@ export function createInternalApi(baseUrl: string, secret: string): TInternalApi
       call("GET", gatewayAccountModelPath(accountId), SGatewayModelState, undefined),
     updateModel: (accountId, update) =>
       call("PUT", gatewayAccountModelPath(accountId), SGatewayModelState, update),
+    getModels: (accountId) =>
+      call("GET", gatewayAccountModelsPath(accountId), SGatewayModelCatalog, undefined),
     getPersonality: (accountId) =>
       call("GET", gatewayAccountPersonalityPath(accountId), SGatewayPersonality, undefined),
     updatePersonality: (accountId, update) =>

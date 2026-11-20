@@ -26,6 +26,7 @@ import {
   gatewayAccountDevicesPath,
   gatewayAccountMessagePath,
   gatewayAccountModelPath,
+  gatewayAccountModelsPath,
   gatewayAccountPath,
   gatewayAccountPersonalityPath,
   gatewayChatLinkPath,
@@ -51,6 +52,7 @@ import {
   type TGatewayLinkStarted,
   type TGatewayMedia,
   type TGatewayMessageDeleted,
+  type TGatewayModelCatalog,
   type TGatewayModelChoice,
   type TGatewayModelState,
   type TGatewayPersonality,
@@ -262,6 +264,33 @@ function createModelState(settings: TConfigRecord): TGatewayModelState {
   };
 }
 
+// every provider with its models, and why a send cannot use it now. A catalog that loads over the
+// network is refreshed only for a provider that can be used
+async function createModelCatalog(): Promise<TGatewayModelCatalog> {
+  const providers: TGatewayModelCatalog["providers"] = [];
+
+  for (const provider of Object.values(EAiProvider)) {
+    const reason = await findProviderProblem(provider);
+
+    if (reason === undefined) {
+      await refreshAiModels(provider);
+    }
+
+    providers.push({
+      id: provider,
+      usable: reason === undefined,
+      reason,
+      models: aiModels.getModels(provider).map((model) => ({
+        id: model.id,
+        name: model.name,
+        supportedEfforts: getSupportedThinkingLevels(model),
+      })),
+    });
+  }
+
+  return { providers };
+}
+
 // the same checks, verification and settings.update.requested command as the update-settings tool.
 // The trace names the account's Bella conversation.
 async function updateModel(
@@ -352,6 +381,22 @@ async function updatePersonality(
   );
 }
 
+// why the provider cannot be used now: its API key is missing, or its OAuth login is not connected
+// or expired
+async function findProviderProblem(provider: EAiProvider): Promise<TOption<string>> {
+  try {
+    getAiApiKey(provider);
+  } catch (error) {
+    if (error instanceof Error) {
+      return error.message;
+    }
+
+    return String(error);
+  }
+
+  return findAiLoginProblem(provider);
+}
+
 // A plain chat's model as the app chose it, checked against what the server offers: a provider of
 // its own that is usable now (its API key is set, its OAuth login is connected), a model that
 // provider lists, an effort the model supports
@@ -362,12 +407,10 @@ async function checkModelChoice(choice: TGatewayModelChoice): Promise<TModelChoi
     throw new Error(`Unknown AI provider: ${choice.provider}`);
   }
 
-  // throws for a provider whose API key is missing
-  getAiApiKey(provider.data);
-  const loginProblem = await findAiLoginProblem(provider.data);
+  const providerProblem = await findProviderProblem(provider.data);
 
-  if (loginProblem !== undefined) {
-    throw new Error(loginProblem);
+  if (providerProblem !== undefined) {
+    throw new Error(providerProblem);
   }
 
   const problem = await checkAiModelChoice(provider.data, choice.model, choice.effort);
@@ -493,6 +536,7 @@ export async function handleInternalApiRequest(
   // ["", "internal", "links"],
   // ["", "internal", "links", chatKey],
   // ["", "internal", "accounts", accountId], ["", "internal", "accounts", accountId, "model"],
+  // ["", "internal", "accounts", accountId, "models"],
   // ["", "internal", "accounts", accountId, "personality"] or
   // ["", "internal", "accounts", accountId, "messages", messageId] or
   // ["", "internal", "accounts", accountId, "conversations"] or
@@ -528,6 +572,8 @@ export async function handleInternalApiRequest(
     key.length > 0 &&
     pathname === gatewayAccountModelPath(key) &&
     (request.method === "GET" || request.method === "PUT");
+  const modelsRoute =
+    request.method === "GET" && key.length > 0 && pathname === gatewayAccountModelsPath(key);
   const personalityRoute =
     key.length > 0 &&
     pathname === gatewayAccountPersonalityPath(key) &&
@@ -580,6 +626,7 @@ export async function handleInternalApiRequest(
     !chatLinkRoute &&
     !accountRoute &&
     !modelRoute &&
+    !modelsRoute &&
     !personalityRoute &&
     !messageDeleteRoute &&
     !appMessageRoute &&
@@ -978,6 +1025,10 @@ export async function handleInternalApiRequest(
       };
 
       return Response.json(body);
+    }
+
+    if (modelsRoute) {
+      return Response.json(await createModelCatalog());
     }
 
     if (personalityRoute) {

@@ -19,7 +19,7 @@ import { AccountStore } from "./account-store";
 import { CLIENT_HEADER, createApp } from "./app";
 import { createChatReader, type TChatReader } from "./chat-reader";
 import { createLiveStream } from "./live-stream";
-import { createFakeAssistant } from "./test-utils";
+import { createFakeAssistant, FAKE_MODEL_CATALOG } from "./test-utils";
 
 const ORIGIN = "https://dashboard.test";
 const SECRET = "test-secret";
@@ -285,6 +285,7 @@ test("the account routes reach only the signed-in account's keys, and need a ses
     ["GET", "/api/facts"],
     ["GET", "/api/model"],
     ["PUT", "/api/model"],
+    ["GET", "/api/models"],
     ["GET", "/api/personality"],
     ["PUT", "/api/personality"],
     ["DELETE", "/api/messages/1"],
@@ -308,10 +309,15 @@ test("the account routes reach only the signed-in account's keys, and need a ses
     "getAccount",
     "getModel",
     "updateModel",
+    "getModels",
     "getPersonality",
     "updatePersonality",
     "deleteMessage",
   ]);
+
+  // the assistant's catalog, as it answered it
+  const models = await send("GET", "/api/models", undefined, alice.cookie);
+  expect(await models.json()).toEqual(FAKE_MODEL_CATALOG);
 
   reads.length = 0;
   await send("GET", "/api/messages", undefined, bob.cookie);
@@ -675,6 +681,7 @@ test("every account route serves the bearer token without Origin, for its own ac
     ["GET", "/api/facts"],
     ["GET", "/api/model"],
     ["PUT", "/api/model"],
+    ["GET", "/api/models"],
     ["DELETE", "/api/messages/1"],
     ["POST", "/api/link"],
   ] as const;
@@ -699,6 +706,9 @@ test("every account route serves the bearer token without Origin, for its own ac
 
   expect(reads).toEqual([`bella:${alice.publicId}`, `account:${alice.publicId}`]);
   expect(assistant.calls.every((call) => call.accountId === alice.publicId)).toBe(true);
+
+  const models = await sendApp("GET", "/api/models", undefined, aliceToken);
+  expect(await models.json()).toEqual(FAKE_MODEL_CATALOG);
 
   reads.length = 0;
   await sendApp("GET", "/api/messages", undefined, bobToken);

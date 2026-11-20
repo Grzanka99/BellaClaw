@@ -14,6 +14,8 @@ import {
   gatewayAccountConversationMessagesPath,
   gatewayAccountConversationPath,
   gatewayAccountConversationsPath,
+  gatewayAccountModelsPath,
+  type TGatewayModelCatalog,
   type TGatewayStreamEvent,
   type TOption,
 } from "@bellaclaw/shared";
@@ -300,6 +302,35 @@ test("a send to a plain chat names a provider the server can use now, else it an
   expect(await eventsOf(EEventType.MessageReceived)).toEqual([]);
   expect(await history(chat)).toEqual([]);
   expect(runPlain).not.toHaveBeenCalled();
+});
+
+test("the models list offers every provider with its models and efforts, and why a send cannot use one now", async () => {
+  await start();
+  const accountId = `acct-${crypto.randomUUID()}`;
+  const getAuth = spyOn(aiModels, "getAuth").mockResolvedValue(undefined);
+  let answer: [number, unknown];
+
+  try {
+    answer = await request("GET", gatewayAccountModelsPath(accountId));
+  } finally {
+    getAuth.mockRestore();
+  }
+
+  const [status, body] = answer;
+  expect(status).toBe(200);
+  const { providers } = body as TGatewayModelCatalog;
+  expect(providers.map((provider) => provider.id)).toEqual(Object.values(EAiProvider));
+
+  const openrouter = providers.find((provider) => provider.id === EAiProvider.Openrouter);
+  expect(openrouter).toMatchObject({ usable: true });
+  expect(openrouter?.reason).toBeUndefined();
+  expect(openrouter?.models.find((model) => model.id === GPT.model)?.supportedEfforts).toContain(
+    "low",
+  );
+
+  const opencodeGo = providers.find((provider) => provider.id === EAiProvider.OpencodeGo);
+  expect(opencodeGo).toMatchObject({ usable: false, reason: "opencode-go is not connected." });
+  expect(opencodeGo?.models.map((model) => model.id)).toContain("grok-4.7");
 });
 
 test("a plain chat's failed turn answers the failure reply and leaves the account's provider and models as they are", async () => {

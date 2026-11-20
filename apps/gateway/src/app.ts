@@ -1206,6 +1206,16 @@ export function createApp({
     return c.json(result.data);
   });
 
+  app.get("/api/models", requireSession, async (c) => {
+    const result = await internalApi.getModels(c.var.account.publicId);
+
+    if ("error" in result) {
+      return c.json<TApiError>({ error: result.error }, result.status);
+    }
+
+    return c.json(result.data);
+  });
+
   app.get("/api/personality", requireSession, async (c) => {
     const result = await internalApi.getPersonality(c.var.account.publicId);
 

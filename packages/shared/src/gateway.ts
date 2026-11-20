@@ -106,6 +106,28 @@ export const SGatewayModelState = z.object({
 
 export type TGatewayModelState = z.infer<typeof SGatewayModelState>;
 
+// GET /internal/accounts/:accountId/models response: every provider a plain chat's model may name,
+// in the order of the model state's `providers`, each with its models. A provider that cannot be
+// used now is listed too, with usable false and reason the error a send to it is refused with
+export const SGatewayModelCatalog = z.object({
+  providers: z.array(
+    z.object({
+      id: z.string(),
+      usable: z.boolean(),
+      reason: z.string().optional(),
+      models: z.array(
+        z.object({
+          id: z.string(),
+          name: z.string(),
+          supportedEfforts: z.array(SGatewayReasoningEffort),
+        }),
+      ),
+    }),
+  ),
+});
+
+export type TGatewayModelCatalog = z.infer<typeof SGatewayModelCatalog>;
+
 // PUT /internal/accounts/:accountId/model body: the AI arguments of the update-settings tool.
 // aiProvider is one of `providers` and aiModelPurpose one of `purposes[].purpose`.
 export const SGatewayModelUpdate = z
@@ -421,6 +443,10 @@ export function gatewayAccountPath(accountId: string): string {
 
 export function gatewayAccountModelPath(accountId: string): string {
   return `${gatewayAccountPath(accountId)}/model`;
+}
+
+export function gatewayAccountModelsPath(accountId: string): string {
+  return `${gatewayAccountPath(accountId)}/models`;
 }
 
 export function gatewayAccountPersonalityPath(accountId: string): string {

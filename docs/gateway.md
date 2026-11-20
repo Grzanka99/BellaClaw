@@ -202,6 +202,11 @@ Conversations:
   `!dashboard` sent from the app answer with a plain stored reply. An
   image that was not uploaded by this account to this conversation, or is named with another type,
   answers 400 and nothing is sent.
+- `GET /api/models`: every provider a plain chat's `model` may name, in the assistant's order, as
+  `{ providers: [{ id, usable, reason?, models: [{ id, name, supportedEfforts }] }] }`. A provider
+  that cannot be used now is listed with its models, `usable: false` and `reason`, the error a send
+  to it answers. A send's `model` comes from this list: a usable provider, one of its models and
+  one of that model's efforts.
 
 Images:
 

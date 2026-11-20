@@ -4,11 +4,29 @@ import {
   type TGatewayChatLink,
   type TGatewayDeviceRegistration,
   type TGatewayLinkState,
+  type TGatewayModelCatalog,
   type TGatewayPersonality,
   type TGatewayStreamEvent,
   type TOption,
 } from "@bellaclaw/shared";
 import type { TInternalApi } from "./internal-api";
+
+// the catalog the fake assistant's getModels answers
+export const FAKE_MODEL_CATALOG: TGatewayModelCatalog = {
+  providers: [
+    {
+      id: "openrouter",
+      usable: true,
+      models: [{ id: "openai/gpt-5", name: "GPT-5", supportedEfforts: ["low", "high"] }],
+    },
+    {
+      id: "opencode-go",
+      usable: false,
+      reason: "opencode-go is not connected.",
+      models: [{ id: "grok-4.7", name: "Grok 4.7", supportedEfforts: ["high"] }],
+    },
+  ],
+};
 
 // An in-memory stand-in for the assistant's internal API, for tests. links: by chat key.
 // activationCode: the configured code, undefined for none; codeChecks: every code checked.
@@ -140,6 +158,11 @@ export function createFakeAssistant() {
       calls.push({ method: "updateModel", accountId });
 
       return unavailable;
+    },
+    getModels: async (accountId) => {
+      calls.push({ method: "getModels", accountId });
+
+      return { data: FAKE_MODEL_CATALOG };
     },
     getPersonality: async (accountId) => {
       calls.push({ method: "getPersonality", accountId });
