@@ -180,9 +180,9 @@ else from Firebase; the manifest turns off Firebase's default data collection an
 - `SettingsRepository` watches the session from its construction: when one starts (a new token) it
   drops what it held and loads `GET /api/model`, `GET /api/personality` and `GET /api/models`; when it ends (sign-out,
   a `401`) it drops them back to loading. The theme stays. An answer is applied only while the
-  session that asked is still current. The Models screen reloads the models when it opens; no
-  reload starts while a model change is verified, and a reload's answer is dropped when a change
-  started after it did.
+  session that asked is still current. The Models screen reloads the models when it opens
+  (`reloadModels`, in the application scope); no reload starts while a model change is verified, and
+  a reload's answer is dropped when a change or another reload started after it did.
 - `ModelSettings` is the server's model state: the active provider of `providers` (ids), a
   `RoleModel` per role (model id, effort or null for the model's default) and the active provider's
   `AiModel`s with the efforts each supports. The server's purposes and efforts map in `SettingsMapping.kt`.
@@ -190,7 +190,7 @@ else from Firebase; the manifest turns off Firebase's default data collection an
   (`ChatProvider`): whether it can be used now, the server's reason when not, and its `AiModel`s. It is
   read when a session starts and each time the picker opens (`reloadChatModels`, in the application
   scope). A held list stays while it is read again and when that read fails, so the picker shows it at
-  once. Opening a plain chat, or its picker, also reads again the
+  once. A read's answer is dropped when another read of the list started after it did. Opening a plain chat, or its picker, also reads again the
   account's models or the list when their last read failed.
 - A model change (provider, a role's model and effort, a role's reset) runs in the application
   scope, so leaving the screen does not drop it. While it is verified, `isChangingModels` is set and
@@ -292,7 +292,7 @@ its state (`collectIn`), send events, assert the exposed state. Chat tests run t
 conversation routes, and a stream that opens with `check` and carries what the test pushes. A test
 waits for a request off the test thread (`withContext(Dispatchers.IO)`), so the repository's work in
 the test scope keeps running. Account tests use `TestServer`: a
-local `MockWebServer` plus the real `SessionStore`, `ApiClient` and `AccountRepository` on a session
+`MockWebServer` on 127.0.0.1 (not `localhost`, which OkHttp tries as `::1` first) plus the real `SessionStore`, `ApiClient` and `AccountRepository` on a session
 file in a temporary folder; a network answer reaches the ViewModel on OkHttp's thread, so after any event that follows one
 they wait with `uiState.first { … }` for the state the outcome names (an error, a step), not for a
 loading flag to clear, read `uiState.value` only before the first request, and before an event the

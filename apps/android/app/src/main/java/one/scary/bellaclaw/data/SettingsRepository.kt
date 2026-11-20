@@ -67,12 +67,17 @@ class SettingsRepository(
         }
     }
 
+    /** Reads the models again, in [scope]: the read finishes when the screen that asked for it is gone. */
+    fun reloadModels() {
+        scope.launch { loadModels() }
+    }
+
     /**
-     * Reads the models again; a failed load shows loading while it retries. The last refusal stays.
+     * Reads the models; a failed load shows loading while it retries. The last refusal stays.
      * No read starts while a change is verified, and the answer of a read that a change or a newer read
      * overtook is dropped: their answer is newer.
      */
-    suspend fun loadModels() {
+    private suspend fun loadModels() {
         val token = session.value?.token ?: return
         if (state.value.isChangingModels) {
             return
@@ -104,7 +109,7 @@ class SettingsRepository(
         }
     }
 
-    /** Reads the model list; a held list stays while it is read and when the read fails, or a newer read overtook it. */
+    /** Reads the model list; a held list stays while it is read and when the read fails. A read that a newer one overtook changes nothing. */
     private suspend fun loadChatModels() {
         val token = session.value?.token ?: return
         val read = chatModelReads.incrementAndGet()

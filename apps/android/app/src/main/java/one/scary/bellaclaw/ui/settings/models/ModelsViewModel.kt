@@ -72,9 +72,7 @@ class ModelsViewModel(private val settingsRepository: SettingsRepository) : View
     }
 
     fun retry() {
-        viewModelScope.launch {
-            settingsRepository.loadModels()
-        }
+        settingsRepository.reloadModels()
     }
 
     fun selectProvider(providerId: String) {

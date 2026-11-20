@@ -27,7 +27,7 @@ import org.junit.rules.ExternalResource
 
 private const val LOOPBACK = "127.0.0.1"
 
-/** A mock gateway on localhost, and the real store, client and repository on it with a session file in a fresh folder. */
+/** A mock gateway on 127.0.0.1, and the real store, client and repository on it with a session file in a fresh folder. */
 class TestServer : ExternalResource() {
     val server = MockWebServer()
     private lateinit var folder: File
