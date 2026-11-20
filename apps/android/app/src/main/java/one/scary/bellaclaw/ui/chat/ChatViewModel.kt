@@ -99,7 +99,8 @@ class ChatViewModel(
         settingsRepository.settings,
     ) { chat, draft, local, settings ->
         val picker = if (local.isPickerOpen) {
-            ModelPickerState(settings.chatModels, validSelection(local.pickerSelection, settings.chatModels))
+            val usable = settings.chatModels.map { providers -> providers.filter { it.isUsable } }
+            ModelPickerState(usable, validSelection(local.pickerSelection, settings.chatModels))
         } else {
             null
         }
@@ -199,7 +200,12 @@ class ChatViewModel(
     }
 
     fun confirmModelPicker() {
-        val selection = validSelection(local.value.pickerSelection, settingsRepository.settings.value.chatModels) ?: return
+        // With no provider connected there is nothing to store: Done just closes.
+        val selection = validSelection(local.value.pickerSelection, settingsRepository.settings.value.chatModels)
+        if (selection == null) {
+            dismissModelPicker()
+            return
+        }
         viewModelScope.launch {
             chatRepository.setModel(chatId, selection)
             local.update { it.copy(isPickerOpen = false, pickerSelection = null) }

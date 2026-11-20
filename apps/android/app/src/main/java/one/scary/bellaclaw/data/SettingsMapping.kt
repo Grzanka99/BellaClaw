@@ -39,7 +39,7 @@ internal fun ModelStateBody.toModelSettings() = ModelSettings(
 )
 
 internal fun ModelCatalogBody.toChatProviders() = providers.map { provider ->
-    ChatProvider(provider.id, provider.usable, provider.reason, provider.models.map { it.toAiModel() })
+    ChatProvider(provider.id, provider.usable, provider.models.map { it.toAiModel() })
 }
 
 private fun AvailableModelBody.toAiModel() = AiModel(id, name, supportedEfforts.mapNotNull(::effortOf))

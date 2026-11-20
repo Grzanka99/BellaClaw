@@ -27,6 +27,7 @@
     <string name="day_yesterday">Yesterday</string>
 
     <string name="picker_title">Model for this chat</string>
+    <string name="picker_no_provider">No provider is connected.</string>
     <string name="label_provider">Provider</string>
     <string name="label_model">Model</string>
     <string name="label_effort">Effort</string>

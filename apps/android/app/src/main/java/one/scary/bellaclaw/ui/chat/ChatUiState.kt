@@ -52,7 +52,7 @@ sealed interface ChatRow {
 }
 
 /**
- * The picker's providers, the last list read while it is read again, and its unsaved [selection],
+ * The picker's providers usable now, of the last list read while it is read again, and its unsaved [selection],
  * one of their usable models at an effort it supports (null while the list is not loaded or none is
  * usable). Done stores it on the chat.
  */

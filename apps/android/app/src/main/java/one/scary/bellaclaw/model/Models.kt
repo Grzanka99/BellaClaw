@@ -11,11 +11,10 @@ enum class Effort {
     MAX,
 }
 
-/** A provider a plain chat may use, with its [models]; [reason] says why a send cannot use it now when it is not [isUsable]. */
+/** A provider a plain chat may use, with its [models]; a send can use it now only when it [isUsable]. */
 data class ChatProvider(
     val id: String,
     val isUsable: Boolean,
-    val reason: String?,
     val models: List<AiModel>,
 )
 

@@ -471,14 +471,13 @@ class ChatViewModelTest {
         viewModel.confirmModelPicker()
         val codex = ModelChoice("openai-codex", "gpt-5.5", Effort.XHIGH)
         repository.chat("plain:ada:k1").first { (it as? PlainChat)?.model == codex }
+        viewModel.uiState.first { it.picker == null }
 
         testServer.route("GET", "/api/models", 200, chatModelsAnswer())
         viewModel.openModelPicker()
 
-        val reopened = viewModel.uiState.first { state -> state.picker.loaded()?.any { !it.isUsable } == true }.picker!!
-        val unusable = reopened.loaded()!!.single { !it.isUsable }
-        assertEquals("openai-codex", unusable.id)
-        assertEquals("The OpenAI Codex login is not connected", unusable.reason)
+        // Codex is no longer connected, so the picker leaves it out.
+        val reopened = viewModel.uiState.first { state -> state.picker.loaded()?.map { it.id } == listOf("opencode-go") }.picker!!
         assertEquals(ModelChoice("opencode-go", "kimi-k3.1-pro", Effort.MEDIUM), reopened.selection)
         viewModel.dismissModelPicker()
         viewModel.uiState.first { it.picker == null }
@@ -497,9 +496,9 @@ class ChatViewModelTest {
         viewModel.openModelPicker()
 
         val held = viewModel.uiState.first { it.picker != null }.picker
-        assertEquals(false, held.loaded()?.last()?.isUsable)
+        assertEquals(listOf("opencode-go"), held.loaded()?.map { it.id })
         hold.complete(Unit)
-        viewModel.uiState.first { it.picker.loaded()?.last()?.isUsable == true }
+        viewModel.uiState.first { it.picker.loaded()?.map { provider -> provider.id } == listOf("opencode-go", "openai-codex") }
     }
 
     @Test

@@ -25,12 +25,10 @@ data class AvailableModelBody(val id: String, val name: String, val supportedEff
 @Serializable
 data class ModelCatalogBody(val providers: List<CatalogProviderBody>)
 
-/** [reason] says why a send cannot use the provider now; absent when it is [usable]. */
 @Serializable
 data class CatalogProviderBody(
     val id: String,
     val usable: Boolean,
-    val reason: String? = null,
     val models: List<AvailableModelBody>,
 )
 

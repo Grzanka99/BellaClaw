@@ -192,7 +192,7 @@ else from Firebase; the manifest turns off Firebase's default data collection an
   `RoleModel` per role (model id, effort or null for the model's default) and the active provider's
   `AiModel`s with the efforts each supports. The server's purposes and efforts map in `SettingsMapping.kt`.
 - `chatModels`, the chat's model picker list (`GET /api/models`), is every provider a plain chat may use
-  (`ChatProvider`): whether it can be used now, the server's reason when not, and its `AiModel`s. It is
+  (`ChatProvider`): whether it can be used now and its `AiModel`s. It is
   read when a session starts and each time the picker opens (`reloadChatModels`, in the application
   scope). A held list stays while it is read again and when that read fails, so the picker shows it at
   once. A read's answer is dropped when another read of the list started after it did. Opening a plain chat, or its picker, also reads again the
@@ -269,9 +269,10 @@ Everything it holds is one immutable `ChatState` in a `MutableStateFlow`, change
   the error with Retry, until a list is held. Its selection is always made valid for the list
   (`pickerSelection`): a usable provider (the chat's, else the first usable), a model it lists (the
   chat's, else its first), an effort the model supports (the chat's, else MEDIUM if listed, else the
-  first). With no usable model there is no selection and Done is off. So a pick the list
+  first). With no usable model there is no selection and Done only closes. So a pick the list
   no longer allows stays on the chat until Done stores another, and picking another model keeps the
-  effort when it can. A provider that cannot be used now is listed with its reason and cannot be picked.
+  effort when it can. It lists only the providers usable now, one at a time behind a provider select
+  that opens on the selection's provider; choosing a provider there picks nothing.
 - **Images.** The composer's attach button opens Android's photo picker (images only, no permission).
   A picked image is checked on the phone (`ChatImages.check`: JPEG, PNG, WebP or GIF, 5 MB at most, by
   the picker's type and size; a file whose size is not reported is read up to one byte past 5 MB to tell);
