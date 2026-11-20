@@ -244,7 +244,10 @@ Everything it holds is one immutable `ChatState` in a `MutableStateFlow`, change
 - **Chat ids.** The Bella conversation is always `BELLACLAW_CHAT_ID` in the app and always listed, so
   its screen never waits; a plain chat's id is its conversation key, and its screen waits for the list
   before it can be missing. A chat created here is kept whether or not the list has loaded (that is
-  its own fact, `ChatState.isListLoaded`), so its screen shows at once. `chat(chatId)` reads the list
+  its own fact, `ChatState.isListLoaded`), so its screen shows at once. The server answers the
+  account's empty plain chat when it has one, so a key the list holds already is not added again. Home
+  lists a plain chat only once it has a message (`latestMessages`: the list's newest row, else the
+  newest this phone holds, such as a send in progress). `chat(chatId)` reads the list
   and that fact from one snapshot of `ChatState`, so a restored screen never sees the list loaded
   without its chat and reports it missing. A plain chat's icon is derived
   from its key.

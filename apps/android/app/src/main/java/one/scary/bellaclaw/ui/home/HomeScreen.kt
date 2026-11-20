@@ -101,7 +101,7 @@ private fun HomeScreenPreview() {
                 bellaClaw = BellaClawSummary("bellaclaw", "Reminder set for 18:00", now, isUnread = true),
                 chats = listOf(
                     PlainChatSummary("a", "Kotlin flow vs channel", ChatIcon.CODE, "Use a SharedFlow when…", now, isUnread = true),
-                    PlainChatSummary("b", null, ChatIcon.ROCKET, null, null),
+                    PlainChatSummary("b", null, ChatIcon.ROCKET, "Launch checklist for Friday", now.minusSeconds(86_400)),
                 ),
             ),
             onOpenChat = {},

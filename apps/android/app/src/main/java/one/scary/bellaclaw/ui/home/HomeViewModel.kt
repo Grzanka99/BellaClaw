@@ -32,12 +32,12 @@ class HomeViewModel(private val chatRepository: ChatRepository) : ViewModel() {
         val bellaClaw = latest[BellaClawChat.id]
         HomeUiState(
             bellaClaw = BellaClawSummary(BellaClawChat.id, bellaClaw?.text, bellaClaw?.sentAt, BellaClawChat.id in unread),
-            // The repository's order: the latest active first.
+            // The repository's order: the latest active first. A chat with no message yet is left out.
             chats = chats
                 .filterIsInstance<PlainChat>()
-                .map { chat ->
-                    val last = latest[chat.id]
-                    PlainChatSummary(chat.id, chat.title, chat.icon, last?.text, last?.sentAt, chat.id in unread)
+                .mapNotNull { chat ->
+                    val last = latest[chat.id] ?: return@mapNotNull null
+                    PlainChatSummary(chat.id, chat.title, chat.icon, last.text, last.sentAt, chat.id in unread)
                 },
             createdChatId = created,
             newChatFailed = failed,

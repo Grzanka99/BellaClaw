@@ -88,11 +88,15 @@ class ChatRepository(
             listOf(BellaClawChat) + plainChats(list, local, settings)
         }
 
-    /** The newest row of each chat that has one, by chat id. */
+    /**
+     * The newest row of each chat that has one, by chat id: the list's, else the newest this phone holds
+     * (a send in progress), so a chat whose first message is on its way already has one.
+     */
     val latestMessages: Flow<Map<String, Message>> = state.map { current ->
         current.conversations.mapNotNull { conversation ->
             val chatId = conversation.chatId()
-            conversation.lastMessage?.let { chatId to it.toMessage(chatId) }
+            val latest = conversation.lastMessage?.toMessage(chatId) ?: current.messagesOf(chatId).lastOrNull()
+            latest?.let { chatId to it }
         }.toMap()
     }.distinctUntilChanged()
 

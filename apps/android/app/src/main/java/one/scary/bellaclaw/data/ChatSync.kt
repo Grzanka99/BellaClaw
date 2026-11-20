@@ -106,7 +106,8 @@ internal class ChatSync(
             }
             val key = result.value.conversationKey
             state.update { current ->
-                if (current.generation != generation) {
+                // The server answers the account's empty chat when it has one, which the list may hold already.
+                if (current.generation != generation || current.conversation(key) != null) {
                     current
                 } else {
                     val list = current.conversations

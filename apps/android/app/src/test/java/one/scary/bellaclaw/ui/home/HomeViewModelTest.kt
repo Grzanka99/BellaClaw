@@ -11,6 +11,7 @@ import one.scary.bellaclaw.data.TestServer
 import one.scary.bellaclaw.data.errorAnswer
 import one.scary.bellaclaw.data.local.SessionStore
 import one.scary.bellaclaw.model.BELLACLAW_CHAT_ID
+import one.scary.bellaclaw.model.PlainChat
 import one.scary.bellaclaw.model.Session
 import one.scary.bellaclaw.ui.MainDispatcherRule
 import one.scary.bellaclaw.ui.chat.ChatRow
@@ -45,6 +46,7 @@ class HomeViewModelTest {
     fun `lists BellaClaw apart from the plain chats, the latest active first`() = runTest {
         gateway.addChat("plain:ada:a", "Regex")
         gateway.addChat("plain:ada:b")
+        gateway.addRow("plain:ada:b", "user", "Hello")
         gateway.addRow("plain:ada:a", "assistant", "^\\d{2}-\\d{3}$")
         gateway.addRow(BELLA_KEY, "assistant", "Reminder set for 18:00.")
         val viewModel = home(repository())
@@ -56,7 +58,7 @@ class HomeViewModelTest {
         assertEquals(listOf("plain:ada:a", "plain:ada:b"), state.chats.map { it.id })
         assertEquals(listOf("Regex", null), state.chats.map { it.title })
         assertEquals("^\\d{2}-\\d{3}$", state.chats[0].preview)
-        assertNull(state.chats[1].preview)
+        assertEquals("Hello", state.chats[1].preview)
     }
 
     @Test
@@ -75,18 +77,60 @@ class HomeViewModelTest {
 
     @Test
     fun `new chat is created untitled and handed to the screen once`() = runTest {
-        val viewModel = home(repository())
+        val repository = repository()
+        val viewModel = home(repository)
 
         viewModel.newChat()
         viewModel.newChat()
 
         val created = viewModel.uiState.first { it.createdChatId != null }.createdChatId
-        val listed = viewModel.uiState.first { state -> state.chats.any { it.id == created } }
-        assertEquals(1, listed.chats.size)
-        assertNull(listed.chats.single().title)
+        val chats = repository.chats.first { list -> list.any { it.id == created } }.filterIsInstance<PlainChat>()
+        assertEquals(1, chats.size)
+        assertNull(chats.single().title)
 
         viewModel.onNewChatOpened()
         viewModel.uiState.first { it.createdChatId == null }
+    }
+
+    @Test
+    fun `an empty plain chat is not listed, and is listed once it has a message`() = runTest {
+        gateway.addChat("plain:ada:a")
+        gateway.addChat("plain:ada:b", "Regex")
+        gateway.addRow("plain:ada:b", "user", "Match a postcode")
+        val repository = repository()
+        val viewModel = home(repository)
+
+        val populated = viewModel.uiState.first { state -> state.chats.any { it.id == "plain:ada:b" } }
+        assertEquals(listOf("plain:ada:b"), populated.chats.map { it.id })
+
+        val created = "plain:ada:a"
+        val chat = ChatViewModel(created, repository, testServer.settingsRepository(scope = backgroundScope), SavedStateHandle())
+        collectIn(chat.uiState)
+        chat.uiState.first { it.isReadyToSend }
+
+        chat.onDraftChange("Hello")
+        chat.send()
+
+        val listed = viewModel.uiState.first { state -> state.chats.any { it.id == created } }
+        assertEquals("Hello", listed.chats.single { it.id == created }.preview)
+    }
+
+    @Test
+    fun `New chat while the account's empty chat exists opens that chat, held once`() = runTest {
+        gateway.addChat("plain:ada:a")
+        testServer.route("POST", "/api/conversations", 200, """{"conversationKey":"plain:ada:a"}""")
+        val repository = repository()
+        val viewModel = home(repository)
+        repository.chats.first { chats -> chats.any { it.id == "plain:ada:a" } }
+
+        repeat(2) {
+            viewModel.newChat()
+            viewModel.uiState.first { it.createdChatId == "plain:ada:a" }
+            viewModel.onNewChatOpened()
+            viewModel.uiState.first { it.createdChatId == null }
+        }
+
+        assertEquals(1, repository.chats.first().count { it.id == "plain:ada:a" })
     }
 
     @Test
@@ -107,6 +151,7 @@ class HomeViewModelTest {
     @Test
     fun `signing out leaves no chat behind, and signing in loads them again`() = runTest {
         gateway.addChat("plain:ada:a", "Regex")
+        gateway.addRow("plain:ada:a", "user", "Match a postcode")
         gateway.addRow(BELLA_KEY, "assistant", "Reminder set for 18:00.")
         val store = testServer.signedInStore()
         val viewModel = home(repository(store))
