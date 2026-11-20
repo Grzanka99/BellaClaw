@@ -18,13 +18,14 @@ import one.scary.bellaclaw.ui.settings.SettingsRoute
 import one.scary.bellaclaw.ui.settings.models.ModelsRoute
 import one.scary.bellaclaw.ui.settings.personality.PersonalityRoute
 import one.scary.bellaclaw.ui.settings.theme.ThemeSettingsRoute
+import one.scary.bellaclaw.ui.signin.LinkRoute
 
 /**
- * The app's only navigation graph. Home sits under the BellaClaw chat, so Back from it lands on Home.
+ * The app's graph while signed in. Home sits under the BellaClaw chat, so Back from it lands on Home.
  * A screen navigates only while its entry is resumed, so repeated taps during a transition push or pop once.
  */
 @Composable
-fun BellaClawNavHost() {
+fun BellaClawNavHost(hasPendingLink: Boolean) {
     val navController = rememberNavController()
     var openedBellaClaw by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(Unit) {
@@ -66,11 +67,15 @@ fun BellaClawNavHost() {
         composable<ThemeDestination> { entry ->
             ThemeSettingsRoute(onBack = { entry.onBack() })
         }
+        composable<LinkDestination> {
+            LinkRoute(onClose = { navController.popBackStack<LinkDestination>(inclusive = true) })
+        }
     }
+    PendingLinkEffect(navController, hasPendingLink)
 }
 
 /** Runs [action] only while this entry is the resumed, on-screen one. */
-private fun NavBackStackEntry.ifResumed(action: () -> Unit) {
+internal fun NavBackStackEntry.ifResumed(action: () -> Unit) {
     if (lifecycle.currentState == Lifecycle.State.RESUMED) {
         action()
     }

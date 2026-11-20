@@ -9,14 +9,16 @@ module; every dependency and plugin version lives in `gradle/libs.versions.toml`
 
 | Package (`one.scary.bellaclaw.…`) | Holds |
 | --- | --- |
-| `model` | Plain Kotlin types (`Chat`, `Message`, `ModelChoice`, `ModelSettings`, `Personality`, `SettingsSnapshot`, …). No Android or Compose imports. |
-| `data` | One repository per kind of data: `ChatRepository` (chats, messages, typing, stream state), `SettingsRepository` (one `SettingsSnapshot` flow: providers, models, personality, theme). |
+| `model` | Plain Kotlin types (`Chat`, `Message`, `ModelChoice`, `ModelSettings`, `Personality`, `SettingsSnapshot`, `Session`, `LoginLink`, `PendingLink`, `LinkStatus`, `AccountError`, …), and every type a ViewModel gets from a repository. No Android or Compose imports. |
+| `data` | One repository per kind of data: `ChatRepository` (chats, messages, typing, stream state), `SettingsRepository` (one `SettingsSnapshot` flow: providers, models, personality, theme), `AccountRepository` (the session, sign-in, sign-out, the pending login link). `ServerUrls.kt`: the server address rule and the login link parser. |
+| `data.remote` | `ApiClient`, the one HTTP client of the gateway's app API (OkHttp, kotlinx.serialization JSON), its request and answer bodies, and `ApiResult`. |
+| `data.local` | `SessionStore`: the server address, session token and username in one app-private file. |
 | `data.sample` | The in-memory sample data the repositories start from. Only `data` and previews read it. |
-| `ui.<feature>` | `home`, `chat`, `settings`, `settings.models`, `settings.personality`, `settings.theme`. |
+| `ui.<feature>` | `signin`, `home`, `chat`, `settings`, `settings.models`, `settings.personality`, `settings.theme`. |
 | `ui.components` | Composables and label mappings used by more than one feature. |
 | `ui.theme` | Colour schemes, extra colour tokens, typography, `BellaClawTheme`. |
-| `ui.navigation` | Typed destinations and the one `NavHost`. |
-| `ui` (root) | `MainActivity`, `AppViewModel` (theme), `appContainer()` for factories. |
+| `ui.navigation` | Typed destinations and the two `NavHost`s. |
+| `ui` (root) | `MainActivity`, `AppViewModel` (theme, signed in or not, a waiting login link), `appContainer()` for factories. |
 | root | `BellaClawApplication` and `AppContainer` (wiring only). |
 
 No domain/use-case layer: add one only for logic that two ViewModels share.
@@ -57,8 +59,13 @@ resources in `ui.components.Labels`.
 
 ## Navigation
 
-Destinations are `@Serializable` types in `ui.navigation.Destinations`. `BellaClawNavHost` is the
-only graph: it starts at Home and pushes the BellaClaw chat once, so Back from it lands on Home.
+Destinations are `@Serializable` types in `ui.navigation.Destinations`. `MainActivity` shows one of
+two graphs: `SignInNavHost` while signed out (sign-in, create account) and `BellaClawNavHost` while
+signed in. Switching graphs drops the other's back stack, so a session that starts or ends (sign-in,
+sign-out, a `401`) leaves nothing to go back to. `BellaClawNavHost` starts at Home and pushes the
+BellaClaw chat once, so Back from it lands on Home. Both graphs hold the login link confirmation
+(`LinkDestination`, no arguments) and push it whenever a link starts waiting (`PendingLinkEffect`);
+every way out of it (Cancel, Done, Back) dismisses the link, and the screen closes once its link no longer waits.
 Screens get navigation as lambdas, and those lambdas act only while their back stack entry is
 resumed, so taps during a transition push or pop once. The one exception is the missing-chat return
 to Home, which a restored entry reports before it resumes. A destination's arguments reach its
@@ -68,9 +75,42 @@ takes plain values plus, where it keeps drafts, that `SavedStateHandle`.
 `MainActivity` sets the system bar icon appearance from the resolved app theme (`ThemeMode.isDark`)
 whenever it changes, since the app theme can override the device theme.
 
+## Account and networking
+
+- Only repositories call `ApiClient`; ViewModels see `AccountError` and model types, never
+  `ApiResult` or request bodies. Every request carries `X-BellaClaw-Client: app` and a JSON body with
+  a `Content-Length`. `post` goes to a server named by the caller (sign-in, link check);
+  `postSignedIn` goes to the session's server with `Authorization: Bearer <token>`. `ApiClient` builds
+  its one OkHttp client: it follows no redirect (a redirect answer is an API error like any other
+  non-2xx, so no body with a password or token is replayed elsewhere), and its read timeout (70 s)
+  covers the server's longest wait (a link request waits up to 60 s for the assistant).
+- The session lives only in `SessionStore` (`files/session.json`, written through
+  `session.json.tmp`; both are excluded from cloud backup and device transfer by
+  `res/xml/data_extraction_rules.xml`). It is read once when the store is
+  created, so the app starts in the right graph; `AccountRepository.session` is its flow.
+- A `401` on any signed-in request ends the session in `ApiClient` itself (only if the session still
+  has that request's token). The session flow turns null, `AppViewModel` reports signed out and
+  `MainActivity` swaps to the sign-in graph. Sign-out ends the session after the server's `ok` or
+  its `401`; any other failure keeps it.
+- Server addresses pass `checkServerUrl`: trimmed, absolute, no trailing slash, no default port, a
+  port in 1–65535, `https://`, and `http://` only in a debug build (`BuildConfig.DEBUG`), which alone allows cleartext traffic
+  (`src/debug/AndroidManifest.xml`).
+- A login link (`bellaclaw://login?server=…&token=…`, from an intent or a pasted code) is held in
+  memory by `AccountRepository.pendingLink`. One link at a time: a link that arrives while one waits
+  is dropped. A confirmation (`LinkViewModel`) belongs to the link that waited when it was created; its
+  first state is already that link's step, and its actions and answers concern that link only. It
+  shows the link's server and sends nothing before the user continues; then `POST /api/link/check`
+  names the link's chat (`chatKey`, shown as channel and address), which the screen shows before any
+  action that signs in, registers or connects. Signed in on another server, nothing is sent. The link
+  is lost with the process, and the restored confirmation closes.
+- Never log, `toString`, or put in saved state a token, a password, an activation code or a link:
+  `Session`, `LoginLink` and the sign-in UI states leave them out of `toString`, request bodies
+  holding them are plain classes, and sign-in ViewModels keep them in plain `MutableStateFlow`s.
+
 ## Wiring
 
-`BellaClawApplication` creates one `AppContainer`, which creates each repository once. It also owns
+`BellaClawApplication` creates one `AppContainer` on first use, which creates the `SessionStore`,
+the `ApiClient` and each repository once. It also owns
 one application-lifetime `CoroutineScope` and passes it to repositories whose work must outlive a
 screen (`ChatRepository`: the sample typing timer, one per chat, restarted on each send). ViewModel
 factories read it through `CreationExtras.appContainer()`. No DI framework. Repositories are concrete
@@ -79,7 +119,9 @@ classes; add an interface only when a second implementation exists.
 ## Tests
 
 JVM unit tests in `app/src/test` for every ViewModel: construct it with real repositories, collect
-its state (`collectIn`), send events, assert the exposed state. `MainDispatcherRule` replaces
+its state (`collectIn`), send events, assert the exposed state. Account tests use `TestServer`: a
+local `MockWebServer` plus the real `SessionStore`, `ApiClient` and `AccountRepository` on a session
+file in a temporary folder; they wait for a request's end with `uiState.first { … }`. `MainDispatcherRule` replaces
 `Dispatchers.Main`; repositories that take a scope get the test's `backgroundScope`, and a fixed
 `Clock` where dates matter.
 
@@ -88,13 +130,11 @@ its state (`collectIn`), send events, assert the exposed state. `MainDispatcherR
 Later chunks change repository internals, not their public `Flow`/`suspend` surface, so ViewModels
 stay as they are:
 
-- Networking (server URL, sign-in, history, sends, the live stream): an HTTP/stream client in
-  `data` (e.g. `data.remote`), created in `AppContainer` and passed to the repositories. It
-  replaces `data.sample`, `ChatRepository.isStreamOpen`, `isTyping` and the sample typing timer.
-  Network writes that must finish after the screen is gone run in the application scope the
-  repositories already receive.
-- Storage (settings, session, cached history): a local store in `data` (e.g. `data.local`) behind
-  the same repositories.
+- Networking (history, sends, the live stream): `ApiClient` from `AppContainer`, passed to the
+  repositories (OkHttp also reads the server-sent event stream). It replaces `data.sample`,
+  `ChatRepository.isStreamOpen`, `isTyping` and the sample typing timer. Network writes that must
+  finish after the screen is gone run in the application scope the repositories already receive.
+- Storage (settings, cached history): a local store in `data.local` behind the same repositories.
 - Push: a messaging service at the app root that hands decrypted messages to `ChatRepository`;
   Keystore code lives in `data`.
 - Images: upload goes through `ChatRepository.send`; the UI already passes a content URI. Thumbnails

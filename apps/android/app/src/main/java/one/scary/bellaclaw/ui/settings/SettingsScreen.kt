@@ -36,6 +36,7 @@ fun SettingsScreen(
     onOpenPersonality: () -> Unit,
     onOpenTheme: () -> Unit,
     onOpenNotifications: () -> Unit,
+    onSignOut: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Scaffold(
@@ -84,6 +85,8 @@ fun SettingsScreen(
                 subtitle = stringResource(R.string.notifications_summary),
                 onClick = onOpenNotifications,
             )
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+            AccountSection(state, onSignOut)
         }
     }
 }
@@ -93,12 +96,21 @@ fun SettingsScreen(
 private fun SettingsScreenPreview() {
     BellaClawTheme {
         SettingsScreen(
-            state = SettingsUiState("OpenCode Go", "Kimi K3.1 Pro", true, ThemeMode.SYSTEM, true),
+            state = SettingsUiState(
+                "OpenCode Go",
+                "Kimi K3.1 Pro",
+                true,
+                ThemeMode.SYSTEM,
+                true,
+                username = "ada",
+                serverUrl = "https://bellaclaw.example.com",
+            ),
             onBack = {},
             onOpenModels = {},
             onOpenPersonality = {},
             onOpenTheme = {},
             onOpenNotifications = {},
+            onSignOut = {},
         )
     }
 }

@@ -29,5 +29,6 @@ fun SettingsRoute(
                 .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
             context.startActivity(intent)
         },
+        onSignOut = viewModel::signOut,
     )
 }

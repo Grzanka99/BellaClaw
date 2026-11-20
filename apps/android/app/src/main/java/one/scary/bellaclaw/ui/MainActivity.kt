@@ -1,5 +1,6 @@
 package one.scary.bellaclaw.ui
 
+import android.content.Intent
 import android.graphics.Color
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -15,6 +16,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import one.scary.bellaclaw.ui.navigation.BellaClawNavHost
+import one.scary.bellaclaw.ui.navigation.SignInNavHost
 import one.scary.bellaclaw.ui.theme.BellaClawTheme
 import one.scary.bellaclaw.ui.theme.isDark
 
@@ -24,8 +26,13 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        // A recreated activity saw its launch intent already.
+        if (savedInstanceState == null) {
+            handleLoginLink(intent)
+        }
         setContent {
-            val theme by appViewModel.theme.collectAsStateWithLifecycle()
+            val state by appViewModel.uiState.collectAsStateWithLifecycle()
+            val theme = state.theme
             val dark = theme.mode.isDark()
             // System bar icons follow the app theme, which can differ from the device theme.
             DisposableEffect(dark) {
@@ -35,9 +42,26 @@ class MainActivity : ComponentActivity() {
             }
             BellaClawTheme(mode = theme.mode, dynamicColor = theme.dynamicColor) {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                    BellaClawNavHost()
+                    // Each graph starts fresh, so signing in or out leaves no back stack behind.
+                    if (state.isSignedIn) {
+                        BellaClawNavHost(hasPendingLink = state.hasPendingLink)
+                    } else {
+                        SignInNavHost(hasPendingLink = state.hasPendingLink)
+                    }
                 }
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleLoginLink(intent)
+    }
+
+    private fun handleLoginLink(intent: Intent) {
+        val link = intent.dataString
+        if (intent.action == Intent.ACTION_VIEW && link != null) {
+            appViewModel.onLoginLink(link)
         }
     }
 }

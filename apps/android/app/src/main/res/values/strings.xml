@@ -67,4 +67,53 @@
 
     <string name="notifications_title">Notifications</string>
     <string name="notifications_summary">Open Android notification settings</string>
+
+    <string name="account_title">Account</string>
+    <string name="sign_out">Sign out</string>
+    <string name="sign_out_summary">End this session on the server</string>
+
+    <string name="sign_in_title">Sign in</string>
+    <string name="sign_in_intro">Sign in to your BellaClaw server.</string>
+    <string name="label_server_url">Server address</string>
+    <string name="hint_server_url">https://bellaclaw.example.com</string>
+    <string name="label_username">Username</string>
+    <string name="label_password">Password</string>
+    <string name="label_activation_code">Activation code</string>
+    <string name="action_sign_in">Sign in</string>
+    <string name="action_create_account">Create account</string>
+    <string name="action_go_to_create_account">New here? Create an account</string>
+    <string name="sign_in_with_chat">Signed in from a chat?</string>
+    <string name="sign_in_with_chat_help">Send !app in Signal or Discord, then open the link or paste its code here.</string>
+    <string name="label_login_code">Login code</string>
+    <string name="action_use_code">Use code</string>
+    <string name="register_title">Create account</string>
+    <string name="register_intro">Create an account with the activation code of your server.</string>
+
+    <string name="link_title">Sign in from a chat</string>
+    <string name="link_confirm">This link is for the server:</string>
+    <string name="link_confirm_help">Continue only if you asked for this link in your own chat and you trust this server.</string>
+    <string name="action_continue">Continue</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="action_close">Close</string>
+    <string name="link_unusable">This link can\'t be used.</string>
+    <string name="link_invalid">This link has expired or was used already. Send !app in your chat for a new one.</string>
+    <string name="link_linked">The chat %1$s belongs to the account %2$s.</string>
+    <string name="link_unlinked">The chat %1$s has no account yet. Create an account, or sign in to one you have: the chat will be connected to it for good, and can then sign in to that account and set its password.</string>
+    <string name="action_i_have_account">I have an account</string>
+    <string name="link_connect">Connect the chat %1$s to %2$s for good? The chat can then sign in to this account and set its password.</string>
+    <string name="action_connect">Connect</string>
+    <string name="link_connected">The chat %1$s is connected to %2$s.</string>
+    <string name="link_already_connected">The chat %1$s is connected to %2$s already.</string>
+    <string name="link_other_account">The chat %1$s belongs to another account, not to %2$s.</string>
+    <string name="link_other_server">This link is for another server. This app is signed in as %1$s on %2$s.</string>
+
+    <string name="error_server_status">The server refused the request (%1$d).</string>
+    <string name="error_network">Can\'t reach the server. Check the address and your connection.</string>
+    <string name="error_server_url_empty">Enter the server address.</string>
+    <string name="error_server_url_invalid">Enter the full address, starting with https://</string>
+    <string name="error_server_url_cleartext">The address must start with https://</string>
+    <string name="error_link_not_login">This is not a BellaClaw login code.</string>
+    <string name="error_link_incomplete">The login code is incomplete. Copy all of it.</string>
+    <string name="error_link_cleartext">The link names a server without https://, which this app does not accept.</string>
+    <string name="error_link_server_invalid">The link names an invalid server address.</string>
 </resources>
