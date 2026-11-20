@@ -1,5 +1,16 @@
+import { expect } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+  conversationsTable,
+  EConversationKind,
+  MIGRATIONS_FOLDER,
+  memoriesTable,
+} from "@bellaclaw/database";
 import {
   ADDRESS_LINKED_ELSEWHERE,
+  createGatewayLinkToken,
   type TGatewayAppMessage,
   type TGatewayChatLink,
   type TGatewayDeviceRegistration,
@@ -9,7 +20,16 @@ import {
   type TGatewayStreamEvent,
   type TOption,
 } from "@bellaclaw/shared";
+import { eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/libsql";
+import { migrate } from "drizzle-orm/libsql/migrator";
+import { ACCOUNT_HEADER } from "./account-header";
+import { AccountStore } from "./account-store";
+import { createApp } from "./app";
+import { createChatReader, type TChatReader } from "./chat-reader";
 import type { TInternalApi } from "./internal-api";
+import { createLiveStream } from "./live-stream";
+import { CLIENT_HEADER } from "./route-support";
 
 // the catalog the fake assistant's getModels answers
 export const FAKE_MODEL_CATALOG: TGatewayModelCatalog = {
@@ -306,5 +326,247 @@ export function createFakeAssistant() {
         link.state = "active";
       }
     },
+  };
+}
+
+const ORIGIN = "https://dashboard.test";
+const SECRET = "test-secret";
+export const PASSWORD = "correct horse battery";
+
+// an app on a store at path, in memory by default, and a fake assistant; reads collects the keys
+// the fake reader got. reader: a real one instead
+export function createTestApp(path = ":memory:", reader?: TChatReader, streamSilenceMs = 60_000) {
+  const reads: string[] = [];
+  const assistant = createFakeAssistant();
+  const store = new AccountStore(path);
+  // reconnects after 1 ms, so a test barely waits
+  const liveStream = createLiveStream(assistant.internalApi, 1, streamSilenceMs);
+  const app = createApp({
+    config: { publicOrigin: ORIGIN, secret: SECRET },
+    store,
+    reader: reader ?? {
+      listMessages: async (conversationKey) => {
+        reads.push(conversationKey);
+
+        return [];
+      },
+      listFacts: async (ownerKey) => {
+        reads.push(ownerKey);
+
+        return [];
+      },
+      findConversation: async () => undefined,
+      listConversations: async () => [],
+      listHistory: async () => [],
+    },
+    internalApi: assistant.internalApi,
+    liveStream,
+    serveClient: async () => new Response("client"),
+  });
+
+  // account: the username of the account header, as a page that shows it sends
+  function send(method: string, path: string, body?: unknown, cookie?: string, account?: string) {
+    const headers = new Headers({ Origin: ORIGIN });
+
+    if (cookie !== undefined) {
+      headers.set("Cookie", cookie);
+    }
+
+    if (account !== undefined) {
+      headers.set(ACCOUNT_HEADER, account);
+    }
+
+    return app.request(path, { method, headers, body: JSON.stringify(body) });
+  }
+
+  // a request of the app: no Origin and no cookie unless headers has one; the bearer token, or the
+  // client header that asks for one
+  function sendApp(
+    method: string,
+    path: string,
+    body?: unknown,
+    bearer?: string,
+    headers: Record<string, string> = {},
+  ) {
+    const appHeaders = new Headers(headers);
+
+    if (bearer !== undefined) {
+      appHeaders.set("Authorization", `Bearer ${bearer}`);
+    } else {
+      appHeaders.set(CLIENT_HEADER, "app");
+    }
+
+    return app.request(path, { method, headers: appHeaders, body: JSON.stringify(body) });
+  }
+
+  function cookieOf(response: Response) {
+    return response.headers.get("Set-Cookie")?.split(";")[0] ?? "";
+  }
+
+  function token(chatKey: string) {
+    return createGatewayLinkToken(SECRET, chatKey, Date.now());
+  }
+
+  // registers an account with a fresh link to the chat; its link becomes active
+  async function register(username: string, chatKey: string) {
+    const response = await send("POST", "/api/register", {
+      token: token(chatKey),
+      username,
+      password: PASSWORD,
+    });
+
+    expect(response.status).toBe(200);
+    assistant.activate(chatKey);
+
+    return { cookie: cookieOf(response), publicId: store.findCredentials(username)?.publicId };
+  }
+
+  // the edge follows the assistant's stream from when its first stream is open; the returned stop
+  // ends it
+  async function startFollowing(): Promise<() => Promise<void>> {
+    const following = new AbortController();
+    const follow = liveStream.follow(following.signal);
+
+    try {
+      await waitUntil(() => assistant.streams.length >= 1);
+    } catch (error) {
+      following.abort();
+      await follow;
+      throw error;
+    }
+
+    return async () => {
+      following.abort();
+      await follow;
+    };
+  }
+
+  return {
+    app,
+    send,
+    sendApp,
+    register,
+    token,
+    cookieOf,
+    reads,
+    assistant,
+    store,
+    liveStream,
+    startFollowing,
+  };
+}
+
+// polls until check holds; a few seconds at most
+export async function waitUntil(check: () => boolean) {
+  for (let attempt = 0; attempt < 1_000 && !check(); attempt++) {
+    await Bun.sleep(1);
+  }
+
+  expect(check()).toBe(true);
+}
+
+// the assistant's database in a temporary file, migrated, with the reader the gateway uses on it
+export async function createAssistantDatabase() {
+  const dir = await mkdtemp(join(tmpdir(), "bellaclaw-gateway-history-"));
+  const url = `file:${join(dir, "assistant.db")}`;
+  const db = drizzle({ connection: { url } });
+  await migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
+
+  // rows as the assistant writes them; createdAt: epoch ms
+  function insertRow(
+    chatId: string,
+    author: "user" | "assistant",
+    kind: "message" | "tool" | "display",
+    message: string,
+    clientMessageId?: string,
+  ) {
+    return db
+      .insert(memoriesTable)
+      .values({
+        chatId,
+        channel: "app",
+        author,
+        kind,
+        message,
+        createdAt: new Date(1_000),
+        clientMessageId,
+      })
+      .returning({ id: memoriesTable.id })
+      .get();
+  }
+
+  function setRevision(
+    conversationKey: string,
+    ownerKey: string,
+    revision: number,
+    rewriteRevision: number,
+  ) {
+    return db
+      .insert(conversationsTable)
+      .values({ conversationKey, ownerKey, revision, rewriteRevision })
+      .onConflictDoUpdate({
+        target: conversationsTable.conversationKey,
+        set: { revision, rewriteRevision },
+      });
+  }
+
+  // a plain chat as the assistant lists it on creation, and its removal with its rows
+  function createPlain(conversationKey: string, ownerKey: string) {
+    return db.insert(conversationsTable).values({
+      conversationKey,
+      ownerKey,
+      kind: EConversationKind.Plain,
+      createdAt: new Date(500),
+    });
+  }
+
+  async function removeConversation(conversationKey: string) {
+    await db.delete(memoriesTable).where(eq(memoriesTable.chatId, conversationKey));
+    await db
+      .delete(conversationsTable)
+      .where(eq(conversationsTable.conversationKey, conversationKey));
+  }
+
+  return {
+    db,
+    reader: createChatReader(url, ""),
+    insertRow,
+    setRevision,
+    createPlain,
+    removeConversation,
+    deleteRow: (id: number) => db.delete(memoriesTable).where(eq(memoriesTable.id, id)),
+    remove: () => rm(dir, { recursive: true, force: true }),
+  };
+}
+
+// registers an app account with the activation code; its bearer token and public id
+export async function registerApp(
+  sendApp: ReturnType<typeof createTestApp>["sendApp"],
+  store: AccountStore,
+  username: string,
+) {
+  const response = await sendApp("POST", "/api/register", {
+    username,
+    password: PASSWORD,
+    activationCode: "open-sesame",
+  });
+  expect(response.status).toBe(200);
+  const body = await response.json();
+
+  return { token: String(body.token), publicId: String(store.findCredentials(username)?.publicId) };
+}
+
+// real P-256 public keys, uncompressed, base64url
+const PUBLIC_KEYS = [
+  "BA45xSmkpu16iOb3SDdemng3MY0BBUBpXQTZ9_u_XrgBhMbbDrSUSmJs3hm6zHVYq1DuFSV7hLcvavZQMDe4UkM",
+  "BK0NaeMoGRCI4PAxQ1dSlLqaFvREgqUAxC-3HUWgt3y8p-tA24e65EW5mBBtfZ4psKk118_YVeyD9_YEMuKyxWM",
+];
+
+// RFC 8291 key material of PUBLIC_KEYS[index], base64url
+export function deviceKeys(index: number) {
+  return {
+    fcmToken: `token-${index}`,
+    publicKey: PUBLIC_KEYS[index] ?? "",
+    authSecret: Buffer.from(new Uint8Array(16).fill(index + 1)).toString("base64url"),
   };
 }
