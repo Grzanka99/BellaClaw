@@ -48,6 +48,7 @@ fun BellaClawRow(summary: BellaClawSummary, onClick: () -> Unit, modifier: Modif
             title = stringResource(R.string.bellaclaw_name),
             titleStyle = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
             mutedColor = LocalContentColor.current.copy(alpha = 0.8f),
+            isTimeCentered = true,
             summary = summary,
             modifier = Modifier.padding(vertical = 6.dp),
         )
@@ -74,6 +75,7 @@ fun PlainChatRow(summary: PlainChatSummary, onClick: () -> Unit, modifier: Modif
         title = summary.title ?: stringResource(R.string.new_chat_title),
         titleStyle = MaterialTheme.typography.titleMedium,
         mutedColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        isTimeCentered = false,
         summary = summary,
         modifier = modifier.clickable(onClick = onClick),
     )
@@ -85,6 +87,7 @@ private fun ChatRowLayout(
     title: String,
     titleStyle: TextStyle,
     mutedColor: Color,
+    isTimeCentered: Boolean,
     summary: ChatSummary,
     modifier: Modifier = Modifier,
 ) {
@@ -110,8 +113,14 @@ private fun ChatRowLayout(
         }
         summary.lastActivity?.let {
             Spacer(Modifier.width(12.dp))
+            // The pill's time sits in its vertical middle; a plain row's lines up with the title.
+            val timeModifier = if (isTimeCentered) {
+                Modifier.align(Alignment.CenterVertically)
+            } else {
+                Modifier.align(Alignment.Top).padding(top = 4.dp)
+            }
             Column(
-                modifier = Modifier.align(Alignment.Top).padding(top = 4.dp),
+                modifier = timeModifier,
                 horizontalAlignment = Alignment.End,
             ) {
                 Text(
