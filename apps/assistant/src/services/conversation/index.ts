@@ -149,6 +149,20 @@ export class ConversationStore {
     });
   }
 
+  // The channel and text of one row of the chat; undefined once it is deleted
+  public findMessage(
+    chatId: string,
+    messageId: number,
+  ): Promise<TOption<Pick<TSelectMemory, "channel" | "message">>> {
+    return this.database.run((db) =>
+      db
+        .select({ channel: memoriesTable.channel, message: memoriesTable.message })
+        .from(memoriesTable)
+        .where(and(eq(memoriesTable.id, messageId), eq(memoriesTable.chatId, chatId)))
+        .get(),
+    );
+  }
+
   // A turn's exchange in an untitled plain chat, for its title: the turn's user message and the
   // reply that ended that turn. undefined when the chat is unlisted or titled already
   public findTitleExchange(
@@ -469,6 +483,7 @@ export class ConversationStore {
     };
   }
 
+  // Returns the delivery's row id
   public async saveDeliveredMessage(
     db: TDatabaseHandle,
     chatId: string,
@@ -476,7 +491,7 @@ export class ConversationStore {
     text: string,
     notice: string,
     deliveredAt: number,
-  ): Promise<void> {
+  ): Promise<number> {
     const message: AssistantMessage = {
       role: "assistant",
       content: [{ type: "text", text }],
@@ -500,25 +515,32 @@ export class ConversationStore {
       modelMessage: JSON.stringify(noticeMessage),
       createdAt: new Date(deliveredAt),
     });
-    await db.insert(memoriesTable).values({
-      chatId,
-      channel,
-      kind: "message",
-      author: ERole.Assistant,
-      message: text,
-      modelMessage: JSON.stringify(message),
-      createdAt: new Date(deliveredAt),
-    });
+    const row = await db
+      .insert(memoriesTable)
+      .values({
+        chatId,
+        channel,
+        kind: "message",
+        author: ERole.Assistant,
+        message: text,
+        modelMessage: JSON.stringify(message),
+        createdAt: new Date(deliveredAt),
+      })
+      .returning({ id: memoriesTable.id })
+      .get();
+
+    return row.id;
   }
 
-  // display: stored with kind display and no model message, so it is never replayed
+  // display: stored with kind display and no model message, so it is never replayed. Returns the
+  // reply's row id
   public async saveDisplayMessage(
     db: TDatabaseHandle,
     chatId: string,
     channel: EMessagePlatform,
     display: TDisplay,
     sentAt: number,
-  ): Promise<void> {
+  ): Promise<number> {
     if (display.request !== undefined) {
       await db.insert(memoriesTable).values({
         chatId,
@@ -530,14 +552,20 @@ export class ConversationStore {
         clientMessageId: display.request.clientMessageId,
       });
     }
-    await db.insert(memoriesTable).values({
-      chatId,
-      channel,
-      kind: "display",
-      author: ERole.Assistant,
-      message: display.text,
-      createdAt: new Date(sentAt),
-    });
+    const row = await db
+      .insert(memoriesTable)
+      .values({
+        chatId,
+        channel,
+        kind: "display",
+        author: ERole.Assistant,
+        message: display.text,
+        createdAt: new Date(sentAt),
+      })
+      .returning({ id: memoriesTable.id })
+      .get();
+
+    return row.id;
   }
 
   // Deletes one transcript message. An assistant reply takes the tool rows of its turn with it:

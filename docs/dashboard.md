@@ -115,6 +115,28 @@ Device, for notifications:
   one they go to the oldest linked chat, and to the app when there is none. A reply always goes
   back to the channel its message came from.
 
+Notifications (when the assistant has an FCM credential, see
+[Configuration](configuration.md#push)):
+
+- One push per new message for the app, to every registered device of the account, while the
+  account has no app stream open: a reply to a message sent from the app, in the Bella
+  conversation or a plain chat (command and failure replies included), and a reminder, scheduled
+  task result or notice that went to the app. Never for a reply to a Signal or Discord message, a
+  confidential reply (a login link) or the user's own message.
+- An FCM data-only message with Android priority `HIGH`. Its only data field, `ciphertext`, is
+  the payload encrypted for that one device with RFC 8291 (`aes128gcm`, one record), base64url.
+  Nothing else in the message is readable.
+- The payload, once decrypted, is UTF-8 JSON (`SAppPush` in `@bellaclaw/shared`):
+  `{ conversationKey, messageId, revision, text, truncated }`. `messageId` is the row's `id` in
+  history and `revision` the conversation's revision with it. `text` is the row's text; when the
+  whole payload would exceed 2,800 bytes, `text` is its longest start that fits, cut between
+  Unicode code points, and `truncated` is `true`. The app then fetches history as on a
+  `changed` (with `after`, or a reload below `rewriteRevision`) and finds the rest in row
+  `messageId`.
+- A failed push is tried four times, 5, 30 and 120 seconds apart, then dropped; the message is
+  stored and readable either way. A device whose token FCM reports as unregistered (404
+  `UNREGISTERED`) is unregistered at once.
+
 Ways in:
 
 - **Activation code**: `POST /api/register` with `username`, `password` and `activationCode`
@@ -296,6 +318,7 @@ State:
 | Accounts, password hashes, web and app sessions (with each app session's device id), chat links, used link tokens | Dashboard SQLite file, `BELLACLAW_DASHBOARD_DB_PATH` |
 | Messages, facts, settings | Assistant database |
 | App devices: FCM token and RFC 8291 key material | Assistant database, `app_devices` |
+| FCM service-account key | Assistant only, `BELLACLAW_FCM_CREDENTIALS_PATH` |
 | Images uploaded from the app | Assistant's data volume, `BELLACLAW_APP_MEDIA_DIR`, listed in the assistant database |
 
 Web sessions last 30 days from the last request; app sessions last until logout. Only a hash of

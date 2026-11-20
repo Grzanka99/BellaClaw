@@ -205,7 +205,8 @@ test("a scripted session stores one row per visible message with its channel, a 
     const facts = await changes();
     expect(facts).toHaveLength(seen.length + count);
     for (const fact of facts.slice(seen.length)) {
-      expect(fact).toEqual({
+      // an appended reply or notice also names its row
+      expect(fact).toMatchObject({
         conversationKey: chatId,
         ownerKey: chatId,
         revision: seen.length + 1,

@@ -16,6 +16,7 @@ services:
       - SIGNAL_CLI_RPC_URL=http://signal-cli:8080
       - BELLACLAW_INTERNAL_API_HOSTNAME=0.0.0.0
       - BELLACLAW_APP_MEDIA_DIR=/app-data/app-media
+      - BELLACLAW_FCM_CREDENTIALS_PATH=/app/.secrets/fcm-service-account.json
       - BELLACLAW_RELEASES_DIR=/srv
     depends_on:
       - ollama

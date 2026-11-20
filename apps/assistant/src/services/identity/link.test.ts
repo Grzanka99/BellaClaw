@@ -575,6 +575,7 @@ describe("linking an address to an account", () => {
         ownerKey: "account:acct-14",
         revision: 1,
         rewriteRevision: 0,
+        messageId: expect.any(Number),
       },
       {
         conversationKey: "bella:acct-14",

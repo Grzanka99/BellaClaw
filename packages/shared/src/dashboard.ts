@@ -375,6 +375,24 @@ export const SDashboardStreamEvent = z.discriminatedUnion("type", [
 
 export type TDashboardStreamEvent = z.infer<typeof SDashboardStreamEvent>;
 
+// The plaintext of a push, before it is encrypted for one device (RFC 8291): a new row of a
+// conversation, for a notification shown without a fetch. revision: the conversation's revision
+// with the row; text: the row's text, or its start when truncated, and the app fetches the row by
+// messageId. Its JSON stays within APP_PUSH_MAX_BYTES, so the encrypted message fits FCM's data
+export const SAppPush = z
+  .object({
+    conversationKey: z.string(),
+    messageId: z.number().int(),
+    revision: z.number().int(),
+    text: z.string(),
+    truncated: z.boolean(),
+  })
+  .strict();
+
+export type TAppPush = z.infer<typeof SAppPush>;
+
+export const APP_PUSH_MAX_BYTES = 2_800;
+
 export const DASHBOARD_STREAM_PATH = "/internal/stream";
 
 export const DASHBOARD_ACTIVATION_CHECK_PATH = "/internal/activation-code/check";

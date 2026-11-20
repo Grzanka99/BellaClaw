@@ -143,3 +143,15 @@ disable the dashboard. Compose sets `BELLACLAW_INTERNAL_API_URL` and `BELLACLAW_
 and `BELLACLAW_APP_MEDIA_DIR` to `/app-data/app-media` on the assistant's data volume.
 
 See [Dashboard](dashboard.md).
+
+## Push
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `BELLACLAW_FCM_CREDENTIALS_PATH` | — | Firebase service-account JSON key for FCM. Blank, or no file at the path, turns push off. |
+| `BELLACLAW_FCM_URL` | `https://fcm.googleapis.com` | Where the assistant sends FCM messages. Change it only for a test endpoint. |
+
+Only the assistant reads them. Compose sets the path to
+`/app/.secrets/fcm-service-account.json`, so the key goes to `.secrets/fcm-service-account.json`;
+the dashboard and log-viewer containers get neither the variable nor the `.secrets` mount. The
+assistant logs at boot whether push is on. See [Dashboard](dashboard.md#the-app).

@@ -44,7 +44,7 @@ only its own tables and reaches another service with a message: a **fact** it pu
   revives it.
 - A dead delivery appends `event.dead_lettered`; a dead command also appends `command.rejected`.
   Notices turns a dead fact into a chat notice, except for outbound types, `message.sent`, dead
-  letters, commands and the `conversation-title` consumer. `apps/assistant/scripts/redrive-events.ts` lists dead rows and sets chosen ones back
+  letters, `conversation.changed` (the push), commands and the `conversation-title` consumer. `apps/assistant/scripts/redrive-events.ts` lists dead rows and sets chosen ones back
   to pending for the next boot.
 - Boot deletes events older than 30 days whose deliveries are all done, with their delivery rows.
   Error text in `lastError` and `command.rejected` passes through `sanitizeErrorMessage`.
@@ -97,6 +97,8 @@ bus.subscribe({
   (60 s default). Tools get it as `context.events`.
 - `ctx.waitFor(causationId, type, timeoutMs)`: await a fact caused by an event already known, such
   as `cron.automation.detached` after an automation delete.
+- `ctx.lastAttempt`: a failure of this attempt ends the delivery dead. A handler that must never
+  leave a dead letter, as the push, logs and returns instead of throwing then.
 - A command handler that fails emits `command.rejected` with `commandFailed(event.type, error)`
   inside `ctx.complete`, so the requester fails at once.
 - Outside a handler, `EventBus.instance.transact` gets `emit(draft)` with a whole `TEventDraft`.
@@ -147,7 +149,7 @@ A call across services is allowed only when it changes no state:
 - Bytes an event must not carry: the internal API hands an app upload to `AppChannel.store` and
   reads it back with `open`; `findAttachments` checks a send's named images.
 - Reads, including reads that prepare a command (`AutomationService.resolveNames`,
-  `CronScheduler.get`), dry runs, status slash commands, and pure functions such as
+  `CronScheduler.get`), `ConversationStore.findMessage` (the row a push carries), dry runs, status slash commands, and pure functions such as
   `parseCanonicalChatKey` and `IdentityService.accountIdOf`, `plainConversationKey` and
   `isPlainConversation`.
 
@@ -188,7 +190,9 @@ Every change of a transcript (`memories`), and a plain chat's title, raises the 
 revision in `conversations` and emits `conversation.changed` with it and the owner key, in the same
 transaction. A change that is not an append
 (a delete, or rows moved in by a merge) also sets `rewriteRevision` to that revision, and the fact
-carries it: a client synced at or above it fetches by cursor, below it reloads. Conversation writes the rows
+carries it: a client synced at or above it fetches by cursor, below it reloads. A change that appended
+the assistant row of a reply (a turn's last row), a delivery or a notice also carries that row's
+`messageId`. Conversation writes the rows
 of a sent reply, notice or delivery from `message.sent`; a reply with neither `transcript` nor
 `display` is not stored, which keeps a confidential one out of history.
 
@@ -215,6 +219,14 @@ the device read model. Who owns a conversation is one rule, `findOwnedConversati
 `@bellaclaw/database`: the registry's owner, or, before its first row, the account whose Bella
 conversation it is. The dashboard's reads, the internal API's send and Authorization's gate for an
 app message all use it.
+
+The same consumer `app` pushes: on `conversation.changed` with a `messageId` whose row went out on
+the `app` channel, for an account with no open stream, it encrypts the payload (`SAppPush`) for each
+of the account's devices (RFC 8291, `app/web-push.ts`) and sends it to FCM HTTP v1 (`app/fcm.ts`),
+outside any transaction, on the conversation's lane. A token FCM reports as unregistered becomes an
+`app.device.unregister.requested` on `global`, emitted with `ctx.transact`, never requested. Any
+other failure is retried per its backoff; on `ctx.lastAttempt` it is logged and acked. Without
+`BELLACLAW_FCM_CREDENTIALS_PATH` (or its file) push is off and the change is acked.
 
 ## Adding a fact or command
 

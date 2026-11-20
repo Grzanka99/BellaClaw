@@ -222,7 +222,7 @@ export class MessageHandler {
             undefined,
             undefined,
           );
-          await this.changed(tx, emit, chatId, ownerKey, true, undefined);
+          await this.changed(tx, emit, chatId, ownerKey, true, undefined, undefined);
           return deleted.attachments;
         });
 
@@ -306,7 +306,7 @@ export class MessageHandler {
     await ctx.complete(async (tx, emit) => {
       // a chat deleted meanwhile is left as it is
       if (await this.conversations.setTitle(tx, conversationKey, title)) {
-        await this.changed(tx, emit, conversationKey, ownerKey, false, undefined);
+        await this.changed(tx, emit, conversationKey, ownerKey, false, undefined, undefined);
       }
     });
   }
@@ -370,7 +370,7 @@ export class MessageHandler {
       );
 
       if (moved) {
-        await this.changed(tx, emit, conversationKey, ownerKey, true, undefined);
+        await this.changed(tx, emit, conversationKey, ownerKey, true, undefined, undefined);
       }
       emit(
         EEventType.IdentityLinkMoved,
@@ -438,8 +438,10 @@ export class MessageHandler {
     let failure: TOption<string>;
     try {
       await ctx.complete(async (tx, emit) => {
+        let messageId: TOption<number>;
+
         if (transcript !== undefined) {
-          await this.conversations.saveDeliveredMessage(
+          messageId = await this.conversations.saveDeliveredMessage(
             tx,
             chatId,
             event.payload.channel,
@@ -450,7 +452,7 @@ export class MessageHandler {
         }
 
         if (display !== undefined) {
-          await this.conversations.saveDisplayMessage(
+          messageId = await this.conversations.saveDisplayMessage(
             tx,
             chatId,
             event.payload.channel,
@@ -459,7 +461,7 @@ export class MessageHandler {
           );
         }
 
-        await this.changed(tx, emit, chatId, ownerKey, false, undefined);
+        await this.changed(tx, emit, chatId, ownerKey, false, undefined, messageId);
       });
     } catch (error) {
       failure = String(error);
@@ -600,7 +602,7 @@ export class MessageHandler {
             attachments,
           );
           emit(EEventType.TurnStarted, { ...origin, userMessageId: row.id }, undefined, undefined);
-          await this.changed(tx, emit, conversationKey, ownerKey, false, "started");
+          await this.changed(tx, emit, conversationKey, ownerKey, false, "started", undefined);
           return row;
         });
       } catch (error) {
@@ -701,8 +703,12 @@ export class MessageHandler {
             conversation,
           );
 
+          let replyId: TOption<number>;
+
           if (text.trim().length > 0) {
             emit(EEventType.ReplyReady, { ...origin, text }, undefined, undefined);
+            // the turn's last row: its final assistant message
+            replyId = state.entries.at(-1)?.id;
           }
 
           emit(
@@ -711,7 +717,7 @@ export class MessageHandler {
             undefined,
             undefined,
           );
-          await this.changed(tx, emit, conversationKey, ownerKey, false, "completed");
+          await this.changed(tx, emit, conversationKey, ownerKey, false, "completed", replyId);
           return state;
         });
       } catch (error) {
@@ -750,7 +756,8 @@ export class MessageHandler {
   }
 
   // the revision and the fact commit with the transcript change they report; rewrite: the change
-  // is not an append (a delete, or rows moved in by a merge)
+  // is not an append (a delete, or rows moved in by a merge); messageId: the assistant row a
+  // reply, delivery or notice appended
   private async changed(
     tx: TDatabaseHandle,
     emit: TDerivedEmit,
@@ -758,6 +765,7 @@ export class MessageHandler {
     ownerKey: string,
     rewrite: boolean,
     step: TOption<string>,
+    messageId: TOption<number>,
   ): Promise<void> {
     const { revision, rewriteRevision } = await this.conversations.raiseRevision(
       tx,
@@ -767,7 +775,7 @@ export class MessageHandler {
     );
     emit(
       EEventType.ConversationChanged,
-      { conversationKey, ownerKey, revision, rewriteRevision },
+      { conversationKey, ownerKey, revision, rewriteRevision, messageId },
       step,
       undefined,
     );

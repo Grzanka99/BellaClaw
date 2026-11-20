@@ -76,6 +76,8 @@ export type TEventContext = {
     type: O,
     timeoutMs: TOption<number>,
   ) => Promise<TEvent<O>>;
+  // a failure of this attempt ends the delivery dead
+  lastAttempt: boolean;
 };
 
 // the part of a handler's context that tools and agent runs get
@@ -94,7 +96,7 @@ type TSubscription = {
   type: EEventType;
   mode: ESubscriptionMode;
   backoffMs: number[];
-  run: (row: TSelectEvent) => Promise<void>;
+  run: (row: TSelectEvent, attempt: number) => Promise<void>;
 };
 
 type TWaiter = {
@@ -184,7 +186,7 @@ export class EventBus {
       mode: subscription.mode,
       backoffMs: subscription.backoffMs,
       // the closure keeps T, so the stored list needs no generic and no cast
-      run: async (row) => {
+      run: async (row, attempt) => {
         const parsed = schema.safeParse(row.payload);
 
         if (!parsed.success) {
@@ -221,6 +223,7 @@ export class EventBus {
             request: (type, payload, options) =>
               this.request(row, subscription.consumer, type, payload, options),
             waitFor: (causationId, type, timeoutMs) => this.waitFor(causationId, type, timeoutMs),
+            lastAttempt: attempt >= subscription.backoffMs.length + 1,
           });
         } catch (error) {
           // the delivery is already acked: a retry would repeat its effects
@@ -534,7 +537,7 @@ export class EventBus {
       });
 
       try {
-        await subscription.run(row);
+        await subscription.run(row, attempts + 1);
         span.ok();
         return;
       } catch (error) {

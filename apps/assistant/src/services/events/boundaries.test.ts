@@ -56,6 +56,8 @@ const ALLOWED: Record<string, string> = {
   "commands -> messaging": "deleteAttachment: a driver call, no stored state",
   "commands -> mcp/auth": "status read",
   "commands -> mcp/config": "profile config reads",
+  "app -> conversation": "ConversationStore.findMessage read: the text of the row a push carries",
+  "app -> identity": "IdentityService.accountIdOf, a pure function",
   "app -> messaging": "registerAttachmentStore: boot wiring of the app's files, no stored state",
   "app-stream -> identity":
     "IdentityService.resolve, a cached read model, and accountIdOf, a pure function",

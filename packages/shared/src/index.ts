@@ -1,6 +1,7 @@
 export { AsyncQueue } from "./async-queue";
 export {
   ADDRESS_LINKED_ELSEWHERE,
+  APP_PUSH_MAX_BYTES,
   CONVERSATION_NOT_FOUND,
   createDashboardLinkToken,
   DASHBOARD_ACTIVATION_CHECK_PATH,
@@ -23,6 +24,7 @@ export {
   dashboardChatLinkPath,
   isP256PublicKey,
   MAX_IMAGE_BYTES,
+  SAppPush,
   SDashboardAccount,
   SDashboardActivationCheck,
   SDashboardActivationCheckRequest,
@@ -51,6 +53,7 @@ export {
   SDashboardReasoningEffort,
   SDashboardServiceTier,
   SDashboardStreamEvent,
+  type TAppPush,
   type TDashboardAccount,
   type TDashboardActivationCheck,
   type TDashboardActivationCheckRequest,

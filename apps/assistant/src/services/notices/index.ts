@@ -15,6 +15,8 @@ const NO_DEAD_LETTER_NOTICE: ReadonlySet<string> = new Set([
   EEventType.NoticeReady,
   EEventType.MessageSent,
   EEventType.EventDeadLettered,
+  // a push, which gives up without a dead letter unless the process dies on its last attempt
+  EEventType.ConversationChanged,
 ]);
 // the user's request succeeded before these consumers ran, so their failure has nothing to retry
 const NO_DEAD_LETTER_NOTICE_CONSUMERS: ReadonlySet<string> = new Set(["conversation-title"]);

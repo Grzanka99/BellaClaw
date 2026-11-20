@@ -60,7 +60,9 @@ Requesters are conversation tools, slash commands, scheduling and the internal A
    reloads instead of fetching by cursor. Memory distills facts from `turn.completed`, except a
    plain chat's, and its boot catch-up skips plain chats. The live
    consumer `app-stream` turns `conversation.changed` and the turn facts of account conversations
-   into nudges and typing on the dashboard's stream (see `docs/dashboard.md`).
+   into nudges and typing on the dashboard's stream (see `docs/dashboard.md`), and the App
+   channel's durable consumer `app` pushes the new rows of the app channel to an account with no
+   open stream.
 6. After a restart, unfinished deliveries replay. A turn that was interrupted mid-model gets one
    notice instead of a second model run.
 
@@ -83,6 +85,16 @@ the audience of a global notice, which also holds the Bella conversation of ever
 device. It also keeps in memory which accounts have an
 open stream at the dashboard, as the dashboard reports it over its live connection; a dropped
 connection or a restart reads closed for every account.
+
+The same consumer `app` sends the push. `conversation.changed` carries `messageId` when a reply,
+delivery or notice appended an assistant row; a confidential reply has no row, so it has none.
+When that row's channel is `app` and the account has no open stream, the consumer encrypts a
+small payload (`SAppPush` in `@bellaclaw/shared`) for each of the account's devices with RFC 8291
+(`services/app/web-push.ts`) and sends it to FCM HTTP v1 as a data-only message
+(`services/app/fcm.ts`, with the service-account key from `BELLACLAW_FCM_CREDENTIALS_PATH`, read
+only by the assistant). A token FCM no longer knows becomes an `app.device.unregister.requested`.
+Any other failure is retried with the consumer's backoff; the last attempt logs and acks, so a
+push never ends as a dead letter, and Notices ignores a dead `conversation.changed` anyway.
 
 Discord and Signal use separate chat keys. Their histories and scheduled deliveries do not merge.
 

@@ -7,21 +7,28 @@ import {
   findOwnedConversation,
 } from "@bellaclaw/database";
 import {
+  APP_PUSH_MAX_BYTES,
   createLogger,
   DEVICE_NOT_FOUND,
   repositoryPath,
+  type TAppPush,
   type TDashboardMedia,
   type TLogger,
   type TOption,
 } from "@bellaclaw/shared";
 import type { BunFile } from "bun";
 import { and, eq, inArray } from "drizzle-orm";
+import { ConversationStore } from "../conversation";
 import { DatabaseConnector, type TDatabaseHandle } from "../database";
 import { ESubscriptionMode, EventBus } from "../events";
 import { ERejectionCode } from "../events/catalog";
-import type { TAccountKeys } from "../identity";
+import { IdentityService, type TAccountKeys } from "../identity";
 import { MessagingAdapter } from "../messaging";
 import { EMessagePlatform, type TAttachmentRef, type TAttachmentStore } from "../messaging/types";
+import { EPushResult, FcmClient } from "./fcm";
+import { encryptForDevice } from "./web-push";
+
+const DEFAULT_FCM_URL = "https://fcm.googleapis.com";
 
 // The supported image type the bytes really are, by their leading bytes; undefined for any other
 // content
@@ -47,6 +54,39 @@ export function imageTypeOf(data: Uint8Array): TOption<string> {
   return undefined;
 }
 
+// The push of a row: its whole text when the JSON fits APP_PUSH_MAX_BYTES, else the longest start
+// of it, cut between code points, that does
+export function appPush(
+  conversationKey: string,
+  messageId: number,
+  revision: number,
+  text: string,
+): TAppPush {
+  const push = { conversationKey, messageId, revision, text, truncated: false };
+
+  if (Buffer.byteLength(JSON.stringify(push)) <= APP_PUSH_MAX_BYTES) {
+    return push;
+  }
+
+  let room =
+    APP_PUSH_MAX_BYTES - Buffer.byteLength(JSON.stringify({ ...push, text: "", truncated: true }));
+  let cut = "";
+
+  for (const char of text) {
+    // as JSON writes it, without the quotes
+    const size = Buffer.byteLength(JSON.stringify(char)) - 2;
+
+    if (size > room) {
+      break;
+    }
+
+    room -= size;
+    cut += char;
+  }
+
+  return { ...push, text: cut, truncated: true };
+}
+
 // NOTE: the App channel: the images the app uploads, kept on the assistant's data volume, one
 // file per id, listed in app_media. It is the app's attachment store; the app has nothing to send.
 // It also keeps the app's devices in app_devices, and which accounts have an open app stream at
@@ -62,6 +102,9 @@ export class AppChannel implements TAttachmentStore {
   // what the edge last reported, while its live connection is open; memory only
   private openStreams = new Set<string>();
   private edgeConnections = 0;
+  // undefined while push is off: no FCM credential is configured
+  private fcm: TOption<FcmClient>;
+  private pushBackoffMs = [5_000, 30_000, 120_000];
 
   private constructor() {}
 
@@ -80,7 +123,7 @@ export class AppChannel implements TAttachmentStore {
 
   // NOTE: the read model has its own live consumer, so its update never waits behind a command
   // on the app consumer's lanes
-  public setup(): Promise<void> {
+  public async setup(): Promise<void> {
     MessagingAdapter.instance.registerAttachmentStore(this);
 
     // a deleted plain chat leaves no image behind, sent or only uploaded
@@ -105,6 +148,86 @@ export class AppChannel implements TAttachmentStore {
         }
 
         this.logger.info(`Deleted ${rows.length} images of ${conversationKey}`);
+      },
+    });
+
+    // NOTE: one push for each reply, delivery or notice row on the app channel, to every device of
+    // the account, while it has no app stream open. The row is stored already, whatever FCM does.
+    // A token FCM no longer knows unregisters its device and is not tried again; any other failure
+    // is retried, then logged and acked
+    EventBus.instance.subscribe({
+      consumer: "app",
+      type: EEventType.ConversationChanged,
+      mode: ESubscriptionMode.Durable,
+      backoffMs: this.pushBackoffMs,
+      handler: async (event, ctx) => {
+        const { conversationKey, ownerKey, revision, messageId } = event.payload;
+        const fcm = this.fcm;
+        const accountId = IdentityService.instance.accountIdOf(ownerKey);
+
+        if (fcm === undefined || messageId === undefined || accountId === undefined) {
+          return;
+        }
+
+        if (this.hasOpenStream(accountId)) {
+          return;
+        }
+
+        const message = await ConversationStore.instance.findMessage(conversationKey, messageId);
+
+        if (message === undefined || message.channel !== EMessagePlatform.App) {
+          return;
+        }
+
+        const devices = await DatabaseConnector.instance.run((db) =>
+          db.select().from(appDevicesTable).where(eq(appDevicesTable.accountId, accountId)),
+        );
+        const plaintext = JSON.stringify(
+          appPush(conversationKey, messageId, revision, message.message),
+        );
+        const gone: string[] = [];
+        let failure: TOption<string>;
+
+        for (const device of devices) {
+          try {
+            const ciphertext = await encryptForDevice(
+              plaintext,
+              device.publicKey,
+              device.authSecret,
+            );
+
+            if ((await fcm.send(device.fcmToken, ciphertext)) === EPushResult.Unregistered) {
+              gone.push(device.id);
+            }
+          } catch (error) {
+            failure = String(error);
+            this.logger.warning(`Push to device ${device.id} failed: ${failure}`);
+          }
+        }
+
+        if (gone.length > 0) {
+          this.logger.info(`FCM no longer knows devices ${gone.join(", ")}; unregistering them`);
+          await ctx.transact(async (_tx, emit) => {
+            for (const deviceId of gone) {
+              emit(
+                EEventType.AppDeviceUnregisterRequested,
+                { deviceId, accountId },
+                deviceId,
+                "global",
+              );
+            }
+          });
+        }
+
+        if (failure === undefined) {
+          return;
+        }
+
+        if (!ctx.lastAttempt) {
+          throw new Error(failure);
+        }
+
+        this.logger.error(`Push of message ${messageId} in ${conversationKey} given up`);
       },
     });
 
@@ -186,7 +309,25 @@ export class AppChannel implements TAttachmentStore {
       },
     });
 
-    return this.load();
+    await Promise.all([this.load(), this.loadPush()]);
+  }
+
+  // NOTE: the credential is read only here, in the assistant; push stays off without it
+  private async loadPush(): Promise<void> {
+    const path = Bun.env.BELLACLAW_FCM_CREDENTIALS_PATH?.trim() ?? "";
+
+    if (path.length === 0 || !(await Bun.file(path).exists())) {
+      this.logger.info("Push is off: no FCM credential is configured");
+      return;
+    }
+
+    try {
+      this.fcm = await FcmClient.load(path, Bun.env.BELLACLAW_FCM_URL?.trim() || DEFAULT_FCM_URL);
+      this.logger.info("Push is on");
+    } catch {
+      // the error's text could quote the file
+      this.logger.error(`Push is off: the FCM credential at ${path} is not a service-account key`);
+    }
   }
 
   // whether the account has a registered device: the app is then its main channel
