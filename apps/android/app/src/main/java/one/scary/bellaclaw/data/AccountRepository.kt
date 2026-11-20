@@ -3,6 +3,8 @@ package one.scary.bellaclaw.data
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import one.scary.bellaclaw.data.local.SessionStore
 import one.scary.bellaclaw.data.remote.AccountBody
 import one.scary.bellaclaw.data.remote.ApiClient
@@ -25,12 +27,13 @@ import one.scary.bellaclaw.model.Session
 /**
  * The account on one server: the session, sign-in, sign-out and login links. Server addresses follow
  * [checkServerUrl]; `http://` only when [allowCleartext]. Each `suspend` call answers null on success
- * or why it failed.
+ * or why it failed. Sign-out holds [deviceLock], so the device does not register while it runs.
  */
 class AccountRepository(
     private val api: ApiClient,
     private val sessionStore: SessionStore,
     private val allowCleartext: Boolean,
+    private val deviceLock: Mutex,
 ) {
     private val pending = MutableStateFlow<PendingLink?>(null)
 
@@ -126,7 +129,7 @@ class AccountRepository(
     }
 
     /** Ends the session on the server, then here. A `401` ends it here too; any other failure keeps it. */
-    suspend fun signOut(): AccountError? {
+    suspend fun signOut(): AccountError? = deviceLock.withLock {
         val session = sessionStore.session.value ?: return null
         val result = api.postSignedIn<EmptyBody, OkBody>("/api/logout", EmptyBody)
         if (result is ApiResult.Success) {

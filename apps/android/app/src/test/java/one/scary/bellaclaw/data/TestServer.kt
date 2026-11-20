@@ -3,6 +3,7 @@ package one.scary.bellaclaw.data
 import java.io.File
 import java.nio.file.Files
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
@@ -39,7 +40,7 @@ class TestServer : ExternalResource() {
     fun store() = SessionStore(sessionFile)
 
     fun repository(store: SessionStore = store(), allowCleartext: Boolean = true) =
-        AccountRepository(ApiClient(store), store, allowCleartext)
+        AccountRepository(ApiClient(store), store, allowCleartext, Mutex())
 
     /** A store signed in to this server as `ada` with token `t0`. */
     suspend fun signedInStore(serverUrl: String = url): SessionStore = store().also { it.save(Session(serverUrl, "ada", "t0")) }

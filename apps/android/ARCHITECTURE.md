@@ -12,6 +12,7 @@ module; every dependency and plugin version lives in `gradle/libs.versions.toml`
 | `model` | Plain Kotlin types (`Chat`, `Message`, `ModelChoice`, `ModelSettings`, `Personality`, `SettingsSnapshot`, `Session`, `LoginLink`, `PendingLink`, `LinkStatus`, `AccountError`, …), and every type a ViewModel gets from a repository. No Android or Compose imports. |
 | `data` | One repository per kind of data: `ChatRepository` (chats, messages, typing, stream state), `SettingsRepository` (one `SettingsSnapshot` flow: providers, models, personality, theme), `AccountRepository` (the session, sign-in, sign-out, the pending login link). `ServerUrls.kt`: the server address rule and the login link parser. |
 | `data.remote` | `ApiClient`, the one HTTP client of the gateway's app API (OkHttp, kotlinx.serialization JSON), its request and answer bodies, and `ApiResult`. |
+| `data.push` | `PushRepository` (device registration, decrypted pushes as a flow), the device keys (`loadDeviceKeys`, `DeviceKeys`), RFC 8291 decryption (`decryptPush`), `PushTokens` (FCM's token, `FirebasePushTokens`). |
 | `data.local` | `SessionStore`: the server address, session token and username in one app-private file. |
 | `data.sample` | The in-memory sample data the repositories start from. Only `data` and previews read it. |
 | `ui.<feature>` | `signin`, `home`, `chat`, `settings`, `settings.models`, `settings.personality`, `settings.theme`. |
@@ -19,7 +20,7 @@ module; every dependency and plugin version lives in `gradle/libs.versions.toml`
 | `ui.theme` | Colour schemes, extra colour tokens, typography, `BellaClawTheme`. |
 | `ui.navigation` | Typed destinations and the two `NavHost`s. |
 | `ui` (root) | `MainActivity`, `AppViewModel` (theme, signed in or not, a waiting login link), `appContainer()` for factories. |
-| root | `BellaClawApplication` and `AppContainer` (wiring only). |
+| root | `BellaClawApplication` and `AppContainer` (wiring only), `PushService` (FCM's entry point). |
 
 No domain/use-case layer: add one only for logic that two ViewModels share.
 
@@ -108,6 +109,33 @@ whenever it changes, since the app theme can override the device theme.
   `Session`, `LoginLink` and the sign-in UI states leave them out of `toString`, request bodies
   holding them are plain classes, and sign-in ViewModels keep them in plain `MutableStateFlow`s.
 
+## Push
+
+FCM is only a wake-up channel carrying ciphertext: the app uses `firebase-messaging` and nothing
+else from Firebase; the manifest turns off Firebase's default data collection and keeps messaging's own token making on.
+
+- Keys: a P-256 key pair in the Android Keystore (alias `push`, purpose agree-key; the private key
+  never leaves it) and a 16-byte auth secret in `files/push_auth_secret`, excluded from cloud backup
+  and device transfer. Made on first use and kept for the install; when either is missing (a restored
+  phone) both are made anew and the next registration sends them.
+- Registration: `PushRepository` sends `PUT /api/device` (`DeviceBody`: FCM token, public key and
+  auth secret, base64url) whenever a session starts (sign-in, or app start with a session) and
+  whenever FCM gives a new token (`PushService.onNewToken`), if there is a session and a token. A
+  failed registration is sent again at the next of those moments. Registration and sign-out
+  hold one `Mutex` from `AppContainer`, so the device never registers while signing out; the server
+  unregisters the device as part of logout. Once a session ends (sign-out or a `401`), the FCM token
+  is deleted; the next sign-in gets a new one.
+- Receiving: `PushService` (not exported) takes the data field `ciphertext` and hands it to
+  `PushRepository.receive`, which decrypts it (`decryptPush`: RFC 8291, `aes128gcm`, one record) into
+  `AppPush` and queues it on `pushes` (one collector; kept until collected). A message that arrives
+  signed out, or does not decrypt or parse, is dropped, and one still waiting when its session is no
+  longer the session is dropped when its turn comes.
+- Off without Firebase: the Google services plugin is applied only when `app/google-services.json`
+  exists (gitignored, never committed). Without it, or without Google Play services, `FirebasePushTokens`
+  gives no token and push is simply off.
+- Never log a push payload, a key, the auth secret or an FCM token; `DeviceBody` is a plain class.
+- Test seams: `DeviceKeys.agree` (the ECDH step, so JVM tests use a software key) and `PushTokens`.
+
 ## Wiring
 
 `BellaClawApplication` creates one `AppContainer` on first use, which creates the `SessionStore`,
@@ -127,6 +155,9 @@ they wait with `uiState.first { … }` and read `uiState.value` only before the 
 `Dispatchers.Main`; repositories that take a scope get the test's `backgroundScope`, and a fixed
 `Clock` where dates matter.
 
+Push tests run the whole decryption with a software P-256 key (`DeviceKeys.agree`) against the RFC 8291
+Appendix A vector and messages encrypted as the server does, and replace `PushTokens` with a fake.
+
 ## Extension points
 
 Later chunks change repository internals, not their public `Flow`/`suspend` surface, so ViewModels
@@ -137,8 +168,7 @@ stay as they are:
   `ChatRepository.isStreamOpen`, `isTyping` and the sample typing timer. Network writes that must
   finish after the screen is gone run in the application scope the repositories already receive.
 - Storage (settings, cached history): a local store in `data.local` behind the same repositories.
-- Push: a messaging service at the app root that hands decrypted messages to `ChatRepository`;
-  Keystore code lives in `data`.
+- Push notifications: collect `PushRepository.pushes` (see Push).
 - Images: upload goes through `ChatRepository.send`; the UI already passes a content URI. Thumbnails
   are decoded by a `ThumbnailLoader` the chat Route builds on the `ContentResolver`; `ImageThumbnail`
   only shows the result for its current URI.
