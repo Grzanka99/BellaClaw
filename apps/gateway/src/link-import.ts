@@ -3,6 +3,8 @@ import type { AccountStore } from "./account-store";
 import type { TInternalApi } from "./internal-api";
 
 const logger = createLogger("LINK-IMPORT");
+// the assistant's hold on messages of an address being linked; a link not active after it is stuck
+const LINK_HOLD_MS = 10 * 60_000;
 
 // Requests a link for every row of account_chats, oldest first, one at a time: the next starts
 // once the link before is active, which removes its row. A row whose chat is linked to another
@@ -16,6 +18,9 @@ export async function importAccountChats(
   waitMs: number,
 ): Promise<void> {
   const skipped = new Set<string>();
+  // the row whose link is being made, and how many waits it has seen
+  let waitingChatId = "";
+  let waits = 0;
 
   for (;;) {
     const row = store.nextImportRow(skipped);
@@ -74,6 +79,19 @@ export async function importAccountChats(
       store.deleteImportRow(row.chatId);
       logger.info(`A chat of account ${row.accountId} is linked`);
       continue;
+    }
+
+    if (row.chatId !== waitingChatId) {
+      waitingChatId = row.chatId;
+      waits = 0;
+    }
+
+    waits += 1;
+
+    if (waits === Math.ceil(LINK_HOLD_MS / waitMs)) {
+      logger.error(
+        `The link of a chat of account ${row.accountId} is stuck; redrive its dead identity.link.* deliveries and restart the assistant (see docs/deployment.md)`,
+      );
     }
 
     await Bun.sleep(waitMs);
