@@ -15,6 +15,8 @@ const NO_DEAD_LETTER_NOTICE: ReadonlySet<string> = new Set([
   EEventType.MessageSent,
   EEventType.EventDeadLettered,
 ]);
+// the user's request succeeded before these consumers ran, so their failure has nothing to retry
+const NO_DEAD_LETTER_NOTICE_CONSUMERS: ReadonlySet<string> = new Set(["conversation-title"]);
 const SEventType = z.enum(EEventType);
 const SSupervisorNotice = z.object({ type: z.literal("notice"), text: z.string() });
 
@@ -94,7 +96,10 @@ export class Notices {
           return;
         }
 
-        if (NO_DEAD_LETTER_NOTICE.has(event.payload.eventType)) {
+        if (
+          NO_DEAD_LETTER_NOTICE.has(event.payload.eventType) ||
+          NO_DEAD_LETTER_NOTICE_CONSUMERS.has(event.payload.consumer)
+        ) {
           return;
         }
 

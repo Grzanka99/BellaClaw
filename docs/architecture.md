@@ -11,7 +11,7 @@ BellaClaw is a Bun workspace orchestrated by Turborepo:
 | --- | --- |
 | `@bellaclaw/assistant` | Messaging, AI orchestration, authorization, scheduling, memory, settings, and the Turso database connection. |
 | `@bellaclaw/log-viewer` | Hono routes, query parsing, assets, and behavior-log rendering. |
-| `@bellaclaw/dashboard` | Per-user web control panel: accounts, sessions, chat links, message history, fact graph and model settings. |
+| `@bellaclaw/dashboard` | Per-user web control panel: accounts, sessions, chat links, message history, fact graph, model and personality settings. |
 | `@bellaclaw/behavior-logs` | Behavior event types, SQLite schema, read/write access, and log CLI tools. |
 | `@bellaclaw/database` | Drizzle schema, the enums it stores, migrations, and drizzle-kit configs. |
 | `@bellaclaw/shared` | Primitives every workspace needs: `TOption`, `AsyncQueue`, the logger, and `REPOSITORY_ROOT`. |
@@ -86,7 +86,11 @@ chat's turn runs on the provider the app's message names: Main on its model and 
 compaction on its model, and every other purpose on that provider's saved preference for it, else
 its default. When the turn starts, the provider's catalog must still list the model, with the
 effort, else the turn fails with a reply saying the model is no longer available instead of running
-on another model.
+on another model. Its persona is the account's setting for plain chats
+(`ai.plainChats.useBellaPersona` and `ai.plainChats.persona`): Bella's, Bella's plus the text, the
+text alone, or none. After each completed turn of an untitled plain chat, the `conversation-title`
+consumer of `turn.completed` makes one Utility-model call on the account's settings and Conversation stores the
+title on the registry row with `conversation.changed`.
 
 Specialists receive only role-specific tools and cannot delegate again. Scheduling can dry-run a
 job with automations, which starts a scheduled-task agent run without MCP tools. Only the Memory

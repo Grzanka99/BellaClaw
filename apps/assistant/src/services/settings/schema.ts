@@ -12,6 +12,11 @@ export enum EConfigKey {
   AiInstructionsTimezone = "ai.instructions.timezone",
   AiInstructionsTimeFormat = "ai.instructions.timeFormat",
   AiInstructionsPreferredReplyLength = "ai.instructions.preferredReplyLength",
+  // the persona of every plain chat of the app: Bella's persona when "true", followed by
+  // AiPlainChatsPersona when that is not empty; only AiPlainChatsPersona when "false"; no persona
+  // when "false" and AiPlainChatsPersona is empty. The Bella conversation keeps Bella's persona
+  AiPlainChatsUseBellaPersona = "ai.plainChats.useBellaPersona",
+  AiPlainChatsPersona = "ai.plainChats.persona",
 }
 
 export type TConfigRecord = { [key in EConfigKey]: string };
@@ -27,6 +32,8 @@ export const DefaultConfigRecord: TConfigRecord = {
   [EConfigKey.AiInstructionsTimezone]: "Europe/Warsaw",
   [EConfigKey.AiInstructionsTimeFormat]: "24-hour format (e.g. 14:30, not 2:30 PM)",
   [EConfigKey.AiInstructionsPreferredReplyLength]: "1-3 sentences",
+  [EConfigKey.AiPlainChatsUseBellaPersona]: "true",
+  [EConfigKey.AiPlainChatsPersona]: "",
 };
 
 const SNonEmptyString = z.string().trim().min(1);
@@ -52,6 +59,8 @@ export const ConfigValidators: { [key in EConfigKey]: z.ZodType<string> } = {
   [EConfigKey.AiInstructionsTimezone]: STimezone,
   [EConfigKey.AiInstructionsTimeFormat]: SNonEmptyString,
   [EConfigKey.AiInstructionsPreferredReplyLength]: SNonEmptyString,
+  [EConfigKey.AiPlainChatsUseBellaPersona]: z.enum(["true", "false"]),
+  [EConfigKey.AiPlainChatsPersona]: z.string().trim(),
 };
 
 const KNOWN_CONFIG_KEYS = new Set<string>(Object.values(EConfigKey));

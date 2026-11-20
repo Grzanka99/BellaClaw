@@ -21,11 +21,13 @@ import {
   dashboardAccountMessagePath,
   dashboardAccountModelPath,
   dashboardAccountPath,
+  dashboardAccountPersonalityPath,
   dashboardChatLinkPath,
   SDashboardActivationCheckRequest,
   SDashboardAppMessage,
   SDashboardLinkRequest,
   SDashboardModelUpdate,
+  SDashboardPersonalityUpdate,
   type TDashboardAccount,
   type TDashboardActivationCheck,
   type TDashboardAppMessageAccepted,
@@ -37,6 +39,7 @@ import {
   type TDashboardMessageDeleted,
   type TDashboardModelChoice,
   type TDashboardModelState,
+  type TDashboardPersonality,
   type TOption,
 } from "@bellaclaw/shared";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
@@ -257,6 +260,57 @@ async function updateModel(
   );
 }
 
+function createPersonality(settings: TConfigRecord): TDashboardPersonality {
+  return {
+    bellaPersona: settings[EConfigKey.AiInstructionsPersona],
+    plainChatsUseBellaPersona: settings[EConfigKey.AiPlainChatsUseBellaPersona] === "true",
+    plainChatsPersona: settings[EConfigKey.AiPlainChatsPersona],
+  };
+}
+
+// the settings.update.requested command a change in chat makes, so Settings validates the values
+// the same way: a blank Bella persona or no field at all is refused. The trace names the account's
+// Bella conversation
+async function updatePersonality(
+  { ownerKey, conversationKey }: TAccountKeys,
+  body: unknown,
+): Promise<TConfigRecord> {
+  const update = SDashboardPersonalityUpdate.safeParse(body);
+
+  if (!update.success) {
+    throw new Error(
+      update.error.issues.map((issue) => [...issue.path, issue.message].join(": ")).join(", "),
+    );
+  }
+
+  const updates: TConfigUpdate[] = [];
+
+  if (update.data.bellaPersona !== undefined) {
+    updates.push({ key: EConfigKey.AiInstructionsPersona, value: update.data.bellaPersona });
+  }
+
+  if (update.data.plainChatsUseBellaPersona !== undefined) {
+    updates.push({
+      key: EConfigKey.AiPlainChatsUseBellaPersona,
+      value: String(update.data.plainChatsUseBellaPersona),
+    });
+  }
+
+  if (update.data.plainChatsPersona !== undefined) {
+    updates.push({ key: EConfigKey.AiPlainChatsPersona, value: update.data.plainChatsPersona });
+  }
+
+  return requestOutcome(
+    pendingUpdates,
+    { turnId: createSystemTurnId(), chatId: conversationKey, platform: undefined },
+    ownerKey,
+    EEventType.SettingsUpdateRequested,
+    { ownerKey, updates },
+    COMMAND_TIMEOUT_MS,
+    "Settings update timed out",
+  );
+}
+
 // A plain chat's model as the app chose it, checked against what the server offers: a provider of
 // its own that is usable now (its API key is set, its OAuth login is connected), a model that
 // provider lists, an effort the model supports
@@ -371,7 +425,8 @@ export async function handleInternalApiRequest(
   // ["", "internal", "activation-code", "check"], ["", "internal", "stream"],
   // ["", "internal", "links"],
   // ["", "internal", "links", chatKey],
-  // ["", "internal", "accounts", accountId], ["", "internal", "accounts", accountId, "model"] or
+  // ["", "internal", "accounts", accountId], ["", "internal", "accounts", accountId, "model"],
+  // ["", "internal", "accounts", accountId, "personality"] or
   // ["", "internal", "accounts", accountId, "messages", messageId] or
   // ["", "internal", "accounts", accountId, "conversations"] or
   // ["", "internal", "accounts", accountId, "conversations", conversationKey] or
@@ -398,6 +453,10 @@ export async function handleInternalApiRequest(
   const modelRoute =
     key.length > 0 &&
     pathname === dashboardAccountModelPath(key) &&
+    (request.method === "GET" || request.method === "PUT");
+  const personalityRoute =
+    key.length > 0 &&
+    pathname === dashboardAccountPersonalityPath(key) &&
     (request.method === "GET" || request.method === "PUT");
   const messageDeleteRoute =
     request.method === "DELETE" &&
@@ -426,6 +485,7 @@ export async function handleInternalApiRequest(
     !chatLinkRoute &&
     !accountRoute &&
     !modelRoute &&
+    !personalityRoute &&
     !messageDeleteRoute &&
     !appMessageRoute &&
     !conversationCreateRoute &&
@@ -633,6 +693,18 @@ export async function handleInternalApiRequest(
       };
 
       return Response.json(body);
+    }
+
+    if (personalityRoute) {
+      let settings: TConfigRecord;
+
+      if (request.method === "PUT") {
+        settings = await updatePersonality(account, await request.json());
+      } else {
+        settings = await SettingsService.instance.getAll(account.ownerKey);
+      }
+
+      return Response.json(createPersonality(settings));
     }
 
     if (request.method === "PUT") {

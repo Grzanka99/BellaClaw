@@ -237,7 +237,8 @@ a {
 }
 
 input,
-select {
+select,
+textarea {
   width: 100%;
   min-width: 0;
   min-height: var(--control-height);
@@ -266,8 +267,29 @@ select option {
   color: var(--foreground);
 }
 
+textarea {
+  padding: 0.5rem 0.75rem;
+  resize: vertical;
+}
+
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.toggle input {
+  flex: none;
+  width: 1.25rem;
+  min-height: 1.25rem;
+  accent-color: var(--primary);
+}
+
 input:disabled,
-select:disabled {
+select:disabled,
+textarea:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
@@ -277,7 +299,7 @@ select:disabled {
   grid-auto-columns: 1fr;
   grid-auto-flow: column;
   gap: 0.25rem;
-  max-width: 24rem;
+  max-width: 28rem;
   padding: 0.25rem;
   border-radius: var(--radius);
   background: var(--muted);
@@ -288,7 +310,7 @@ select:disabled {
   align-items: center;
   justify-content: center;
   min-height: calc(var(--control-height) - 0.5rem);
-  padding: 0 0.75rem;
+  padding: 0 0.5rem;
   border: 0;
   border-radius: calc(var(--radius) - 2px);
   background: transparent;

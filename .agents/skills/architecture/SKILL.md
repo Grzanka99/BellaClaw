@@ -44,7 +44,7 @@ only its own tables and reaches another service with a message: a **fact** it pu
   revives it.
 - A dead delivery appends `event.dead_lettered`; a dead command also appends `command.rejected`.
   Notices turns a dead fact into a chat notice, except for outbound types, `message.sent`, dead
-  letters and commands. `apps/assistant/scripts/redrive-events.ts` lists dead rows and sets chosen ones back
+  letters, commands and the `conversation-title` consumer. `apps/assistant/scripts/redrive-events.ts` lists dead rows and sets chosen ones back
   to pending for the next boot.
 - Boot deletes events older than 30 days whose deliveries are all done, with their delivery rows.
   Error text in `lastError` and `command.rejected` passes through `sanitizeErrorMessage`.
@@ -156,17 +156,28 @@ into `deleted`. A turn or a reply that reaches a deleted plain chat's lane store
 `message.authorized` and the turn facts carry the conversation's `kind`, which Authorization sets:
 Bella for a channel message, the registry's kind for an app message. A plain chat's message also carries the app's `model`
 (provider, model, effort), which the internal API checks against the server's catalog and the
-provider's API key or login, and the turn lays over the owner's settings; a failed plain-chat
+provider's API key or login, and the turn lays over the owner's settings; its persona is the
+account's plain-chat setting (`ai.plainChats.*`), which AgentHarness adds to the plain agent's prompt, with Bella's persona resolved by `injectConfig` exactly as in the Bella prompt; a failed plain-chat
 turn answers the failure reply without `ai.auth.diagnose`, which would switch the owner's provider; Commands passes its `!` messages to the turn, and Memory
 neither distils its turns nor drains it at boot.
+
+Conversation's durable consumer `conversation-title` takes each `turn.completed` of a listed plain chat
+whose title is still null, on a lane of its own per chat key, so the call never holds the chat's next
+turn: it reads that turn's message and reply, calls the account's Utility model outside any
+transaction, and in one `ctx.complete` writes `conversations.title` and emits `conversation.changed`.
+A deleted chat gets no row; a failed or empty answer is logged and acked, so it leaves no dead letter,
+and the chat's next completed turn tries again. The backoff retries a database failure in reading the
+exchange or storing the title; a crash redelivers at boot. A dead title delivery gets no notice: the
+reply was already sent.
 
 Table owners: `memories`, `conversation_summaries`, `conversations` → Conversation · `facts`,
 `fact_distillation_state` → Memory · `cron_engine_jobs` → Cron · `automations`,
 `automation_drafts` → Automations · `user_configs` → Settings · `calendars` → Calendar ·
 `message_authorizations` → Authorization · `identity_links` → Identity · `events`, `event_deliveries` → EventBus.
 
-Every change of a transcript (`memories`) raises the conversation's revision in `conversations`
-and emits `conversation.changed` with it and the owner key, in the same transaction. A change that is not an append
+Every change of a transcript (`memories`), and a plain chat's title, raises the conversation's
+revision in `conversations` and emits `conversation.changed` with it and the owner key, in the same
+transaction. A change that is not an append
 (a delete, or rows moved in by a merge) also sets `rewriteRevision` to that revision, and the fact
 carries it: a client synced at or above it fetches by cursor, below it reloads. Conversation writes the rows
 of a sent reply, notice or delivery from `message.sent`; a reply with neither `transcript` nor

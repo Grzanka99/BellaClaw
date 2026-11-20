@@ -1,18 +1,20 @@
 /** @jsxImportSource hono/jsx/dom */
 import { useEffect, useState } from "hono/jsx/dom";
-import type { TMeResponse } from "../api-types";
+import type { TDashboardPersonalityUpdate, TMeResponse } from "../api-types";
 import { ACCOUNT_CHANGED_EVENT, api, UNAUTHORIZED_EVENT } from "./api";
 import { FactsTab } from "./facts";
 import { HistoryTab } from "./history";
 import { ModelTab } from "./model";
+import { PersonalityTab } from "./personality";
 
-type TTab = "model" | "history" | "facts";
+type TTab = "model" | "personality" | "history" | "facts";
 
 // how often the account is read again while a link is being made
 const LINKING_POLL_MS = 3_000;
 
 const TABS: { id: TTab; label: string }[] = [
   { id: "model", label: "Model" },
+  { id: "personality", label: "Personality" },
   { id: "history", label: "History" },
   { id: "facts", label: "Facts" },
 ];
@@ -35,6 +37,9 @@ export function Dashboard({ me: initialMe, onLoggedOut, onAccountChanged }: TDas
   const [me, setMe] = useState(initialMe);
   // a new value mounts the visible tab again, which loads its data again
   const [panelVersion, setPanelVersion] = useState(0);
+  // the Personality tab's unsaved edits, only the fields the user changed, kept while the tab
+  // mounts again
+  const [personalityDraft, setPersonalityDraft] = useState<TDashboardPersonalityUpdate>({});
 
   useEffect(() => {
     const onHashChange = () => setTab(readTab());
@@ -85,19 +90,31 @@ export function Dashboard({ me: initialMe, onLoggedOut, onAccountChanged }: TDas
     onLoggedOut();
   }
 
+  // the personality belongs to the account, so an account with no chat has it too
   let content = (
-    <section class="card">
-      <h2>No chats yet</h2>
-      <p class="muted">
-        Send <code>!dashboard</code> to the bot in a chat and open the link to connect that chat.
-      </p>
-    </section>
+    <>
+      <section class="card">
+        <h2>No chats yet</h2>
+        <p class="muted">
+          Send <code>!dashboard</code> to the bot in a chat and open the link to connect that chat.
+        </p>
+      </section>
+      <PersonalityTab draft={personalityDraft} setDraft={setPersonalityDraft} />
+    </>
   );
 
   if (me.chats.length > 0) {
     let panel = <ModelTab key={panelVersion} />;
 
-    if (tab === "history") {
+    if (tab === "personality") {
+      panel = (
+        <PersonalityTab
+          key={panelVersion}
+          draft={personalityDraft}
+          setDraft={setPersonalityDraft}
+        />
+      );
+    } else if (tab === "history") {
       panel = <HistoryTab key={panelVersion} />;
     } else if (tab === "facts") {
       panel = <FactsTab key={panelVersion} />;

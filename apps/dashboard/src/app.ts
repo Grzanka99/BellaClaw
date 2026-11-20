@@ -5,6 +5,7 @@ import {
   createLogger,
   SDashboardAppMessage,
   SDashboardModelUpdate,
+  SDashboardPersonalityUpdate,
   type TDashboardLinkToken,
   type TOption,
   verifyDashboardLinkToken,
@@ -992,6 +993,32 @@ export function createApp({
     }
 
     const result = await internalApi.updateModel(c.var.account.publicId, body.data);
+
+    if ("error" in result) {
+      return c.json<TApiError>({ error: result.error }, result.status);
+    }
+
+    return c.json(result.data);
+  });
+
+  app.get("/api/personality", requireSession, async (c) => {
+    const result = await internalApi.getPersonality(c.var.account.publicId);
+
+    if ("error" in result) {
+      return c.json<TApiError>({ error: result.error }, result.status);
+    }
+
+    return c.json(result.data);
+  });
+
+  app.put("/api/personality", requireSession, async (c) => {
+    const body = await parseBody(c.req.raw, SDashboardPersonalityUpdate);
+
+    if (!body.success) {
+      return c.json(invalidBody(body.error), 400);
+    }
+
+    const result = await internalApi.updatePersonality(c.var.account.publicId, body.data);
 
     if ("error" in result) {
       return c.json<TApiError>({ error: result.error }, result.status);

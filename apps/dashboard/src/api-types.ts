@@ -13,12 +13,16 @@ import type {
 // sent; createdAt: epoch ms
 export type { THistoryMessage } from "@bellaclaw/database";
 // POST /api/conversations/:conversationKey/messages body and answer; model: a plain chat's model
+// GET and PUT /api/personality answer, and PUT /api/personality body (the fields to change, at
+// least one): Bella's persona and the persona of the plain chats
 export type {
   TDashboardAppMessage,
   TDashboardAppMessageAccepted,
   TDashboardModelChoice,
   TDashboardModelState,
   TDashboardModelUpdate,
+  TDashboardPersonality,
+  TDashboardPersonalityUpdate,
   TDashboardReasoningEffort,
   TDashboardServiceTier,
 } from "@bellaclaw/shared";

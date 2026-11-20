@@ -323,6 +323,53 @@ afterEach(async () => {
 });
 
 describe("linking an address to an account", () => {
+  test("into an account with settings of its own: it keeps each setting it has and takes the address's others", async () => {
+    await seedChat("signal:+905", "Europe/Warsaw");
+    const now = Date.now();
+    await database()
+      .insert(userConfigsTable)
+      .values([
+        {
+          ownerKey: "signal:+905",
+          key: EConfigKey.AiInstructionsLanguage,
+          value: "Polish",
+          createdAt: now,
+          updatedAt: now,
+        },
+        {
+          ownerKey: "account:acct-23",
+          key: EConfigKey.AiInstructionsLanguage,
+          value: "French",
+          createdAt: now,
+          updatedAt: now,
+        },
+        {
+          ownerKey: "account:acct-23",
+          key: EConfigKey.AiPlainChatsUseBellaPersona,
+          value: "false",
+          createdAt: now,
+          updatedAt: now,
+        },
+      ]);
+    stubFusion(0);
+    await setupOwners(async () => true);
+    await EventBus.instance.start();
+
+    await requestLink("acct-23", "+905");
+    await EventBus.instance.idle();
+
+    const settings = await SettingsService.instance.getAll("account:acct-23");
+    expect(settings[EConfigKey.AiInstructionsLanguage]).toBe("French");
+    expect(settings[EConfigKey.AiPlainChatsUseBellaPersona]).toBe("false");
+    expect(settings[EConfigKey.AiInstructionsTimezone]).toBe("Europe/Warsaw");
+    expect(
+      await database()
+        .select()
+        .from(userConfigsTable)
+        .where(eq(userConfigsTable.ownerKey, "signal:+905")),
+    ).toEqual([]);
+  });
+
   test("into an empty account: every owner's rows move to the account, the link becomes active, and running the moves again changes nothing", async () => {
     await seedChat("signal:+900", "Europe/Warsaw");
     await database().insert(conversationsTable).values({

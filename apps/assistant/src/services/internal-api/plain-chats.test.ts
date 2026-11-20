@@ -4,6 +4,7 @@ import {
   conversationsTable,
   EConversationKind,
   EEventType,
+  eventDeliveriesTable,
   eventsTable,
   factsTable,
   listConversations,
@@ -15,14 +16,16 @@ import {
   dashboardAccountConversationPath,
   dashboardAccountConversationsPath,
   type TDashboardStreamEvent,
+  type TOption,
 } from "@bellaclaw/shared";
 import { fauxAssistantMessage, type Message } from "@earendil-works/pi-ai";
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import type { AgentHarness } from "../ai/agent-harness";
 import { setupAiAuth } from "../ai/auth";
+import type { LlmClient } from "../ai/llm";
 import { decodeAiModelPreferences } from "../ai/model-preferences";
 import { aiModels } from "../ai/providers/registry";
-import { EAiProvider } from "../ai/types";
+import { EAiProvider, EModelPurpose } from "../ai/types";
 import { AppStream } from "../app-stream";
 import { AuthorizationService } from "../authorization";
 import { Commands } from "../commands";
@@ -45,6 +48,7 @@ const GPT = { provider: "openrouter", model: "openai/gpt-5", effort: "low" };
 const HAIKU = { provider: "openrouter", model: "anthropic/claude-haiku-4.5", effort: "off" };
 
 type TRunArgs = Parameters<AgentHarness["runMain"]>[0];
+type TCompleteTextArgs = Parameters<LlmClient["completeText"]>[0];
 
 const previousOpenrouterKey = Bun.env.OPENROUTER_API_KEY;
 
@@ -91,10 +95,12 @@ function reply(args: TRunArgs, text: string) {
 // the pipeline from the internal API to the transcript and Memory on a fresh bus, with a scripted
 // model: the Bella agent and the plain agent answer apart. Memory distils a fact from every user
 // message it reads; streamed: what the app stream sent. storedSettings: Settings and the AI auth
-// diagnosis run for real instead of every owner reading the default settings
+// diagnosis run for real instead of every owner reading the default settings. completeText: the
+// Utility call that writes a plain chat's title
 async function start(
   runPlain = mock(async (args: TRunArgs) => reply(args, `Plain reply to ${args.prompt}`)),
   storedSettings = false,
+  completeText = mock(async (_args: TCompleteTextArgs): Promise<TOption<string>> => "Trip plans"),
 ) {
   if (storedSettings) {
     SettingsService.instance.setup();
@@ -107,6 +113,7 @@ async function start(
   const runMain = mock(async (args: TRunArgs) => reply(args, `Bella reply to ${args.prompt}`));
   Object.assign(MessageHandler.instance, {
     ai: { runMain, runPlain, compactConversation: mock(async () => undefined) },
+    llm: { completeText },
   });
   Object.assign(FactDistiller.instance, {
     distill: mock(async (window: { messages: { id: number; author: string }[] }) =>
@@ -129,7 +136,7 @@ async function start(
   await IdentityService.instance.setup();
   await AuthorizationService.instance.setup();
   await EventBus.instance.start();
-  return { runMain, runPlain, streamed };
+  return { runMain, runPlain, completeText, streamed };
 }
 
 async function request(method: string, path: string, body?: unknown) {
@@ -631,4 +638,205 @@ test("deleting a plain chat leaves no transcript rows, summary or registry entry
       .from(conversationsTable)
       .where(eq(conversationsTable.ownerKey, `account:${accountId}`)),
   ).toEqual([]);
+});
+
+async function titleOf(conversationKey: string) {
+  const row = await DatabaseConnector.instance.database
+    .select({ title: conversationsTable.title, revision: conversationsTable.revision })
+    .from(conversationsTable)
+    .where(eq(conversationsTable.conversationKey, conversationKey))
+    .get();
+  return row;
+}
+
+// boots the bus again with the title delivery of the chat's first turn.completed pending, as a
+// crash leaves it
+async function replayTitle(conversationKey: string) {
+  const [completed] = await DatabaseConnector.instance.database
+    .select({ seq: eventsTable.seq })
+    .from(eventsTable)
+    .where(
+      and(eq(eventsTable.type, EEventType.TurnCompleted), eq(eventsTable.key, conversationKey)),
+    )
+    .orderBy(asc(eventsTable.seq));
+  await DatabaseConnector.instance.database
+    .update(eventDeliveriesTable)
+    .set({ status: "pending", attempts: 0 })
+    .where(
+      and(
+        eq(eventDeliveriesTable.eventSeq, completed?.seq ?? 0),
+        eq(eventDeliveriesTable.consumer, "conversation-title"),
+      ),
+    );
+  await EventBus.instance.stop();
+  Object.assign(EventBus, { _instance: undefined });
+  MessageHandler.instance.setup();
+  await EventBus.instance.start();
+  await EventBus.instance.idle();
+}
+
+test("the first reply of a plain chat writes one title, which the stream announces and the list shows; later turns keep it", async () => {
+  const { runMain, completeText, streamed } = await start();
+  const accountId = `acct-${crypto.randomUUID()}`;
+  const keys = account(accountId);
+  const chat = await createChat(accountId);
+
+  await send(accountId, chat, { clientMessageId: "m-1", text: "Plan a trip", model: GPT });
+
+  expect(completeText).toHaveBeenCalledTimes(1);
+  const titleCall = completeText.mock.calls[0]?.[0];
+  expect(titleCall?.purpose).toBe(EModelPurpose.Utility);
+  expect(titleCall?.settings).toBe(DefaultConfigRecord);
+  expect(JSON.parse(titleCall?.prompt ?? "")).toEqual({
+    message: "Plan a trip",
+    reply: "Plain reply to Plan a trip",
+  });
+  const titled = await titleOf(chat);
+  expect(titled?.title).toBe("Trip plans");
+  // the title raised the revision after the turn's, and the stream carried it
+  expect(streamed.filter((event) => event.type === "changed").at(-1)).toEqual({
+    type: "changed",
+    accountId,
+    conversationKey: chat,
+    revision: titled?.revision ?? 0,
+    rewriteRevision: 0,
+  });
+  expect(
+    (await listConversations(DatabaseConnector.instance.database, keys)).map((row) => [
+      row.conversationKey,
+      row.title,
+    ]),
+  ).toEqual([
+    [keys.conversationKey, undefined],
+    [chat, "Trip plans"],
+  ]);
+
+  // a second turn and the Bella conversation call nothing
+  completeText.mockImplementation(async () => "Another title");
+  await send(accountId, chat, { clientMessageId: "m-2", text: "And hotels?", model: GPT });
+  await send(accountId, keys.conversationKey, { clientMessageId: "b-1", text: "Hi" });
+  expect(runMain).toHaveBeenCalledTimes(1);
+  expect(completeText).toHaveBeenCalledTimes(1);
+  expect((await titleOf(chat))?.title).toBe("Trip plans");
+});
+
+test("a plain chat whose first turn fails takes its title from the next completed turn", async () => {
+  const runPlain = mock(async (args: TRunArgs) => reply(args, `Plain reply to ${args.prompt}`));
+  runPlain.mockImplementationOnce(async () => {
+    throw new Error("provider down");
+  });
+  const { completeText } = await start(runPlain);
+  const accountId = `acct-${crypto.randomUUID()}`;
+  const chat = await createChat(accountId);
+
+  await send(accountId, chat, { clientMessageId: "m-1", text: "Hello", model: GPT });
+  expect(await eventsOf(EEventType.TurnFailed)).toHaveLength(1);
+  expect(completeText).toHaveBeenCalledTimes(0);
+
+  completeText.mockImplementation(async () => "Trip plans");
+  await send(accountId, chat, { clientMessageId: "m-2", text: "Plan a trip", model: GPT });
+  expect(completeText).toHaveBeenCalledTimes(1);
+  expect(JSON.parse(completeText.mock.calls[0]?.[0].prompt ?? "")).toEqual({
+    message: "Plan a trip",
+    reply: "Plain reply to Plan a trip",
+  });
+  expect((await titleOf(chat))?.title).toBe("Trip plans");
+});
+
+test("a title answer of several lines is stored as its first line", async () => {
+  const completeText = mock(
+    async (_args: TCompleteTextArgs): Promise<TOption<string>> => "\n Trips \nHotels",
+  );
+  await start(undefined, false, completeText);
+  const accountId = `acct-${crypto.randomUUID()}`;
+  const chat = await createChat(accountId);
+
+  await send(accountId, chat, { clientMessageId: "m-1", text: "Plan a trip", model: GPT });
+
+  expect((await titleOf(chat))?.title).toBe("Trips");
+});
+
+test("a plain chat whose first title call fails takes its title after its next completed turn", async () => {
+  const completeText = mock(async (_args: TCompleteTextArgs): Promise<TOption<string>> => {
+    throw new Error("provider down");
+  });
+  await start(undefined, false, completeText);
+  const accountId = `acct-${crypto.randomUUID()}`;
+  const chat = await createChat(accountId);
+
+  await send(accountId, chat, { clientMessageId: "m-1", text: "Hello", model: GPT });
+  expect((await titleOf(chat))?.title).toBeNull();
+
+  completeText.mockImplementation(async () => "Hotels");
+  await send(accountId, chat, { clientMessageId: "m-2", text: "And hotels?", model: GPT });
+  expect(completeText).toHaveBeenCalledTimes(2);
+  expect(JSON.parse(completeText.mock.calls[1]?.[0].prompt ?? "")).toEqual({
+    message: "And hotels?",
+    reply: "Plain reply to And hotels?",
+  });
+  expect((await titleOf(chat))?.title).toBe("Hotels");
+});
+
+test("a failed or empty title call leaves the plain chat untitled and usable, with no dead letter; a crash before the store writes the title on replay", async () => {
+  const completeText = mock(async (_args: TCompleteTextArgs): Promise<TOption<string>> => {
+    throw new Error("provider down");
+  });
+  const { runPlain } = await start(undefined, false, completeText);
+  const accountId = `acct-${crypto.randomUUID()}`;
+  const chat = await createChat(accountId);
+  const empty = await createChat(accountId);
+
+  await send(accountId, chat, { clientMessageId: "m-1", text: "Hello", model: GPT });
+  completeText.mockImplementation(async () => undefined);
+  await send(accountId, empty, { clientMessageId: "m-1", text: "Hello", model: GPT });
+  await send(accountId, chat, { clientMessageId: "m-2", text: "Still there?", model: GPT });
+
+  expect(runPlain).toHaveBeenCalledTimes(3);
+  expect(completeText).toHaveBeenCalledTimes(3);
+  expect((await titleOf(chat))?.title).toBeNull();
+  expect((await titleOf(empty))?.title).toBeNull();
+  expect(await eventsOf(EEventType.EventDeadLettered)).toEqual([]);
+  expect((await history(chat)).map((row) => row.text)).toEqual([
+    "Hello",
+    "Plain reply to Hello",
+    "Still there?",
+    "Plain reply to Still there?",
+  ]);
+
+  // the first turn's delivery pending again, as a crash between the call and the store leaves it
+  completeText.mockImplementation(async () => "Greetings\nA chat that starts with a hello.");
+  await replayTitle(chat);
+  expect(completeText).toHaveBeenCalledTimes(4);
+  expect(JSON.parse(completeText.mock.calls[3]?.[0].prompt ?? "")).toEqual({
+    message: "Hello",
+    reply: "Plain reply to Hello",
+  });
+  expect((await titleOf(chat))?.title).toBe("Greetings");
+});
+
+test("a plain chat deleted before its title arrives gets none, and nothing fails", async () => {
+  const accountId = `acct-${crypto.randomUUID()}`;
+  let chat = "";
+  let deleted: TOption<Response>;
+  // the chat is deleted on its own lane while the title call runs
+  const completeText = mock(async (_args: TCompleteTextArgs): Promise<TOption<string>> => {
+    deleted = await handleInternalApiRequest(
+      new Request(`http://internal${dashboardAccountConversationPath(accountId, chat)}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${SECRET}` },
+      }),
+      SECRET,
+    );
+    return "Too late";
+  });
+  const { streamed } = await start(undefined, false, completeText);
+  chat = await createChat(accountId);
+
+  await send(accountId, chat, { clientMessageId: "m-1", text: "Hello", model: GPT });
+
+  expect(completeText).toHaveBeenCalledTimes(1);
+  expect(deleted?.status).toBe(200);
+  expect(await titleOf(chat)).toBeUndefined();
+  expect(await eventsOf(EEventType.EventDeadLettered)).toEqual([]);
+  expect(streamed.at(-1)).toEqual({ type: "deleted", accountId, conversationKey: chat });
 });

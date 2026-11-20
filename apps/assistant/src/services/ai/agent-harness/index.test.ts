@@ -260,6 +260,91 @@ describe("AgentHarness", () => {
   });
 
   test.each([
+    ["Bella", "true", "", "<persona>\nYou are Bella, assistant Bellatrix.\n</persona>"],
+    [
+      "Bella plus text",
+      "true",
+      "Keep it short {{braces}}.",
+      "<persona>\nYou are Bella, assistant Bellatrix.\n\nKeep it short {{braces}}.\n</persona>",
+    ],
+    ["custom", "false", "Keep it short.", "<persona>\nKeep it short.\n</persona>"],
+    ["none", "false", "", undefined],
+  ])("the plain agent's persona in mode %s, and the Bella prompt the same in every mode", async (_mode, useBella, text, persona) => {
+    const harness = AgentHarness.instance as unknown as {
+      createSystemPrompt(args: TAgentRunArgs): Promise<string>;
+    };
+    const settings = {
+      ...DefaultConfigRecord,
+      [EConfigKey.AiInstructionsPersona]:
+        "You are Bella, assistant {{config.ai.instructions.assistantName}}.",
+    };
+    const prompt = (name: EAgentName, plainSettings: typeof settings) =>
+      harness.createSystemPrompt({
+        name,
+        prompt: "Hello",
+        conversationKey: "plain:acct:1",
+        ownerKey: "account:acct",
+        settings: plainSettings,
+        currentTimeContext: undefined,
+        platform: undefined,
+        trace: TEST_TRACE,
+        events: testEventRequester,
+        parentToolCallId: undefined,
+        signal: undefined,
+      });
+    const modeSettings = {
+      ...settings,
+      [EConfigKey.AiPlainChatsUseBellaPersona]: useBella,
+      [EConfigKey.AiPlainChatsPersona]: text,
+    };
+
+    const plain = await prompt(EAgentName.Plain, modeSettings);
+
+    if (persona === undefined) {
+      expect(plain).not.toContain("<persona>");
+      expect(plain).not.toContain("You are Bella");
+    } else {
+      expect(plain.startsWith(`${persona}\n\n<instructions>`)).toBe(true);
+      expect(plain.match(/<persona>/g)).toHaveLength(1);
+    }
+    const bella = await prompt(EAgentName.Main, modeSettings);
+    expect(bella).toBe(await prompt(EAgentName.Main, settings));
+    expect(bella).toContain("You are Bella, assistant Bellatrix.");
+  });
+
+  test("the plain prompt's persona holds the Bella prompt's persona text", async () => {
+    const harness = AgentHarness.instance as unknown as {
+      createSystemPrompt(args: TAgentRunArgs): Promise<string>;
+    };
+    const settings = {
+      ...DefaultConfigRecord,
+      [EConfigKey.AiInstructionsPersona]:
+        "You are {{config.ai.instructions.assistantName}}. Keep {{commands}} literal.",
+    };
+    const prompt = (name: EAgentName) =>
+      harness.createSystemPrompt({
+        name,
+        prompt: "Hello",
+        conversationKey: "plain:acct:1",
+        ownerKey: "account:acct",
+        settings,
+        currentTimeContext: undefined,
+        platform: undefined,
+        trace: TEST_TRACE,
+        events: testEventRequester,
+        parentToolCallId: undefined,
+        signal: undefined,
+      });
+    const persona = (text: string) => text.match(/<persona>\s*([\s\S]*?)\s*<\/persona>/)?.[1];
+
+    const plain = persona(await prompt(EAgentName.Plain));
+    const bella = persona(await prompt(EAgentName.Main));
+
+    expect(plain).toBe("You are Bellatrix. Keep {{commands}} literal.");
+    expect(plain).toBe(bella);
+  });
+
+  test.each([
     "empty",
     "malformed",
   ])("resumes a scheduled MCP question with %s current configuration", async (configuration) => {

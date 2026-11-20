@@ -155,7 +155,7 @@ export const AGENTS: Record<EAgentName, TAgentDefinition> = {
   },
   // NOTE: a plain chat of the app: web tools and MCP, no delegates, so no memory, calendar,
   // scheduling, settings or automations. Only MCP profiles with plainChats true are offered. Its
-  // persona is Bella's
+  // persona is the account's persona for plain chats, which AgentHarness adds
   [EAgentName.Plain]: {
     purpose: EModelPurpose.Main,
     maxIterations: 30,

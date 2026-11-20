@@ -210,6 +210,27 @@ describe("Notices", () => {
     expect(notices.map((row) => row.key)).toEqual(["signal:+100"]);
   });
 
+  test("a dead delivery to the title consumer gets no notice", async () => {
+    await bus.publish({
+      ...draft(EEventType.EventDeadLettered, "plain:acct-1:chat-1", {
+        eventId: "dead-turn",
+        eventType: EEventType.TurnCompleted,
+        consumer: "conversation-title",
+        attempts: 3,
+        error: "Error: boom",
+      }),
+      trace: { turnId: "app:test", chatId: "signal:+100", platform: undefined },
+    });
+    await bus.idle();
+
+    expect(sendText.mock.calls).toEqual([]);
+    const notices = await DatabaseConnector.instance.database
+      .select()
+      .from(eventsTable)
+      .where(eq(eventsTable.type, EEventType.NoticeReady));
+    expect(notices).toEqual([]);
+  });
+
   test("a dead event of no chat notifies every authorized chat", async () => {
     const authorized = spyOn(
       AuthorizationService.instance,

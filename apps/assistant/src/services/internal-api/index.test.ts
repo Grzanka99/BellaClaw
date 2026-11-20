@@ -244,6 +244,70 @@ describe("internal API", () => {
     expect(verify.mock.calls.every(([, , trace]) => trace.chatId === "bella:acct-1")).toBe(true);
   });
 
+  test("personality settings are read and changed per account, each field alone, with Settings' validation", async () => {
+    SettingsService.instance.setup();
+    await start();
+    const alice = `acct-${crypto.randomUUID()}`;
+    const bob = `acct-${crypto.randomUUID()}`;
+    const path = (accountId: string) => `/internal/accounts/${accountId}/personality`;
+    const read = async (accountId: string) => {
+      const response = await send("GET", path(accountId));
+      return [response.status, await response.json()];
+    };
+    const change = async (accountId: string, body: unknown) => {
+      const response = await send("PUT", path(accountId), body);
+      return [response.status, await response.json()];
+    };
+    const defaults = {
+      bellaPersona: DefaultConfigRecord[EConfigKey.AiInstructionsPersona],
+      plainChatsUseBellaPersona: true,
+      plainChatsPersona: "",
+    };
+
+    expect(await read(alice)).toEqual([200, defaults]);
+    expect(await change(alice, { bellaPersona: "  Be brief.  " })).toEqual([
+      200,
+      { ...defaults, bellaPersona: "Be brief." },
+    ]);
+    expect(await change(alice, { plainChatsUseBellaPersona: false })).toEqual([
+      200,
+      { ...defaults, bellaPersona: "Be brief.", plainChatsUseBellaPersona: false },
+    ]);
+    const changed = {
+      bellaPersona: "Be brief.",
+      plainChatsUseBellaPersona: false,
+      plainChatsPersona: "Code in Kotlin.",
+    };
+    expect(await change(alice, { plainChatsPersona: "Code in Kotlin." })).toEqual([200, changed]);
+    expect(await read(alice)).toEqual([200, changed]);
+    expect(
+      (await SettingsService.instance.getAll(`account:${alice}`))[
+        EConfigKey.AiPlainChatsUseBellaPersona
+      ],
+    ).toBe("false");
+
+    // invalid changes answer 400 and change nothing
+    for (const body of [
+      { bellaPersona: "   " },
+      { bellaPersona: "   ", plainChatsPersona: "Other" },
+      {},
+      { plainChatsUseBellaPersona: "yes" },
+      { mood: "dark" },
+    ]) {
+      const [status] = await change(alice, body);
+      expect(status).toBe(400);
+    }
+    expect(await read(alice)).toEqual([200, changed]);
+
+    // another account's settings are its own
+    expect(await read(bob)).toEqual([200, defaults]);
+    // an empty chats text with Bella's persona off is the mode with no persona
+    expect(await change(alice, { plainChatsPersona: "" })).toEqual([
+      200,
+      { ...changed, plainChatsPersona: "" },
+    ]);
+  });
+
   test("a message is deleted in the account's Bella conversation", async () => {
     const deletes: { chatId: string; key: string }[] = [];
     EventBus.instance.subscribe({

@@ -52,6 +52,7 @@ import type { TAttachmentRef } from "../../messaging/types";
 import { EConfigKey, type TConfigRecord } from "../../settings/schema";
 import { AGENTS, EAgentName } from "../agents";
 import baseInstructions from "../instructions/base-system.xml" with { type: "text" };
+import { injectConfig } from "../instructions/inject-config";
 import { createPlatformInstructions } from "../instructions/platform";
 import { readXmlAndInjectConfig } from "../instructions/read-xml-and-inject-config";
 import { emptyUsage, LlmClient, type TLlmModelConfig } from "../llm";
@@ -634,6 +635,25 @@ export class AgentHarness {
     }
 
     const parts = instructions.map((xml) => readXmlAndInjectConfig(xml, args.settings));
+
+    // NOTE: Bella's persona gets its config placeholders resolved and nothing else, as in the Bella
+    // prompt. The plain chats' own text is taken as written: it is no template, so a brace in it
+    // cannot break the prompt. With neither persona the prompt has no persona element
+    if (args.name === EAgentName.Plain) {
+      const personas: string[] = [];
+
+      if (args.settings[EConfigKey.AiPlainChatsUseBellaPersona] === "true") {
+        personas.push(injectConfig(args.settings[EConfigKey.AiInstructionsPersona], args.settings));
+      }
+
+      if (args.settings[EConfigKey.AiPlainChatsPersona].length > 0) {
+        personas.push(args.settings[EConfigKey.AiPlainChatsPersona]);
+      }
+
+      if (personas.length > 0) {
+        parts.unshift(`<persona>\n${personas.join("\n\n")}\n</persona>`);
+      }
+    }
 
     if (args.mcp !== undefined) {
       parts.push(

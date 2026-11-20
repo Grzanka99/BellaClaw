@@ -9,6 +9,7 @@ import {
   dashboardAccountMessagePath,
   dashboardAccountModelPath,
   dashboardAccountPath,
+  dashboardAccountPersonalityPath,
   dashboardChatLinkPath,
   SDashboardAccount,
   SDashboardActivationCheck,
@@ -20,6 +21,7 @@ import {
   SDashboardLinkStarted,
   SDashboardMessageDeleted,
   SDashboardModelState,
+  SDashboardPersonality,
   type TDashboardAccount,
   type TDashboardActivationCheck,
   type TDashboardActivationCheckRequest,
@@ -33,6 +35,8 @@ import {
   type TDashboardMessageDeleted,
   type TDashboardModelState,
   type TDashboardModelUpdate,
+  type TDashboardPersonality,
+  type TDashboardPersonalityUpdate,
   type TOption,
 } from "@bellaclaw/shared";
 import type { z } from "zod";
@@ -66,6 +70,11 @@ export type TInternalApi = {
     accountId: string,
     update: TDashboardModelUpdate,
   ): Promise<TInternalApiResult<TDashboardModelState>>;
+  getPersonality(accountId: string): Promise<TInternalApiResult<TDashboardPersonality>>;
+  updatePersonality(
+    accountId: string,
+    update: TDashboardPersonalityUpdate,
+  ): Promise<TInternalApiResult<TDashboardPersonality>>;
   deleteMessage(
     accountId: string,
     messageId: number,
@@ -96,6 +105,7 @@ export function createInternalApi(baseUrl: string, secret: string): TInternalApi
     schema: z.ZodType<T>,
     body: TOption<
       | TDashboardModelUpdate
+      | TDashboardPersonalityUpdate
       | TDashboardLinkRequest
       | TDashboardActivationCheckRequest
       | TDashboardAppMessage
@@ -153,6 +163,10 @@ export function createInternalApi(baseUrl: string, secret: string): TInternalApi
       call("GET", dashboardAccountModelPath(accountId), SDashboardModelState, undefined),
     updateModel: (accountId, update) =>
       call("PUT", dashboardAccountModelPath(accountId), SDashboardModelState, update),
+    getPersonality: (accountId) =>
+      call("GET", dashboardAccountPersonalityPath(accountId), SDashboardPersonality, undefined),
+    updatePersonality: (accountId, update) =>
+      call("PUT", dashboardAccountPersonalityPath(accountId), SDashboardPersonality, update),
     deleteMessage: (accountId, messageId) =>
       call(
         "DELETE",

@@ -140,6 +140,65 @@ export class ConversationStore {
     });
   }
 
+  // A turn's exchange in an untitled plain chat, for its title: the turn's user message and the
+  // reply that ended that turn. undefined when the chat is unlisted or titled already
+  public findTitleExchange(
+    conversationKey: string,
+    userMessageId: number,
+  ): Promise<TOption<{ message: string; reply: string }>> {
+    return this.database.run(async (db) => {
+      const conversation = await db
+        .select({ title: conversationsTable.title })
+        .from(conversationsTable)
+        .where(eq(conversationsTable.conversationKey, conversationKey))
+        .get();
+
+      if (conversation === undefined || conversation.title !== null) {
+        return undefined;
+      }
+
+      const message = await db
+        .select({ message: memoriesTable.message })
+        .from(memoriesTable)
+        .where(and(eq(memoriesTable.id, userMessageId), eq(memoriesTable.chatId, conversationKey)))
+        .get();
+      const reply = await db
+        .select({ message: memoriesTable.message })
+        .from(memoriesTable)
+        .where(
+          and(
+            eq(memoriesTable.chatId, conversationKey),
+            eq(memoriesTable.author, ERole.Assistant),
+            eq(memoriesTable.kind, "message"),
+            gt(memoriesTable.id, userMessageId),
+          ),
+        )
+        .orderBy(asc(memoriesTable.id))
+        .limit(1)
+        .get();
+
+      // the turn.completed of a listed chat is stored with both rows, which go only with the chat
+      if (message === undefined || reply === undefined) {
+        throw new Error("Title exchange rows are missing");
+      }
+
+      return { message: message.message, reply: reply.message };
+    });
+  }
+
+  // Writes a plain chat's title: false, writing nothing, when the chat is gone
+  public async setTitle(
+    db: TDatabaseHandle,
+    conversationKey: string,
+    title: string,
+  ): Promise<boolean> {
+    const updated = await db
+      .update(conversationsTable)
+      .set({ title })
+      .where(eq(conversationsTable.conversationKey, conversationKey));
+    return updated.rowsAffected === 1;
+  }
+
   // Deletes a plain chat of the owner: its transcript rows, its summary and its registry entry.
   // Returns false, deleting nothing, for a conversation that is no plain chat of this owner
   public async deletePlain(

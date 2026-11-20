@@ -85,6 +85,7 @@ const ALLOWED: Record<string, string> = {
   "memory -> identity": "IdentityService.resolve, a cached read model",
   "message-handler -> ai/agent-harness":
     "runMain, runPlain and compactConversation, the stateless engine",
+  "message-handler -> ai/llm": "driver: the Utility call that writes a plain chat's title",
   "message-handler -> ai/providers/registry":
     "checkAiModelChoice: the model catalog, a plain chat's model for its turn",
   "message-handler -> conversation": "the same component: Conversation's handler and its store",
@@ -104,6 +105,7 @@ const ALLOWED: Record<string, string> = {
   "scheduling -> automation/runner": "run-mode and outcome enums, timeout constant",
   "scheduling -> identity": "IdentityService.resolve and waitWhileLinking, a cached read model",
   "settings -> ai/model-preferences": "pure helpers",
+  "settings -> ai/instructions/inject-config": "injectConfig, the prompt builder's pure resolver",
   "signal -> messaging": "registerTransport: boot wiring of the driver, no stored state",
   "signal -> identity": "IdentityService.resolve, a cached read model",
   "signal -> messaging/chat-key": "pure functions",

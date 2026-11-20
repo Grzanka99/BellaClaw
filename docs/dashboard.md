@@ -115,7 +115,10 @@ Conversations:
   creation. Each has `conversationKey`, `kind`, `revision` and `rewriteRevision`; `lastMessage`,
   the newest row the app shows (as in history), once there is one; a plain chat also has
   `createdAt` (epoch ms) and, once written, `title`. An account with no message yet has
-  revision 0.
+  revision 0. After a completed turn of an untitled plain chat, the account's Utility model writes
+  its title (one line, at most 60 characters) from that turn's message and reply. The title raises
+  the chat's revision, so the stream sends `changed` and the app reads the list again. A failed
+  title call leaves the chat untitled, without a notice, until its next completed turn.
 - `POST /api/conversations`: creates a plain chat and answers `{ conversationKey, createdAt }`.
   The chat is listed at once, empty, at revision 0. The assistant builds the key.
 - `DELETE /api/conversations/:conversationKey`: deletes a plain chat with its history and summary,
@@ -172,15 +175,31 @@ assistant checks it again on a send and a delete.
 
 A plain chat is a side conversation of the app: web tools and MCP tools (the profiles that set
 `plainChats: true`; `vault` and `logs` stay closed), no memory, reminders, schedules, calendars, automations or settings, and `!` messages
-are plain text there. It speaks with Bella's persona.
+are plain text there. Its persona is the account's setting for all plain chats: Bella's persona,
+Bella's persona followed by the chats text, the chats text alone, or none when Bella's persona is
+off and the chats text is empty. The Bella conversation always speaks with Bella's persona.
+
+Personality, the same settings as the Personality tab:
+
+- `GET /api/personality`: `{ bellaPersona, plainChatsUseBellaPersona, plainChatsPersona }`.
+- `PUT /api/personality` with any of those fields, at least one: changes them and answers the new
+  settings. `bellaPersona` must not be blank, and its `{{config.<key>}}` placeholders must name
+  settings and still resolve, nested ones included, with the account's settings after the change;
+  any other text, `{{commands}}` included, stays as written. A change to any setting that leaves
+  them unresolvable is refused. `plainChatsPersona` may be empty. An invalid change answers 400 and changes nothing. Values are
+  trimmed.
 
 ## Tabs
 
 | Tab | Action |
 | --- | --- |
 | Model | View and change the AI provider, and the model, effort and service tier per model purpose. |
+| Personality | Edit Bella's persona, whether plain chats start from it, and the plain chats' own text. |
 | History | Browse the chat's messages, newest first, and delete single messages. |
 | Facts | A 3D graph of the facts BellaClaw remembers. Each fact links to its nearest neighbours by embedding similarity. |
+
+An account with no linked chat sees no tabs: a hint to link a chat and the Personality settings.
+Unsaved Personality edits stay while the page reloads the same account's tab.
 
 A settings change runs the same checks and provider verification as asking BellaClaw in chat.
 

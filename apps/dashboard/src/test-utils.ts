@@ -3,6 +3,7 @@ import {
   type TDashboardAppMessage,
   type TDashboardChatLink,
   type TDashboardLinkState,
+  type TDashboardPersonality,
   type TDashboardStreamEvent,
   type TOption,
 } from "@bellaclaw/shared";
@@ -12,8 +13,15 @@ import type { TInternalApi } from "./internal-api";
 // activationCode: the configured code, undefined for none; codeChecks: every code checked.
 // unreachableCalls: how many next requestLink, getChatLink or getAccount calls answer 502. Links are made active by activate().
 // sends: every message sent, accepted as the assistant does, without a turn. streams: the stream
-// opened by each openStream call, oldest first; push writes an event to the newest, drop closes it
+// opened by each openStream call, oldest first; push writes an event to the newest, drop closes it.
+// personalities: by account id
 export function createFakeAssistant() {
+  const personalities = new Map<string, TDashboardPersonality>();
+  const defaultPersonality: TDashboardPersonality = {
+    bellaPersona: "You are Bella.",
+    plainChatsUseBellaPersona: true,
+    plainChatsPersona: "",
+  };
   const links = new Map<string, { accountId: string; state: TDashboardLinkState }>();
   const requests: { accountId: string; chatKey: string }[] = [];
   const calls: { method: string; accountId: string }[] = [];
@@ -112,6 +120,19 @@ export function createFakeAssistant() {
 
       return unavailable;
     },
+    getPersonality: async (accountId) => {
+      calls.push({ method: "getPersonality", accountId });
+
+      return { data: personalities.get(accountId) ?? defaultPersonality };
+    },
+    updatePersonality: async (accountId, update) => {
+      calls.push({ method: "updatePersonality", accountId });
+
+      const next = { ...(personalities.get(accountId) ?? defaultPersonality), ...update };
+      personalities.set(accountId, next);
+
+      return { data: next };
+    },
     deleteMessage: async (accountId, messageId) => {
       calls.push({ method: "deleteMessage", accountId });
 
@@ -157,6 +178,7 @@ export function createFakeAssistant() {
     calls,
     codeChecks,
     sends,
+    personalities,
     state,
     streams,
     push(event: TDashboardStreamEvent) {

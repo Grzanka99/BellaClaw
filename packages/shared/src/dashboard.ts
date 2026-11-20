@@ -123,6 +123,24 @@ export const SDashboardModelUpdate = z
 
 export type TDashboardModelUpdate = z.infer<typeof SDashboardModelUpdate>;
 
+// GET and PUT /internal/accounts/:accountId/personality response. bellaPersona: the persona of the
+// Bella conversation; plainChatsUseBellaPersona: plain chats start from Bella's persona;
+// plainChatsPersona: added after Bella's persona when that is used, else the plain chats' whole
+// persona; empty with Bella's persona off, plain chats have none
+export const SDashboardPersonality = z.object({
+  bellaPersona: z.string(),
+  plainChatsUseBellaPersona: z.boolean(),
+  plainChatsPersona: z.string(),
+});
+
+export type TDashboardPersonality = z.infer<typeof SDashboardPersonality>;
+
+// PUT /internal/accounts/:accountId/personality body: the fields to change, at least one.
+// bellaPersona must not be blank; plainChatsPersona may be empty
+export const SDashboardPersonalityUpdate = SDashboardPersonality.partial().strict();
+
+export type TDashboardPersonalityUpdate = z.infer<typeof SDashboardPersonalityUpdate>;
+
 // DELETE /internal/accounts/:accountId/messages/:messageId response
 export const SDashboardMessageDeleted = z.object({ deletedMessageIds: z.array(z.number().int()) });
 
@@ -283,6 +301,10 @@ export function dashboardAccountPath(accountId: string): string {
 
 export function dashboardAccountModelPath(accountId: string): string {
   return `${dashboardAccountPath(accountId)}/model`;
+}
+
+export function dashboardAccountPersonalityPath(accountId: string): string {
+  return `${dashboardAccountPath(accountId)}/personality`;
 }
 
 export function dashboardAccountMessagePath(accountId: string, messageId: number): string {

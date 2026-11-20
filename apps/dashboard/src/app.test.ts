@@ -284,6 +284,8 @@ test("the account routes reach only the signed-in account's keys, and need a ses
     ["GET", "/api/facts"],
     ["GET", "/api/model"],
     ["PUT", "/api/model"],
+    ["GET", "/api/personality"],
+    ["PUT", "/api/personality"],
     ["DELETE", "/api/messages/1"],
   ] as const;
 
@@ -305,6 +307,8 @@ test("the account routes reach only the signed-in account's keys, and need a ses
     "getAccount",
     "getModel",
     "updateModel",
+    "getPersonality",
+    "updatePersonality",
     "deleteMessage",
   ]);
 
@@ -609,6 +613,8 @@ test("an account route naming another account than the session's is refused; one
     ["GET", "/api/facts"],
     ["GET", "/api/model"],
     ["PUT", "/api/model"],
+    ["GET", "/api/personality"],
+    ["PUT", "/api/personality"],
     ["DELETE", "/api/messages/1"],
     ["POST", "/api/link"],
     ["POST", "/api/logout"],
@@ -886,6 +892,47 @@ test("every account route serves the bearer token without Origin, for its own ac
   });
   expect(noOrigin.status).toBe(403);
   expect((await send("PUT", "/api/model", {}, alice.cookie)).status).not.toBe(403);
+});
+
+test("the app reads its personality settings, changes each and reads the change back; an invalid change answers 400 and changes nothing; another account's are its own", async () => {
+  const { sendApp, store } = createTestApp();
+  const alice = await registerApp(sendApp, store, "alice");
+  const bob = await registerApp(sendApp, store, "bob");
+  const read = async (token: string) => {
+    const response = await sendApp("GET", "/api/personality", undefined, token);
+    return [response.status, await response.json()];
+  };
+  const change = async (token: string, body: unknown) => {
+    const response = await sendApp("PUT", "/api/personality", body, token);
+    return [response.status, await response.json()];
+  };
+  const defaults = {
+    bellaPersona: "You are Bella.",
+    plainChatsUseBellaPersona: true,
+    plainChatsPersona: "",
+  };
+
+  expect(await read(alice.token)).toEqual([200, defaults]);
+  expect((await change(alice.token, { bellaPersona: "Be brief." }))[0]).toBe(200);
+  expect((await change(alice.token, { plainChatsUseBellaPersona: false }))[0]).toBe(200);
+  expect((await change(alice.token, { plainChatsPersona: "Code in Kotlin." }))[0]).toBe(200);
+  const changed = {
+    bellaPersona: "Be brief.",
+    plainChatsUseBellaPersona: false,
+    plainChatsPersona: "Code in Kotlin.",
+  };
+  expect(await read(alice.token)).toEqual([200, changed]);
+
+  // refused at the edge
+  for (const body of [{ plainChatsUseBellaPersona: "no" }, { bellaPersona: 1 }, { mood: "dark" }]) {
+    expect((await change(alice.token, body))[0]).toBe(400);
+  }
+  expect(await read(alice.token)).toEqual([200, changed]);
+
+  // another account reads and changes only its own
+  expect(await read(bob.token)).toEqual([200, defaults]);
+  expect((await change(bob.token, { plainChatsPersona: "Bob's" }))[0]).toBe(200);
+  expect(await read(alice.token)).toEqual([200, changed]);
 });
 
 // the assistant's database in a temporary file, migrated, with the reader the dashboard uses on it
