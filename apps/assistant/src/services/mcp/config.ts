@@ -47,7 +47,9 @@ export const SMcpProfile = z.object({
       }),
   ]),
   tools: z.array(z.string()).optional(),
-  contextArguments: z.record(z.string(), z.enum(["chatId", "turnId"])).default({}),
+  contextArguments: z
+    .record(z.string(), z.enum(["ownerKey", "conversationKey", "turnId"]))
+    .default({}),
   resources: z.boolean().default(true),
   prompts: z.boolean().default(true),
   sampling: z.boolean().default(true),

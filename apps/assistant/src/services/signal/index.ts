@@ -209,11 +209,18 @@ export class SignalSingleton implements TMessageTransport {
     }
 
     const chatId = createCanonicalChatKey(EMessagePlatform.Signal, message.sourceNumber);
+    // the trace names the conversation: an address with an active link means its account's
+    const conversationKey =
+      (await IdentityService.instance.resolve(chatId))?.conversationKey ?? chatId;
     await EventBus.instance.publish({
       type: EEventType.MessageReceived,
       source: "signal",
       key: chatId,
-      trace: { turnId: createMessageTurnId(), chatId, platform: EMessagePlatform.Signal },
+      trace: {
+        turnId: createMessageTurnId(),
+        chatId: conversationKey,
+        platform: EMessagePlatform.Signal,
+      },
       // the chat key is the conversation and the owner
       payload: {
         conversationKey: chatId,

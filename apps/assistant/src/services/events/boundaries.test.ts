@@ -54,10 +54,12 @@ const ALLOWED: Record<string, string> = {
   "commands -> mcp/auth": "status read",
   "commands -> mcp/config": "profile config reads",
   "authorization -> identity": "IdentityService.resolve, a cached read model",
+  "cron -> identity": "IdentityService.resolve for a fire's trace, a cached read model",
   "conversation -> ai/instructions/compaction.xml": "prompt text",
   "conversation -> ai/llm": "driver helper",
   "discord -> messaging": "registerTransport: boot wiring of the driver, no stored state",
   "discord -> messaging/chat-key": "pure functions",
+  "discord -> identity": "IdentityService.resolve for a message's trace, a cached read model",
   "identity -> messaging/chat-key": "pure functions",
   "events -> automation/runner": "enums the catalog payloads use",
   "internal-api -> ai/llm": "driver",
@@ -66,7 +68,10 @@ const ALLOWED: Record<string, string> = {
   "internal-api -> ai/tools/get-settings": "resolveAiProvider, a pure helper",
   "internal-api -> ai/tools/update-settings/ai-settings":
     "checks and verification that prepare the settings command",
+  "internal-api -> identity": "IdentityService.link, account and addressKey, a cached read model",
+  "internal-api -> messaging/chat-key": "pure functions",
   "mcp -> ai/llm": "driver helper",
+  "mcp -> identity": "IdentityService.resolve for a connection's trace, a cached read model",
   "memory -> ai/llm": "driver",
   "memory -> conversation": "ConversationStore.findChatIds read",
   "memory -> embedding": "driver",
@@ -107,7 +112,7 @@ const ALLOWED_WAITS: Record<string, string[]> = {
   // a message held while its address or account is being linked
   authorization: ["identity"],
   // an HTTP request, on no lane: it awaits the outcome through live subscriptions
-  "internal-api": ["settings", "conversation"],
+  "internal-api": ["settings", "conversation", "identity"],
 };
 
 const STATIC_IMPORT =

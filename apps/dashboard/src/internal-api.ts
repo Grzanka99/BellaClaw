@@ -1,10 +1,20 @@
 import {
   createLogger,
-  dashboardChatMessagePath,
-  dashboardChatModelPath,
+  DASHBOARD_LINKS_PATH,
+  dashboardAccountMessagePath,
+  dashboardAccountModelPath,
+  dashboardAccountPath,
+  dashboardChatLinkPath,
+  SDashboardAccount,
+  SDashboardChatLink,
   SDashboardError,
+  SDashboardLinkStarted,
   SDashboardMessageDeleted,
   SDashboardModelState,
+  type TDashboardAccount,
+  type TDashboardChatLink,
+  type TDashboardLinkRequest,
+  type TDashboardLinkStarted,
   type TDashboardMessageDeleted,
   type TDashboardModelState,
   type TDashboardModelUpdate,
@@ -19,17 +29,27 @@ const UNAVAILABLE = "The assistant is unavailable";
 
 const logger = createLogger("INTERNAL-API");
 
-// status 400 and 404 carry the assistant's own error; 502 is an unreachable or broken assistant
-export type TInternalApiResult<T> = { data: T } | { error: string; status: 400 | 404 | 502 };
+// status 400 carries the assistant's own error, and code the stable code of a rejected
+// command; 502 is an unreachable or broken assistant
+export type TInternalApiResult<T> =
+  | { data: T }
+  | { error: string; status: 400 | 502; code?: string };
 
+// accountId: an account's public id; chatKey: an address, as a link token carries it
 export type TInternalApi = {
-  getModel(chatId: string): Promise<TInternalApiResult<TDashboardModelState>>;
+  requestLink(
+    accountId: string,
+    chatKey: string,
+  ): Promise<TInternalApiResult<TDashboardLinkStarted>>;
+  getChatLink(chatKey: string): Promise<TInternalApiResult<TDashboardChatLink>>;
+  getAccount(accountId: string): Promise<TInternalApiResult<TDashboardAccount>>;
+  getModel(accountId: string): Promise<TInternalApiResult<TDashboardModelState>>;
   updateModel(
-    chatId: string,
+    accountId: string,
     update: TDashboardModelUpdate,
   ): Promise<TInternalApiResult<TDashboardModelState>>;
   deleteMessage(
-    chatId: string,
+    accountId: string,
     messageId: number,
   ): Promise<TInternalApiResult<TDashboardMessageDeleted>>;
 };
@@ -40,7 +60,7 @@ export function createInternalApi(baseUrl: string, secret: string): TInternalApi
     method: string,
     path: string,
     schema: z.ZodType<T>,
-    body: TOption<TDashboardModelUpdate>,
+    body: TOption<TDashboardModelUpdate | TDashboardLinkRequest>,
   ): Promise<TInternalApiResult<T>> {
     let status: number;
     let payload: unknown;
@@ -68,11 +88,11 @@ export function createInternalApi(baseUrl: string, secret: string): TInternalApi
       }
     }
 
-    if (status === 400 || status === 404) {
+    if (status === 400) {
       const failure = SDashboardError.safeParse(payload);
 
       if (failure.success) {
-        return { error: failure.data.error, status };
+        return { error: failure.data.error, status, code: failure.data.code };
       }
     }
 
@@ -82,14 +102,20 @@ export function createInternalApi(baseUrl: string, secret: string): TInternalApi
   }
 
   return {
-    getModel: (chatId) =>
-      call("GET", dashboardChatModelPath(chatId), SDashboardModelState, undefined),
-    updateModel: (chatId, update) =>
-      call("PUT", dashboardChatModelPath(chatId), SDashboardModelState, update),
-    deleteMessage: (chatId, messageId) =>
+    requestLink: (accountId, chatKey) =>
+      call("POST", DASHBOARD_LINKS_PATH, SDashboardLinkStarted, { accountId, chatKey }),
+    getChatLink: (chatKey) =>
+      call("GET", dashboardChatLinkPath(chatKey), SDashboardChatLink, undefined),
+    getAccount: (accountId) =>
+      call("GET", dashboardAccountPath(accountId), SDashboardAccount, undefined),
+    getModel: (accountId) =>
+      call("GET", dashboardAccountModelPath(accountId), SDashboardModelState, undefined),
+    updateModel: (accountId, update) =>
+      call("PUT", dashboardAccountModelPath(accountId), SDashboardModelState, update),
+    deleteMessage: (accountId, messageId) =>
       call(
         "DELETE",
-        dashboardChatMessagePath(chatId, messageId),
+        dashboardAccountMessagePath(accountId, messageId),
         SDashboardMessageDeleted,
         undefined,
       ),

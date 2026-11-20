@@ -6,10 +6,14 @@ import type { TChatMessage } from "./api-types";
 import type { TFact } from "./fact-graph";
 
 export type TChatReader = {
-  // the chat's user and assistant messages with an id below `before`, newest first
-  listMessages(chatId: string, before: TOption<number>, limit: number): Promise<TChatMessage[]>;
-  // the chat's live facts
-  listFacts(chatId: string): Promise<TFact[]>;
+  // the conversation's user and assistant messages with an id below `before`, newest first
+  listMessages(
+    conversationKey: string,
+    before: TOption<number>,
+    limit: number,
+  ): Promise<TChatMessage[]>;
+  // the owner's live facts
+  listFacts(ownerKey: string): Promise<TFact[]>;
 };
 
 // NOTE: the assistant's database. The dashboard only reads it; writes go through the internal API.
@@ -17,9 +21,9 @@ export function createChatReader(url: string, authToken: string): TChatReader {
   const db = drizzle({ connection: { url, authToken } });
 
   return {
-    async listMessages(chatId, before, limit) {
+    async listMessages(conversationKey, before, limit) {
       const conditions = [
-        eq(memoriesTable.chatId, chatId),
+        eq(memoriesTable.chatId, conversationKey),
         eq(memoriesTable.kind, "message"),
         inArray(memoriesTable.author, ["user", "assistant"]),
       ];
@@ -56,7 +60,7 @@ export function createChatReader(url: string, authToken: string): TChatReader {
       return messages;
     },
 
-    async listFacts(chatId) {
+    async listFacts(ownerKey) {
       const rows = await db
         .select({
           id: factsTable.id,
@@ -67,7 +71,7 @@ export function createChatReader(url: string, authToken: string): TChatReader {
         .from(factsTable)
         .where(
           and(
-            eq(factsTable.chatId, chatId),
+            eq(factsTable.chatId, ownerKey),
             isNull(factsTable.supersededBy),
             isNull(factsTable.forgottenAt),
           ),

@@ -21,6 +21,7 @@ import {
   memoriesTable,
   userConfigsTable,
 } from "@bellaclaw/database";
+import { ADDRESS_LINKED_ELSEWHERE } from "@bellaclaw/shared";
 import { fauxAssistantMessage, type Message } from "@earendil-works/pi-ai";
 import { asc, eq, inArray, sql } from "drizzle-orm";
 import type { AgentHarness } from "../ai/agent-harness";
@@ -49,7 +50,7 @@ import { ScheduledDelivery } from "../scheduling/delivery";
 import { SettingsService } from "../settings";
 import { EConfigKey } from "../settings/schema";
 import { IdentityService } from ".";
-import { ADDRESS_LINKED_ELSEWHERE, EIdentityLinkState } from "./schema";
+import { EIdentityLinkState } from "./schema";
 
 const database = () => DatabaseConnector.instance.database;
 const originalActivationToken = Bun.env.BELLACLAW_ACTIVATION_TOKEN;

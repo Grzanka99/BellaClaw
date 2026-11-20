@@ -1,7 +1,7 @@
 /** @jsxImportSource hono/jsx/dom */
 import type { TOption } from "@bellaclaw/shared";
 import { useRef, useState } from "hono/jsx/dom";
-import type { TMeResponse } from "../api-types";
+import type { TLinkLoginRequest, TMeResponse } from "../api-types";
 import { api } from "./api";
 
 type TAuthCardProps = {
@@ -131,6 +131,72 @@ export function AuthCard({ token, onAuthenticated }: TAuthCardProps) {
         )}
         <button class="button" type="submit" disabled={busy}>
           {submitLabel}
+        </button>
+      </form>
+    </section>
+  );
+}
+
+type TLinkLoginCardProps = {
+  // a link of a chat linked to the account
+  token: string;
+  username: string;
+  onAuthenticated: (me: TMeResponse) => void;
+};
+
+// logs into the account of a linked chat, optionally setting a new password
+export function LinkLoginCard({ token, username, onAuthenticated }: TLinkLoginCardProps) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<TOption<string>>(undefined);
+  const form = useRef<HTMLFormElement>(null);
+
+  async function submit(event: Event) {
+    event.preventDefault();
+    const password = new FormData(form.current ?? undefined).get("password");
+    let body: TLinkLoginRequest = { token };
+
+    if (typeof password === "string" && password.length > 0) {
+      body = { token, password };
+    }
+
+    setBusy(true);
+    setError(undefined);
+    const result = await api<TMeResponse>("POST", "/api/link/login", body);
+
+    if ("error" in result) {
+      setBusy(false);
+      setError(result.error);
+      return;
+    }
+
+    onAuthenticated(result.data);
+  }
+
+  return (
+    <section class="card">
+      <h1>BellaClaw</h1>
+      <p class="muted">
+        This chat belongs to <strong>{username}</strong>. The link logs you in once.
+      </p>
+      <form class="stack" ref={form} onSubmit={submit}>
+        <label class="field">
+          <span>New password (optional)</span>
+          <input
+            name="password"
+            type="password"
+            autocomplete="new-password"
+            minlength={10}
+            maxlength={256}
+          />
+          <small>Leave empty to keep the current one</small>
+        </label>
+        {error !== undefined && (
+          <p class="alert" role="alert">
+            {error}
+          </p>
+        )}
+        <button class="button" type="submit" disabled={busy}>
+          Log in as {username}
         </button>
       </form>
     </section>

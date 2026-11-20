@@ -8,7 +8,7 @@
         "type": "http",
         "url": "${BELLACLAW_LOGS_MCP_URL:-http://127.0.0.1:8989/mcp}"
       },
-      "contextArguments": { "chatId": "chatId", "excludeTurnId": "turnId" }
+      "contextArguments": { "chatId": "conversationKey", "excludeTurnId": "turnId" }
     },
     {
       "id": "vault",

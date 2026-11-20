@@ -79,7 +79,7 @@ export const SDashboardServiceTier = z.enum(["default", "flex", "priority"]);
 
 export type TDashboardServiceTier = z.infer<typeof SDashboardServiceTier>;
 
-// GET and PUT /internal/chats/:chatId/model response
+// GET and PUT /internal/accounts/:accountId/model response
 export const SDashboardModelState = z.object({
   provider: z.string(),
   providers: z.array(z.string()),
@@ -106,7 +106,7 @@ export const SDashboardModelState = z.object({
 
 export type TDashboardModelState = z.infer<typeof SDashboardModelState>;
 
-// PUT /internal/chats/:chatId/model body: the AI arguments of the update-settings tool.
+// PUT /internal/accounts/:accountId/model body: the AI arguments of the update-settings tool.
 // aiProvider is one of `providers` and aiModelPurpose one of `purposes[].purpose`.
 export const SDashboardModelUpdate = z
   .object({
@@ -123,21 +123,71 @@ export const SDashboardModelUpdate = z
 
 export type TDashboardModelUpdate = z.infer<typeof SDashboardModelUpdate>;
 
-// DELETE /internal/chats/:chatId/messages/:messageId response
+// DELETE /internal/accounts/:accountId/messages/:messageId response
 export const SDashboardMessageDeleted = z.object({ deletedMessageIds: z.array(z.number().int()) });
 
 export type TDashboardMessageDeleted = z.infer<typeof SDashboardMessageDeleted>;
 
+// the rejection code of a link request for an address another account owns
+export const ADDRESS_LINKED_ELSEWHERE = "address-linked-elsewhere";
+
+export const SDashboardLinkState = z.enum(["migrating", "active"]);
+
+export type TDashboardLinkState = z.infer<typeof SDashboardLinkState>;
+
+// POST /internal/links body. accountId: the account's public id; chatKey: the address, as a link
+// token carries it
+export const SDashboardLinkRequest = z
+  .object({ accountId: z.string().min(1), chatKey: z.string().min(1) })
+  .strict();
+
+export type TDashboardLinkRequest = z.infer<typeof SDashboardLinkRequest>;
+
+// POST /internal/links response: the link is recorded as migrating and its cutover began
+export const SDashboardLinkStarted = z.object({ state: z.literal("migrating") });
+
+export type TDashboardLinkStarted = z.infer<typeof SDashboardLinkStarted>;
+
+// GET /internal/links/:chatKey response; no link when the address has none
+export const SDashboardChatLink = z.object({
+  link: z.object({ accountId: z.string(), state: SDashboardLinkState }).optional(),
+});
+
+export type TDashboardChatLink = z.infer<typeof SDashboardChatLink>;
+
+// GET /internal/accounts/:accountId response. conversationKey: the account's Bella conversation,
+// the key of its messages; ownerKey: the key of its facts and settings. links: oldest first,
+// linkedAt in epoch ms
+export const SDashboardAccount = z.object({
+  conversationKey: z.string(),
+  ownerKey: z.string(),
+  links: z.array(
+    z.object({ chatKey: z.string(), state: SDashboardLinkState, linkedAt: z.number().int() }),
+  ),
+});
+
+export type TDashboardAccount = z.infer<typeof SDashboardAccount>;
+
 // body of a 400 (invalid input or rejected command), 401 (bad or missing bearer) or 404 (unknown
-// route)
-export const SDashboardError = z.object({ error: z.string() });
+// route). code: the stable error code of a rejected command that has one
+export const SDashboardError = z.object({ error: z.string(), code: z.string().optional() });
 
 export type TDashboardError = z.infer<typeof SDashboardError>;
 
-export function dashboardChatModelPath(chatId: string): string {
-  return `/internal/chats/${encodeURIComponent(chatId)}/model`;
+export const DASHBOARD_LINKS_PATH = "/internal/links";
+
+export function dashboardChatLinkPath(chatKey: string): string {
+  return `${DASHBOARD_LINKS_PATH}/${encodeURIComponent(chatKey)}`;
 }
 
-export function dashboardChatMessagePath(chatId: string, messageId: number): string {
-  return `/internal/chats/${encodeURIComponent(chatId)}/messages/${messageId}`;
+export function dashboardAccountPath(accountId: string): string {
+  return `/internal/accounts/${encodeURIComponent(accountId)}`;
+}
+
+export function dashboardAccountModelPath(accountId: string): string {
+  return `${dashboardAccountPath(accountId)}/model`;
+}
+
+export function dashboardAccountMessagePath(accountId: string, messageId: number): string {
+  return `${dashboardAccountPath(accountId)}/messages/${messageId}`;
 }

@@ -115,7 +115,7 @@ bus.subscribe({
 - `ai-auth` → `settings`
 - `authorization` → `identity`: a message held while its address or its account is being linked.
   It waits on Identity's read model (`waitWhileLinking`), bounded from the message's arrival
-- `internal-api` → `settings`, `conversation`. An HTTP request is on no lane: it publishes the
+- `internal-api` → `settings`, `conversation`, `identity`. An HTTP request is on no lane: it publishes the
   command and awaits the outcome through live subscriptions.
 
 A new wait is a new edge there; the test fails on a cycle.
@@ -127,7 +127,8 @@ A call across services is allowed only when it changes no state:
 - Infrastructure: `DatabaseConnector`, `EventBus`, `AppLogger`, `startSpan`.
 - Cached read models: `SettingsService.getAll` (fed by `settings.changed`),
   `AuthorizationService.listAuthorizedChatIds` (fed by `authorization.changed`),
-  `IdentityService.resolve`, `linkedAccount`, `waitWhileLinking` and `listNoticeRecipients`
+  `IdentityService.resolve`, `linkedAccount`, `link`, `account`, `waitWhileLinking` and
+  `listNoticeRecipients`
   (loaded from `identity_links`, fed by `identity.link.started` and `identity.linked`).
 - Drivers: `LlmClient`, `EmbeddingClient`, `aiModels`, the Discord and Signal clients, `gws`.
 - The stateless engine: `AgentHarness.runMain`, `runScheduledTask`, `compactConversation`.

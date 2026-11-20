@@ -118,22 +118,6 @@ a {
   margin-left: auto;
 }
 
-.header .field {
-  flex: 1 1 100%;
-  order: 1;
-}
-
-.header .field > span {
-  display: none;
-}
-
-@media (min-width: 40rem) {
-  .header .field {
-    flex: 0 1 18rem;
-    order: 0;
-  }
-}
-
 .page {
   width: 100%;
   max-width: 64rem;

@@ -6,7 +6,7 @@ import type {
   TDashboardModelUpdate,
   TDashboardServiceTier,
 } from "../api-types";
-import { api, chatPath } from "./api";
+import { api } from "./api";
 import { Select } from "./select";
 
 type TSelection = TDashboardModelState["purposes"][number];
@@ -123,7 +123,7 @@ function PurposeCard({
   );
 }
 
-export function ModelTab({ chatId }: { chatId: string }) {
+export function ModelTab() {
   const [state, setState] = useState<TOption<TDashboardModelState>>(undefined);
   // unsaved choices by purpose
   const [drafts, setDrafts] = useState<Record<string, TSelection>>({});
@@ -135,7 +135,7 @@ export function ModelTab({ chatId }: { chatId: string }) {
   async function request(scope: string, method: string, update: TOption<TDashboardModelUpdate>) {
     setBusy(scope);
     setFailure(undefined);
-    const result = await api<TDashboardModelState>(method, chatPath(chatId, "model"), update);
+    const result = await api<TDashboardModelState>(method, "/api/model", update);
     setBusy(undefined);
 
     if ("error" in result) {

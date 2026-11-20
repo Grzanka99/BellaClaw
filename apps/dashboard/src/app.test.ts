@@ -1,122 +1,595 @@
+import { Database } from "bun:sqlite";
 import { expect, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createDashboardLinkToken } from "@bellaclaw/shared";
+import { ACCOUNT_HEADER } from "./account-header";
 import { AccountStore } from "./account-store";
 import { createApp } from "./app";
+import { createFakeAssistant } from "./test-utils";
 
 const ORIGIN = "https://dashboard.test";
 const SECRET = "test-secret";
 const PASSWORD = "correct horse battery";
 
-// an app on an in-memory store; readChatIds collects the chats whose data a route reached
-function createTestApp() {
-  const readChatIds: string[] = [];
-  const unavailable = async (chatId: string) => {
-    readChatIds.push(chatId);
-
-    return { error: "unavailable", status: 502 as const };
-  };
+// an app on a store at path, in memory by default, and a fake assistant; reads collects the keys
+// the reader got
+function createTestApp(path = ":memory:") {
+  const reads: string[] = [];
+  const assistant = createFakeAssistant();
+  const store = new AccountStore(path);
   const app = createApp({
     config: { publicOrigin: ORIGIN, secret: SECRET },
-    store: new AccountStore(":memory:"),
+    store,
     reader: {
-      listMessages: async (chatId) => {
-        readChatIds.push(chatId);
+      listMessages: async (conversationKey) => {
+        reads.push(conversationKey);
 
         return [];
       },
-      listFacts: async (chatId) => {
-        readChatIds.push(chatId);
+      listFacts: async (ownerKey) => {
+        reads.push(ownerKey);
 
         return [];
       },
     },
-    internalApi: { getModel: unavailable, updateModel: unavailable, deleteMessage: unavailable },
+    internalApi: assistant.internalApi,
     serveClient: async () => new Response("client"),
   });
 
-  function send(method: string, path: string, body?: unknown, cookie?: string) {
+  // account: the username of the account header, as a page that shows it sends
+  function send(method: string, path: string, body?: unknown, cookie?: string, account?: string) {
     const headers = new Headers({ Origin: ORIGIN });
 
     if (cookie !== undefined) {
       headers.set("Cookie", cookie);
     }
 
+    if (account !== undefined) {
+      headers.set(ACCOUNT_HEADER, account);
+    }
+
     return app.request(path, { method, headers, body: JSON.stringify(body) });
   }
 
-  // registers an account with a fresh link to the chat and returns its session cookie
-  async function register(username: string, chatId: string) {
-    const token = createDashboardLinkToken(SECRET, chatId, Date.now());
-    const response = await send("POST", "/api/register", { token, username, password: PASSWORD });
-
-    expect(response.status).toBe(200);
-
+  function cookieOf(response: Response) {
     return response.headers.get("Set-Cookie")?.split(";")[0] ?? "";
   }
 
-  return { send, register, readChatIds };
+  function token(chatKey: string) {
+    return createDashboardLinkToken(SECRET, chatKey, Date.now());
+  }
+
+  // registers an account with a fresh link to the chat; its link becomes active
+  async function register(username: string, chatKey: string) {
+    const response = await send("POST", "/api/register", {
+      token: token(chatKey),
+      username,
+      password: PASSWORD,
+    });
+
+    expect(response.status).toBe(200);
+    assistant.activate(chatKey);
+
+    return { cookie: cookieOf(response), publicId: store.findCredentials(username)?.publicId };
+  }
+
+  return { send, register, token, cookieOf, reads, assistant, store };
 }
 
-test("a link token links its chat exactly once, and a failed registration does not use it up", async () => {
-  const { send, register } = createTestApp();
-  const token = createDashboardLinkToken(SECRET, "chat-a", Date.now());
+test("registering sends a link request for the new account and uses the token once", async () => {
+  const { send, token, assistant, store } = createTestApp();
+  const link = token("signal:+100");
 
   const tooShort = await send("POST", "/api/register", {
-    token,
+    token: link,
     username: "alice",
     password: "short",
   });
   expect(tooShort.status).toBe(400);
-  expect(await (await send("POST", "/api/link/check", { token })).json()).toEqual({ valid: true });
+  expect(await (await send("POST", "/api/link/check", { token: link })).json()).toEqual({
+    valid: true,
+    chatKey: "signal:+100",
+  });
 
   const registered = await send("POST", "/api/register", {
-    token,
+    token: link,
     username: "alice",
     password: PASSWORD,
   });
   expect(registered.status).toBe(200);
   expect(await registered.json()).toEqual({
     username: "alice",
-    chats: [{ chatId: "chat-a", linkedAt: expect.any(Number) }],
+    chats: [{ chatKey: "signal:+100", state: "migrating", linkedAt: 1_000 }],
+  });
+  const publicId = store.findCredentials("alice")?.publicId;
+  expect(assistant.requests).toEqual([{ accountId: publicId ?? "", chatKey: "signal:+100" }]);
+
+  const again = await send("POST", "/api/register", {
+    token: link,
+    username: "bob",
+    password: PASSWORD,
+  });
+  expect(again.status).toBe(400);
+  expect(await (await send("POST", "/api/link/check", { token: link })).json()).toEqual({
+    valid: false,
+  });
+  expect(assistant.requests).toHaveLength(1);
+});
+
+test("logging in with a token and the signed-in link action send a link request for that account", async () => {
+  const { send, register, token, cookieOf, assistant } = createTestApp();
+  const alice = await register("alice", "signal:+100");
+
+  const loggedIn = await send("POST", "/api/login", {
+    username: "alice",
+    password: PASSWORD,
+    token: token("discord:200"),
+  });
+  expect(loggedIn.status).toBe(200);
+
+  const linked = await send(
+    "POST",
+    "/api/link",
+    { token: token("signal:+300") },
+    cookieOf(loggedIn),
+    "alice",
+  );
+  expect(linked.status).toBe(200);
+  expect((await linked.json()).chats.map((chat: { chatKey: string }) => chat.chatKey)).toEqual([
+    "signal:+100",
+    "discord:200",
+    "signal:+300",
+  ]);
+  expect(assistant.requests.slice(1)).toEqual([
+    { accountId: alice.publicId ?? "", chatKey: "discord:200" },
+    { accountId: alice.publicId ?? "", chatKey: "signal:+300" },
+  ]);
+});
+
+test("a chat linked to another account is refused as such", async () => {
+  const { send, register, token, assistant, store } = createTestApp();
+  const alice = await register("alice", "signal:+100");
+  const bob = await register("bob", "signal:+200");
+
+  const linked = await send(
+    "POST",
+    "/api/link",
+    { token: token("signal:+100") },
+    bob.cookie,
+    "bob",
+  );
+  expect(linked.status).toBe(409);
+  expect(await linked.json()).toEqual({ error: "This chat is linked to another account" });
+
+  const loggedIn = await send("POST", "/api/login", {
+    username: "bob",
+    password: PASSWORD,
+    token: token("signal:+100"),
+  });
+  expect(loggedIn.status).toBe(409);
+  expect(assistant.links.get("signal:+100")?.accountId).toBe(alice.publicId);
+
+  // registering checks first, so no account is left behind
+  const registered = await send("POST", "/api/register", {
+    token: token("signal:+100"),
+    username: "carol",
+    password: PASSWORD,
+  });
+  expect(registered.status).toBe(409);
+  expect(store.findCredentials("carol")).toBeUndefined();
+});
+
+test("a token of a linked chat logs into its account once, and can set a new password", async () => {
+  const { send, register, token, cookieOf, assistant } = createTestApp();
+  await register("alice", "signal:+100");
+  const link = token("signal:+100");
+
+  expect(await (await send("POST", "/api/link/check", { token: link })).json()).toEqual({
+    valid: true,
+    chatKey: "signal:+100",
+    username: "alice",
   });
 
-  // the same token again, by a new account and by a logged-in one
-  const again = await send("POST", "/api/register", { token, username: "bob", password: PASSWORD });
+  const loggedIn = await send("POST", "/api/link/login", {
+    token: link,
+    password: "a brand new password",
+  });
+  expect(loggedIn.status).toBe(200);
+  expect((await loggedIn.json()).username).toBe("alice");
+  expect((await send("GET", "/api/me", undefined, cookieOf(loggedIn))).status).toBe(200);
+
+  const again = await send("POST", "/api/link/login", { token: link });
   expect(again.status).toBe(400);
-  const bobCookie = await register("bob", "chat-b");
-  expect((await send("POST", "/api/link", { token }, bobCookie)).status).toBe(400);
-  expect(await (await send("POST", "/api/link/check", { token })).json()).toEqual({ valid: false });
-  expect(await (await send("GET", "/api/me", undefined, bobCookie)).json()).toEqual({
+
+  expect((await send("POST", "/api/login", { username: "alice", password: PASSWORD })).status).toBe(
+    401,
+  );
+  expect(
+    (await send("POST", "/api/login", { username: "alice", password: "a brand new password" }))
+      .status,
+  ).toBe(200);
+
+  // a link of an unlinked chat logs into nothing
+  expect((await send("POST", "/api/link/login", { token: token("signal:+999") })).status).toBe(400);
+  // the login link sent no link request
+  expect(assistant.requests).toHaveLength(1);
+});
+
+test("a token of a linked chat logs in without changing the password", async () => {
+  const { send, register, token } = createTestApp();
+  await register("alice", "signal:+100");
+
+  expect((await send("POST", "/api/link/login", { token: token("signal:+100") })).status).toBe(200);
+  expect((await send("POST", "/api/login", { username: "alice", password: PASSWORD })).status).toBe(
+    200,
+  );
+});
+
+test("the account routes reach only the signed-in account's keys, and need a session", async () => {
+  const { send, register, reads, assistant } = createTestApp();
+  const alice = await register("alice", "signal:+100");
+  const bob = await register("bob", "signal:+200");
+  const routes = [
+    ["GET", "/api/messages"],
+    ["GET", "/api/facts"],
+    ["GET", "/api/model"],
+    ["PUT", "/api/model"],
+    ["DELETE", "/api/messages/1"],
+  ] as const;
+
+  for (const [method, path] of routes) {
+    expect((await send(method, path, {})).status).toBe(401);
+  }
+
+  expect(reads).toEqual([]);
+  assistant.calls.length = 0;
+
+  for (const [method, path] of routes) {
+    await send(method, path, {}, alice.cookie);
+  }
+
+  expect(reads).toEqual([`bella:${alice.publicId}`, `account:${alice.publicId}`]);
+  expect(assistant.calls.every((call) => call.accountId === alice.publicId)).toBe(true);
+  expect(assistant.calls.map((call) => call.method)).toEqual([
+    "getAccount",
+    "getAccount",
+    "getModel",
+    "updateModel",
+    "deleteMessage",
+  ]);
+
+  reads.length = 0;
+  await send("GET", "/api/messages", undefined, bob.cookie);
+  expect(reads).toEqual([`bella:${bob.publicId}`]);
+  expect(await (await send("GET", "/api/me", undefined, bob.cookie)).json()).toEqual({
     username: "bob",
-    chats: [{ chatId: "chat-b", linkedAt: expect.any(Number) }],
+    chats: [{ chatKey: "signal:+200", state: "active", linkedAt: 1_000 }],
   });
 });
 
-test("a chat's routes answer 404 to another account and 401 without a session", async () => {
-  const { send, register, readChatIds } = createTestApp();
-  const aliceCookie = await register("alice", "chat-a");
-  await register("bob", "chat-b");
-  const routes = [
-    ["GET", "messages"],
-    ["GET", "facts"],
-    ["GET", "model"],
-    ["PUT", "model"],
-    ["DELETE", "messages/1"],
-  ] as const;
+test("a row of account_chats the import still holds counts as its account's link", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "dashboard-app-"));
+  const path = join(directory, "dashboard.db");
 
-  for (const [method, route] of routes) {
-    const foreign = await send(method, `/api/chats/chat-b/${route}`, undefined, aliceCookie);
-    expect(foreign.status).toBe(404);
+  try {
+    const { send, register, token, assistant, store } = createTestApp(path);
+    const alice = await register("alice", "signal:+100");
+    const bob = await register("bob", "signal:+200");
+    const db = new Database(path);
+    db.run(
+      "CREATE TABLE account_chats (chatId TEXT PRIMARY KEY, accountId INTEGER NOT NULL, linkedAt INTEGER NOT NULL)",
+    );
+    db.query("INSERT INTO account_chats VALUES ('signal:+500', ?, 1)").run(
+      store.findCredentials("alice")?.id ?? 0,
+    );
+    db.close();
+    const link = token("signal:+500");
 
-    const anonymous = await send(method, `/api/chats/chat-a/${route}`);
-    expect(anonymous.status).toBe(401);
+    expect(await (await send("POST", "/api/link/check", { token: link })).json()).toEqual({
+      valid: true,
+      chatKey: "signal:+500",
+      username: "alice",
+    });
+
+    const registered = await send("POST", "/api/register", {
+      token: link,
+      username: "carol",
+      password: PASSWORD,
+    });
+    expect(registered.status).toBe(409);
+    expect(store.findCredentials("carol")).toBeUndefined();
+
+    const linked = await send("POST", "/api/link", { token: link }, bob.cookie, "bob");
+    expect(linked.status).toBe(409);
+    const loggedIn = await send("POST", "/api/login", {
+      username: "bob",
+      password: PASSWORD,
+      token: link,
+    });
+    expect(loggedIn.status).toBe(409);
+    expect(assistant.requests.map((request) => request.chatKey)).toEqual([
+      "signal:+100",
+      "signal:+200",
+    ]);
+
+    // the refusals used nothing: the link logs into alice
+    const linkLogin = await send("POST", "/api/link/login", { token: link });
+    expect(linkLogin.status).toBe(200);
+    expect((await linkLogin.json()).username).toBe("alice");
+
+    // alice takes the chat into her own account
+    const own = await send(
+      "POST",
+      "/api/link",
+      { token: token("signal:+500") },
+      alice.cookie,
+      "alice",
+    );
+    expect(own.status).toBe(200);
+    expect(assistant.links.get("signal:+500")?.accountId).toBe(alice.publicId);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
   }
+});
 
-  expect(readChatIds).toEqual([]);
+test("a login link whose account read fails uses nothing: no session, password and link unchanged", async () => {
+  const { send, register, token, assistant } = createTestApp();
+  await register("alice", "signal:+100");
+  const link = token("signal:+100");
+  const getAccount = assistant.internalApi.getAccount;
+  let failures = 1;
+  assistant.internalApi.getAccount = async (accountId) => {
+    if (failures > 0) {
+      failures -= 1;
 
-  // her own chat is reachable, so the 404 above is the access check
-  expect((await send("GET", "/api/chats/chat-a/messages", undefined, aliceCookie)).status).toBe(
+      return { error: "The assistant is unavailable", status: 502 };
+    }
+
+    return getAccount(accountId);
+  };
+
+  const failed = await send("POST", "/api/link/login", {
+    token: link,
+    password: "a brand new password",
+  });
+  expect(failed.status).toBe(502);
+  expect(failed.headers.get("Set-Cookie")).toBeNull();
+  expect((await send("POST", "/api/login", { username: "alice", password: PASSWORD })).status).toBe(
     200,
   );
-  expect(readChatIds).toEqual(["chat-a"]);
+  expect(await (await send("POST", "/api/link/check", { token: link })).json()).toEqual({
+    valid: true,
+    chatKey: "signal:+100",
+    username: "alice",
+  });
+
+  const again = await send("POST", "/api/link/login", { token: link });
+  expect(again.status).toBe(200);
+});
+
+// the number of session rows of the store
+function countSessions(store: AccountStore) {
+  // biome-ignore lint/complexity/useLiteralKeys: a private field, read for the check
+  return store["db"].query<{ count: number }, []>("SELECT COUNT(*) AS count FROM sessions").get()
+    ?.count;
+}
+
+// the next getAccount call of the assistant answers 502
+function failNextAccountRead(assistant: ReturnType<typeof createFakeAssistant>) {
+  const getAccount = assistant.internalApi.getAccount;
+  let failures = 1;
+  assistant.internalApi.getAccount = async (accountId) => {
+    if (failures > 0) {
+      failures -= 1;
+
+      return { error: "The assistant is unavailable", status: 502 };
+    }
+
+    return getAccount(accountId);
+  };
+}
+
+test("the link action refuses an account other than the one the confirmation named, using nothing", async () => {
+  const { send, register, token, assistant } = createTestApp();
+  await register("alice", "signal:+100");
+  const bob = await register("bob", "signal:+200");
+  const link = token("signal:+300");
+
+  const refused = await send("POST", "/api/link", { token: link }, bob.cookie, "alice");
+  expect(refused.status).toBe(409);
+  expect(await refused.json()).toEqual({
+    error: "You are signed in to another account now",
+    code: "otherAccount",
+  });
+  expect(assistant.requests).toHaveLength(2);
+  expect(await (await send("POST", "/api/link/check", { token: link })).json()).toEqual({
+    valid: true,
+    chatKey: "signal:+300",
+  });
+
+  const linked = await send("POST", "/api/link", { token: link }, bob.cookie, "bob");
+  expect(linked.status).toBe(200);
+  expect(assistant.links.get("signal:+300")?.accountId).toBe(bob.publicId);
+});
+
+test("a new password set through a login link ends the account's other sessions; a plain login link does not", async () => {
+  const { send, register, token, cookieOf } = createTestApp();
+  const alice = await register("alice", "signal:+100");
+
+  const plain = await send("POST", "/api/link/login", { token: token("signal:+100") });
+  expect(plain.status).toBe(200);
+  expect((await send("GET", "/api/me", undefined, alice.cookie)).status).toBe(200);
+
+  const reset = await send("POST", "/api/link/login", {
+    token: token("signal:+100"),
+    password: "a brand new password",
+  });
+  expect(reset.status).toBe(200);
+  expect((await send("GET", "/api/me", undefined, alice.cookie)).status).toBe(401);
+  expect((await send("GET", "/api/me", undefined, cookieOf(plain))).status).toBe(401);
+  expect((await send("GET", "/api/me", undefined, cookieOf(reset))).status).toBe(200);
+});
+
+test("a failed account read leaves no session on any route that starts one", async () => {
+  const { send, register, token, assistant, store } = createTestApp();
+  await register("alice", "signal:+100");
+  // biome-ignore lint/complexity/useLiteralKeys: a private field, written for the check
+  store["db"].run("DELETE FROM sessions");
+
+  const attempts = [
+    ["/api/register", { token: token("signal:+200"), username: "bob", password: PASSWORD }],
+    ["/api/login", { username: "alice", password: PASSWORD }],
+    ["/api/login", { username: "alice", password: PASSWORD, token: token("signal:+300") }],
+    ["/api/link/login", { token: token("signal:+100") }],
+  ] as const;
+
+  for (const [path, body] of attempts) {
+    failNextAccountRead(assistant);
+    const response = await send("POST", path, body);
+    expect(response.status).toBe(502);
+    expect(response.headers.get("Set-Cookie")).toBeNull();
+    expect(countSessions(store)).toBe(0);
+  }
+});
+
+test("a token of a chat linked to another account is refused unused, and still logs into that account", async () => {
+  const { send, register, token, assistant } = createTestApp();
+  await register("alice", "signal:+100");
+  const bob = await register("bob", "signal:+200");
+  const link = token("signal:+100");
+
+  const linked = await send("POST", "/api/link", { token: link }, bob.cookie, "bob");
+  expect(linked.status).toBe(409);
+  const loggedIn = await send("POST", "/api/login", {
+    username: "bob",
+    password: PASSWORD,
+    token: link,
+  });
+  expect(loggedIn.status).toBe(409);
+  expect(assistant.requests).toHaveLength(2);
+
+  const linkLogin = await send("POST", "/api/link/login", { token: link });
+  expect(linkLogin.status).toBe(200);
+  expect((await linkLogin.json()).username).toBe("alice");
+});
+
+// the next call of the method waits for release(); entered resolves once it waits
+function holdNextCall<T extends (...args: never[]) => Promise<unknown>>(call: T) {
+  let release = () => {};
+  let enter = () => {};
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const entered = new Promise<void>((resolve) => {
+    enter = resolve;
+  });
+  let held = false;
+  const wrapped = (async (...args: Parameters<T>) => {
+    if (!held) {
+      held = true;
+      enter();
+      await released;
+    }
+
+    return call(...args);
+  }) as T;
+
+  return { wrapped, entered, release };
+}
+
+test("a login whose account read is held open while a login link sets a new password is refused and starts no session", async () => {
+  const { send, register, token, assistant, store } = createTestApp();
+  await register("alice", "signal:+100");
+  // biome-ignore lint/complexity/useLiteralKeys: a private field, written for the check
+  store["db"].run("DELETE FROM sessions");
+  const hold = holdNextCall(assistant.internalApi.getAccount);
+  assistant.internalApi.getAccount = hold.wrapped;
+
+  const login = send("POST", "/api/login", { username: "alice", password: PASSWORD });
+  await hold.entered;
+  const reset = await send("POST", "/api/link/login", {
+    token: token("signal:+100"),
+    password: "a brand new password",
+  });
+  expect(reset.status).toBe(200);
+  hold.release();
+
+  const response = await login;
+  expect(response.status).toBe(401);
+  expect(await response.json()).toEqual({ error: "Wrong username or password" });
+  expect(response.headers.get("Set-Cookie")).toBeNull();
+  expect(countSessions(store)).toBe(1);
+});
+
+test("a login with a token whose chat read is held open while a login link sets a new password is refused, leaving the token unused", async () => {
+  const { send, register, token, assistant, store } = createTestApp();
+  await register("alice", "signal:+100");
+  // biome-ignore lint/complexity/useLiteralKeys: a private field, written for the check
+  store["db"].run("DELETE FROM sessions");
+  const link = token("signal:+300");
+  const hold = holdNextCall(assistant.internalApi.getChatLink);
+  assistant.internalApi.getChatLink = hold.wrapped;
+
+  const login = send("POST", "/api/login", { username: "alice", password: PASSWORD, token: link });
+  await hold.entered;
+  const reset = await send("POST", "/api/link/login", {
+    token: token("signal:+100"),
+    password: "a brand new password",
+  });
+  expect(reset.status).toBe(200);
+  hold.release();
+
+  const response = await login;
+  expect(response.status).toBe(401);
+  expect(response.headers.get("Set-Cookie")).toBeNull();
+  expect(countSessions(store)).toBe(1);
+  expect(await (await send("POST", "/api/link/check", { token: link })).json()).toEqual({
+    valid: true,
+    chatKey: "signal:+300",
+  });
+  expect(assistant.requests.map((request) => request.chatKey)).toEqual(["signal:+100"]);
+});
+
+test("an account route naming another account than the session's is refused; one naming it, or none, is served", async () => {
+  const { send, register, assistant } = createTestApp();
+  const alice = await register("alice", "signal:+100");
+  const routes = [
+    ["GET", "/api/me"],
+    ["GET", "/api/messages"],
+    ["GET", "/api/facts"],
+    ["GET", "/api/model"],
+    ["PUT", "/api/model"],
+    ["DELETE", "/api/messages/1"],
+    ["POST", "/api/link"],
+    ["POST", "/api/logout"],
+  ] as const;
+  assistant.calls.length = 0;
+
+  for (const [method, path] of routes) {
+    const refused = await send(method, path, {}, alice.cookie, "bob");
+    expect(refused.status).toBe(409);
+    expect(await refused.json()).toEqual({
+      error: "You are signed in to another account now",
+      code: "otherAccount",
+    });
+  }
+
+  expect(assistant.calls).toEqual([]);
+
+  for (const account of ["alice", undefined]) {
+    expect((await send("GET", "/api/messages", undefined, alice.cookie, account)).status).toBe(200);
+    expect((await send("GET", "/api/facts", undefined, alice.cookie, account)).status).toBe(200);
+    expect((await send("GET", "/api/me", undefined, alice.cookie, account)).status).toBe(200);
+    expect((await send("DELETE", "/api/messages/1", undefined, alice.cookie, account)).status).toBe(
+      200,
+    );
+    // the fake assistant answers 502 for the model, past the session check
+    expect((await send("GET", "/api/model", undefined, alice.cookie, account)).status).toBe(502);
+    expect((await send("PUT", "/api/model", {}, alice.cookie, account)).status).not.toBe(409);
+  }
+
+  expect((await send("POST", "/api/logout", undefined, alice.cookie, "alice")).status).toBe(200);
+  expect((await send("GET", "/api/me", undefined, alice.cookie)).status).toBe(401);
 });

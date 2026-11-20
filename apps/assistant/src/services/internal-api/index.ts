@@ -2,10 +2,17 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { createSystemTurnId, type TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
 import { EEventType } from "@bellaclaw/database";
 import {
-  dashboardChatMessagePath,
-  dashboardChatModelPath,
+  DASHBOARD_LINKS_PATH,
+  dashboardAccountMessagePath,
+  dashboardAccountModelPath,
+  dashboardAccountPath,
+  dashboardChatLinkPath,
+  SDashboardLinkRequest,
   SDashboardModelUpdate,
+  type TDashboardAccount,
+  type TDashboardChatLink,
   type TDashboardError,
+  type TDashboardLinkStarted,
   type TDashboardMessageDeleted,
   type TDashboardModelState,
   type TOption,
@@ -27,8 +34,10 @@ import {
 } from "../ai/tools/update-settings/ai-settings";
 import { EAiProvider, EModelPurpose, SAiProvider } from "../ai/types";
 import { sanitizeErrorMessage } from "../app-logger/sanitizers";
-import { ESubscriptionMode, EventBus } from "../events";
+import { CommandRejectedError, ESubscriptionMode, EventBus } from "../events";
 import type { TEventPayloads } from "../events/catalog";
+import { IdentityService, type TAccountKeys } from "../identity";
+import { parseCanonicalChatKey } from "../messaging/chat-key";
 import { SettingsService, type TConfigUpdate } from "../settings";
 import { EConfigKey, type TConfigRecord } from "../settings/schema";
 
@@ -46,6 +55,7 @@ const SModelUpdate = SDashboardModelUpdate.extend({
 // commands waiting for their outcome, by the turn id of the command
 const pendingUpdates = new Map<string, PromiseWithResolvers<TConfigRecord>>();
 const pendingDeletes = new Map<string, PromiseWithResolvers<number[]>>();
+const pendingLinks = new Map<string, PromiseWithResolvers<void>>();
 let server: TOption<ReturnType<typeof Bun.serve>>;
 
 // NOTE: a request is no bus handler, so it has no ctx.request. It publishes the command under a
@@ -73,22 +83,33 @@ export function setupInternalApi(): void {
   });
   bus.subscribe({
     consumer: "internal-api",
+    type: EEventType.IdentityLinkStarted,
+    mode: ESubscriptionMode.Live,
+    backoffMs: [],
+    handler: async (event) => {
+      pendingLinks.get(event.trace.turnId)?.resolve();
+    },
+  });
+  bus.subscribe({
+    consumer: "internal-api",
     type: EEventType.CommandRejected,
     mode: ESubscriptionMode.Live,
     backoffMs: [],
     handler: async (event) => {
-      const error = new Error(event.payload.message);
+      const { code, message, errorCode } = event.payload;
+      const error = new CommandRejectedError(code, message, errorCode);
       pendingUpdates.get(event.trace.turnId)?.reject(error);
       pendingDeletes.get(event.trace.turnId)?.reject(error);
+      pendingLinks.get(event.trace.turnId)?.reject(error);
     },
   });
 }
 
-// publishes a command on the chat's lane and waits for the outcome the live subscriptions settle
+// publishes a command on the key's lane and waits for the outcome the live subscriptions settle
 async function requestOutcome<T extends EEventType, R>(
   pending: Map<string, PromiseWithResolvers<R>>,
   trace: TBehaviorTraceContext,
-  chatId: string,
+  key: string,
   type: T,
   payload: TEventPayloads[T],
   timeoutMs: number,
@@ -106,7 +127,7 @@ async function requestOutcome<T extends EEventType, R>(
       EventBus.instance.publish({
         type,
         source: "internal-api",
-        key: chatId,
+        key,
         trace,
         payload,
         causationId: undefined,
@@ -141,8 +162,12 @@ function createModelState(settings: TConfigRecord): TDashboardModelState {
   };
 }
 
-// the same checks, verification and settings.update.requested command as the update-settings tool
-async function updateModel(chatId: string, body: unknown): Promise<TConfigRecord> {
+// the same checks, verification and settings.update.requested command as the update-settings tool.
+// The trace names the account's Bella conversation.
+async function updateModel(
+  { ownerKey, conversationKey }: TAccountKeys,
+  body: unknown,
+): Promise<TConfigRecord> {
   const args = SModelUpdate.safeParse(body);
 
   if (!args.success) {
@@ -151,10 +176,10 @@ async function updateModel(chatId: string, body: unknown): Promise<TConfigRecord
     );
   }
 
-  const trace = { turnId: createSystemTurnId(), chatId, platform: undefined };
+  const trace = { turnId: createSystemTurnId(), chatId: conversationKey, platform: undefined };
   const updates: TConfigUpdate[] = [];
   const { settings } = await prepareAiSettingsUpdate(
-    chatId,
+    ownerKey,
     args.data,
     validateAiSettingsArgs(args.data),
     updates,
@@ -168,16 +193,45 @@ async function updateModel(chatId: string, body: unknown): Promise<TConfigRecord
   return requestOutcome(
     pendingUpdates,
     trace,
-    chatId,
+    ownerKey,
     EEventType.SettingsUpdateRequested,
-    { ownerKey: chatId, updates },
+    { ownerKey, updates },
     COMMAND_TIMEOUT_MS,
     "Settings update timed out",
   );
 }
 
-function errorResponse(error: string, status: number): Response {
-  const body: TDashboardError = { error };
+// publishes identity.link.requested and answers once the cutover began; it does not wait for
+// identity.linked
+async function requestLink(body: unknown): Promise<TDashboardLinkStarted> {
+  const request = SDashboardLinkRequest.safeParse(body);
+
+  if (!request.success) {
+    throw new Error("Invalid link request");
+  }
+
+  const { accountId, chatKey } = request.data;
+  const address = parseCanonicalChatKey(chatKey);
+
+  if (address === undefined) {
+    throw new Error("Invalid chat key");
+  }
+
+  await requestOutcome(
+    pendingLinks,
+    { turnId: createSystemTurnId(), chatId: chatKey, platform: undefined },
+    chatKey,
+    EEventType.IdentityLinkRequested,
+    { accountId, channel: address.platform, address: address.chatId },
+    COMMAND_TIMEOUT_MS,
+    "Link request timed out",
+  );
+
+  return { state: "migrating" };
+}
+
+function errorResponse(error: string, status: number, code: TOption<string>): Response {
+  const body: TDashboardError = { error, code };
 
   return Response.json(body, { status });
 }
@@ -192,43 +246,83 @@ export async function handleInternalApiRequest(
   if (
     !timingSafeEqual(digest(request.headers.get("authorization") ?? ""), digest(`Bearer ${secret}`))
   ) {
-    return errorResponse("Unauthorized", 401);
+    return errorResponse("Unauthorized", 401, undefined);
   }
 
   const { pathname } = new URL(request.url);
-  // ["", "internal", "chats", chatId, "model"] or
-  // ["", "internal", "chats", chatId, "messages", messageId]
+  // ["", "internal", "links"], ["", "internal", "links", chatKey],
+  // ["", "internal", "accounts", accountId], ["", "internal", "accounts", accountId, "model"] or
+  // ["", "internal", "accounts", accountId, "messages", messageId]
   const segments = pathname.split("/");
   const messageId = Number(segments[5]);
-  let chatId = "";
+  let key = "";
 
   try {
-    chatId = decodeURIComponent(segments[3] ?? "");
+    key = decodeURIComponent(segments[3] ?? "");
   } catch {
     // a malformed escape is an unknown route
   }
 
+  const linkRequestRoute = request.method === "POST" && pathname === DASHBOARD_LINKS_PATH;
+  const chatLinkRoute =
+    request.method === "GET" && key.length > 0 && pathname === dashboardChatLinkPath(key);
+  const accountRoute =
+    request.method === "GET" && key.length > 0 && pathname === dashboardAccountPath(key);
   const modelRoute =
-    pathname === dashboardChatModelPath(chatId) &&
+    key.length > 0 &&
+    pathname === dashboardAccountModelPath(key) &&
     (request.method === "GET" || request.method === "PUT");
   const messageDeleteRoute =
     request.method === "DELETE" &&
+    key.length > 0 &&
     Number.isSafeInteger(messageId) &&
-    pathname === dashboardChatMessagePath(chatId, messageId);
+    pathname === dashboardAccountMessagePath(key, messageId);
 
-  if (chatId.length === 0 || (!modelRoute && !messageDeleteRoute)) {
-    return errorResponse("Not found", 404);
+  if (!linkRequestRoute && !chatLinkRoute && !accountRoute && !modelRoute && !messageDeleteRoute) {
+    return errorResponse("Not found", 404, undefined);
   }
 
   try {
+    if (linkRequestRoute) {
+      return Response.json(await requestLink(await request.json()));
+    }
+
+    if (chatLinkRoute) {
+      const link = await IdentityService.instance.link(key);
+      const body: TDashboardChatLink = { link: undefined };
+
+      if (link !== undefined) {
+        body.link = { accountId: link.accountId, state: link.state };
+      }
+
+      return Response.json(body);
+    }
+
+    const account = await IdentityService.instance.account(key);
+
+    if (accountRoute) {
+      const body: TDashboardAccount = {
+        conversationKey: account.conversationKey,
+        ownerKey: account.ownerKey,
+        links: account.links.map((link) => ({
+          chatKey: IdentityService.instance.addressKey(link),
+          state: link.state,
+          linkedAt: link.linkedAt.getTime(),
+        })),
+      };
+
+      return Response.json(body);
+    }
+
     if (messageDeleteRoute) {
+      const { conversationKey } = account;
       const body: TDashboardMessageDeleted = {
         deletedMessageIds: await requestOutcome(
           pendingDeletes,
-          { turnId: createSystemTurnId(), chatId, platform: undefined },
-          chatId,
+          { turnId: createSystemTurnId(), chatId: conversationKey, platform: undefined },
+          conversationKey,
           EEventType.ConversationMessageDeleteRequested,
-          { chatId, messageId },
+          { chatId: conversationKey, messageId },
           DELETE_TIMEOUT_MS,
           // the command stays queued on the lane
           "The assistant is busy with this chat. The message is deleted once it finishes.",
@@ -239,21 +333,26 @@ export async function handleInternalApiRequest(
     }
 
     if (request.method === "PUT") {
-      return Response.json(createModelState(await updateModel(chatId, await request.json())));
+      return Response.json(createModelState(await updateModel(account, await request.json())));
     }
 
-    const settings = await SettingsService.instance.getAll(chatId);
+    const settings = await SettingsService.instance.getAll(account.ownerKey);
     await refreshAiModels(resolveAiProvider(settings), true);
 
     return Response.json(createModelState(settings));
   } catch (error) {
     let message = String(error);
+    let code: TOption<string>;
 
     if (error instanceof Error) {
       message = error.message;
     }
 
-    return errorResponse(sanitizeErrorMessage(message) ?? "", 400);
+    if (error instanceof CommandRejectedError) {
+      code = error.errorCode;
+    }
+
+    return errorResponse(sanitizeErrorMessage(message) ?? "", 400, code);
   }
 }
 

@@ -48,7 +48,11 @@ async function configure(transport: object, extra: object = {}) {
           description: "Fixture",
           instructions: "Use fixture tools",
           transport,
-          contextArguments: { chatId: "chatId", excludeTurnId: "turnId" },
+          contextArguments: {
+            chatId: "conversationKey",
+            ownerKey: "ownerKey",
+            excludeTurnId: "turnId",
+          },
           ...extra,
         },
       ],
@@ -140,7 +144,8 @@ describe("MCP runtime", () => {
       args: [join(import.meta.dir, "fixtures/server.ts")],
     });
     const session = await service.open({
-      chatId: "discord:a",
+      ownerKey: "account:a",
+      conversationKey: "discord:a",
       profileId: "fixture",
       turnId: "turn:now",
     });
@@ -166,11 +171,15 @@ describe("MCP runtime", () => {
         query: "hi",
         options: { limit: 2 },
         chatId: "discord:a",
+        ownerKey: "account:a",
         excludeTurnId: "turn:now",
       }),
     });
     await expect(read.execute("bad", { query: 12 })).rejects.toThrow("Invalid arguments");
-    const missingContext = await service.open({ chatId: "discord:missing", profileId: "fixture" });
+    const missingContext = await service.open({
+      ownerKey: "discord:missing",
+      profileId: "fixture",
+    });
     const missingContextRead = tool(missingContext, "read.foo");
     expect(JSON.stringify(missingContextRead.parameters)).not.toContain('"excludeTurnId"');
     await expect(
@@ -188,15 +197,21 @@ describe("MCP runtime", () => {
       ).content[0],
     ).toEqual({ type: "text", text: JSON.stringify({ marker: "kept" }) });
     const other = await service.open({
-      chatId: "discord:b",
+      ownerKey: "account:b",
+      conversationKey: "discord:b",
       profileId: "fixture",
       turnId: "other",
     });
     expect((await tool(other, "read.foo").execute("b", { query: "q" })).content[0]).toEqual({
       type: "text",
-      text: JSON.stringify({ query: "q", chatId: "discord:b", excludeTurnId: "other" }),
+      text: JSON.stringify({
+        query: "q",
+        chatId: "discord:b",
+        ownerKey: "account:b",
+        excludeTurnId: "other",
+      }),
     });
-    await service.disconnect("discord:a", "fixture");
+    await service.disconnect("account:a", "fixture");
     expect(session.signal.aborted).toBe(true);
     expect(other.signal.aborted).toBe(false);
     await expect(read.execute("closed", { query: "q" })).rejects.toThrow();
@@ -214,7 +229,7 @@ describe("MCP runtime", () => {
       },
       { tools: ["read.foo"], resources: false, prompts: false },
     );
-    const session = await service.open({ chatId: "a", profileId: "fixture" });
+    const session = await service.open({ ownerKey: "a", profileId: "fixture" });
     expect(session.tools).toHaveLength(1);
     expect(session.tools[0]?.label).toBe("read.foo");
   });
@@ -227,7 +242,7 @@ describe("MCP runtime", () => {
     });
     let requests = 0;
     const session = await service.open({
-      chatId: "a",
+      ownerKey: "a",
       profileId: "fixture",
       elicit: async (params) => {
         requests++;
@@ -239,7 +254,7 @@ describe("MCP runtime", () => {
     expect((await tool(session, "url").execute("url", {})).content.length).toBeGreaterThan(0);
     expect(requests).toBe(1);
     const declined = await service.open({
-      chatId: "b",
+      ownerKey: "b",
       profileId: "fixture",
       elicit: async () => ({ action: "decline" }),
     });
@@ -271,7 +286,7 @@ describe("MCP runtime", () => {
       await configure({ type: "http", url: `http://127.0.0.1:${http.port}/mcp` });
       let samples = 0;
       const session = await service.open({
-        chatId: "a",
+        ownerKey: "a",
         profileId: "fixture",
         sample: async (params) => {
           samples++;
@@ -373,7 +388,7 @@ describe("MCP runtime", () => {
     });
     try {
       await configure({ type: "http", url: `http://127.0.0.1:${http.port}/mcp` });
-      const session = await service.open({ chatId: "a", profileId: "fixture" });
+      const session = await service.open({ ownerKey: "a", profileId: "fixture" });
       await session.close();
       expect(deletions).toBe(1);
       expect(session.signal.aborted).toBe(true);
@@ -429,21 +444,21 @@ describe("MCP runtime", () => {
         headers: { authorization: "Bearer operator-token" },
         tokenAuth: true,
       });
-      await expect(service.open({ chatId: "a", profileId: "fixture" })).rejects.toThrow(
+      await expect(service.open({ ownerKey: "a", profileId: "fixture" })).rejects.toThrow(
         "Run !mcp-auth token fixture TOKEN",
       );
       expect(authorizations.size).toBe(0);
 
       await saveMcpAuthToken("a", "fixture", "token-a");
       await saveMcpAuthToken("b", "fixture", "token-b");
-      const first = await service.open({ chatId: "a", profileId: "fixture" });
+      const first = await service.open({ ownerKey: "a", profileId: "fixture" });
       expect(authorizations).toEqual(new Set(["Bearer token-a"]));
       await saveMcpAuthToken("a", "fixture", "token-a2");
       expect(first.signal.aborted).toBe(false);
       await credentialsChanged("a");
       expect(first.signal.aborted).toBe(true);
 
-      const second = await service.open({ chatId: "b", profileId: "fixture" });
+      const second = await service.open({ ownerKey: "b", profileId: "fixture" });
       expect(authorizations).toEqual(new Set(["Bearer token-a", "Bearer token-b"]));
       await second.close();
 
@@ -502,7 +517,7 @@ describe("MCP runtime", () => {
     const context: TMcpToolContext = {
       client,
       profile,
-      args: { chatId: "test", profileId: profile.id },
+      args: { ownerKey: "test", profileId: profile.id },
       signal: new AbortController().signal,
       updates: [],
     };
@@ -541,7 +556,7 @@ describe("MCP runtime", () => {
       command: process.execPath,
       args: [join(import.meta.dir, "fixtures/server.ts")],
     });
-    const session = await service.open({ chatId: "a", profileId: "fixture" });
+    const session = await service.open({ ownerKey: "a", profileId: "fixture" });
     const controller = new AbortController();
     const request = tool(session, "wait").execute("w", {}, controller.signal);
     controller.abort(new Error("cancel test"));

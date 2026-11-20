@@ -794,7 +794,8 @@ export class AgentHarness {
           };
           try {
             const session = await McpService.instance.open({
-              chatId: ownerKey,
+              ownerKey,
+              conversationKey,
               profileId: profile.id,
               turnId: args.trace.turnId,
               signal: controller.signal,

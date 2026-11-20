@@ -1,11 +1,13 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
-import { EEventType, eventsTable } from "@bellaclaw/database";
+import { EEventType, eventsTable, identityLinksTable } from "@bellaclaw/database";
 import { asc, eq } from "drizzle-orm";
 import { DatabaseConnector } from "../database";
-import { resetEventTables } from "../database/test-utils";
+import { resetEventTables, resetIdentityLinksTable } from "../database/test-utils";
 import { EventBus } from "../events";
 import type { TEventPayloads } from "../events/catalog";
 import { testMessageOrigin } from "../events/test-utils";
+import { IdentityService } from "../identity";
+import { EIdentityLinkState } from "../identity/schema";
 import { MessagingAdapter } from "../messaging";
 import { EMessagePlatform } from "../messaging/types";
 import { SignalClient } from "./client";
@@ -172,6 +174,44 @@ describe("SignalSingleton", () => {
       attachments: [],
       receivedAt: expect.any(Number),
     });
+  });
+
+  test("an inbound message is traced under its conversation: the account's of a linked address", async () => {
+    Bun.env.SIGNAL_PHONE_NUMBER = "+100";
+    await resetEventTables();
+    await resetIdentityLinksTable();
+    await DatabaseConnector.instance.database.insert(identityLinksTable).values({
+      channel: EMessagePlatform.Signal,
+      address: "+300",
+      accountId: "acct-1",
+      state: EIdentityLinkState.Active,
+      linkedAt: new Date(1_000),
+    });
+    Object.assign(IdentityService, { _instance: undefined });
+    const signal = SignalSingleton.instance as unknown as TSignalSingletonInternals;
+    signal.client = {
+      sendReadReceipt: mock(async () => {}),
+      showTyping: mock(async () => {}),
+      hideTyping: mock(async () => {}),
+    };
+
+    await signal.handleInboundMessage({
+      sourceNumber: "+300",
+      message: "linked",
+      attachments: [],
+      timestamp: 1,
+    });
+    await signal.handleInboundMessage({
+      sourceNumber: "+400",
+      message: "unlinked",
+      attachments: [],
+      timestamp: 2,
+    });
+
+    const rows = await receivedRows();
+    expect(rows.map((row) => row.chatId)).toEqual(["bella:acct-1", "signal:+400"]);
+    await resetIdentityLinksTable();
+    Object.assign(IdentityService, { _instance: undefined });
   });
 
   test("a re-delivered message is one row and distinct ones are kept", async () => {

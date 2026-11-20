@@ -1,5 +1,5 @@
 import { EEventType, identityLinksTable } from "@bellaclaw/database";
-import type { TOption } from "@bellaclaw/shared";
+import { ADDRESS_LINKED_ELSEWHERE, type TOption } from "@bellaclaw/shared";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { DatabaseConnector } from "../database";
@@ -8,7 +8,6 @@ import { ERejectionCode, type TIdentityLinkKeys } from "../events/catalog";
 import { createCanonicalChatKey, parseCanonicalChatKey } from "../messaging/chat-key";
 import type { EMessagePlatform } from "../messaging/types";
 import {
-  ADDRESS_LINKED_ELSEWHERE,
   EIdentityLinkOwner,
   EIdentityLinkState,
   SIdentityLink,
@@ -298,6 +297,26 @@ export class IdentityService {
     return {
       conversationKey: `${BELLA_CONVERSATION_PREFIX}${link.accountId}`,
       ownerKey: `${ACCOUNT_OWNER_PREFIX}${link.accountId}`,
+    };
+  }
+
+  // the link of an address, by its chat key
+  public async link(chatKey: string): Promise<TOption<TIdentityLink>> {
+    await this.load();
+
+    return this.links.get(chatKey);
+  }
+
+  // the account's keys and the links of its addresses, oldest first
+  public async account(accountId: string): Promise<TAccountKeys & { links: TIdentityLink[] }> {
+    await this.load();
+
+    return {
+      conversationKey: `${BELLA_CONVERSATION_PREFIX}${accountId}`,
+      ownerKey: `${ACCOUNT_OWNER_PREFIX}${accountId}`,
+      links: [...this.links.values()]
+        .filter((link) => link.accountId === accountId)
+        .sort((left, right) => left.linkedAt.getTime() - right.linkedAt.getTime()),
     };
   }
 

@@ -14,6 +14,7 @@ import { sanitizeErrorMessage } from "../app-logger/sanitizers";
 import { DatabaseConnector, type TDatabaseHandle, type TDatabaseTransaction } from "../database";
 import { ESubscriptionMode, EventBus, type TEventContext, type TEventDraft } from "../events";
 import { ERejectionCode, type TEvent } from "../events/catalog";
+import { IdentityService } from "../identity";
 import { EIdentityLinkOwner } from "../identity/schema";
 import { DefaultConfigRecord, EConfigKey } from "../settings/schema";
 import {
@@ -689,6 +690,22 @@ export class CronScheduler {
 
   private async fire(id: number) {
     try {
+      // the trace names the conversation the job's scope belongs to
+      const scope = await this.database.run(async (db) => {
+        const row = await db
+          .select({ scope: cronEngineJobsTable.scope })
+          .from(cronEngineJobsTable)
+          .where(eq(cronEngineJobsTable.id, id))
+          .get();
+        return row?.scope;
+      });
+
+      if (scope === undefined) {
+        return;
+      }
+
+      const conversationKey =
+        (await IdentityService.instance.resolve(scope))?.conversationKey ?? scope;
       // NOTE: the job update and the cron.fired row commit together, so a crash cannot lose a fire
       const firedJob = await EventBus.instance.transact(async (tx, emit) => {
         const current = await tx
@@ -739,7 +756,7 @@ export class CronScheduler {
             return undefined;
           }
 
-          emit(this.firedDraft(job));
+          emit(this.firedDraft(job, conversationKey));
           return job;
         }
 
@@ -766,7 +783,7 @@ export class CronScheduler {
             return undefined;
           }
 
-          emit(this.firedDraft(job));
+          emit(this.firedDraft(job, conversationKey));
           return job;
         }
 
@@ -787,12 +804,13 @@ export class CronScheduler {
     }
   }
 
-  private firedDraft(job: TCronJob): TEventDraft<EEventType.CronFired> {
+  // conversationKey: the conversation of the job's scope, which the trace names
+  private firedDraft(job: TCronJob, conversationKey: string): TEventDraft<EEventType.CronFired> {
     return {
       type: EEventType.CronFired,
       source: "cron",
       key: `${job.scope}|${job.name}`,
-      trace: { turnId: createCronTurnId(), chatId: job.scope, platform: undefined },
+      trace: { turnId: createCronTurnId(), chatId: conversationKey, platform: undefined },
       causationId: undefined,
       dedupeKey: `cron:${job.id}:${job.nextRunAt.getTime()}`,
       payload: {

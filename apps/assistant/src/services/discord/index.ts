@@ -4,6 +4,7 @@ import type { TOption } from "@bellaclaw/shared";
 import { createLogger, type TLogger } from "@bellaclaw/shared";
 import { ChannelType, Client, Events, GatewayIntentBits, type Message, Partials } from "discord.js";
 import { EventBus } from "../events";
+import { IdentityService } from "../identity";
 import { MessagingAdapter } from "../messaging";
 import { createCanonicalChatKey } from "../messaging/chat-key";
 import {
@@ -78,13 +79,20 @@ export class DiscordSingleton implements TMessageTransport {
 
     const receivedAt = Date.now();
     const chatId = createCanonicalChatKey(EMessagePlatform.Discord, message.author.id);
+    // the trace names the conversation: an address with an active link means its account's
+    const conversationKey =
+      (await IdentityService.instance.resolve(chatId))?.conversationKey ?? chatId;
 
     try {
       await EventBus.instance.publish({
         type: EEventType.MessageReceived,
         source: "discord",
         key: chatId,
-        trace: { turnId: createMessageTurnId(), chatId, platform: EMessagePlatform.Discord },
+        trace: {
+          turnId: createMessageTurnId(),
+          chatId: conversationKey,
+          platform: EMessagePlatform.Discord,
+        },
         // the chat key is the conversation and the owner
         payload: {
           conversationKey: chatId,

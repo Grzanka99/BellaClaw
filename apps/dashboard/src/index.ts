@@ -5,8 +5,10 @@ import { AccountStore } from "./account-store";
 import { createApp } from "./app";
 import { createChatReader } from "./chat-reader";
 import { createInternalApi } from "./internal-api";
+import { importAccountChats } from "./link-import";
 
 const PAGE_PATH = "/index.html";
+const LINK_IMPORT_WAIT_MS = 5_000;
 
 const logger = createLogger("DASHBOARD");
 
@@ -65,12 +67,14 @@ const reader = createChatReader(requireEnv("TURSO_CONNECTION_URL"), requireEnv("
 mkdirSync(dirname(databasePath), { recursive: true });
 
 let client = await buildClient();
+const store = new AccountStore(databasePath);
+const internalApi = createInternalApi(internalApiUrl.replace(/\/+$/, ""), secret);
 
 const app = createApp({
   config: { publicOrigin: new URL(publicUrl).origin, secret },
-  store: new AccountStore(databasePath),
+  store,
   reader,
-  internalApi: createInternalApi(internalApiUrl.replace(/\/+$/, ""), secret),
+  internalApi,
   serveClient: async (request) => {
     const path = new URL(request.url).pathname;
     const asset = client.get(path);
@@ -102,3 +106,8 @@ const server = Bun.serve({
 });
 
 logger.info(`Dashboard listening on http://${hostname}:${server.port}`);
+
+// links every row of account_chats through the assistant, then drops the table
+void importAccountChats(store, internalApi, LINK_IMPORT_WAIT_MS).catch((error) => {
+  logger.error(`Link import stopped: ${error}`);
+});

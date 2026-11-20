@@ -2,14 +2,14 @@
 import type { TOption } from "@bellaclaw/shared";
 import { useEffect, useRef, useState } from "hono/jsx/dom";
 import type { TChatMessage, TMessageDeletedResponse, TMessagesResponse } from "../api-types";
-import { api, chatPath } from "./api";
+import { api } from "./api";
 
 const AUTHOR_LABELS: Record<TChatMessage["author"], string> = {
   user: "You",
   assistant: "Assistant",
 };
 
-export function HistoryTab({ chatId }: { chatId: string }) {
+export function HistoryTab() {
   // newest first
   const [messages, setMessages] = useState<TChatMessage[]>([]);
   // the `before` of the next page; undefined after the last one
@@ -23,7 +23,7 @@ export function HistoryTab({ chatId }: { chatId: string }) {
   const dialog = useRef<HTMLDialogElement>(null);
 
   async function load(before: TOption<number>) {
-    let path = chatPath(chatId, "messages");
+    let path = "/api/messages";
 
     if (before !== undefined) {
       path += `?before=${before}`;
@@ -51,10 +51,7 @@ export function HistoryTab({ chatId }: { chatId: string }) {
   async function deleteMessage(message: TChatMessage) {
     setDeleting(true);
     setDeleteError(undefined);
-    const result = await api<TMessageDeletedResponse>(
-      "DELETE",
-      chatPath(chatId, `messages/${message.id}`),
-    );
+    const result = await api<TMessageDeletedResponse>("DELETE", `/api/messages/${message.id}`);
     setDeleting(false);
 
     if ("error" in result) {

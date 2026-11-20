@@ -10,6 +10,7 @@ import type {
 } from "@modelcontextprotocol/sdk/shared/auth.js";
 import type { FetchLike } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { commandFailed, ESubscriptionMode, EventBus } from "../../events";
+import { IdentityService } from "../../identity";
 import { EIdentityLinkOwner } from "../../identity/schema";
 import { getMcpProfile, type TMcpProfile } from "../config";
 import { McpAuthCredentialStore } from "./store";
@@ -550,11 +551,14 @@ export async function handleMcpAuthCallback(request: Request): Promise<Response>
       }
     });
     try {
+      // the trace names the conversation the owner key belongs to
+      const conversationKey =
+        (await IdentityService.instance.resolve(pending.chatId))?.conversationKey ?? pending.chatId;
       await EventBus.instance.publish({
         type: EEventType.McpAuthConnected,
         source: "mcp-auth",
         key: pending.chatId,
-        trace: { turnId: createSystemTurnId(), chatId: pending.chatId, platform: undefined },
+        trace: { turnId: createSystemTurnId(), chatId: conversationKey, platform: undefined },
         payload: { chatId: pending.chatId, profileId: pending.profileId },
         causationId: undefined,
         dedupeKey: undefined,

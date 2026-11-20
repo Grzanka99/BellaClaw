@@ -1,25 +1,32 @@
 import { Database } from "bun:sqlite";
 import { createHash, randomBytes } from "node:crypto";
 import type { TDashboardLinkToken, TOption } from "@bellaclaw/shared";
-import type { TLinkedChat } from "./api-types";
 
 export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
-export type TAccount = { id: number; username: string };
+// id: the row id, which never leaves the dashboard; publicId: the account's id for the assistant
+export type TAccount = { id: number; publicId: string; username: string };
 
-// the new account's id, or why none was created
-export type TRegistration = { accountId: number } | { failure: "usernameTaken" | "linkUsed" };
+// the new account, or why none was created
+export type TRegistration = { account: TAccount } | { failure: "usernameTaken" | "linkUsed" };
+
+// a row of account_chats: its chat, and its account's row id and public id
+export type TImportRow = { chatId: string; accountId: number; publicId: string };
 
 // only the hash of a session token is stored
 function hashSessionToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }
 
-// Accounts, sessions, linked chats and used link tokens. Every `now` is epoch ms.
+function createPublicId(): string {
+  return randomBytes(16).toString("base64url");
+}
+
+// Accounts, sessions and used link tokens. Every `now` is epoch ms.
 export class AccountStore {
   private db: Database;
 
-  // path: a database file, or ":memory:"
+  // path: a database file, or ":memory:". An account without a public id gets one here.
   constructor(path: string) {
     this.db = new Database(path);
     this.db.run(`
@@ -27,23 +34,35 @@ export class AccountStore {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         username TEXT NOT NULL UNIQUE COLLATE NOCASE,
         passwordHash TEXT NOT NULL,
-        createdAt INTEGER NOT NULL
+        createdAt INTEGER NOT NULL,
+        publicId TEXT
       );
       CREATE TABLE IF NOT EXISTS sessions (
         tokenHash TEXT PRIMARY KEY,
         accountId INTEGER NOT NULL,
         expiresAt INTEGER NOT NULL
       );
-      CREATE TABLE IF NOT EXISTS account_chats (
-        chatId TEXT PRIMARY KEY,
-        accountId INTEGER NOT NULL,
-        linkedAt INTEGER NOT NULL
-      );
       CREATE TABLE IF NOT EXISTS used_link_tokens (
         nonce TEXT PRIMARY KEY,
         expiresAt INTEGER NOT NULL
       );
     `);
+
+    const columns = this.db.query<{ name: string }, []>("PRAGMA table_info(accounts)").all();
+
+    if (!columns.some((column) => column.name === "publicId")) {
+      this.db.run("ALTER TABLE accounts ADD COLUMN publicId TEXT");
+    }
+
+    const missing = this.db
+      .query<{ id: number }, []>("SELECT id FROM accounts WHERE publicId IS NULL")
+      .all();
+
+    for (const { id } of missing) {
+      this.db.query("UPDATE accounts SET publicId = ? WHERE id = ?").run(createPublicId(), id);
+    }
+
+    this.db.run("CREATE UNIQUE INDEX IF NOT EXISTS accounts_public_id ON accounts (publicId)");
   }
 
   // username matches in any letter case; the answer carries it as stored
@@ -51,13 +70,21 @@ export class AccountStore {
     return (
       this.db
         .query<TAccount & { passwordHash: string }, [string]>(
-          "SELECT id, username, passwordHash FROM accounts WHERE username = ?",
+          "SELECT id, publicId, username, passwordHash FROM accounts WHERE username = ?",
         )
         .get(username) ?? undefined
     );
   }
 
-  // Creates the account and redeems its link in one transaction, so a failure consumes nothing.
+  public findByPublicId(publicId: string): TOption<TAccount> {
+    return (
+      this.db
+        .query<TAccount, [string]>("SELECT id, publicId, username FROM accounts WHERE publicId = ?")
+        .get(publicId) ?? undefined
+    );
+  }
+
+  // Creates the account and uses up its link in one transaction, so a failure consumes nothing.
   public createAccount(
     username: string,
     passwordHash: string,
@@ -65,7 +92,7 @@ export class AccountStore {
     now: number,
   ): TRegistration {
     return this.db.transaction((): TRegistration => {
-      if (this.isLinkUsed(link.nonce)) {
+      if (link.expiresAt <= now || this.isLinkUsed(link.nonce)) {
         return { failure: "linkUsed" };
       }
 
@@ -73,14 +100,17 @@ export class AccountStore {
         return { failure: "usernameTaken" };
       }
 
-      const accountId = Number(
+      const publicId = createPublicId();
+      const id = Number(
         this.db
-          .query("INSERT INTO accounts (username, passwordHash, createdAt) VALUES (?, ?, ?)")
-          .run(username, passwordHash, now).lastInsertRowid,
+          .query(
+            "INSERT INTO accounts (username, passwordHash, createdAt, publicId) VALUES (?, ?, ?, ?)",
+          )
+          .run(username, passwordHash, now, publicId).lastInsertRowid,
       );
-      this.redeem(accountId, link, now);
+      this.useLink(link, now);
 
-      return { accountId };
+      return { account: { id, publicId, username } };
     })();
   }
 
@@ -88,25 +118,99 @@ export class AccountStore {
     return this.db.query("SELECT 1 FROM used_link_tokens WHERE nonce = ?").get(nonce) !== null;
   }
 
-  // False when the link was already used. A chat linked to another account moves to this one.
-  public redeemLink(accountId: number, link: TDashboardLinkToken, now: number): boolean {
-    return this.db.transaction(() => this.redeem(accountId, link, now))();
+  // False when the link was already used or has expired.
+  public consumeLink(link: TDashboardLinkToken, now: number): boolean {
+    return this.db.transaction(() => this.useLink(link, now))();
   }
 
-  public listChats(accountId: number): TLinkedChat[] {
-    return this.db
-      .query<TLinkedChat, [number]>(
-        "SELECT chatId, linkedAt FROM account_chats WHERE accountId = ? ORDER BY linkedAt DESC",
-      )
-      .all(accountId);
+  // Uses up the link, sets the password hash when one is given (ending the account's other
+  // sessions), and returns a new session token, all in one transaction. Undefined, with nothing changed, when the link was already used or has
+  // expired.
+  public redeemLoginLink(
+    accountId: number,
+    link: TDashboardLinkToken,
+    passwordHash: TOption<string>,
+    now: number,
+  ): TOption<string> {
+    return this.db.transaction((): TOption<string> => {
+      if (!this.useLink(link, now)) {
+        return undefined;
+      }
+
+      if (passwordHash !== undefined) {
+        this.db
+          .query("UPDATE accounts SET passwordHash = ? WHERE id = ?")
+          .run(passwordHash, accountId);
+        this.db.query("DELETE FROM sessions WHERE accountId = ?").run(accountId);
+      }
+
+      return this.createSession(accountId, now);
+    })();
   }
 
-  public isChatLinked(accountId: number, chatId: string): boolean {
+  // The row of account_chats for the chat, while the import still holds one whose account exists.
+  public findImportRow(chatId: string): TOption<TImportRow> {
+    if (!this.hasImportTable()) {
+      return undefined;
+    }
+
     return (
       this.db
-        .query("SELECT 1 FROM account_chats WHERE chatId = ? AND accountId = ?")
-        .get(chatId, accountId) !== null
+        .query<TImportRow, [string]>(
+          `SELECT account_chats.chatId, account_chats.accountId, accounts.publicId FROM account_chats
+           JOIN accounts ON accounts.id = account_chats.accountId
+           WHERE account_chats.chatId = ?`,
+        )
+        .get(chatId) ?? undefined
     );
+  }
+
+  // The oldest row of account_chats whose account exists, skipping the given chat ids. Undefined
+  // once none is left or the table is gone.
+  public nextImportRow(skipped: Set<string>): TOption<TImportRow> {
+    if (!this.hasImportTable()) {
+      return undefined;
+    }
+
+    const rows = this.db
+      .query<TImportRow, []>(
+        `SELECT account_chats.chatId, account_chats.accountId, accounts.publicId FROM account_chats
+         JOIN accounts ON accounts.id = account_chats.accountId
+         ORDER BY account_chats.linkedAt, account_chats.chatId`,
+      )
+      .all();
+
+    return rows.find((row) => !skipped.has(row.chatId));
+  }
+
+  public deleteImportRow(chatId: string): void {
+    this.db.query("DELETE FROM account_chats WHERE chatId = ?").run(chatId);
+  }
+
+  // Drops account_chats when it holds no row. Otherwise keeps it and answers the account row ids of
+  // its rows whose account does not exist.
+  public finishImport(): { orphanAccountIds: number[] } {
+    return this.db.transaction(() => {
+      if (!this.hasImportTable()) {
+        return { orphanAccountIds: [] };
+      }
+
+      if (this.db.query("SELECT 1 FROM account_chats").get() === null) {
+        this.db.run("DROP TABLE account_chats");
+
+        return { orphanAccountIds: [] };
+      }
+
+      const orphans = this.db
+        .query<{ accountId: number }, []>(
+          `SELECT DISTINCT account_chats.accountId FROM account_chats
+           LEFT JOIN accounts ON accounts.id = account_chats.accountId
+           WHERE accounts.id IS NULL`,
+        )
+        .all();
+
+      return { orphanAccountIds: orphans.map((orphan) => orphan.accountId) };
+    })();
   }
 
   // Returns the session token for the cookie.
@@ -126,7 +230,7 @@ export class AccountStore {
     const tokenHash = hashSessionToken(token);
     const account = this.db
       .query<TAccount, [string, number]>(
-        `SELECT accounts.id, accounts.username FROM sessions
+        `SELECT accounts.id, accounts.publicId, accounts.username FROM sessions
          JOIN accounts ON accounts.id = sessions.accountId
          WHERE sessions.tokenHash = ? AND sessions.expiresAt > ?`,
       )
@@ -147,28 +251,31 @@ export class AccountStore {
     this.db.query("DELETE FROM sessions WHERE tokenHash = ?").run(hashSessionToken(token));
   }
 
-  // NOTE: runs inside the caller's transaction
-  private redeem(accountId: number, link: TDashboardLinkToken, now: number): boolean {
-    // an expired token fails verification, so its nonce needs no row
-    this.db.query("DELETE FROM used_link_tokens WHERE expiresAt <= ?").run(now);
+  private hasImportTable(): boolean {
+    return (
+      this.db
+        .query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'account_chats'")
+        .get() !== null
+    );
+  }
 
-    const used = this.db
-      .query("INSERT INTO used_link_tokens (nonce, expiresAt) VALUES (?, ?) ON CONFLICT DO NOTHING")
-      .run(link.nonce, link.expiresAt);
-
-    if (used.changes === 0) {
+  // NOTE: runs inside the caller's transaction. False when the link was already used or has
+  // expired.
+  private useLink(link: TDashboardLinkToken, now: number): boolean {
+    // NOTE: the rows of expired tokens go below, so an expired token is refused here and never
+    // reaches the insert
+    if (link.expiresAt <= now) {
       return false;
     }
 
-    this.db
-      .query(
-        `INSERT INTO account_chats (chatId, accountId, linkedAt) VALUES (?, ?, ?)
-         ON CONFLICT (chatId) DO UPDATE SET
-           accountId = excluded.accountId,
-           linkedAt = excluded.linkedAt`,
-      )
-      .run(link.chatId, accountId, now);
+    this.db.query("DELETE FROM used_link_tokens WHERE expiresAt <= ?").run(now);
 
-    return true;
+    return (
+      this.db
+        .query(
+          "INSERT INTO used_link_tokens (nonce, expiresAt) VALUES (?, ?) ON CONFLICT DO NOTHING",
+        )
+        .run(link.nonce, link.expiresAt).changes > 0
+    );
   }
 }

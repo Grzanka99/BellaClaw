@@ -2,8 +2,8 @@
 import type { TOption } from "@bellaclaw/shared";
 import { render, useEffect, useState } from "hono/jsx/dom";
 import type { TLinkCheckResponse, TMeResponse } from "../api-types";
-import { api } from "./api";
-import { AuthCard } from "./auth";
+import { api, showAccount } from "./api";
+import { AuthCard, LinkLoginCard } from "./auth";
 import { Dashboard } from "./dashboard";
 
 type TView =
@@ -12,10 +12,16 @@ type TView =
   | { name: "invalidLink" }
   // token: the link that the registration or login redeems
   | { name: "auth"; token: TOption<string> }
+  // token: a link of a chat linked to the account of username, which logs into it
+  | { name: "linkLogin"; token: string; username: string }
+  // token: a link of the unlinked chat chatKey, which the signed-in account takes once confirmed;
+  // error: why the last confirmation was refused
+  | { name: "confirmLink"; token: string; chatKey: string; me: TMeResponse; error?: string }
   | { name: "main"; me: TMeResponse };
 
 function App() {
   const [view, setView] = useState<TView>({ name: "loading" });
+  const [busy, setBusy] = useState(false);
 
   function showMain(me: TMeResponse) {
     // the link token leaves the address bar
@@ -25,6 +31,7 @@ function App() {
 
   async function start() {
     let token: TOption<string>;
+    let chatKey = "";
 
     if (location.pathname === "/link") {
       token = new URLSearchParams(location.search).get("token") ?? "";
@@ -39,6 +46,13 @@ function App() {
         setView({ name: "invalidLink" });
         return;
       }
+
+      if (check.data.username !== undefined) {
+        setView({ name: "linkLogin", token, username: check.data.username });
+        return;
+      }
+
+      chatKey = check.data.chatKey;
     }
 
     const me = await api<TMeResponse>("GET", "/api/me");
@@ -58,17 +72,59 @@ function App() {
       return;
     }
 
+    // NOTE: a linked address signs into its account for good, so nothing is sent before the
+    // confirmation
+    setView({ name: "confirmLink", token, chatKey, me: me.data });
+  }
+
+  // the page again for whoever is signed in now
+  async function showSignedIn() {
+    // NOTE: the controls of the account shown so far go first, so none of them acts on this one
+    setView({ name: "loading" });
+    const me = await api<TMeResponse>("GET", "/api/me");
+
+    if (!("error" in me)) {
+      setView({ name: "main", me: me.data });
+    } else if (me.status === 401) {
+      setView({ name: "auth", token: undefined });
+    } else {
+      setView({ name: "failed", message: me.error });
+    }
+  }
+
+  async function confirmLink(token: string, chatKey: string) {
+    setBusy(true);
     const linked = await api<TMeResponse>("POST", "/api/link", { token });
 
     if ("error" in linked) {
       if (linked.status === 400) {
+        setBusy(false);
         setView({ name: "invalidLink" });
-      } else {
+        return;
+      }
+
+      if (linked.status !== 409) {
+        setBusy(false);
         setView({ name: "failed", message: linked.error });
+        return;
+      }
+
+      // the card shows the error with whoever is signed in now
+      const me = await api<TMeResponse>("GET", "/api/me");
+      setBusy(false);
+
+      if (!("error" in me)) {
+        setView({ name: "confirmLink", token, chatKey, me: me.data, error: linked.error });
+      } else if (me.status === 401) {
+        setView({ name: "auth", token });
+      } else {
+        setView({ name: "failed", message: me.error });
       }
 
       return;
     }
+
+    setBusy(false);
 
     showMain(linked.data);
   }
@@ -77,9 +133,21 @@ function App() {
     void start();
   }, []);
 
+  // every request names the account the page shows
+  if (view.name === "main" || view.name === "confirmLink") {
+    showAccount(view.me.username);
+  } else {
+    showAccount(undefined);
+  }
+
   if (view.name === "main") {
     return (
-      <Dashboard me={view.me} onLoggedOut={() => setView({ name: "auth", token: undefined })} />
+      <Dashboard
+        key={view.me.username}
+        me={view.me}
+        onLoggedOut={() => setView({ name: "auth", token: undefined })}
+        onAccountChanged={showSignedIn}
+      />
     );
   }
 
@@ -106,6 +174,37 @@ function App() {
     );
   } else if (view.name === "auth") {
     card = <AuthCard token={view.token} onAuthenticated={showMain} />;
+  } else if (view.name === "linkLogin") {
+    card = <LinkLoginCard token={view.token} username={view.username} onAuthenticated={showMain} />;
+  } else if (view.name === "confirmLink") {
+    const { token, chatKey, me, error } = view;
+    card = (
+      <section class="card">
+        <h1>Link this chat?</h1>
+        <p class="muted">
+          <strong>{chatKey}</strong> will be linked to your account <strong>{me.username}</strong>{" "}
+          for good. The chat can then log into this account and set its password.
+        </p>
+        {error !== undefined && (
+          <p class="alert" role="alert">
+            {error}
+          </p>
+        )}
+        <div class="row">
+          <button
+            class="button"
+            type="button"
+            disabled={busy}
+            onClick={() => confirmLink(token, chatKey)}
+          >
+            Link to {me.username}
+          </button>
+          <button class="button outline" type="button" disabled={busy} onClick={() => showMain(me)}>
+            Cancel
+          </button>
+        </div>
+      </section>
+    );
   }
 
   return <main class="center">{card}</main>;

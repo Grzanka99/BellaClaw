@@ -3,18 +3,18 @@ import type { TOption } from "@bellaclaw/shared";
 import type { ForceGraph3DInstance, NodeObject } from "3d-force-graph";
 import { useEffect, useRef, useState } from "hono/jsx/dom";
 import type { TFactNode, TFactsResponse } from "../api-types";
-import { api, chatPath } from "./api";
+import { api } from "./api";
 
 const MAX_LABEL_LENGTH = 80;
 
-export function FactsTab({ chatId }: { chatId: string }) {
+export function FactsTab() {
   const [facts, setFacts] = useState<TOption<TFactsResponse>>(undefined);
   const [error, setError] = useState<TOption<string>>(undefined);
   const [selected, setSelected] = useState<TOption<TFactNode>>(undefined);
   const container = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    void api<TFactsResponse>("GET", chatPath(chatId, "facts")).then((result) => {
+    void api<TFactsResponse>("GET", "/api/facts").then((result) => {
       if ("error" in result) {
         setError(result.error);
       } else {

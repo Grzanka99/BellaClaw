@@ -1,21 +1,21 @@
 /** @jsxImportSource hono/jsx/dom */
-import type { TOption } from "@bellaclaw/shared";
 import { useEffect, useState } from "hono/jsx/dom";
 import type { TMeResponse } from "../api-types";
-import { api, UNAUTHORIZED_EVENT } from "./api";
+import { ACCOUNT_CHANGED_EVENT, api, UNAUTHORIZED_EVENT } from "./api";
 import { FactsTab } from "./facts";
 import { HistoryTab } from "./history";
 import { ModelTab } from "./model";
-import { Select } from "./select";
 
 type TTab = "model" | "history" | "facts";
+
+// how often the account is read again while a link is being made
+const LINKING_POLL_MS = 3_000;
 
 const TABS: { id: TTab; label: string }[] = [
   { id: "model", label: "Model" },
   { id: "history", label: "History" },
   { id: "facts", label: "Facts" },
 ];
-const CHAT_STORAGE_KEY = "bellaclaw.dashboard.chat";
 
 // the tab named by the URL hash
 function readTab(): TTab {
@@ -26,49 +26,62 @@ type TDashboardProps = {
   me: TMeResponse;
   // after a logout, and when the session ended
   onLoggedOut: () => void;
+  // when the session belongs to another account than me
+  onAccountChanged: () => void;
 };
 
-export function Dashboard({ me, onLoggedOut }: TDashboardProps) {
+export function Dashboard({ me: initialMe, onLoggedOut, onAccountChanged }: TDashboardProps) {
   const [tab, setTab] = useState(readTab);
-  const [chatId, setChatId] = useState<TOption<string>>(() => {
-    let stored: TOption<string>;
-
-    try {
-      stored = localStorage.getItem(CHAT_STORAGE_KEY) ?? undefined;
-    } catch {
-      // storage is blocked
-    }
-
-    if (me.chats.some((chat) => chat.chatId === stored)) {
-      return stored;
-    }
-
-    return me.chats[0]?.chatId;
-  });
+  const [me, setMe] = useState(initialMe);
+  // a new value mounts the visible tab again, which loads its data again
+  const [panelVersion, setPanelVersion] = useState(0);
 
   useEffect(() => {
     const onHashChange = () => setTab(readTab());
     window.addEventListener("hashchange", onHashChange);
     window.addEventListener(UNAUTHORIZED_EVENT, onLoggedOut);
+    window.addEventListener(ACCOUNT_CHANGED_EVENT, onAccountChanged);
 
     return () => {
       window.removeEventListener("hashchange", onHashChange);
       window.removeEventListener(UNAUTHORIZED_EVENT, onLoggedOut);
+      window.removeEventListener(ACCOUNT_CHANGED_EVENT, onAccountChanged);
     };
   }, []);
 
-  function selectChat(selected: string) {
-    setChatId(selected);
-
-    try {
-      localStorage.setItem(CHAT_STORAGE_KEY, selected);
-    } catch {
-      // storage is blocked
+  // while a link is being made the account is read again, and once none is the tab reloads
+  useEffect(() => {
+    if (!me.chats.some((chat) => chat.state === "migrating")) {
+      return;
     }
-  }
+
+    const timer = setTimeout(async () => {
+      const result = await api<TMeResponse>("GET", "/api/me");
+
+      if ("error" in result) {
+        // the same state again schedules the next read
+        setMe({ ...me });
+        return;
+      }
+
+      setMe(result.data);
+
+      if (!result.data.chats.some((chat) => chat.state === "migrating")) {
+        setPanelVersion((version) => version + 1);
+      }
+    }, LINKING_POLL_MS);
+
+    return () => clearTimeout(timer);
+  }, [me]);
 
   async function logOut() {
-    await api("POST", "/api/logout");
+    const result = await api("POST", "/api/logout");
+
+    // the session of another account stays, and the page renders again for it
+    if ("error" in result && result.status === 409) {
+      return;
+    }
+
     onLoggedOut();
   }
 
@@ -81,18 +94,32 @@ export function Dashboard({ me, onLoggedOut }: TDashboardProps) {
     </section>
   );
 
-  if (chatId !== undefined) {
-    // the key gives every chat a tab of its own
-    let panel = <ModelTab key={chatId} chatId={chatId} />;
+  if (me.chats.length > 0) {
+    let panel = <ModelTab key={panelVersion} />;
 
     if (tab === "history") {
-      panel = <HistoryTab key={chatId} chatId={chatId} />;
+      panel = <HistoryTab key={panelVersion} />;
     } else if (tab === "facts") {
-      panel = <FactsTab key={chatId} chatId={chatId} />;
+      panel = <FactsTab key={panelVersion} />;
     }
 
     content = (
       <>
+        <div class="row">
+          {me.chats.map((chat) => {
+            let state = "linked";
+
+            if (chat.state === "migrating") {
+              state = "linking…";
+            }
+
+            return (
+              <span class="badge">
+                {chat.chatKey} · {state}
+              </span>
+            );
+          })}
+        </div>
         <div class="tabs" role="tablist">
           {TABS.map(({ id, label }) => (
             <a role="tab" href={`#${id}`} aria-selected={String(id === tab)}>
@@ -110,14 +137,6 @@ export function Dashboard({ me, onLoggedOut }: TDashboardProps) {
       <header class="header">
         <div class="page header-row">
           <h1>BellaClaw</h1>
-          {chatId !== undefined && (
-            <Select
-              label="Chat"
-              value={chatId}
-              options={me.chats.map((chat) => ({ value: chat.chatId, label: chat.chatId }))}
-              onChange={selectChat}
-            />
-          )}
           <div class="header-account">
             <span class="muted">{me.username}</span>
             <button class="button ghost" type="button" onClick={logOut}>
