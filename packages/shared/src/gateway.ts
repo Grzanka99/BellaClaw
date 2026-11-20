@@ -1,4 +1,4 @@
-import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHmac, createPublicKey, randomBytes, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 import type { TOption } from "./option";
 
@@ -255,16 +255,26 @@ export const SGatewayDeviceRegistration = z
 
 export type TGatewayDeviceRegistration = z.infer<typeof SGatewayDeviceRegistration>;
 
-// whether publicKey, base64url, is a point on the P-256 curve
+// whether publicKey, base64url, is an uncompressed point on the P-256 curve
+// NOTE: not WebCrypto: in Bun a WebCrypto import that refuses an off-curve point leaves its error
+// on the BoringSSL queue, and the next keyed Bun.CryptoHasher throws it
 export async function isP256PublicKey(publicKey: string): Promise<boolean> {
+  const point = Buffer.from(publicKey, "base64url");
+
+  if (point.length !== 65 || point[0] !== 0x04) {
+    return false;
+  }
+
   try {
-    await crypto.subtle.importKey(
-      "raw",
-      Buffer.from(publicKey, "base64url"),
-      { name: "ECDH", namedCurve: "P-256" },
-      false,
-      [],
-    );
+    createPublicKey({
+      key: {
+        kty: "EC",
+        crv: "P-256",
+        x: point.subarray(1, 33).toString("base64url"),
+        y: point.subarray(33).toString("base64url"),
+      },
+      format: "jwk",
+    });
 
     return true;
   } catch {
