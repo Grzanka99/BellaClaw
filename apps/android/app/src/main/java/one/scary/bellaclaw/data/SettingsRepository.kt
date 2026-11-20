@@ -49,6 +49,10 @@ class SettingsRepository(
     /** Model changes started so far; a read that a change overtook drops its answer. */
     private val modelChanges = AtomicInteger()
 
+    /** Reads of the models and of the model list started so far; a read that a newer one overtook drops its answer. */
+    private val modelReads = AtomicInteger()
+    private val chatModelReads = AtomicInteger()
+
     init {
         // Undispatched, so the current session is seen here, before any screen asks for a load.
         scope.launch(start = CoroutineStart.UNDISPATCHED) {
@@ -65,8 +69,8 @@ class SettingsRepository(
 
     /**
      * Reads the models again; a failed load shows loading while it retries. The last refusal stays.
-     * No read starts while a change is verified, and the answer of a read that a change overtook is
-     * dropped: the change's answer is newer.
+     * No read starts while a change is verified, and the answer of a read that a change or a newer read
+     * overtook is dropped: their answer is newer.
      */
     suspend fun loadModels() {
         val token = session.value?.token ?: return
@@ -74,10 +78,11 @@ class SettingsRepository(
             return
         }
         val changes = modelChanges.get()
+        val read = modelReads.incrementAndGet()
         updateForSession(token) { it.copy(models = it.models.retrying()) }
         val result = api.getSignedIn<ModelStateBody>("/api/model")
         updateForSession(token) {
-            if (modelChanges.get() == changes) {
+            if (modelChanges.get() == changes && modelReads.get() == read) {
                 it.copy(models = result.toLoadable { body -> body.toModelSettings() })
             } else {
                 it
@@ -99,13 +104,16 @@ class SettingsRepository(
         }
     }
 
-    /** Reads the model list; a held list stays while it is read and when the read fails. */
+    /** Reads the model list; a held list stays while it is read and when the read fails, or a newer read overtook it. */
     private suspend fun loadChatModels() {
         val token = session.value?.token ?: return
+        val read = chatModelReads.incrementAndGet()
         updateForSession(token) { it.copy(chatModels = it.chatModels.retrying()) }
         val result = api.getSignedIn<ModelCatalogBody>("/api/models")
         updateForSession(token) {
-            if (result is ApiResult.Success || it.chatModels !is Loadable.Loaded) {
+            if (chatModelReads.get() != read) {
+                it
+            } else if (result is ApiResult.Success || it.chatModels !is Loadable.Loaded) {
                 it.copy(chatModels = result.toLoadable { body -> body.toChatProviders() })
             } else {
                 it
