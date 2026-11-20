@@ -29,7 +29,8 @@ import { EMessagePlatform } from "../messaging/types";
 import { Notices } from "../notices";
 import { SettingsService } from "../settings";
 import { DefaultConfigRecord } from "../settings/schema";
-import { AppChannel, appPush } from ".";
+import { AppChannel } from ".";
+import { appPush } from "./push";
 import { encryptWebPush } from "./web-push";
 
 const BELLA = "bella:acct-1";
