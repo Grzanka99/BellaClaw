@@ -2,9 +2,11 @@ package one.scary.bellaclaw.ui.settings.personality
 
 import androidx.lifecycle.SavedStateHandle
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.jsonPrimitive
+import one.scary.bellaclaw.data.SettingsRepository
 import one.scary.bellaclaw.data.TestServer
 import one.scary.bellaclaw.data.errorAnswer
 import one.scary.bellaclaw.data.json
@@ -27,6 +29,14 @@ class PersonalityViewModelTest {
     @get:Rule
     val gateway = TestServer()
 
+    /** A view model whose personality has loaded, on the signed-in session's settings unless [repository] says otherwise. */
+    private suspend fun TestScope.loadedPersonality(repository: SettingsRepository? = null): PersonalityViewModel {
+        val viewModel = PersonalityViewModel(repository ?: gateway.settingsRepository(gateway.signedInStore(), backgroundScope), SavedStateHandle())
+        collectIn(viewModel.uiState)
+        viewModel.uiState.first { !it.isLoading }
+        return viewModel
+    }
+
     @Test
     fun `shows the server's personality with nothing to save`() = runTest {
         val viewModel = PersonalityViewModel(gateway.settingsRepository(gateway.signedInStore(), backgroundScope), SavedStateHandle())
@@ -44,9 +54,7 @@ class PersonalityViewModelTest {
     @Test
     fun `saving sends the edits and shows the server's answer`() = runTest {
         val repository = gateway.settingsRepository(gateway.signedInStore(), backgroundScope)
-        val viewModel = PersonalityViewModel(repository, SavedStateHandle())
-        collectIn(viewModel.uiState)
-        viewModel.uiState.first { !it.isLoading }
+        val viewModel = loadedPersonality(repository)
         gateway.route("PUT", "/api/personality", 200, personalityAnswer("Be brief.", useInChats = false, chats = ""))
 
         viewModel.onUseInChatsChange(false)
@@ -70,9 +78,7 @@ class PersonalityViewModelTest {
 
     @Test
     fun `a refused save keeps the draft and shows the server's text`() = runTest {
-        val viewModel = PersonalityViewModel(gateway.settingsRepository(gateway.signedInStore(), backgroundScope), SavedStateHandle())
-        collectIn(viewModel.uiState)
-        viewModel.uiState.first { !it.isLoading }
+        val viewModel = loadedPersonality()
         gateway.route("PUT", "/api/personality", 400, errorAnswer("bellaPersona must not be blank"))
 
         viewModel.onBellaClawChange(" ")
@@ -102,9 +108,7 @@ class PersonalityViewModelTest {
 
     @Test
     fun `undoing an edit leaves nothing to save`() = runTest {
-        val viewModel = PersonalityViewModel(gateway.settingsRepository(gateway.signedInStore(), backgroundScope), SavedStateHandle())
-        collectIn(viewModel.uiState)
-        viewModel.uiState.first { !it.isLoading }
+        val viewModel = loadedPersonality()
 
         viewModel.onUseInChatsChange(false)
         viewModel.onUseInChatsChange(true)

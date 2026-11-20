@@ -71,11 +71,31 @@ class ChatViewModelTest {
         settings: SettingsRepository = testServer.settingsRepository(scope = backgroundScope),
     ) = ChatViewModel(chatId, chatRepository, settings, savedStateHandle, ZoneOffset.UTC).also { collectIn(it.uiState) }
 
+    /** A plain chat titled Kotlin, ready to send, on [chatRepository] and [settings]. */
+    private suspend fun TestScope.kotlinChat(
+        chatRepository: ChatRepository,
+        settings: SettingsRepository = testServer.settingsRepository(scope = backgroundScope),
+    ): ChatViewModel {
+        gateway.addChat("plain:ada:k1", "Kotlin")
+        val viewModel = viewModel("plain:ada:k1", chatRepository, settings = settings)
+        viewModel.uiState.first { it.title == "Kotlin" && it.isReadyToSend }
+        return viewModel
+    }
+
     private fun ChatUiState.messages() = rows.filterIsInstance<ChatRow.Item>().map { it.message }
 
     /** Waits off the test thread, so the repository's work in the test scope keeps running meanwhile. */
     private suspend fun takeSend(): JsonObject =
         checkNotNull(withContext(Dispatchers.IO) { gateway.sends.poll(5, TimeUnit.SECONDS) }) { "no send arrived" }
+
+    /** Polls [condition] off the test thread for at most 5 s, then fails naming [what]. */
+    private suspend fun awaitTrue(what: String, condition: () -> Boolean) = withContext(Dispatchers.IO) {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+        while (!condition()) {
+            check(System.nanoTime() < deadline) { "Not within 5 s: $what" }
+            Thread.sleep(10)
+        }
+    }
 
     @Test
     fun `BellaClaw chat shows its history by author, images as placeholders, and an open stream`() = runTest {
@@ -102,7 +122,7 @@ class ChatViewModelTest {
     fun `an image sends without text, shows at once from the picked file, uploads, then posts with the upload's answer`() = runTest {
         testServer.pickedImages.files["content://picked/1"] = "image/jpeg" to photo
         val viewModel = viewModel(BELLACLAW_CHAT_ID, repository())
-        viewModel.uiState.first { it.isReadyToSend }
+        viewModel.uiState.first { it.isReadyToSend && it.isStreamOpen }
 
         viewModel.onAttach("content://picked/1")
         viewModel.uiState.first { it.attachmentUri == "content://picked/1" && it.canSend }
@@ -212,11 +232,7 @@ class ChatViewModelTest {
 
         store.end("t0")
 
-        withContext(Dispatchers.IO) {
-            while (file.exists()) {
-                Thread.sleep(10)
-            }
-        }
+        awaitTrue("the image file is deleted") { !file.exists() }
     }
 
     @Test
@@ -238,7 +254,7 @@ class ChatViewModelTest {
     fun `a send shows pending, then the stored row and the reply the stream announces`() = runTest {
         gateway.addRow(BELLA_KEY, "assistant", "Hi")
         val viewModel = viewModel(BELLACLAW_CHAT_ID, repository())
-        viewModel.uiState.first { it.messages().size == 1 }
+        viewModel.uiState.first { it.messages().size == 1 && it.isStreamOpen }
 
         viewModel.onDraftChange("  Ship it  ")
         viewModel.send()
@@ -264,10 +280,8 @@ class ChatViewModelTest {
 
     @Test
     fun `a refused send shows the server's text and a retry sends it again with the same id`() = runTest {
-        gateway.addChat("plain:ada:k1", "Kotlin")
         gateway.sendFailures.put(400 to errorAnswer("The provider has no API key"))
-        val viewModel = viewModel("plain:ada:k1", repository())
-        viewModel.uiState.first { it.title == "Kotlin" && it.isReadyToSend }
+        val viewModel = kotlinChat(repository())
 
         viewModel.onDraftChange("Hello")
         viewModel.send()
@@ -303,11 +317,7 @@ class ChatViewModelTest {
         gateway.historyFailures.put(503)
         val viewModel = viewModel(BELLACLAW_CHAT_ID, repository())
         viewModel.uiState.first { it.isStreamOpen }
-        withContext(Dispatchers.IO) {
-            while (gateway.historyFailures.isNotEmpty()) {
-                Thread.sleep(10)
-            }
-        }
+        awaitTrue("the failing history read is answered") { gateway.historyFailures.isEmpty() }
 
         gateway.push("check", "{}")
 
@@ -350,7 +360,7 @@ class ChatViewModelTest {
     fun `a deleted chat closes its screen`() = runTest {
         gateway.addChat("plain:ada:k1", "Kotlin")
         val viewModel = viewModel("plain:ada:k1", repository())
-        viewModel.uiState.first { it.title == "Kotlin" }
+        viewModel.uiState.first { it.title == "Kotlin" && it.isStreamOpen }
 
         gateway.deleteChat("plain:ada:k1")
         gateway.push("deleted", """{"conversationKey":"plain:ada:k1"}""")
@@ -363,7 +373,7 @@ class ChatViewModelTest {
         val removed = gateway.addRow(BELLA_KEY, "user", "Hello")
         gateway.addRow(BELLA_KEY, "assistant", "Kept")
         val viewModel = viewModel(BELLACLAW_CHAT_ID, repository())
-        viewModel.uiState.first { it.messages().size == 2 }
+        viewModel.uiState.first { it.messages().size == 2 && it.isStreamOpen }
 
         gateway.push("reply", """{"conversationKey":"$BELLA_KEY","text":"Open this link to sign in"}""")
 
@@ -394,16 +404,19 @@ class ChatViewModelTest {
 
     private fun ModelPickerState?.loaded() = (this?.providers as? Loadable.Loaded)?.value
 
+    /** Opens the model picker and waits for its list. */
+    private suspend fun ChatViewModel.openedPicker(): ModelPickerState {
+        openModelPicker()
+        return checkNotNull(uiState.first { it.picker.loaded() != null }.picker)
+    }
+
     @Test
     fun `the picker lists every provider's models, and the pick is kept on the phone and goes with the chat's sends`() = runTest {
         testServer.route("GET", "/api/models", 200, chatModelsAnswer(codexReason = null))
-        gateway.addChat("plain:ada:k1", "Kotlin")
         val repository = repository()
-        val viewModel = viewModel("plain:ada:k1", repository)
-        viewModel.uiState.first { it.title == "Kotlin" && it.isReadyToSend }
+        val viewModel = kotlinChat(repository)
 
-        viewModel.openModelPicker()
-        val opened = viewModel.uiState.first { it.picker.loaded() != null }.picker!!
+        val opened = viewModel.openedPicker()
         assertEquals(listOf("opencode-go", "openai-codex"), opened.loaded()?.map { it.id })
         assertEquals(listOf("Kimi K3.1 Pro", "GLM 5"), opened.loaded()?.first()?.models?.map { it.name })
         assertEquals(ModelChoice("opencode-go", "kimi-k3.1-pro", Effort.MEDIUM), opened.selection)
@@ -422,8 +435,7 @@ class ChatViewModelTest {
 
         val restarted = viewModel("plain:ada:k1", repository())
         restarted.uiState.first { it.title == "Kotlin" }
-        restarted.openModelPicker()
-        assertEquals(picked, restarted.uiState.first { it.picker.loaded() != null }.picker?.selection)
+        assertEquals(picked, restarted.openedPicker().selection)
         restarted.dismissModelPicker()
         restarted.onDraftChange("Hi")
         restarted.send()
@@ -432,13 +444,10 @@ class ChatViewModelTest {
 
     @Test
     fun `a chat with no pick starts with the model used last on this phone`() = runTest {
-        gateway.addChat("plain:ada:k1", "Kotlin")
         gateway.addChat("plain:ada:k2", "Rust")
         val repository = repository()
-        val first = viewModel("plain:ada:k1", repository)
-        first.uiState.first { it.title == "Kotlin" && it.isReadyToSend }
-        first.openModelPicker()
-        first.uiState.first { it.picker.loaded() != null }
+        val first = kotlinChat(repository)
+        first.openedPicker()
         first.onPickerModel("opencode-go", "glm-5")
         first.confirmModelPicker()
         repository.chat("plain:ada:k1").first { (it as? PlainChat)?.model?.model == "glm-5" }
@@ -454,12 +463,9 @@ class ChatViewModelTest {
     @Test
     fun `a pick the list no longer allows stays on the chat, and the picker starts from a valid choice`() = runTest {
         testServer.route("GET", "/api/models", 200, chatModelsAnswer(codexReason = null))
-        gateway.addChat("plain:ada:k1", "Kotlin")
         val repository = repository()
-        val viewModel = viewModel("plain:ada:k1", repository)
-        viewModel.uiState.first { it.title == "Kotlin" && it.isReadyToSend }
-        viewModel.openModelPicker()
-        viewModel.uiState.first { it.picker.loaded() != null }
+        val viewModel = kotlinChat(repository)
+        viewModel.openedPicker()
         viewModel.onPickerModel("openai-codex", "gpt-5.5")
         viewModel.onPickerEffort(Effort.XHIGH)
         viewModel.confirmModelPicker()
@@ -481,27 +487,25 @@ class ChatViewModelTest {
 
     @Test
     fun `the picker shows the list it holds at once while reading it again`() = runTest {
-        gateway.addChat("plain:ada:k1", "Kotlin")
         val store = testServer.signedInStore()
         val settings = testServer.settingsRepository(store, backgroundScope)
-        val viewModel = viewModel("plain:ada:k1", testServer.chatRepository(store, backgroundScope, settings = settings), settings = settings)
-        viewModel.uiState.first { it.title == "Kotlin" && it.isReadyToSend }
+        val viewModel = kotlinChat(testServer.chatRepository(store, backgroundScope, settings = settings), settings)
         settings.settings.first { it.chatModels is Loadable.Loaded }
-        testServer.route("GET", "/api/models", 200, chatModelsAnswer(codexReason = null), delayMillis = 1_000)
+        val hold = CompletableDeferred<Unit>()
+        testServer.route("GET", "/api/models", 200, chatModelsAnswer(codexReason = null), until = hold)
 
         viewModel.openModelPicker()
 
         val held = viewModel.uiState.first { it.picker != null }.picker
         assertEquals(false, held.loaded()?.last()?.isUsable)
+        hold.complete(Unit)
         viewModel.uiState.first { it.picker.loaded()?.last()?.isUsable == true }
     }
 
     @Test
     fun `a failed read of the list shows in the picker until Retry reads it`() = runTest {
-        gateway.addChat("plain:ada:k1", "Kotlin")
         testServer.route("GET", "/api/models", 503, errorAnswer("Unavailable"))
-        val viewModel = viewModel("plain:ada:k1", repository())
-        viewModel.uiState.first { it.title == "Kotlin" && it.isReadyToSend }
+        val viewModel = kotlinChat(repository())
 
         viewModel.openModelPicker()
 
@@ -554,8 +558,12 @@ class ChatViewModelTest {
         assertEquals("Half a thought", restored.uiState.first { it.isStreamOpen }.draft)
 
         restored.onDraftChange("   ")
+        restored.uiState.first { it.isReadyToSend && it.draft == "   " }
         restored.send()
-        assertNull(withContext(Dispatchers.IO) { gateway.sends.poll(200, TimeUnit.MILLISECONDS) })
+        restored.onDraftChange("Hello")
+        restored.uiState.first { it.canSend }
+        restored.send()
+        assertEquals("Hello", takeSend().getValue("text").jsonPrimitive.content)
     }
 
     @Test

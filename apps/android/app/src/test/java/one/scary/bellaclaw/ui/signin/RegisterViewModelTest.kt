@@ -2,8 +2,10 @@ package one.scary.bellaclaw.ui.signin
 
 import androidx.lifecycle.SavedStateHandle
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.jsonPrimitive
+import one.scary.bellaclaw.data.AccountRepository
 import one.scary.bellaclaw.data.TestServer
 import one.scary.bellaclaw.data.errorAnswer
 import one.scary.bellaclaw.data.json
@@ -16,7 +18,6 @@ import one.scary.bellaclaw.ui.collectIn
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 
@@ -27,6 +28,9 @@ class RegisterViewModelTest {
     @get:Rule
     val gateway = TestServer()
 
+    private fun TestScope.viewModel(accounts: AccountRepository = gateway.repository()) =
+        RegisterViewModel(accounts, gateway.url, SavedStateHandle()).also { collectIn(it.uiState) }
+
     private fun RegisterViewModel.fill() {
         onUsernameChange("ada")
         onPasswordChange("pw")
@@ -36,15 +40,18 @@ class RegisterViewModelTest {
     @Test
     fun `creates the account with the activation code, loading meanwhile, and keeps the session`() = runTest {
         val accounts = gateway.repository()
-        val viewModel = RegisterViewModel(accounts, gateway.url, SavedStateHandle())
-        collectIn(viewModel.uiState)
-        gateway.answer(200, sessionAnswer("ada", "t1"), delayMillis = 300)
+        val viewModel = viewModel(accounts)
+        val hold = gateway.hold()
+        gateway.answer(200, sessionAnswer("ada", "t1"))
 
         assertEquals(gateway.url, viewModel.uiState.value.serverUrl)
         viewModel.fill()
+        viewModel.uiState.first { it.canRegister }
         viewModel.register()
 
-        assertTrue(viewModel.uiState.value.isLoading)
+        viewModel.uiState.first { it.isLoading }
+        hold.complete(Unit)
+        accounts.session.first { it != null }
         assertNull(viewModel.uiState.first { !it.isLoading }.error)
         assertEquals(Session(gateway.url, "ada", "t1"), accounts.session.value)
         val request = gateway.takeRequest()
@@ -63,22 +70,21 @@ class RegisterViewModelTest {
             429 to "Too many wrong activation codes. Try again in 15 minutes",
         )
         refusals.forEach { (status, text) ->
-            val viewModel = RegisterViewModel(accounts, gateway.url, SavedStateHandle())
-            collectIn(viewModel.uiState)
+            val viewModel = viewModel(accounts)
             gateway.answer(status, errorAnswer(text))
 
             viewModel.fill()
+            viewModel.uiState.first { it.canRegister }
             viewModel.register()
 
-            assertEquals(AccountError.Server(status, text), viewModel.uiState.first { !it.isLoading }.error)
+            assertEquals(AccountError.Server(status, text), viewModel.uiState.first { it.error != null && !it.isLoading }.error)
         }
         assertNull(accounts.session.value)
     }
 
     @Test
     fun `refuses http outside a debug build without a request`() = runTest {
-        val viewModel = RegisterViewModel(gateway.repository(allowCleartext = false), gateway.url, SavedStateHandle())
-        collectIn(viewModel.uiState)
+        val viewModel = viewModel(gateway.repository(allowCleartext = false))
 
         viewModel.fill()
         viewModel.register()
@@ -89,8 +95,7 @@ class RegisterViewModelTest {
 
     @Test
     fun `needs every field`() = runTest {
-        val viewModel = RegisterViewModel(gateway.repository(), gateway.url, SavedStateHandle())
-        collectIn(viewModel.uiState)
+        val viewModel = viewModel()
 
         viewModel.onUsernameChange("ada")
         viewModel.onPasswordChange("pw")

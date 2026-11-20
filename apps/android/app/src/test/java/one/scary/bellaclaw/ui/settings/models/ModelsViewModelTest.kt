@@ -1,9 +1,13 @@
 package one.scary.bellaclaw.ui.settings.models
 
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.jsonPrimitive
+import one.scary.bellaclaw.data.SettingsRepository
 import one.scary.bellaclaw.data.TestServer
 import one.scary.bellaclaw.data.errorAnswer
 import one.scary.bellaclaw.data.json
@@ -27,12 +31,18 @@ class ModelsViewModelTest {
     @get:Rule
     val gateway = TestServer()
 
+    /** A view model whose models have loaded, on the signed-in session's settings unless [repository] says otherwise. */
+    private suspend fun TestScope.loadedModels(repository: SettingsRepository? = null): ModelsViewModel {
+        val viewModel = ModelsViewModel(repository ?: gateway.settingsRepository(gateway.signedInStore(), backgroundScope))
+        collectIn(viewModel.uiState)
+        viewModel.uiState.first { !it.isLoading }
+        return viewModel
+    }
+
     private fun ModelsUiState.row(role: ModelRole) = roles.single { it.role == role }
 
     @Test
     fun `shows the server's provider and roles once they load`() = runTest {
-        // Late enough that the screen is seen loading first.
-        gateway.route("GET", "/api/model", 200, modelAnswer(), delayMillis = 300)
         val viewModel = ModelsViewModel(gateway.settingsRepository(gateway.signedInStore(), backgroundScope))
         collectIn(viewModel.uiState)
         assertTrue(viewModel.uiState.value.isLoading)
@@ -49,11 +59,9 @@ class ModelsViewModelTest {
 
     @Test
     fun `a role change shows the server's answer once it is verified`() = runTest {
-        val viewModel = ModelsViewModel(gateway.settingsRepository(gateway.signedInStore(), backgroundScope))
-        collectIn(viewModel.uiState)
-        viewModel.uiState.first { !it.isLoading }
+        val viewModel = loadedModels()
         // The server keeps the model's default effort, not the high one asked for.
-        gateway.route("PUT", "/api/model", 200, modelAnswer(mainModel = "glm-5"), delayMillis = 300)
+        gateway.route("PUT", "/api/model", 200, modelAnswer(mainModel = "glm-5"))
 
         viewModel.openRole(ModelRole.MAIN)
         val editor = viewModel.uiState.first { it.editor != null }.editor
@@ -79,9 +87,7 @@ class ModelsViewModelTest {
 
     @Test
     fun `a refused change shows why and keeps the settings the server has`() = runTest {
-        val viewModel = ModelsViewModel(gateway.settingsRepository(gateway.signedInStore(), backgroundScope))
-        collectIn(viewModel.uiState)
-        viewModel.uiState.first { !it.isLoading }
+        val viewModel = loadedModels()
         gateway.route("PUT", "/api/model", 400, errorAnswer("Provider openai-codex is not connected"))
 
         viewModel.selectProvider("openai-codex")
@@ -95,9 +101,7 @@ class ModelsViewModelTest {
     @Test
     fun `a refusal is still shown after reopening Models`() = runTest {
         val repository = gateway.settingsRepository(gateway.signedInStore(), backgroundScope)
-        val viewModel = ModelsViewModel(repository)
-        collectIn(viewModel.uiState)
-        viewModel.uiState.first { !it.isLoading }
+        val viewModel = loadedModels(repository)
         gateway.route("PUT", "/api/model", 400, errorAnswer("Provider openai-codex is not connected"))
         viewModel.selectProvider("openai-codex")
         viewModel.uiState.first { it.changeError != null }
@@ -115,9 +119,7 @@ class ModelsViewModelTest {
 
     @Test
     fun `the role sheet closes when a reload no longer has its model`() = runTest {
-        val viewModel = ModelsViewModel(gateway.settingsRepository(gateway.signedInStore(), backgroundScope))
-        collectIn(viewModel.uiState)
-        viewModel.uiState.first { !it.isLoading }
+        val viewModel = loadedModels()
         viewModel.openRole(ModelRole.MAIN)
         viewModel.uiState.first { it.editor != null }
         // The provider was changed in the dashboard: its catalog has no Kimi.
@@ -140,9 +142,7 @@ class ModelsViewModelTest {
 
     @Test
     fun `reset asks the server for the role's default`() = runTest {
-        val viewModel = ModelsViewModel(gateway.settingsRepository(gateway.signedInStore(), backgroundScope))
-        collectIn(viewModel.uiState)
-        viewModel.uiState.first { !it.isLoading }
+        val viewModel = loadedModels()
         gateway.route("PUT", "/api/model", 200, modelAnswer())
 
         viewModel.openRole(ModelRole.UTILITY)
@@ -150,7 +150,7 @@ class ModelsViewModelTest {
         viewModel.resetRole()
         viewModel.uiState.first { !it.isChanging }
 
-        val body = gateway.takeRequest("PUT", "/api/model").json()
+        val body = withContext(Dispatchers.IO) { gateway.takeRequest("PUT", "/api/model") }.json()
         assertEquals("Utility", body["aiModelPurpose"]?.jsonPrimitive?.content)
         assertTrue(body["resetAiModel"]?.jsonPrimitive?.boolean == true)
     }

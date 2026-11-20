@@ -326,7 +326,7 @@ the test scope keeps running. Account tests use `TestServer`: a
 file in a temporary folder; a network answer reaches the ViewModel on OkHttp's thread, so after any event that follows one
 they wait with `uiState.first { … }` for the state the outcome names (an error, a step), not for a
 loading flag to clear, read `uiState.value` only before the first request, and before an event the
-ViewModel allows only in some state (submitting a form) wait for that state too. `MainDispatcherRule` replaces
+ViewModel allows only in some state (submitting a form) wait for that state too. To see a state that lasts only while a request is in flight (loading), take `TestServer.hold()` (or pass `until` to `route` for a routed answer) before queuing the answer, wait for that state, then complete the hold; no real delays. `MainDispatcherRule` replaces
 `Dispatchers.Main`; repositories that take a scope get the test's `backgroundScope`, and a fixed
 `Clock` where dates matter.
 

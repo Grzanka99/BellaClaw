@@ -41,11 +41,11 @@ class LinkViewModelTest {
         return viewModel
     }
 
-    /** Continues past the server and waits for the link check. */
-    private suspend fun LinkViewModel.checked(answer: String): LinkUiState {
+    /** Continues past the server and waits for the link check to settle on [step]. */
+    private suspend fun LinkViewModel.checked(answer: String, step: LinkStep): LinkUiState {
         gateway.answer(200, answer)
         check()
-        return uiState.first { !it.isLoading }
+        return uiState.first { it.step == step && !it.isLoading }
     }
 
     @Test
@@ -63,12 +63,14 @@ class LinkViewModelTest {
     @Test
     fun `continuing checks the link on its server, loading meanwhile`() = runTest {
         val viewModel = openLink(gateway.repository())
-        gateway.answer(200, """{"valid":false}""", delayMillis = 300)
+        val hold = gateway.hold()
+        gateway.answer(200, """{"valid":false}""")
 
         viewModel.check()
 
-        assertTrue(viewModel.uiState.value.isLoading)
-        assertEquals(LinkStep.INVALID, viewModel.uiState.first { !it.isLoading }.step)
+        viewModel.uiState.first { it.isLoading }
+        hold.complete(Unit)
+        viewModel.uiState.first { it.step == LinkStep.INVALID && !it.isLoading }
         val request = gateway.takeRequest()
         assertEquals("/api/link/check", request.url.encodedPath)
         assertEquals("link1", request.json()["token"]?.jsonPrimitive?.content)
@@ -81,7 +83,7 @@ class LinkViewModelTest {
         gateway.answer(502, errorAnswer("The assistant is unreachable"))
 
         viewModel.check()
-        val state = viewModel.uiState.first { !it.isLoading }
+        val state = viewModel.uiState.first { it.error != null && !it.isLoading }
 
         assertEquals(LinkStep.CONFIRM, state.step)
         assertEquals(AccountError.Server(502, "The assistant is unreachable"), state.error)
@@ -92,8 +94,7 @@ class LinkViewModelTest {
         val accounts = gateway.repository()
         val viewModel = openLink(accounts)
 
-        val checked = viewModel.checked("""{"valid":true,"chatKey":"signal:+48123","username":"ada"}""")
-        assertEquals(LinkStep.LINKED, checked.step)
+        val checked = viewModel.checked("""{"valid":true,"chatKey":"signal:+48123","username":"ada"}""", LinkStep.LINKED)
         assertEquals("Signal +48123", checked.chat)
         assertEquals("ada", checked.accountName)
         gateway.takeRequest()
@@ -113,8 +114,7 @@ class LinkViewModelTest {
     fun `signed out, a chat with no account shows the chat, then creates an account with the link`() = runTest {
         val accounts = gateway.repository()
         val viewModel = openLink(accounts)
-        val checked = viewModel.checked("""{"valid":true,"chatKey":"discord:42"}""")
-        assertEquals(LinkStep.UNLINKED, checked.step)
+        val checked = viewModel.checked("""{"valid":true,"chatKey":"discord:42"}""", LinkStep.UNLINKED)
         assertEquals("Discord 42", checked.chat)
         assertTrue(checked.createAccount)
         gateway.takeRequest()
@@ -137,7 +137,7 @@ class LinkViewModelTest {
     fun `signed out, a chat with no account signs in to an existing account with the link, and shows a refusal`() = runTest {
         val accounts = gateway.repository()
         val viewModel = openLink(accounts)
-        viewModel.checked("""{"valid":true,"chatKey":"signal:+48123"}""")
+        viewModel.checked("""{"valid":true,"chatKey":"signal:+48123"}""", LinkStep.UNLINKED)
         gateway.takeRequest()
 
         viewModel.onCreateAccountChange(false)
@@ -164,8 +164,7 @@ class LinkViewModelTest {
         assertEquals(LinkStep.CONFIRM, viewModel.uiState.value.step)
         assertEquals(0, gateway.server.requestCount)
 
-        val offer = viewModel.checked("""{"valid":true,"chatKey":"signal:+48123"}""")
-        assertEquals(LinkStep.CONNECT, offer.step)
+        val offer = viewModel.checked("""{"valid":true,"chatKey":"signal:+48123"}""", LinkStep.CONNECT)
         assertEquals("Signal +48123", offer.chat)
         assertEquals("ada", offer.accountName)
         assertEquals("/api/link/check", gateway.takeRequest().url.encodedPath)
@@ -188,9 +187,8 @@ class LinkViewModelTest {
     fun `signed in, a chat of this account already says so and connects nothing`() = runTest {
         val viewModel = openLink(gateway.repository(gateway.signedInStore()))
 
-        val state = viewModel.checked("""{"valid":true,"chatKey":"signal:+48123","username":"ada"}""")
+        val state = viewModel.checked("""{"valid":true,"chatKey":"signal:+48123","username":"ada"}""", LinkStep.ALREADY_CONNECTED)
 
-        assertEquals(LinkStep.ALREADY_CONNECTED, state.step)
         assertEquals("Signal +48123", state.chat)
         assertEquals(1, gateway.server.requestCount)
     }
@@ -199,9 +197,8 @@ class LinkViewModelTest {
     fun `signed in, a chat of another account says so and connects nothing`() = runTest {
         val viewModel = openLink(gateway.repository(gateway.signedInStore()))
 
-        val state = viewModel.checked("""{"valid":true,"chatKey":"signal:+48999","username":"eve"}""")
+        val state = viewModel.checked("""{"valid":true,"chatKey":"signal:+48999","username":"eve"}""", LinkStep.OTHER_ACCOUNT)
 
-        assertEquals(LinkStep.OTHER_ACCOUNT, state.step)
         assertEquals("Signal +48999", state.chat)
         assertEquals("ada", state.accountName)
         assertEquals(1, gateway.server.requestCount)
@@ -211,7 +208,7 @@ class LinkViewModelTest {
     fun `a 401 while connecting ends the session and offers the signed-out choices`() = runTest {
         val accounts = gateway.repository(gateway.signedInStore())
         val viewModel = openLink(accounts)
-        viewModel.checked("""{"valid":true,"chatKey":"signal:+48123"}""")
+        viewModel.checked("""{"valid":true,"chatKey":"signal:+48123"}""", LinkStep.CONNECT)
         gateway.answer(401, errorAnswer("Unauthorized"))
 
         viewModel.connect()

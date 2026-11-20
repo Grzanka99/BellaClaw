@@ -2,8 +2,10 @@ package one.scary.bellaclaw.ui.signin
 
 import androidx.lifecycle.SavedStateHandle
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.jsonPrimitive
+import one.scary.bellaclaw.data.AccountRepository
 import one.scary.bellaclaw.data.TestServer
 import one.scary.bellaclaw.data.errorAnswer
 import one.scary.bellaclaw.data.json
@@ -19,7 +21,6 @@ import one.scary.bellaclaw.ui.collectIn
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 
@@ -30,6 +31,9 @@ class SignInViewModelTest {
     @get:Rule
     val gateway = TestServer()
 
+    private fun TestScope.viewModel(accounts: AccountRepository = gateway.repository(), savedStateHandle: SavedStateHandle = SavedStateHandle()) =
+        SignInViewModel(accounts, savedStateHandle).also { collectIn(it.uiState) }
+
     private fun SignInViewModel.fill(server: String, username: String = "ada", password: String = "pw") {
         onServerUrlChange(server)
         onUsernameChange(username)
@@ -39,16 +43,17 @@ class SignInViewModelTest {
     @Test
     fun `signs in, loading meanwhile, and keeps the session`() = runTest {
         val accounts = gateway.repository()
-        val viewModel = SignInViewModel(accounts, SavedStateHandle())
-        collectIn(viewModel.uiState)
-        gateway.answer(200, sessionAnswer("ada", "t1"), delayMillis = 300)
+        val viewModel = viewModel(accounts)
+        val hold = gateway.hold()
+        gateway.answer(200, sessionAnswer("ada", "t1"))
 
         viewModel.fill("${gateway.url}/", username = " ada ")
-        assertTrue(viewModel.uiState.value.canSignIn)
+        viewModel.uiState.first { it.canSignIn }
         viewModel.signIn()
 
-        assertTrue(viewModel.uiState.value.isLoading)
-        assertFalse(viewModel.uiState.value.canSignIn)
+        viewModel.uiState.first { it.isLoading }
+        hold.complete(Unit)
+        accounts.session.first { it != null }
         val state = viewModel.uiState.first { !it.isLoading }
         assertNull(state.error)
         assertEquals(Session(gateway.url, "ada", "t1"), accounts.session.value)
@@ -61,13 +66,13 @@ class SignInViewModelTest {
     @Test
     fun `shows the server's refusal and stays signed out`() = runTest {
         val accounts = gateway.repository()
-        val viewModel = SignInViewModel(accounts, SavedStateHandle())
-        collectIn(viewModel.uiState)
+        val viewModel = viewModel(accounts)
         gateway.answer(401, errorAnswer("Wrong username or password"))
 
         viewModel.fill(gateway.url)
+        viewModel.uiState.first { it.canSignIn }
         viewModel.signIn()
-        val state = viewModel.uiState.first { !it.isLoading }
+        val state = viewModel.uiState.first { it.error != null && !it.isLoading }
 
         assertEquals(AccountError.Server(401, "Wrong username or password"), state.error)
         assertNull(accounts.session.value)
@@ -75,21 +80,20 @@ class SignInViewModelTest {
 
     @Test
     fun `shows a network failure`() = runTest {
-        val viewModel = SignInViewModel(gateway.repository(), SavedStateHandle())
-        collectIn(viewModel.uiState)
+        val viewModel = viewModel()
         val url = gateway.url
         gateway.server.close()
 
         viewModel.fill(url)
+        viewModel.uiState.first { it.canSignIn }
         viewModel.signIn()
 
-        assertEquals(AccountError.Network, viewModel.uiState.first { !it.isLoading }.error)
+        assertEquals(AccountError.Network, viewModel.uiState.first { it.error != null && !it.isLoading }.error)
     }
 
     @Test
     fun `refuses a bad server address without a request, and editing clears it`() = runTest {
-        val viewModel = SignInViewModel(gateway.repository(), SavedStateHandle())
-        collectIn(viewModel.uiState)
+        val viewModel = viewModel()
 
         viewModel.fill("bella.example.com")
         viewModel.signIn()
@@ -105,15 +109,13 @@ class SignInViewModelTest {
         val store = gateway.signedInStore("https://bella.example.com")
         store.end("t0")
         val savedStateHandle = SavedStateHandle()
-        val viewModel = SignInViewModel(gateway.repository(store), savedStateHandle)
-        collectIn(viewModel.uiState)
+        val viewModel = viewModel(gateway.repository(store), savedStateHandle)
 
         assertEquals("https://bella.example.com", viewModel.uiState.value.serverUrl)
         viewModel.fill("https://other.example.com", password = "secret")
         viewModel.onCodeChange("bellaclaw://login?token=secret-token")
 
-        val restored = SignInViewModel(gateway.repository(store), savedStateHandle)
-        collectIn(restored.uiState)
+        val restored = viewModel(gateway.repository(store), savedStateHandle)
         assertEquals("https://other.example.com", restored.uiState.value.serverUrl)
         assertEquals("ada", restored.uiState.value.username)
         assertEquals("", restored.uiState.value.password)
@@ -125,8 +127,7 @@ class SignInViewModelTest {
     @Test
     fun `a pasted code waits for confirmation and sends nothing`() = runTest {
         val accounts = gateway.repository()
-        val viewModel = SignInViewModel(accounts, SavedStateHandle())
-        collectIn(viewModel.uiState)
+        val viewModel = viewModel(accounts)
 
         viewModel.onCodeChange(" bellaclaw://login?server=https%3A%2F%2Fbella.example.com&token=t ")
         viewModel.useCode()
@@ -140,8 +141,7 @@ class SignInViewModelTest {
     @Test
     fun `a pasted code that is not a usable link is refused in place`() = runTest {
         val accounts = gateway.repository()
-        val viewModel = SignInViewModel(accounts, SavedStateHandle())
-        collectIn(viewModel.uiState)
+        val viewModel = viewModel(accounts)
 
         viewModel.onCodeChange("https://bella.example.com/app?token=t")
         viewModel.useCode()

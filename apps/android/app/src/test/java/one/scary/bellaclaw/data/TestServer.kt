@@ -10,6 +10,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -39,6 +40,13 @@ class TestServer : ExternalResource() {
     /** Answers by `METHOD path`, every time, ahead of the queue of [answer]. */
     private val routes = ConcurrentHashMap<String, MockResponse>()
 
+    /** What routed answers wait for, by `METHOD path`, from [route]. */
+    private val routeHolds = ConcurrentHashMap<String, CompletableDeferred<Unit>>()
+
+    /** What the queued answers wait for, from [hold]. */
+    @Volatile
+    private var held: CompletableDeferred<Unit>? = null
+
     /**
      * The server's address, as checkServerUrl leaves it. By IP, not `localhost`: OkHttp tries `::1` first, where
      * another process (the emulator) may listen on the same port and never answer.
@@ -58,14 +66,19 @@ class TestServer : ExternalResource() {
 
     override fun before() {
         server.dispatcher = object : QueueDispatcher() {
-            override fun dispatch(request: RecordedRequest): MockResponse =
-                routes["${request.method} ${request.url.encodedPath}"] ?: super.dispatch(request)
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                routed(request)?.let { return it }
+                held?.let { runBlocking { it.await() } }
+                return super.dispatch(request)
+            }
         }
         server.start(InetAddress.getByName(LOOPBACK), 0)
         folder = Files.createTempDirectory("bellaclaw-test").toFile()
     }
 
     override fun after() {
+        held?.complete(Unit)
+        routeHolds.values.forEach { it.complete(Unit) }
         server.close()
         folder.deleteRecursively()
     }
@@ -82,7 +95,7 @@ class TestServer : ExternalResource() {
     fun gateway(): FakeGateway = FakeGateway().also { gateway ->
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse =
-                routes["${request.method} ${request.url.encodedPath}"] ?: gateway.dispatch(request)
+                routed(request) ?: gateway.dispatch(request)
 
             override fun close() {
                 gateway.close()
@@ -112,23 +125,29 @@ class TestServer : ExternalResource() {
         retryMillis = retryMillis,
     )
 
-    fun answer(code: Int, body: String, delayMillis: Long = 0) {
-        server.enqueue(
-            MockResponse.Builder()
-                .code(code)
-                .body(body)
-                .headersDelay(delayMillis, TimeUnit.MILLISECONDS)
-                .build(),
-        )
+    fun answer(code: Int, body: String) {
+        server.enqueue(MockResponse.Builder().code(code).body(body).build())
     }
 
-    /** Answers every [method] request to [path] this way from now on, whatever arrives before it. */
-    fun route(method: String, path: String, code: Int, body: String, delayMillis: Long = 0) {
-        routes["$method $path"] = MockResponse.Builder()
-            .code(code)
-            .body(body)
-            .headersDelay(delayMillis, TimeUnit.MILLISECONDS)
-            .build()
+    /** Makes the answers [answer] queues wait until the result completes, so a test can see the state while that request is in flight. */
+    fun hold(): CompletableDeferred<Unit> = CompletableDeferred<Unit>().also { held = it }
+
+    /** Answers every [method] request to [path] this way from now on, whatever arrives before it; after [until] completes, if given. */
+    fun route(method: String, path: String, code: Int, body: String, until: CompletableDeferred<Unit>? = null) {
+        val key = "$method $path"
+        if (until == null) {
+            routeHolds.remove(key)
+        } else {
+            routeHolds[key] = until
+        }
+        routes[key] = MockResponse.Builder().code(code).body(body).build()
+    }
+
+    private fun routed(request: RecordedRequest): MockResponse? {
+        val key = "${request.method} ${request.url.encodedPath}"
+        val response = routes[key] ?: return null
+        routeHolds[key]?.let { runBlocking { it.await() } }
+        return response
     }
 
     /** Writes in place, so a theme change is on disk when the call that made it returns. */

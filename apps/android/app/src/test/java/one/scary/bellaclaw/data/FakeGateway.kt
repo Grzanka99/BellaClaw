@@ -1,6 +1,8 @@
 package one.scary.bellaclaw.data
 
+import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
@@ -20,7 +22,7 @@ import okio.BufferedSink
 /**
  * The gateway's conversation routes and live stream over in-memory conversations, for [TestServer].
  * Rows get ids in one rising sequence; every change raises the conversation's revision, a rewrite also
- * its rewrite revision. Each stream opens with `check`, then carries what [push] sends.
+ * its rewrite revision. Each stream opens with `check`, then carries what [push] sends while it is open.
  */
 class FakeGateway : Dispatcher() {
     class Row(val id: Long, val author: String, val text: String, val createdAt: Long, val clientMessageId: String?, val imageIds: List<String?>)
@@ -34,7 +36,8 @@ class FakeGateway : Dispatcher() {
     private val conversations = mutableListOf(Conversation(BELLA_KEY, "bella"))
     private var nextRowId = 1L
     private var createdChats = 0
-    private val events = LinkedBlockingQueue<String>()
+    /** The events of each open stream, not yet written. */
+    private val streams = CopyOnWriteArrayList<LinkedBlockingQueue<String>>()
 
     @Volatile
     private var closed = false
@@ -112,7 +115,8 @@ class FakeGateway : Dispatcher() {
 
     /** Sends a stream event of [type] with [data] (JSON) to the open streams. */
     fun push(type: String, data: String) {
-        events.put("event: $type\ndata: $data\n\n")
+        val event = "event: $type\ndata: $data\n\n"
+        streams.forEach { it.put(event) }
     }
 
     override fun close() {
@@ -125,22 +129,22 @@ class FakeGateway : Dispatcher() {
             request.url.encodedPath == "/api/stream" -> stream()
             request.url.encodedPath == "/api/logout" -> json("""{"ok":true}""")
             segments == listOf("api", "conversations") && request.method == "GET" ->
-                listFailures.poll()?.let { MockResponse.Builder().code(it).body(errorAnswer("Unavailable")).build() } ?: json(list())
+                listFailures.poll()?.let { failure(it, errorAnswer("Unavailable")) } ?: json(list())
             segments == listOf("api", "conversations") && request.method == "POST" -> json(create())
             segments.size == 4 && segments[3] == "messages" && request.method == "GET" ->
-                historyFailures.poll()?.let { MockResponse.Builder().code(it).body(errorAnswer("Unavailable")).build() }
+                historyFailures.poll()?.let { failure(it, errorAnswer("Unavailable")) }
                     ?: json(history(segments[2], request.url.queryParameter("before"), request.url.queryParameter("after")))
             segments.size == 4 && segments[3] == "messages" && request.method == "POST" -> send(request)
             segments.size == 4 && segments[3] == "media" && request.method == "POST" -> upload(request)
             segments.size == 5 && segments[3] == "media" && request.method == "GET" -> download(segments[4])
-            else -> MockResponse.Builder().code(404).body(errorAnswer("Not found")).build()
+            else -> failure(404, errorAnswer("Not found"))
         }
     }
 
     private fun send(request: RecordedRequest): MockResponse {
         val body = request.json()
         sends.put(body)
-        sendFailures.poll()?.let { (code, text) -> return MockResponse.Builder().code(code).body(text).build() }
+        sendFailures.poll()?.let { (code, text) -> return failure(code, text) }
         return json("""{"clientMessageId":${body["clientMessageId"]}}""")
     }
 
@@ -148,14 +152,14 @@ class FakeGateway : Dispatcher() {
         val type = request.headers["Content-Type"]
         val bytes = checkNotNull(request.body).toByteArray()
         uploads.put(type to bytes)
-        uploadFailures.poll()?.let { (code, text) -> return MockResponse.Builder().code(code).body(text).build() }
+        uploadFailures.poll()?.let { (code, text) -> return failure(code, text) }
         val id = "media-${nextMediaId.incrementAndGet()}"
         media[id] = bytes
         return json("""{"id":"$id","mimeType":"$type"}""")
     }
 
     private fun download(id: String): MockResponse {
-        val bytes = media[id] ?: return MockResponse.Builder().code(410).body(errorAnswer("Gone")).build()
+        val bytes = media[id] ?: return failure(410, errorAnswer("Gone"))
         downloads++
         return MockResponse.Builder().setHeader("Content-Type", "image/jpeg").body(Buffer().write(bytes)).build()
     }
@@ -217,10 +221,18 @@ class FakeGateway : Dispatcher() {
             override val contentLength = -1L
 
             override fun writeTo(sink: BufferedSink) {
-                sink.writeUtf8("event: check\ndata: {}\n\n").flush()
-                while (!closed) {
-                    val event = events.poll(POLL_MILLIS, TimeUnit.MILLISECONDS) ?: continue
-                    sink.writeUtf8(event).flush()
+                val events = LinkedBlockingQueue<String>()
+                streams.add(events)
+                try {
+                    sink.writeUtf8("event: check\ndata: {}\n\n").flush()
+                    while (!closed) {
+                        val event = events.poll(POLL_MILLIS, TimeUnit.MILLISECONDS) ?: continue
+                        sink.writeUtf8(event).flush()
+                    }
+                } catch (_: IOException) {
+                    // The client went away.
+                } finally {
+                    streams.remove(events)
                 }
             }
         }
@@ -252,6 +264,8 @@ class FakeGateway : Dispatcher() {
     }
 
     private fun json(body: String) = MockResponse.Builder().setHeader("Content-Type", "application/json").body(body).build()
+
+    private fun failure(code: Int, body: String) = MockResponse.Builder().code(code).body(body).build()
 
     companion object {
         const val BELLA_KEY = "bella:ada"
