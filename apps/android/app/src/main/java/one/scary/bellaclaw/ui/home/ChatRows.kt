@@ -10,17 +10,22 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import one.scary.bellaclaw.R
@@ -31,14 +36,22 @@ import one.scary.bellaclaw.ui.components.imageVector
 
 @Composable
 fun BellaClawRow(summary: BellaClawSummary, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    ChatRowLayout(
-        leading = { BellaClawAvatar(size = 56.dp) },
-        title = stringResource(R.string.bellaclaw_name),
-        titleStyle = MaterialTheme.typography.titleLarge,
-        summary = summary,
+    Surface(
         onClick = onClick,
-        modifier = modifier.padding(vertical = 4.dp),
-    )
+        shape = CircleShape,
+        color = MaterialTheme.colorScheme.primaryContainer,
+        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        modifier = modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+    ) {
+        ChatRowLayout(
+            leading = { BellaClawAvatar(size = 56.dp) },
+            title = stringResource(R.string.bellaclaw_name),
+            titleStyle = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+            mutedColor = LocalContentColor.current.copy(alpha = 0.8f),
+            summary = summary,
+            modifier = Modifier.padding(vertical = 6.dp),
+        )
+    }
 }
 
 @Composable
@@ -60,9 +73,9 @@ fun PlainChatRow(summary: PlainChatSummary, onClick: () -> Unit, modifier: Modif
         },
         title = summary.title ?: stringResource(R.string.new_chat_title),
         titleStyle = MaterialTheme.typography.titleMedium,
+        mutedColor = MaterialTheme.colorScheme.onSurfaceVariant,
         summary = summary,
-        onClick = onClick,
-        modifier = modifier,
+        modifier = modifier.clickable(onClick = onClick),
     )
 }
 
@@ -71,14 +84,13 @@ private fun ChatRowLayout(
     leading: @Composable () -> Unit,
     title: String,
     titleStyle: TextStyle,
+    mutedColor: Color,
     summary: ChatSummary,
-    onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -90,7 +102,7 @@ private fun ChatRowLayout(
                 Text(
                     text = it.ifEmpty { stringResource(R.string.image_placeholder) },
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = mutedColor,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -105,7 +117,7 @@ private fun ChatRowLayout(
                 Text(
                     text = formatListTime(it),
                     style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = mutedColor,
                 )
                 if (summary.isUnread) {
                     val unread = stringResource(R.string.unread)

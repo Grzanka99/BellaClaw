@@ -1,5 +1,6 @@
 package one.scary.bellaclaw.ui.home
 
+import android.content.res.Configuration
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
@@ -11,7 +12,6 @@ import androidx.compose.material.icons.outlined.EditNote
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Scaffold
@@ -60,8 +60,11 @@ fun HomeScreen(
         LazyColumn(contentPadding = PaddingValues(bottom = 96.dp), modifier = Modifier.padding(padding)) {
             state.bellaClaw?.let { bellaClaw ->
                 item(key = bellaClaw.id) {
-                    BellaClawRow(summary = bellaClaw, onClick = { onOpenChat(bellaClaw.id) })
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
+                    BellaClawRow(
+                        summary = bellaClaw,
+                        onClick = { onOpenChat(bellaClaw.id) },
+                        modifier = Modifier.padding(top = 8.dp, bottom = 4.dp),
+                    )
                 }
             }
             item {
@@ -78,13 +81,14 @@ fun HomeScreen(
 }
 
 @Preview
+@Preview(uiMode = Configuration.UI_MODE_NIGHT_YES)
 @Composable
 private fun HomeScreenPreview() {
     val now = Instant.now()
     BellaClawTheme {
         HomeScreen(
             state = HomeUiState(
-                bellaClaw = BellaClawSummary("bellaclaw", "Reminder set for 18:00", now),
+                bellaClaw = BellaClawSummary("bellaclaw", "Reminder set for 18:00", now, isUnread = true),
                 chats = listOf(
                     PlainChatSummary("a", "Kotlin flow vs channel", ChatIcon.CODE, "Use a SharedFlow when…", now, isUnread = true),
                     PlainChatSummary("b", null, ChatIcon.ROCKET, null, null),
