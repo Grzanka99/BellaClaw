@@ -59,6 +59,14 @@ async function openAppStream(sendApp: ReturnType<typeof createTestApp>["sendApp"
   };
 }
 
+// a new app session of username; its bearer token
+async function loginApp(sendApp: ReturnType<typeof createTestApp>["sendApp"], username: string) {
+  const response = await sendApp("POST", "/api/login", { username, password: PASSWORD });
+  expect(response.status).toBe(200);
+
+  return String((await response.json()).token);
+}
+
 // counts the open subscriptions of the edge's fan-out
 function countSubscriptions(liveStream: ReturnType<typeof createLiveStream>) {
   const counter = { open: 0 };
@@ -431,8 +439,9 @@ test("an account's fifth stream ends its oldest; another account's streams stay"
   const bobStream = await openAppStream(sendApp, bob.token);
   const streams = [];
 
+  // each in its own session: a session holds one stream
   for (let opened = 0; opened < 5; opened += 1) {
-    streams.push(await openAppStream(sendApp, alice.token));
+    streams.push(await openAppStream(sendApp, await loginApp(sendApp, "alice")));
   }
 
   // each opened with a check; the oldest then ended
@@ -488,6 +497,27 @@ test("an account's fifth stream ends its oldest; another account's streams stay"
   }
 
   expect(subscriptions.open).toBe(0);
+});
+
+test("a second stream of an app session ends the first; once it closes the account has no app stream", async () => {
+  const { sendApp, assistant, store, startFollowing } = createTestApp();
+  const alice = await registerApp(sendApp, store, "alice");
+  const stopFollowing = await startFollowing();
+  await waitUntil(() => assistant.presence.length === 1);
+
+  // the phone left Wi-Fi: its old connection died without a close, and it reconnects
+  const dead = await openAppStream(sendApp, alice.token);
+  await waitUntil(() => assistant.presence.length === 2);
+  const reconnected = await openAppStream(sendApp, alice.token);
+  expect(await dead.next(2)).toEqual([{ type: "check" }]);
+  expect(dead.state.ended).toBe(true);
+  expect(await reconnected.next(1)).toEqual([{ type: "check" }]);
+
+  await reconnected.close();
+  await waitUntil(() => assistant.presence.length === 3);
+  expect(assistant.presence).toEqual([[], [alice.publicId], []]);
+
+  await stopFollowing();
 });
 
 test("HEAD of the stream opens no stream and no subscription", async () => {
