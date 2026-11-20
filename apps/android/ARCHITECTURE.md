@@ -78,9 +78,10 @@ whenever it changes, since the app theme can override the device theme.
 ## Account and networking
 
 - Only repositories call `ApiClient`; ViewModels see `AccountError` and model types, never
-  `ApiResult` or request bodies. Every request carries `X-BellaClaw-Client: app` and a JSON body with
-  a `Content-Length`. `post` goes to a server named by the caller (sign-in, link check);
-  `postSignedIn` goes to the session's server with `Authorization: Bearer <token>`. `ApiClient` builds
+  `ApiResult` or request bodies. Every request carries `X-BellaClaw-Client: app`; a POST or PUT carries a
+  JSON body with a `Content-Length`. `post` goes to a server named by the caller (sign-in, link check);
+  `getSignedIn`, `postSignedIn`, `putSignedIn` and `deleteSignedIn` go to the session's server with
+  `Authorization: Bearer <token>`. `ApiClient` builds
   its one OkHttp client: it follows no redirect (a redirect answer is an API error like any other
   non-2xx, so no body with a password or token is replayed elsewhere), and its read timeout (70 s)
   covers the server's longest wait (a link request waits up to 60 s for the assistant).
@@ -121,7 +122,8 @@ classes; add an interface only when a second implementation exists.
 JVM unit tests in `app/src/test` for every ViewModel: construct it with real repositories, collect
 its state (`collectIn`), send events, assert the exposed state. Account tests use `TestServer`: a
 local `MockWebServer` plus the real `SessionStore`, `ApiClient` and `AccountRepository` on a session
-file in a temporary folder; they wait for a request's end with `uiState.first { … }`. `MainDispatcherRule` replaces
+file in a temporary folder; a network answer reaches the ViewModel on OkHttp's thread, so after any event that follows one
+they wait with `uiState.first { … }` and read `uiState.value` only before the first request. `MainDispatcherRule` replaces
 `Dispatchers.Main`; repositories that take a scope get the test's `backgroundScope`, and a fixed
 `Clock` where dates matter.
 

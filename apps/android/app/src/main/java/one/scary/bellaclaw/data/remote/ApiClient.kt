@@ -15,9 +15,9 @@ import okhttp3.Response
 import one.scary.bellaclaw.data.local.SessionStore
 
 /**
- * The one client of the gateway's app API. Every request carries `X-BellaClaw-Client: app` and a
- * JSON body with a `Content-Length`; a signed-in request also carries the session's bearer token, and
- * its `401` ends the session in [sessionStore]. Redirects are not followed: a redirect answer is an API
+ * The one client of the gateway's app API. Every request carries `X-BellaClaw-Client: app`; a POST or
+ * PUT carries a JSON body with a `Content-Length`; a signed-in request also carries the session's
+ * bearer token, and its `401` ends the session in [sessionStore]. Redirects are not followed: a redirect answer is an API
  * error, so a body holding a password or a token never goes to another address. The read timeout covers
  * the server's longest wait (a link waits up to 60 seconds for the assistant).
  */
@@ -30,14 +30,28 @@ class ApiClient(@PublishedApi internal val sessionStore: SessionStore) {
 
     /** POSTs [body] to [path] on [serverUrl] without a session: sign-in and link checks. */
     suspend inline fun <reified B, reified R> post(serverUrl: String, path: String, body: B): ApiResult<R> =
-        exchange(serverUrl + path, bearer = null, json.encodeToString(body)) { json.decodeFromString<R>(it) }
+        exchange("POST", serverUrl + path, bearer = null, json.encodeToString(body)) { json.decodeFromString<R>(it) }
 
-    /** POSTs [body] to [path] on the session's server with its token; a missing session answers as a `401` would. */
-    suspend inline fun <reified B, reified R> postSignedIn(path: String, body: B): ApiResult<R> {
+    /** GETs [path] on the session's server with its token; a missing session answers as a `401` would, here and below. */
+    suspend inline fun <reified R> getSignedIn(path: String): ApiResult<R> =
+        signedIn("GET", path, body = null) { json.decodeFromString<R>(it) }
+
+    /** POSTs [body] to [path] on the session's server with its token. */
+    suspend inline fun <reified B, reified R> postSignedIn(path: String, body: B): ApiResult<R> =
+        signedIn("POST", path, json.encodeToString(body)) { json.decodeFromString<R>(it) }
+
+    /** PUTs [body] to [path] on the session's server with its token. */
+    suspend inline fun <reified B, reified R> putSignedIn(path: String, body: B): ApiResult<R> =
+        signedIn("PUT", path, json.encodeToString(body)) { json.decodeFromString<R>(it) }
+
+    /** DELETEs [path] on the session's server with its token. */
+    suspend inline fun <reified R> deleteSignedIn(path: String): ApiResult<R> =
+        signedIn("DELETE", path, body = null) { json.decodeFromString<R>(it) }
+
+    @PublishedApi
+    internal suspend fun <R> signedIn(method: String, path: String, body: String?, decode: (String) -> R): ApiResult<R> {
         val session = sessionStore.session.value ?: return ApiResult.ApiError(UNAUTHORIZED, null)
-        val result = exchange(session.serverUrl + path, session.token, json.encodeToString(body)) {
-            json.decodeFromString<R>(it)
-        }
+        val result = exchange(method, session.serverUrl + path, session.token, body, decode)
         if (result is ApiResult.ApiError && result.status == UNAUTHORIZED) {
             sessionStore.end(session.token)
         }
@@ -45,10 +59,16 @@ class ApiClient(@PublishedApi internal val sessionStore: SessionStore) {
     }
 
     @PublishedApi
-    internal suspend fun <R> exchange(url: String, bearer: String?, body: String, decode: (String) -> R): ApiResult<R> {
+    internal suspend fun <R> exchange(
+        method: String,
+        url: String,
+        bearer: String?,
+        body: String?,
+        decode: (String) -> R,
+    ): ApiResult<R> {
         val builder = Request.Builder()
             .header(CLIENT_HEADER, "app")
-            .post(body.toRequestBody(JSON))
+            .method(method, body?.toRequestBody(JSON))
         if (bearer != null) {
             builder.header("Authorization", "Bearer $bearer")
         }

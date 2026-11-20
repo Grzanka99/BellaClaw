@@ -54,6 +54,33 @@ class ApiClientTest {
     }
 
     @Test
+    fun `a signed-in GET, PUT and DELETE carry the bearer token, and only the PUT a body`() = runTest {
+        val client = ApiClient(gateway.signedInStore())
+
+        gateway.answer(200, """{"username":"ada","chats":[]}""")
+        assertEquals(ApiResult.Success(AccountBody("ada")), client.getSignedIn<AccountBody>("/api/me"))
+        val get = gateway.takeRequest()
+        assertEquals("GET", get.method)
+        assertEquals("Bearer t0", get.headers["Authorization"])
+        assertEquals(0L, get.bodySize)
+
+        gateway.answer(200, """{"username":"ada","chats":[]}""")
+        client.putSignedIn<LinkTokenBody, AccountBody>("/api/thing", LinkTokenBody("x"))
+        val put = gateway.takeRequest()
+        assertEquals("PUT", put.method)
+        assertEquals("Bearer t0", put.headers["Authorization"])
+        assertEquals("x", put.json()["token"]?.jsonPrimitive?.content)
+
+        gateway.answer(200, """{"username":"ada","chats":[]}""")
+        client.deleteSignedIn<AccountBody>("/api/thing")
+        val delete = gateway.takeRequest()
+        assertEquals("DELETE", delete.method)
+        assertEquals("/api/thing", delete.url.encodedPath)
+        assertEquals("Bearer t0", delete.headers["Authorization"])
+        assertEquals(0L, delete.bodySize)
+    }
+
+    @Test
     fun `an answer outside 2xx is an API error with the server's text`() = runTest {
         val client = ApiClient(gateway.store())
         gateway.answer(409, errorAnswer("This username is taken"))
