@@ -43,9 +43,23 @@ The package scripts include the Signal profile:
 | --- | --- |
 | `bun run server:init` | Build, rebuild embeddings, and start all services. |
 | `bun run server:update` | Rebuild without cache, recreate all services, and remove dangling BellaClaw images. The assistant applies the new image's database migrations before it starts. |
-| `bun run server:migrate-to-gateway` | Once, on a server whose `.env` still has `BELLACLAW_DASHBOARD_*` settings: rename them to `BELLACLAW_GATEWAY_*`, remove the old `bellaclaw-dashboard` container (its data volume stays), then run `server:update`. |
+| `bun run server:migrate-to-gateway` | Once, on a server whose `.env` still has `BELLACLAW_DASHBOARD_*` settings: rename them to `BELLACLAW_GATEWAY_*`, remove the old `bellaclaw-dashboard` container (its data volume stays), then run `server:update`. Run it while the assistant is idle (see below). |
 | `bun run server:rebuild-embeddings` | Stop the assistant, pull the embedding model, re-embed all facts, and start the assistant on the current image. |
 | `bun run server:down` | Stop all services, including the Signal profile. |
+
+Before `server:migrate-to-gateway`, let the assistant go idle. The move changes the payloads of
+most events, so one of those still waiting from before it, such as a reply retried while Signal
+is unreachable, cannot be read afterwards: its delivery ends dead and the event is never handled.
+
+If the gateway then logs that the link of a chat is stuck, list the dead deliveries, redrive the
+`identity.link.started`, `.settled`, `.quiet` and `.moved` ones by their `<eventSeq>:<consumer>`,
+and restart the assistant:
+
+```bash
+podman compose exec bellaclaw bun run --cwd apps/assistant events:redrive
+podman compose exec bellaclaw bun run --cwd apps/assistant events:redrive -- <eventSeq>:<consumer> ...
+podman compose restart bellaclaw
+```
 
 ## Self-Update
 
