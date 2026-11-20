@@ -122,6 +122,7 @@ class LinkViewModelTest {
         viewModel.onUsernameChange("ada")
         viewModel.onPasswordChange("pw")
         gateway.answer(200, sessionAnswer("ada", "t1"))
+        viewModel.uiState.first { it.canSubmitAccount }
         viewModel.submitAccount()
         viewModel.uiState.first { it.isMissing }
 
@@ -143,6 +144,7 @@ class LinkViewModelTest {
         viewModel.onUsernameChange("ada")
         viewModel.onPasswordChange("wrong")
         gateway.answer(401, errorAnswer("Wrong username or password"))
+        viewModel.uiState.first { it.canSubmitAccount }
         viewModel.submitAccount()
 
         val state = viewModel.uiState.first { it.error != null }

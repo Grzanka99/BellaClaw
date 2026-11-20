@@ -247,7 +247,8 @@ the test scope keeps running. Account tests use `TestServer`: a
 local `MockWebServer` plus the real `SessionStore`, `ApiClient` and `AccountRepository` on a session
 file in a temporary folder; a network answer reaches the ViewModel on OkHttp's thread, so after any event that follows one
 they wait with `uiState.first { … }` for the state the outcome names (an error, a step), not for a
-loading flag to clear, and read `uiState.value` only before the first request. `MainDispatcherRule` replaces
+loading flag to clear, read `uiState.value` only before the first request, and before an event the
+ViewModel allows only in some state (submitting a form) wait for that state too. `MainDispatcherRule` replaces
 `Dispatchers.Main`; repositories that take a scope get the test's `backgroundScope`, and a fixed
 `Clock` where dates matter.
 
