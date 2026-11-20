@@ -6,15 +6,12 @@ import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.scaleOut
 import androidx.compose.ui.unit.IntOffset
 import androidx.navigation.NavBackStackEntry
 
 /*
- * The screen motion of both graphs. Forward, the new screen slides in from the end over the old one,
- * which slides out toward the start. Back is Android's documented predictive back for Navigation Compose
- * (developer.android.com/develop/ui/compose/system/predictive-back-setup): the leaving screen scales down
- * to 90% around its centre while the screen below shows at rest; NavHost seeks it with the back gesture.
+ * The screen motion of both graphs, a plain slide. Forward, the new screen slides in from the end and the
+ * old one slides out toward the start; back is the reverse, and NavHost seeks it with the back gesture.
  */
 private val slideSpec = tween<IntOffset>(durationMillis = 300, easing = FastOutSlowInEasing)
 
@@ -26,18 +23,18 @@ internal val exitSlide: AnimatedContentTransitionScope<NavBackStackEntry>.() -> 
     slideOutOfContainer(SlideDirection.Start, slideSpec)
 }
 
-internal val popEnterAtRest: AnimatedContentTransitionScope<NavBackStackEntry>.() -> EnterTransition = {
-    EnterTransition.None
+internal val popEnterSlide: AnimatedContentTransitionScope<NavBackStackEntry>.() -> EnterTransition = {
+    slideIntoContainer(SlideDirection.End, slideSpec)
 }
 
-internal val popExitShrink: AnimatedContentTransitionScope<NavBackStackEntry>.() -> ExitTransition = {
-    scaleOut(targetScale = 0.9f)
+internal val popExitSlide: AnimatedContentTransitionScope<NavBackStackEntry>.() -> ExitTransition = {
+    slideOutOfContainer(SlideDirection.End, slideSpec)
 }
 
-internal val predictivePopEnterAtRest: AnimatedContentTransitionScope<NavBackStackEntry>.(Int) -> EnterTransition = {
-    EnterTransition.None
+internal val predictivePopEnterSlide: AnimatedContentTransitionScope<NavBackStackEntry>.(Int) -> EnterTransition = {
+    slideIntoContainer(SlideDirection.End, slideSpec)
 }
 
-internal val predictivePopExitShrink: AnimatedContentTransitionScope<NavBackStackEntry>.(Int) -> ExitTransition = {
-    scaleOut(targetScale = 0.9f)
+internal val predictivePopExitSlide: AnimatedContentTransitionScope<NavBackStackEntry>.(Int) -> ExitTransition = {
+    slideOutOfContainer(SlideDirection.End, slideSpec)
 }

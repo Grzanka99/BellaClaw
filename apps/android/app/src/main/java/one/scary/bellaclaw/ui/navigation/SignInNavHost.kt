@@ -18,10 +18,10 @@ fun SignInNavHost(hasPendingLink: Boolean) {
         startDestination = SignInDestination,
         enterTransition = enterSlide,
         exitTransition = exitSlide,
-        popEnterTransition = popEnterAtRest,
-        popExitTransition = popExitShrink,
-        predictivePopEnterTransition = predictivePopEnterAtRest,
-        predictivePopExitTransition = predictivePopExitShrink,
+        popEnterTransition = popEnterSlide,
+        popExitTransition = popExitSlide,
+        predictivePopEnterTransition = predictivePopEnterSlide,
+        predictivePopExitTransition = predictivePopExitSlide,
     ) {
         composable<SignInDestination> { entry ->
             SignInRoute(

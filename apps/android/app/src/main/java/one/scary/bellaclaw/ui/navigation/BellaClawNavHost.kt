@@ -57,10 +57,10 @@ fun BellaClawNavHost(hasPendingLink: Boolean, chatToOpen: String?, onChatOpened:
         startDestination = HomeDestination,
         enterTransition = enterSlide,
         exitTransition = exitSlide,
-        popEnterTransition = popEnterAtRest,
-        popExitTransition = popExitShrink,
-        predictivePopEnterTransition = predictivePopEnterAtRest,
-        predictivePopExitTransition = predictivePopExitShrink,
+        popEnterTransition = popEnterSlide,
+        popExitTransition = popExitSlide,
+        predictivePopEnterTransition = predictivePopEnterSlide,
+        predictivePopExitTransition = predictivePopExitSlide,
     ) {
         composable<HomeDestination> { entry ->
             HomeRoute(
