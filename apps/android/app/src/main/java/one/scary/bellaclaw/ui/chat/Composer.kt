@@ -1,15 +1,18 @@
 package one.scary.bellaclaw.ui.chat
 
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
@@ -18,17 +21,20 @@ import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import one.scary.bellaclaw.R
 import one.scary.bellaclaw.model.ImageRefusal
@@ -51,7 +57,7 @@ fun Composer(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+            .padding(horizontal = 8.dp, vertical = 8.dp),
         verticalAlignment = Alignment.Bottom,
     ) {
         Surface(
@@ -74,23 +80,40 @@ fun Composer(
                         modifier = Modifier.padding(start = 16.dp, top = 12.dp, end = 16.dp),
                     )
                 }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = onAttach, modifier = Modifier.padding(start = 4.dp)) {
+                Row(verticalAlignment = Alignment.Bottom) {
+                    IconButton(onClick = onAttach, modifier = Modifier.padding(vertical = 4.dp)) {
                         Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.action_attach_image))
                     }
-                    TextField(
+                    val colors = TextFieldDefaults.colors(
+                        focusedContainerColor = Color.Transparent,
+                        unfocusedContainerColor = Color.Transparent,
+                        focusedIndicatorColor = Color.Transparent,
+                        unfocusedIndicatorColor = Color.Transparent,
+                    )
+                    val interactionSource = remember { MutableInteractionSource() }
+                    BasicTextField(
                         value = draft,
                         onValueChange = onDraftChange,
-                        placeholder = { Text(placeholder) },
+                        textStyle = LocalTextStyle.current.merge(color = colors.focusedTextColor),
+                        cursorBrush = SolidColor(colors.cursorColor),
                         maxLines = 5,
-                        colors = TextFieldDefaults.colors(
-                            focusedContainerColor = Color.Transparent,
-                            unfocusedContainerColor = Color.Transparent,
-                            focusedIndicatorColor = Color.Transparent,
-                            unfocusedIndicatorColor = Color.Transparent,
-                        ),
-                        modifier = Modifier.weight(1f),
-                    )
+                        interactionSource = interactionSource,
+                        modifier = Modifier
+                            .weight(1f)
+                            .defaultMinSize(minHeight = TextFieldDefaults.MinHeight),
+                    ) { innerTextField ->
+                        TextFieldDefaults.DecorationBox(
+                            value = draft,
+                            innerTextField = innerTextField,
+                            enabled = true,
+                            singleLine = false,
+                            visualTransformation = VisualTransformation.None,
+                            interactionSource = interactionSource,
+                            placeholder = { Text(placeholder) },
+                            colors = colors,
+                            contentPadding = TextFieldDefaults.contentPaddingWithoutLabel(start = 0.dp),
+                        )
+                    }
                 }
             }
         }
