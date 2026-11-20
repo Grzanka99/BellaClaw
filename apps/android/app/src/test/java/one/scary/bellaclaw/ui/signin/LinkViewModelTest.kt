@@ -145,7 +145,7 @@ class LinkViewModelTest {
         gateway.answer(401, errorAnswer("Wrong username or password"))
         viewModel.submitAccount()
 
-        val state = viewModel.uiState.first { !it.isLoading }
+        val state = viewModel.uiState.first { it.error != null }
         assertEquals(LinkStep.UNLINKED, state.step)
         assertFalse(state.createAccount)
         assertEquals(AccountError.Server(401, "Wrong username or password"), state.error)
@@ -171,7 +171,7 @@ class LinkViewModelTest {
         gateway.answer(200, """{"username":"ada","chats":[]}""")
         viewModel.connect()
 
-        assertEquals(LinkStep.CONNECTED, viewModel.uiState.first { !it.isLoading }.step)
+        viewModel.uiState.first { it.step == LinkStep.CONNECTED }
         val request = gateway.takeRequest()
         assertEquals("/api/link", request.url.encodedPath)
         assertEquals("Bearer t0", request.headers["Authorization"])
@@ -213,10 +213,9 @@ class LinkViewModelTest {
         gateway.answer(401, errorAnswer("Unauthorized"))
 
         viewModel.connect()
-        viewModel.uiState.first { !it.isLoading }
+        viewModel.uiState.first { it.step == LinkStep.UNLINKED }
 
         assertNull(accounts.session.value)
-        assertEquals(LinkStep.UNLINKED, viewModel.uiState.value.step)
     }
 
     @Test
