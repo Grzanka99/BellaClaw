@@ -12,8 +12,9 @@ type TView =
   | { name: "invalidLink" }
   // token: the link of the !app page, which the app redeems
   | { name: "appLink"; token: string }
-  // token: the link that the registration or login redeems
-  | { name: "auth"; token: TOption<string> }
+  // token: the link of the unlinked chat chatKey, which the registration redeems and a login
+  // leads to confirm
+  | { name: "auth"; token: TOption<string>; chatKey: string }
   // token: a link of a chat linked to the account of username, which logs into it
   | { name: "linkLogin"; token: string; username: string }
   // token: a link of the unlinked chat chatKey, which the signed-in account takes once confirmed;
@@ -66,7 +67,7 @@ function App() {
 
     if ("error" in me) {
       if (me.status === 401) {
-        setView({ name: "auth", token });
+        setView({ name: "auth", token, chatKey });
       } else {
         setView({ name: "failed", message: me.error });
       }
@@ -93,7 +94,7 @@ function App() {
     if (!("error" in me)) {
       setView({ name: "main", me: me.data });
     } else if (me.status === 401) {
-      setView({ name: "auth", token: undefined });
+      setView({ name: "auth", token: undefined, chatKey: "" });
     } else {
       setView({ name: "failed", message: me.error });
     }
@@ -123,7 +124,7 @@ function App() {
       if (!("error" in me)) {
         setView({ name: "confirmLink", token, chatKey, me: me.data, error: linked.error });
       } else if (me.status === 401) {
-        setView({ name: "auth", token });
+        setView({ name: "auth", token, chatKey });
       } else {
         setView({ name: "failed", message: me.error });
       }
@@ -152,7 +153,7 @@ function App() {
       <Dashboard
         key={view.me.username}
         me={view.me}
-        onLoggedOut={() => setView({ name: "auth", token: undefined })}
+        onLoggedOut={() => setView({ name: "auth", token: undefined, chatKey: "" })}
         onAccountChanged={showSignedIn}
       />
     );
@@ -189,7 +190,19 @@ function App() {
   } else if (view.name === "appLink") {
     card = <AppLinkCard token={view.token} />;
   } else if (view.name === "auth") {
-    card = <AuthCard token={view.token} onAuthenticated={showMain} />;
+    const { token, chatKey } = view;
+    card = (
+      <AuthCard
+        token={token}
+        onAuthenticated={(me, registered) => {
+          if (token === undefined || registered) {
+            showMain(me);
+          } else {
+            setView({ name: "confirmLink", token, chatKey, me });
+          }
+        }}
+      />
+    );
   } else if (view.name === "linkLogin") {
     card = <LinkLoginCard token={view.token} username={view.username} onAuthenticated={showMain} />;
   } else if (view.name === "confirmLink") {

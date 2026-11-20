@@ -7,7 +7,8 @@ import { api } from "./api";
 type TAuthCardProps = {
   // the link to redeem; without one only a login is possible
   token: TOption<string>;
-  onAuthenticated: (me: TMeResponse) => void;
+  // registered: whether the account was created, which redeemed the link
+  onAuthenticated: (me: TMeResponse, registered: boolean) => void;
 };
 
 export function AuthCard({ token, onAuthenticated }: TAuthCardProps) {
@@ -20,15 +21,18 @@ export function AuthCard({ token, onAuthenticated }: TAuthCardProps) {
     event.preventDefault();
     const data = new FormData(form.current ?? undefined);
     let path = "/api/login";
+    // NOTE: a login does not redeem the link, the confirmation card that names the chat does
+    let linkToken: TOption<string>;
 
     if (registering) {
       path = "/api/register";
+      linkToken = token;
     }
 
     setBusy(true);
     setError(undefined);
     const result = await api<TMeResponse>("POST", path, {
-      token,
+      token: linkToken,
       username: data.get("username"),
       password: data.get("password"),
     });
@@ -39,7 +43,7 @@ export function AuthCard({ token, onAuthenticated }: TAuthCardProps) {
       return;
     }
 
-    onAuthenticated(result.data);
+    onAuthenticated(result.data, registering);
   }
 
   let intro = (
