@@ -1,5 +1,5 @@
 import type { EConversationKind } from "@bellaclaw/database";
-import { appDevicesTable, EEventType, withoutSchedulerLabel } from "@bellaclaw/database";
+import { appDevicesTable, EEventType } from "@bellaclaw/database";
 import { APP_PUSH_MAX_BYTES, createLogger, type TAppPush, type TOption } from "@bellaclaw/shared";
 import { eq } from "drizzle-orm";
 import { ConversationStore } from "../conversation";
@@ -86,14 +86,7 @@ export function setupPush(channel: AppChannel, backoffMs: number[]): () => Promi
         db.select().from(appDevicesTable).where(eq(appDevicesTable.accountId, accountId)),
       );
       const plaintext = JSON.stringify(
-        // the change names an assistant row: a reply, delivery or notice
-        appPush(
-          conversationKey,
-          message.kind,
-          messageId,
-          revision,
-          withoutSchedulerLabel(message.message),
-        ),
+        appPush(conversationKey, message.kind, messageId, revision, message.message),
       );
       const gone: string[] = [];
       let failure: TOption<string>;

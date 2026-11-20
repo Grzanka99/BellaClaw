@@ -259,7 +259,7 @@ test("a notice or a reminder of an account with no linked chat goes to the app's
     payload: {
       chatId: conversationKey,
       text: "Take a break",
-      transcript: { text: "Take a break", notice: "A reminder fired." },
+      transcript: { text: "Take a break", modelText: "Take a break", notice: "A reminder fired." },
     },
     causationId: undefined,
     dedupeKey: undefined,

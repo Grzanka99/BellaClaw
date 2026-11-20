@@ -519,18 +519,19 @@ export class ConversationStore {
     };
   }
 
-  // Returns the delivery's row id
+  // text: stored for people; modelText: replayed to the model. Returns the delivery's row id
   public async saveDeliveredMessage(
     db: TDatabaseHandle,
     chatId: string,
     channel: EMessagePlatform,
     text: string,
+    modelText: string,
     notice: string,
     deliveredAt: number,
   ): Promise<number> {
     const message: AssistantMessage = {
       role: "assistant",
-      content: [{ type: "text", text }],
+      content: [{ type: "text", text: modelText }],
       api: "bellaclaw",
       provider: "bellaclaw",
       model: "scheduled-delivery",

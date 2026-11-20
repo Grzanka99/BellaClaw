@@ -366,6 +366,7 @@ export class MessageHandler {
             chatId,
             event.payload.channel,
             transcript.text,
+            transcript.modelText,
             transcript.notice,
             event.payload.sentAt,
           );
@@ -423,7 +424,11 @@ export class MessageHandler {
           {
             ...origin,
             text: INTERRUPTED_REPLY,
-            transcript: { text: INTERRUPTED_REPLY, notice: INTERRUPTED_NOTICE },
+            transcript: {
+              text: INTERRUPTED_REPLY,
+              modelText: INTERRUPTED_REPLY,
+              notice: INTERRUPTED_NOTICE,
+            },
           },
           undefined,
           undefined,

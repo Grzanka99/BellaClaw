@@ -27,7 +27,10 @@ export enum ERejectionCode {
   Failed = "failed",
 }
 
-const STranscript = z.object({ text: z.string(), notice: z.string() }).strict();
+// text: shown to people, as it was sent; modelText: what the model replays
+const STranscript = z
+  .object({ text: z.string(), modelText: z.string(), notice: z.string() })
+  .strict();
 
 export type TDeliveryTranscript = z.infer<typeof STranscript>;
 

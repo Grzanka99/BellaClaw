@@ -147,6 +147,7 @@ test("every transcript write stores its channel", async () => {
     chatId,
     EMessagePlatform.Discord,
     "Reminder",
+    "Reminder",
     "notice",
     Date.now(),
   );

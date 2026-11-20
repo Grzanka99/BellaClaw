@@ -165,7 +165,7 @@ describe("MessagingAdapter main channel", () => {
       {
         chatId: "bella:acct-1",
         text,
-        transcript: { text: `[CRON REMINDER daily]: ${text}`, notice: "notice" },
+        transcript: { text, modelText: `[CRON REMINDER daily]: ${text}`, notice: "notice" },
       },
       text,
     );
@@ -244,7 +244,7 @@ describe("MessagingAdapter main channel", () => {
       {
         author: "assistant",
         channel: EMessagePlatform.App,
-        message: "[CRON REMINDER daily]: Stretch",
+        message: "Stretch",
       },
       { author: "assistant", channel: EMessagePlatform.App, message: "A notice" },
     ]);
@@ -273,12 +273,12 @@ describe("MessagingAdapter main channel", () => {
       {
         author: "assistant",
         channel: EMessagePlatform.App,
-        message: "[CRON REMINDER daily]: Before",
+        message: "Before",
       },
       {
         author: "assistant",
         channel: EMessagePlatform.Signal,
-        message: "[CRON REMINDER daily]: After",
+        message: "After",
       },
     ]);
   });

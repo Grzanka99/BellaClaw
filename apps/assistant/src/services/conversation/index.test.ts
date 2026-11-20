@@ -165,6 +165,7 @@ test("a scheduled delivery replays after a scheduler notice the model cannot mer
     DatabaseConnector.instance.database,
     chatId,
     EMessagePlatform.Signal,
+    "Check the oven.",
     "[CRON REMINDER oven]: Check the oven.",
     'Scheduler notice, not from the user: reminder "oven" fired at 2026-11-10T16:06:00.000Z.',
     deliveredAt,
@@ -175,7 +176,10 @@ test("a scheduled delivery replays after a scheduler notice the model cannot mer
   expect(JSON.stringify((await store.load(chatId))?.entries[0]?.message)).toContain(
     "2026-11-10T16:06:00.000Z",
   );
-  expect(await transcriptMessages(chatId)).toEqual(["[CRON REMINDER oven]: Check the oven."]);
+  expect(JSON.stringify((await store.load(chatId))?.entries[1]?.message)).toContain(
+    "[CRON REMINDER oven]: Check the oven.",
+  );
+  expect(await transcriptMessages(chatId)).toEqual(["Check the oven."]);
 });
 
 test("after three kept compactions, saveSummary returns the images of the dropped range", async () => {

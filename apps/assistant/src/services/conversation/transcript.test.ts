@@ -118,7 +118,11 @@ async function publish(
       payload: {
         chatId,
         text,
-        transcript: { text: `[CRON REMINDER daily]: ${text}`, notice: "A reminder fired." },
+        transcript: {
+          text,
+          modelText: `[CRON REMINDER daily]: ${text}`,
+          notice: "A reminder fired.",
+        },
       },
       causationId: undefined,
       dedupeKey: undefined,
@@ -277,7 +281,7 @@ test("a scripted session stores one row per visible message with its channel, a 
     {
       author: ERole.Assistant,
       kind: "message",
-      message: "[CRON REMINDER daily]: Take a break.",
+      message: "Take a break.",
       channel: EMessagePlatform.Signal,
       clientMessageId: null,
       replayed: true,
@@ -303,7 +307,7 @@ test("a scripted session stores one row per visible message with its channel, a 
   // fact distillation reads the model's message rows only, never display rows
   expect(
     (await Memory.instance.loadLiveFactWindow(chatId)).messages.map((row) => row.message),
-  ).toEqual(["Hello", "[CRON REMINDER daily]: Take a break.", "Are you there?"]);
+  ).toEqual(["Hello", "Take a break.", "Are you there?"]);
 
   // the next turn replays the model's rows only: compaction gets this same state; its appends
   // keep rewriteRevision at the delete

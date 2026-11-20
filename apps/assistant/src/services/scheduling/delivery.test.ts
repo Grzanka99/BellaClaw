@@ -219,12 +219,14 @@ describe("ScheduledDelivery", () => {
     };
     let context = cron({ scope: chatId });
     let transcript = "[CRON REMINDER daily]: Take a break.";
+    let sent = "Take a break.";
     if (kind === "task") {
       context = cron({
         scope: chatId,
         content: { kind: "task", prompt: "Prepare briefing", fallback: "Failed" },
       });
       transcript = "[CRON TASK daily]: Your briefing is ready.";
+      sent = "Your briefing is ready.";
     }
 
     await fire(context);
@@ -254,7 +256,7 @@ describe("ScheduledDelivery", () => {
       .select()
       .from(memoriesTable)
       .where(eq(memoriesTable.chatId, chatId));
-    expect(memories.filter((row) => row.message === transcript)).toHaveLength(1);
+    expect(memories.filter((row) => row.message === sent)).toHaveLength(1);
   });
 
   test.each([
@@ -334,7 +336,7 @@ describe("ScheduledDelivery", () => {
           .select()
           .from(memoriesTable)
           .where(eq(memoriesTable.chatId, chatId))
-      ).find((row) => row.message.includes("CRON REMINDER"));
+      ).find((row) => row.message === "Take a break.");
       expect(saved?.createdAt.getTime()).toBe(deliveredAt);
     } finally {
       finish.resolve();
@@ -363,6 +365,7 @@ describe("ScheduledDelivery", () => {
       expect.anything(),
       "signal:+100",
       EMessagePlatform.Signal,
+      "Take a break.",
       "[CRON REMINDER daily]: Take a break.",
       expect.stringContaining('reminder "daily" fired at'),
       expect.any(Number),
@@ -426,6 +429,7 @@ describe("ScheduledDelivery", () => {
       expect.anything(),
       "signal:+100",
       EMessagePlatform.Signal,
+      "Briefing unavailable.",
       "[CRON TASK daily]: Briefing unavailable.",
       expect.stringContaining('scheduled task "daily" ran at'),
       expect.any(Number),
@@ -480,9 +484,7 @@ describe("ScheduledDelivery", () => {
       .select()
       .from(memoriesTable)
       .where(eq(memoriesTable.chatId, chatId));
-    expect(memories.map((row) => row.message)).toContain(
-      "[CRON TASK daily]: Briefing unavailable.",
-    );
+    expect(memories.map((row) => row.message)).toContain("Briefing unavailable.");
   });
 
   describe("cron jobs with automations", () => {
@@ -528,6 +530,7 @@ describe("ScheduledDelivery", () => {
         expect.anything(),
         scope,
         EMessagePlatform.Signal,
+        "Tram at 7:10\n\nBus at 7:05",
         "[CRON TASK daily]: Tram at 7:10\n\nBus at 7:05",
         expect.stringContaining("text output of its automations, sent as written"),
         expect.any(Number),
@@ -677,6 +680,7 @@ describe("ScheduledDelivery", () => {
         expect.anything(),
         scope,
         EMessagePlatform.Signal,
+        "Your briefing.",
         "[CRON TASK daily]: Your briefing.",
         expect.stringContaining("It also used the outputs of the job's automations."),
         expect.any(Number),
@@ -703,6 +707,7 @@ describe("ScheduledDelivery", () => {
         expect.anything(),
         scope,
         EMessagePlatform.Signal,
+        expect.stringMatching(/^Automation "broken" failed/),
         expect.stringMatching(/^\[CRON TASK daily\]: Automation "broken" failed/),
         expect.stringContaining("had an automation fail"),
         expect.any(Number),
@@ -766,6 +771,7 @@ describe("ScheduledDelivery", () => {
         expect.anything(),
         scope,
         EMessagePlatform.Signal,
+        expect.stringMatching(/^Automation "broken" was paused/),
         expect.stringMatching(/^\[CRON TASK daily\]: Automation "broken" was paused/),
         expect.stringContaining("paused a failing automation"),
         expect.any(Number),

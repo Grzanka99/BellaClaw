@@ -8,7 +8,6 @@ import {
   type THistoryMessage,
   type TListedConversation,
   type TOwnedConversation,
-  withoutSchedulerLabel,
 } from "@bellaclaw/database";
 import type { TOption } from "@bellaclaw/shared";
 import { and, desc, eq, inArray, isNull, lt } from "drizzle-orm";
@@ -76,17 +75,10 @@ export function createChatReader(url: string, authToken: string): TChatReader {
       for (const row of rows) {
         // the query selects only these authors; the check narrows the column's type
         if (row.author === "user" || row.author === "assistant") {
-          let text = row.message;
-
-          // a user may type the label, so only an assistant row loses it
-          if (row.author === "assistant") {
-            text = withoutSchedulerLabel(text);
-          }
-
           messages.push({
             id: row.id,
             author: row.author,
-            text,
+            text: row.message,
             createdAt: row.createdAt.getTime(),
           });
         }

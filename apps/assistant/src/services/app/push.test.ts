@@ -355,7 +355,11 @@ describe("AppChannel push", () => {
       {
         chatId: BELLA,
         text,
-        transcript: { text: `[CRON REMINDER daily]: ${text}`, notice: "A reminder fired." },
+        transcript: {
+          text,
+          modelText: `[CRON REMINDER daily]: ${text}`,
+          notice: "A reminder fired.",
+        },
       },
       text,
     );
@@ -589,20 +593,6 @@ describe("AppChannel push", () => {
     expect(
       history.filter((message) => message.author === "assistant").map((message) => message.text),
     ).toEqual(["Stretch", "Drink water"]);
-  });
-
-  test("a reminder comes back from history without its scheduler label; a user message that starts with the label keeps it", async () => {
-    await start("Reply");
-
-    await reminder("Stretch");
-    await ask(EMessagePlatform.App, "[CRON REMINDER daily]: Stretch");
-
-    const history = await listHistory(DatabaseConnector.instance.database, BELLA, undefined, 50);
-    expect(history.map((message) => [message.author, message.text])).toEqual([
-      ["assistant", "Stretch"],
-      ["user", "[CRON REMINDER daily]: Stretch"],
-      ["assistant", "Reply"],
-    ]);
   });
 
   test("with FCM unreachable the reminder is still stored and readable, and the push gives up with no dead letter and no notice", async () => {

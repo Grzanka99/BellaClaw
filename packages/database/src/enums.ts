@@ -20,12 +20,6 @@ export enum ECronFinishedReason {
   Overwritten = "overwritten",
 }
 
-// what a scheduled delivery's transcript row starts with: `[<label> <job name>]: <text>`
-export enum ESchedulerLabel {
-  Reminder = "CRON REMINDER",
-  Task = "CRON TASK",
-}
-
 // bella: an account's Bella conversation, or the chat of an unlinked address; plain: a plain chat
 // of the app, with no memory
 export enum EConversationKind {

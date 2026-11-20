@@ -165,6 +165,7 @@ test("deleting a delivered message removes it with its notice row and keeps the 
     chatId,
     EMessagePlatform.Signal,
     "Tea time",
+    "Tea time",
     "a reminder",
     3,
   );

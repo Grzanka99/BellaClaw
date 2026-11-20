@@ -2,7 +2,7 @@ import type { TOption } from "@bellaclaw/shared";
 import { and, asc, desc, eq, gt, inArray, lt } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import { z } from "zod";
-import { EConversationKind, ESchedulerLabel } from "./enums";
+import { EConversationKind } from "./enums";
 import { appMediaTable, conversationsTable, memoriesTable } from "./schema";
 
 // the assistant's handle or transaction, or the gateway's read-only connection
@@ -10,15 +10,6 @@ type TReadHandle = Pick<BaseSQLiteDatabase<"async", unknown>, "select">;
 
 // the text the assistant stores for each image of a user message, appended to what the user typed
 export const IMAGE_MARKER = "[Image]";
-
-const SCHEDULER_LABEL = new RegExp(
-  `^\\[(?:${Object.values(ESchedulerLabel).join("|")}) [\\s\\S]*?\\]: `,
-);
-
-// a scheduled delivery's text as it was sent, without the label its transcript row starts with
-export function withoutSchedulerLabel(text: string): string {
-  return text.replace(SCHEDULER_LABEL, "");
-}
 
 export type TOwnedConversation = { revision: number; rewriteRevision: number };
 
@@ -276,11 +267,6 @@ export async function listHistory(
       const refs = imagesById.get(row.id);
       let text = row.message;
       let images: TOption<THistoryImage[]>;
-
-      // a user may type the label, so only an assistant row loses it
-      if (row.author === "assistant") {
-        text = withoutSchedulerLabel(text);
-      }
 
       if (refs !== undefined) {
         for (const _ of refs) {
