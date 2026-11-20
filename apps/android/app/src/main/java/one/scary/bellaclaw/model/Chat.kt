@@ -33,10 +33,10 @@ data object BellaClawChat : Chat {
     override val id = BELLACLAW_CHAT_ID
 }
 
-/** A plain chat. [title] is null for a new chat. */
+/** A plain chat. [title] is null for a new chat; [model] is null while none is picked and the account's models are not loaded. */
 data class PlainChat(
     override val id: String,
     val title: String?,
     val icon: ChatIcon,
-    val model: ModelChoice,
+    val model: ModelChoice?,
 ) : Chat

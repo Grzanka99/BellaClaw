@@ -18,11 +18,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import one.scary.bellaclaw.R
 import one.scary.bellaclaw.ui.components.BellaClawAvatar
+import one.scary.bellaclaw.ui.components.OnlineDot
 import one.scary.bellaclaw.ui.components.formatListTime
 import one.scary.bellaclaw.ui.components.imageVector
 
@@ -95,12 +98,23 @@ private fun ChatRowLayout(
         }
         summary.lastActivity?.let {
             Spacer(Modifier.width(12.dp))
-            Text(
-                text = formatListTime(it),
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            Column(
                 modifier = Modifier.align(Alignment.Top).padding(top = 4.dp),
-            )
+                horizontalAlignment = Alignment.End,
+            ) {
+                Text(
+                    text = formatListTime(it),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (summary.isUnread) {
+                    val unread = stringResource(R.string.unread)
+                    OnlineDot(
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(top = 8.dp).semantics { contentDescription = unread },
+                    )
+                }
+            }
         }
     }
 }

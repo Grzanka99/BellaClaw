@@ -1,103 +1,299 @@
 package one.scary.bellaclaw.data
 
+import java.time.Clock
+import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Job
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.channelFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
-import one.scary.bellaclaw.data.sample.SampleChats
+import one.scary.bellaclaw.data.local.ChatStore
+import one.scary.bellaclaw.data.local.LocalChats
+import one.scary.bellaclaw.data.remote.ApiClient
+import one.scary.bellaclaw.data.remote.ApiResult
+import one.scary.bellaclaw.data.remote.ConversationBody
+import one.scary.bellaclaw.data.remote.EmptyBody
+import one.scary.bellaclaw.data.remote.ModelBody
+import one.scary.bellaclaw.data.remote.SendBody
+import one.scary.bellaclaw.data.remote.StreamEventBody
 import one.scary.bellaclaw.model.Author
+import one.scary.bellaclaw.model.BELLACLAW_CHAT_ID
+import one.scary.bellaclaw.model.BellaClawChat
 import one.scary.bellaclaw.model.Chat
-import one.scary.bellaclaw.model.ChatIcon
+import one.scary.bellaclaw.model.Effort
+import one.scary.bellaclaw.model.Loadable
 import one.scary.bellaclaw.model.Message
 import one.scary.bellaclaw.model.ModelChoice
+import one.scary.bellaclaw.model.ModelRole
 import one.scary.bellaclaw.model.PlainChat
-import java.time.Clock
-import java.util.UUID
-import kotlin.random.Random
+import one.scary.bellaclaw.model.SendState
+import one.scary.bellaclaw.model.Session
+import one.scary.bellaclaw.model.SettingsSnapshot
 
 /**
- * Single source of truth for chats and their messages, held in memory from [SampleChats].
- * [scope] lives as long as the application; work that must outlive a screen runs in it.
+ * The account's conversations from the gateway: the list, history, sends and the live stream, held in
+ * memory for the current [session] and dropped when it changes. The stream is open while signed in and
+ * [foreground]. [chatStore] keeps each plain chat's model and what was last seen; a chat with no picked
+ * model uses the [settings]' provider and Main model, and has none while those are not loaded. [scope] lives as long as the application; network
+ * work runs in it, so leaving a screen does not stop a send. A dropped stream and a failed read are
+ * tried again after [retryMillis], doubling to 30 s.
  */
 class ChatRepository(
+    private val api: ApiClient,
+    session: StateFlow<Session?>,
+    foreground: Flow<Boolean>,
+    private val settings: StateFlow<SettingsSnapshot>,
+    private val chatStore: ChatStore,
     private val scope: CoroutineScope,
     private val clock: Clock = Clock.systemDefaultZone(),
-    private val random: Random = Random.Default,
+    private val retryMillis: Long = FIRST_RETRY_MILLIS,
 ) {
-    private val chatsState = MutableStateFlow(SampleChats.chats)
-    private val messagesState = MutableStateFlow(SampleChats.messages(clock.instant()).groupBy { it.chatId })
-    private val typingState = MutableStateFlow<Set<String>>(emptySet())
+    private val state = MutableStateFlow(ChatState())
+    private val sync = ChatSync(api, state, scope, retryMillis, MAX_RETRY_MILLIS)
 
-    /** The current sample typing timer of each chat; a timer removes its own entry when it ends typing. */
-    private val typingTimers = mutableMapOf<String, Job>()
-
-    val chats: Flow<List<Chat>> = chatsState
-
-    /** The newest message of each chat that has one, by chat id. */
-    val latestMessages: Flow<Map<String, Message>> = messagesState.map { byChat ->
-        byChat.mapValues { (_, messages) -> messages.last() }
-    }
-
-    /** Whether the live stream to the server is open. Always open while the data is sample data. */
-    val isStreamOpen: Flow<Boolean> = flowOf(true)
-
-    /** The chat, or null when no chat has [chatId] (e.g. a restored screen of a chat this process never had). */
-    fun chat(chatId: String): Flow<Chat?> = chatsState.map { chats -> chats.firstOrNull { it.id == chatId } }.distinctUntilChanged()
-
-    fun messages(chatId: String): Flow<List<Message>> =
-        messagesState.map { it[chatId].orEmpty() }.distinctUntilChanged()
-
-    fun isTyping(chatId: String): Flow<Boolean> = typingState.map { chatId in it }.distinctUntilChanged()
-
-    /**
-     * Appends the user's message and shows the assistant typing until [SAMPLE_TYPING_MILLIS] after the
-     * chat's latest send. The timer runs in [scope], so leaving the chat does not stop it.
-     */
-    suspend fun send(chatId: String, text: String, imageUri: String?) {
-        val message = Message(UUID.randomUUID().toString(), chatId, Author.USER, text, imageUri, clock.instant())
-        messagesState.update { byChat -> byChat + (chatId to byChat[chatId].orEmpty() + message) }
-        synchronized(typingTimers) {
-            typingTimers[chatId]?.cancel()
-            typingState.update { it + chatId }
-            typingTimers[chatId] = scope.launch {
-                delay(SAMPLE_TYPING_MILLIS)
-                // Only the chat's current timer ends typing; one replaced after its delay does nothing.
-                // Typing and the map entry are set under this lock before the check can run.
-                synchronized(typingTimers) {
-                    if (typingTimers[chatId] === coroutineContext.job) {
-                        typingTimers.remove(chatId)
-                        typingState.update { it - chatId }
+    init {
+        scope.launch {
+            session.collectLatest { current ->
+                state.update { ChatState(generation = it.generation + 1) }
+                if (current != null) {
+                    foreground.collectLatest { isForeground ->
+                        if (isForeground) {
+                            runStream()
+                        }
                     }
                 }
             }
         }
     }
 
-    /** Creates an untitled plain chat with a random icon and returns its id. */
-    suspend fun createChat(): String {
-        val icons = ChatIcon.entries
-        val chat = PlainChat(
-            id = UUID.randomUUID().toString(),
-            title = null,
-            icon = icons[random.nextInt(icons.size)],
-            model = SampleChats.defaultModel,
-        )
-        chatsState.update { it + chat }
-        return chat.id
+    /** BellaClaw's chat, always there, then the plain chats, the latest active first. */
+    val chats: Flow<List<Chat>> =
+        combine(state.map { it.conversations }.distinctUntilChanged(), chatStore.chats, settings) { list, local, settings ->
+            listOf(BellaClawChat) + plainChats(list, local, settings)
+        }
+
+    /** The newest row of each chat that has one, by chat id. */
+    val latestMessages: Flow<Map<String, Message>> = state.map { current ->
+        current.conversations.mapNotNull { conversation ->
+            val chatId = conversation.chatId()
+            conversation.lastMessage?.let { chatId to it.toMessage(chatId) }
+        }.toMap()
+    }.distinctUntilChanged()
+
+    /** Chat ids whose newest row is newer than the newest one seen with the chat's screen open. */
+    val unread: Flow<Set<String>> = combine(state.map { it.conversations }.distinctUntilChanged(), chatStore.chats) { list, local ->
+        list.filter { conversation ->
+            val newest = conversation.lastMessage?.id ?: return@filter false
+            newest > (local.lastSeen[conversation.conversationKey] ?: -1)
+        }.mapTo(HashSet()) { it.chatId() }
+    }.distinctUntilChanged()
+
+    /** Whether the live stream to the server is open. */
+    val isStreamOpen: Flow<Boolean> = state.map { it.isStreamOpen }.distinctUntilChanged()
+
+    /** The chat once it is known; null when the list has no [chatId]: the chat was deleted. */
+    fun chat(chatId: String): Flow<Chat?> {
+        if (chatId == BELLACLAW_CHAT_ID) {
+            return flowOf(BellaClawChat)
+        }
+        // The list and whether it loaded come from one snapshot, so a loaded list never shows without its chats.
+        val list = state.map { it.conversations to it.isListLoaded }.distinctUntilChanged()
+        return combine(list, chatStore.chats, settings) { (conversations, loaded), local, settings ->
+            plainChats(conversations, local, settings).firstOrNull { it.id == chatId } to loaded
+        }.filter { (chat, loaded) -> chat != null || loaded }.map { it.first }.distinctUntilChanged()
     }
+
+    /** Whether [chatId]'s conversation is known and, for a plain chat, its model, so a message can be sent to it. */
+    fun canSend(chatId: String): Flow<Boolean> = combine(state, chatStore.chats, settings) { current, local, settings ->
+        val key = current.keyOf(chatId) ?: return@combine false
+        chatId == BELLACLAW_CHAT_ID || modelOf(key, local, settings) != null
+    }.distinctUntilChanged()
+
+    /**
+     * The chat's rows, oldest first. Collecting it means the chat's screen is open: its history is brought
+     * up to date (now, or with the next list read while the chat is not known or a read failed), and its
+     * newest stored row counts as seen.
+     */
+    fun messages(chatId: String): Flow<List<Message>> = channelFlow {
+        sync.openChats.update { it + chatId }
+        try {
+            // Not known yet: the list read fetches it.
+            state.value.keyOf(chatId)?.let { key -> launch { sync.syncHistory(key) } }
+            state.map { it.messagesOf(chatId) }.distinctUntilChanged().collect { messages ->
+                send(messages)
+                val key = state.value.keyOf(chatId)
+                val newest = key?.let { state.value.histories[it]?.rows?.lastOrNull()?.id }
+                if (key != null && newest != null) {
+                    chatStore.markSeen(key, newest)
+                }
+            }
+        } finally {
+            sync.openChats.update { it - chatId }
+        }
+    }
+
+    fun isTyping(chatId: String): Flow<Boolean> =
+        state.map { current -> current.keyOf(chatId)?.let { it in current.typing } == true }.distinctUntilChanged()
+
+    /** Loads the page of rows older than the chat's oldest, if there is one and it is not loading already. */
+    fun loadOlder(chatId: String) {
+        state.value.keyOf(chatId)?.let(sync::loadOlder)
+    }
+
+    /**
+     * Shows [text] at once as pending and sends it with a fresh client message id; a plain chat's send
+     * names its model. Accepted, it shows as sent until history's row with that id replaces it. False,
+     * and nothing sent, while the chat's conversation is not known, or a plain chat has no model.
+     */
+    fun send(chatId: String, text: String): Boolean {
+        val key = state.value.keyOf(chatId) ?: return false
+        val model = if (chatId == BELLACLAW_CHAT_ID) {
+            null
+        } else {
+            modelOf(key, chatStore.chats.value, settings.value) ?: return false
+        }
+        val message = PendingSend(UUID.randomUUID().toString(), text, model, clock.instant())
+        state.update { it.copy(pending = it.pending + (key to it.pending[key].orEmpty() + message)) }
+        scope.launch { post(key, message) }
+        return true
+    }
+
+    /** Sends the failed message [messageId] again, with the same client message id. */
+    fun retry(chatId: String, messageId: String) {
+        val key = state.value.keyOf(chatId) ?: return
+        val message = state.value.pending[key]?.firstOrNull { it.clientMessageId == messageId && it.state == SendState.FAILED } ?: return
+        changePending(key, messageId) { it.copy(state = SendState.PENDING, failure = null) }
+        scope.launch { post(key, message) }
+    }
+
+    /** Creates an empty plain chat and returns its id, or null when the server could not. */
+    suspend fun createChat(): String? = sync.createChat()
 
     suspend fun setModel(chatId: String, model: ModelChoice) {
-        chatsState.update { chats -> chats.map { if (it is PlainChat && it.id == chatId) it.copy(model = model) else it } }
+        chatStore.setModel(chatId, model)
     }
 
-    companion object {
-        const val SAMPLE_TYPING_MILLIS = 2_000L
+    private suspend fun post(key: String, message: PendingSend) {
+        val body = SendBody(message.clientMessageId, message.text, message.model?.let { ModelBody(it.providerId, it.model, it.effort.name.lowercase()) })
+        when (val result = api.postSignedIn<SendBody, EmptyBody>(messagesPath(key), body)) {
+            is ApiResult.Success -> changePending(key, message.clientMessageId) { it.copy(state = SendState.STORED) }
+            is ApiResult.ApiError -> changePending(key, message.clientMessageId) {
+                it.copy(state = SendState.FAILED, failure = result.message.takeIf { result.status == BAD_REQUEST })
+            }
+            ApiResult.NetworkFailure -> changePending(key, message.clientMessageId) { it.copy(state = SendState.FAILED) }
+        }
+    }
+
+    /** Changes the pending send [clientMessageId] if it is still there. */
+    private fun changePending(key: String, clientMessageId: String, change: (PendingSend) -> PendingSend) {
+        state.update { current ->
+            val sends = current.pending[key] ?: return@update current
+            current.copy(pending = current.pending + (key to sends.map { if (it.clientMessageId == clientMessageId) change(it) else it }))
+        }
+    }
+
+    /**
+     * Keeps the stream open, reconnecting after a drop with a growing delay, until cancelled (background, a
+     * session change). Failed reads are tried again in its scope, so they end with it.
+     */
+    private suspend fun runStream() = coroutineScope {
+        sync.live = this
+        try {
+            keepStreamOpen()
+        } finally {
+            sync.live = null
+        }
+    }
+
+    private suspend fun keepStreamOpen() {
+        var wait = retryMillis
+        while (true) {
+            var opened = false
+            val result = try {
+                api.streamSignedIn("/api/stream") { type, data ->
+                    opened = true
+                    val event = try {
+                        ApiClient.json.decodeFromString<StreamEventBody>(data)
+                    } catch (_: IllegalArgumentException) {
+                        // SerializationException included: an event this app cannot read is skipped.
+                        null
+                    }
+                    if (event != null) {
+                        onEvent(type, event)
+                    }
+                }
+            } finally {
+                state.update { it.copy(isStreamOpen = false, typing = emptySet()) }
+            }
+            if (result is ApiResult.ApiError && result.status == ApiClient.UNAUTHORIZED) {
+                return
+            }
+            if (opened) {
+                wait = retryMillis
+            }
+            delay(wait)
+            wait = (wait * 2).coerceAtMost(MAX_RETRY_MILLIS)
+        }
+    }
+
+    private fun onEvent(type: String, event: StreamEventBody) {
+        val key = event.conversationKey
+        when (type) {
+            "check" -> {
+                state.update { it.copy(isStreamOpen = true, typing = emptySet()) }
+                scope.launch { sync.refreshList() }
+            }
+            "changed" -> scope.launch { sync.refreshList() }
+            "typing" -> if (key != null) {
+                state.update { if (event.typing) it.copy(typing = it.typing + key) else it.copy(typing = it.typing - key) }
+            }
+            "deleted" -> if (key != null) {
+                state.update { it.withoutConversation(key) }
+                scope.launch { chatStore.forget(key) }
+            }
+            "reply" -> if (key != null && event.text != null) {
+                state.update { current ->
+                    val chatId = current.conversations?.firstOrNull { it.conversationKey == key }?.chatId() ?: key
+                    val reply = Message("reply-${UUID.randomUUID()}", chatId, Author.ASSISTANT, event.text, clock.instant())
+                    current.copy(replies = current.replies + (key to current.replies[key].orEmpty() + reply))
+                }
+            }
+        }
+    }
+
+    /** The plain chats of [list], in its order. */
+    private fun plainChats(list: List<ConversationBody>, local: LocalChats, settings: SettingsSnapshot): List<PlainChat> =
+        list.filter { it.kind != ChatState.BELLA }.map { conversation ->
+            val key = conversation.conversationKey
+            PlainChat(key, conversation.title, iconOf(key), modelOf(key, local, settings))
+        }
+
+    /**
+     * The model picked for [key], else the account's provider and Main model at Main's effort; for the
+     * model's default effort, MEDIUM if the model lists it, else its first. Null while the models are not loaded.
+     */
+    private fun modelOf(key: String, local: LocalChats, settings: SettingsSnapshot): ModelChoice? {
+        local.models[key]?.let { return it }
+        val models = (settings.models as? Loadable.Loaded)?.value ?: return null
+        val main = models.roles[ModelRole.MAIN] ?: return null
+        val efforts = models.models.firstOrNull { it.id == main.model }?.efforts.orEmpty()
+        val effort = main.effort ?: Effort.MEDIUM.takeIf { it in efforts } ?: efforts.firstOrNull() ?: return null
+        return ModelChoice(models.providerId, main.model, effort)
+    }
+
+    private companion object {
+        const val BAD_REQUEST = 400
+        const val FIRST_RETRY_MILLIS = 1_000L
+        const val MAX_RETRY_MILLIS = 30_000L
     }
 }

@@ -15,6 +15,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import one.scary.bellaclaw.BellaClawApplication
 import one.scary.bellaclaw.ui.navigation.BellaClawNavHost
 import one.scary.bellaclaw.ui.navigation.SignInNavHost
 import one.scary.bellaclaw.ui.theme.BellaClawTheme
@@ -50,6 +51,19 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+        }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        (application as BellaClawApplication).container.foreground.value = true
+    }
+
+    /** A stop for a configuration change (a rotation) is not leaving the foreground: the next start follows at once. */
+    override fun onStop() {
+        super.onStop()
+        if (!isChangingConfigurations) {
+            (application as BellaClawApplication).container.foreground.value = false
         }
     }
 

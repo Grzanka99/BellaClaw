@@ -6,14 +6,18 @@ import java.nio.file.Files
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
+import mockwebserver3.Dispatcher
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
 import mockwebserver3.QueueDispatcher
 import mockwebserver3.RecordedRequest
+import one.scary.bellaclaw.data.local.ChatStore
 import one.scary.bellaclaw.data.local.SessionStore
 import one.scary.bellaclaw.data.local.ThemeStore
 import one.scary.bellaclaw.data.remote.ApiClient
@@ -56,6 +60,30 @@ class TestServer : ExternalResource() {
 
     /** A store signed in to this server as `ada` with token `t0`. */
     suspend fun signedInStore(serverUrl: String = url): SessionStore = store().also { it.save(Session(serverUrl, "ada", "t0")) }
+
+    /** Answers with a [FakeGateway] from now on, instead of what [answer] queues; [route] still answers first. */
+    fun gateway(): FakeGateway = FakeGateway().also { gateway ->
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse =
+                routes["${request.method} ${request.url.encodedPath}"] ?: gateway.dispatch(request)
+
+            override fun close() {
+                gateway.close()
+            }
+        }
+    }
+
+    /**
+     * The real chat repository on [store]'s session, its local file in this folder; in the foreground unless
+     * [foreground] says otherwise; the account's models from [settings]; tries again after [retryMillis].
+     */
+    fun chatRepository(
+        store: SessionStore,
+        scope: CoroutineScope,
+        foreground: Flow<Boolean> = MutableStateFlow(true),
+        settings: SettingsRepository = settingsRepository(store, scope),
+        retryMillis: Long = 1_000L,
+    ) = ChatRepository(ApiClient(store), store.session, foreground, settings.settings, ChatStore(File(folder, "chats.json")), scope, retryMillis = retryMillis)
 
     fun answer(code: Int, body: String, delayMillis: Long = 0) {
         server.enqueue(

@@ -29,7 +29,7 @@ fun ImageThumbnail(uri: String, loader: ThumbnailLoader, modifier: Modifier = Mo
     }
     val bitmap = thumbnail?.takeIf { it.uri == uri }?.bitmap
     if (bitmap == null) {
-        Box(modifier = modifier.background(MaterialTheme.colorScheme.surfaceVariant))
+        ImagePlaceholder(modifier)
     } else {
         Image(
             bitmap = bitmap,
@@ -38,4 +38,10 @@ fun ImageThumbnail(uri: String, loader: ThumbnailLoader, modifier: Modifier = Mo
             modifier = modifier,
         )
     }
+}
+
+/** The plain box an image shows while it has no picture. */
+@Composable
+fun ImagePlaceholder(modifier: Modifier = Modifier) {
+    Box(modifier = modifier.background(MaterialTheme.colorScheme.surfaceVariant))
 }

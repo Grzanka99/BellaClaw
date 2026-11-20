@@ -22,7 +22,7 @@ class RegisterBody(
 @Serializable
 class LinkTokenBody(val token: String)
 
-/** A request with no fields. */
+/** A request with no fields, or an answer whose fields the app does not read. */
 @Serializable
 object EmptyBody
 

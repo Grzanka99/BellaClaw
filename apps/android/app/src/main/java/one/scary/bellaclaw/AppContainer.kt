@@ -5,10 +5,12 @@ import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.sync.Mutex
 import one.scary.bellaclaw.data.AccountRepository
 import one.scary.bellaclaw.data.ChatRepository
 import one.scary.bellaclaw.data.SettingsRepository
+import one.scary.bellaclaw.data.local.ChatStore
 import one.scary.bellaclaw.data.local.SessionStore
 import one.scary.bellaclaw.data.local.ThemeStore
 import one.scary.bellaclaw.data.push.FirebasePushTokens
@@ -25,12 +27,22 @@ class AppContainer(context: Context) {
     private val apiClient = ApiClient(sessionStore)
     private val deviceLock = Mutex()
 
-    val chatRepository = ChatRepository(applicationScope)
+    /** True while the app is on screen; `MainActivity` reports it. The live stream is open only then. */
+    val foreground = MutableStateFlow(false)
+
     val settingsRepository = SettingsRepository(
         apiClient,
         sessionStore.session,
         ThemeStore(File(context.filesDir, "theme.json")),
         applicationScope,
+    )
+    val chatRepository = ChatRepository(
+        api = apiClient,
+        session = sessionStore.session,
+        foreground = foreground,
+        settings = settingsRepository.settings,
+        chatStore = ChatStore(File(context.filesDir, "chats.json")),
+        scope = applicationScope,
     )
     val accountRepository = AccountRepository(apiClient, sessionStore, allowCleartext = BuildConfig.DEBUG, deviceLock)
     val pushRepository = PushRepository(

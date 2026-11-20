@@ -9,12 +9,11 @@ module; every dependency and plugin version lives in `gradle/libs.versions.toml`
 
 | Package (`one.scary.bellaclaw.…`) | Holds |
 | --- | --- |
-| `model` | Plain Kotlin types (`Chat`, `Message`, `ModelChoice`, `ModelSettings`, `AiModel`, `Personality`, `SettingsSnapshot`, `Loadable`, `Session`, `LoginLink`, `PendingLink`, `LinkStatus`, `AccountError`, …), and every type a ViewModel gets from a repository. No Android or Compose imports. |
-| `data` | One repository per kind of data: `ChatRepository` (chats, messages, typing, stream state), `SettingsRepository` (one `SettingsSnapshot` flow: the account's models and personality from the server, the phone's theme), `AccountRepository` (the session, sign-in, sign-out, the pending login link). `ServerUrls.kt`: the server address rule and the login link parser. |
-| `data.remote` | `ApiClient`, the one HTTP client of the gateway's app API (OkHttp, kotlinx.serialization JSON), its request and answer bodies (one file per area: `ApiBodies.kt`, `DeviceBodies.kt`, `SettingsBodies.kt`), and `ApiResult`. |
+| `model` | Plain Kotlin types (`Chat`, `Message`, `MessageImage`, `SendState`, `ModelChoice`, `ModelSettings`, `AiModel`, `Personality`, `SettingsSnapshot`, `Loadable`, `Session`, `LoginLink`, `PendingLink`, `LinkStatus`, `AccountError`, …), and every type a ViewModel gets from a repository. No Android or Compose imports. |
+| `data` | One repository per kind of data: `ChatRepository` (chats, messages, sends, typing, unread, the live stream; its state and sync in `ChatState` and `ChatSync`), `SettingsRepository` (one `SettingsSnapshot` flow: the account's models and personality from the server, the phone's theme), `AccountRepository` (the session, sign-in, sign-out, the pending login link). `ServerUrls.kt`: the server address rule and the login link parser. |
+| `data.remote` | `ApiClient`, the one HTTP client of the gateway's app API (OkHttp, kotlinx.serialization JSON), its request and answer bodies (one file per area: `ApiBodies.kt`, `ChatBodies.kt` for conversations and the stream, `DeviceBodies.kt`, `SettingsBodies.kt`), and `ApiResult`. |
 | `data.push` | `PushRepository` (device registration, decrypted pushes as a flow), the device keys (`loadDeviceKeys`, `DeviceKeys`), RFC 8291 decryption (`decryptPush`), `PushTokens` (FCM's token, `FirebasePushTokens`). |
-| `data.local` | `SessionStore`: the server address, session token and username in one app-private file. `ThemeStore`: the theme mode and Dynamic color in another. |
-| `data.sample` | The in-memory sample chats `ChatRepository` starts from. Only `data` and previews read it. |
+| `data.local` | `SessionStore`: the server address, session token and username in one app-private file. `ThemeStore`: the theme mode and Dynamic color in another. `ChatStore`: per conversation, the model picked for a plain chat and the newest row seen. |
 | `ui.<feature>` | `signin`, `home`, `chat`, `settings`, `settings.models`, `settings.personality`, `settings.theme`. |
 | `ui.components` | Composables and label mappings used by more than one feature. |
 | `ui.theme` | Colour schemes, extra colour tokens, typography, `BellaClawTheme`. |
@@ -97,6 +96,9 @@ whenever it changes, since the app theme can override the device theme.
   has that request's token). The session flow turns null, `AppViewModel` reports signed out and
   `MainActivity` swaps to the sign-in graph. Sign-out ends the session after the server's `ok` or
   its `401`; any other failure keeps it.
+- `streamSignedIn` reads a server-sent event stream (`GET /api/stream`) on the same client, handing
+  each event's type and data to its caller on an IO thread until the stream ends; cancelling the
+  caller cancels the call. The 70 s read timeout also ends a stream whose 25 s keep-alive stopped.
 - Server addresses pass `checkServerUrl`: trimmed, absolute, no trailing slash, no default port, a
   port in 1–65535, `https://`, and `http://` only in a debug build (`BuildConfig.DEBUG`), which alone allows cleartext traffic
   (`src/debug/AndroidManifest.xml`).
@@ -168,20 +170,80 @@ else from Firebase; the manifest turns off Firebase's default data collection an
   and, after a success, until the screen has closed. The theme is written to `files/theme.json`
   (through `theme.json.tmp`) and read once when the store is created, so the first frame has it.
 
+## Conversations and the live stream
+
+`ChatRepository` is the gateway's app API client for conversations (`docs/gateway.md`, "The App").
+Everything it holds is one immutable `ChatState` in a `MutableStateFlow`, changed only with `update`.
+
+- **Session.** The state belongs to one session: on every change of `AccountRepository.session`
+  (sign-in, sign-out, a `401`) it is replaced by an empty one with a new `generation`, so every
+  conversation, row, pending send, reply and typing mark is gone. A network answer applies only to
+  the generation that asked for it. History lives in memory; each start fetches it.
+- **The stream** is open while signed in and in the foreground (`AppContainer.foreground`, which
+  `MainActivity` sets on start and clears on a stop that is not a configuration change). A dropped
+  stream reconnects after 1 s, doubling to 30 s, back to 1 s once a stream delivered an event. It
+  needs nothing else to catch up: every stream opens with `check`. A failed read of the list, or of
+  an open chat's history, is tried again with the same delays in the stream's scope (`ChatSync.live`),
+  so the retrying ends with a success, a session change or the background; one retry loop at most per
+  list or conversation, so a `check` or `changed` meanwhile reads once but starts no second loop. `isStreamOpen` is true from that
+  first event until the stream ends; typing marks end with it.
+- **Events.** `check`: typing off, read the list. `changed`: read the list. `typing`: mark or unmark the
+  conversation. `deleted`: drop the plain chat; an open screen sees `isMissing`. `reply`: an assistant
+  message kept in memory only (`ChatState.replies`), shown once in its conversation for as long as the
+  session lasts.
+- **The list and revisions.** Reading the list (`ChatSync.refreshList`) replaces it, marks it loaded,
+  drops what belongs to conversations no longer in it, and syncs each loaded history whose revision is
+  below the list's, and the history of each open chat that has none (its first read failed, or the
+  chat was not known when its screen opened). A sync (`ChatSync.syncHistory`) fetches the rows `after`
+  the newest one held, page by page, recording the new revision only after the last page; or, when
+  nothing is held, the held revision is below `rewriteRevision`, or an `after` page names a
+  `rewriteRevision` above the held revision, the newest 50 anew. It repeats
+  while the history is still below the list's revision and the last fetch moved it on, so a change
+  during the first read is caught up. Reads of the list run one at a time, and so do the syncs of one
+  conversation. Older pages load with `before` when the reader reaches the oldest row (`loadOlder`).
+- **Chat ids.** The Bella conversation is always `BELLACLAW_CHAT_ID` in the app and always listed, so
+  its screen never waits; a plain chat's id is its conversation key, and its screen waits for the list
+  before it can be missing. A chat created here is kept whether or not the list has loaded (that is
+  its own fact, `ChatState.isListLoaded`), so its screen shows at once. `chat(chatId)` reads the list
+  and that fact from one snapshot of `ChatState`, so a restored screen never sees the list loaded
+  without its chat and reports it missing. A plain chat's icon is derived
+  from its key.
+- **History is open.** Collecting `messages(chatId)` means the chat's screen shows: it syncs the
+  history if the chat is known (else the next list read does), and marks its newest
+  stored row seen in `ChatStore`. A
+  conversation is unread while its newest row (from the list) is newer than the one seen.
+- **Sends.** Send is disabled until the chat's conversation is known and, in a plain chat, its model; the composer's draft is
+  cleared only once the message is in the repository. A send shows at once as a `PENDING` message
+  with a fresh `clientMessageId`, posted in the application scope. It is pending only until the post
+  is answered: accepted, it shows as a sent (`STORED`) message among the rows by time, and history's
+  row with that id replaces it. One history never gets (a confidential command such as `!ai-auth`,
+  whose reply comes as a `reply` event) stays in memory like a reply. A refused or failed post marks it `FAILED` (with the server's text for a
+  `400`), and a retry posts the same id, text and model again. A plain chat's send names its model by ids: the one picked
+  (`ChatStore`), else the account's provider and Main model at Main's effort, where the model's
+  default effort becomes MEDIUM if the model lists it, else the first effort it lists (a send never
+  says `default`). While the account's models are not loaded (loading or failed) a plain chat with no
+  pick has no model, so its picker does not open and Send waits. The Bella conversation's send names none.
+- **Kept on the phone** (`files/chats.json`, `ChatStore`): per conversation key, the picked model and
+  the newest row id seen.
+
 ## Wiring
 
 `BellaClawApplication` creates one `AppContainer` on first use, which creates the `SessionStore`,
 the `ApiClient` and each repository once. It also owns
 one application-lifetime `CoroutineScope` and passes it to repositories whose work must outlive a
-screen (`ChatRepository`: the sample typing timer, one per chat, restarted on each send;
-`SettingsRepository`: the session watch and model changes). ViewModel
+screen (`ChatRepository`: the stream, list and history reads, sends; `SettingsRepository`: the session
+watch and model changes). ViewModel
 factories read it through `CreationExtras.appContainer()`. No DI framework. Repositories are concrete
 classes; add an interface only when a second implementation exists.
 
 ## Tests
 
 JVM unit tests in `app/src/test` for every ViewModel: construct it with real repositories, collect
-its state (`collectIn`), send events, assert the exposed state. Account tests use `TestServer`: a
+its state (`collectIn`), send events, assert the exposed state. Chat tests run the real
+`ChatRepository` against `FakeGateway` (`TestServer.gateway()`): in-memory conversations behind the
+conversation routes, and a stream that opens with `check` and carries what the test pushes. A test
+waits for a request off the test thread (`withContext(Dispatchers.IO)`), so the repository's work in
+the test scope keeps running. Account tests use `TestServer`: a
 local `MockWebServer` plus the real `SessionStore`, `ApiClient` and `AccountRepository` on a session
 file in a temporary folder; a network answer reaches the ViewModel on OkHttp's thread, so after any event that follows one
 they wait with `uiState.first { … }` for the state the outcome names (an error, a step), not for a
@@ -193,7 +255,9 @@ Push tests run the whole decryption with a software P-256 key (`DeviceKeys.agree
 Appendix A vector and messages encrypted as the server does, and replace `PushTokens` with a fake.
 
 `TestServer.settingsRepository` adds the real `SettingsRepository`, with a `ThemeStore` that writes in
-place and answers for the two settings reads. `route` answers one method and path every time, so
+place and answers for the two settings reads; `TestServer.chatRepository` reads the models from one
+unless the test passes its own. `route` answers one method and path every time, ahead of the queue
+and of `FakeGateway`, so
 concurrent requests get the right body whatever their order; `takeRequest(method, path)` skips the
 others. A repository's work in `backgroundScope` runs only while the test suspends, so a test waits
 with `first { … }` before a blocking `takeRequest`.
@@ -203,12 +267,12 @@ with `first { … }` before a blocking `takeRequest`.
 Later chunks change repository internals, not their public `Flow`/`suspend` surface, so ViewModels
 stay as they are:
 
-- Networking (history, sends, the live stream): `ApiClient` from `AppContainer`, passed to the
-  repositories (OkHttp also reads the server-sent event stream). It replaces `data.sample`,
-  `ChatRepository.isStreamOpen`, `isTyping` and the sample typing timer. Network writes that must
-  finish after the screen is gone run in the application scope the repositories already receive.
 - Storage (cached history): a local store in `data.local` behind the same repositories.
-- Push notifications: collect `PushRepository.pushes` (see Push).
-- Images: upload goes through `ChatRepository.send`; the UI already passes a content URI. Thumbnails
-  are decoded by a `ThumbnailLoader` the chat Route builds on the `ContentResolver`; `ImageThumbnail`
-  only shows the result for its current URI.
+- Push notifications: collect `PushRepository.pushes` (see Push) and hand each to `ChatRepository`,
+  which syncs the conversation as on a `changed`.
+- Images: history keeps each user image (`MessageImage`: `mediaId`, `mimeType`) and the chat shows
+  a placeholder for it. Upload goes through `ChatRepository.send`;
+  the composer's attach button is hidden behind one flag (`SHOW_ATTACH` in `Composer.kt`), and the
+  ViewModel already keeps a picked content URI. Thumbnails of a picked image are decoded by a
+  `ThumbnailLoader` the chat Route builds on the `ContentResolver`; `ImageThumbnail` only shows the
+  result for its current URI.

@@ -48,7 +48,8 @@ class ChatViewModel(
         chatRepository.messages(chatId),
         chatRepository.isTyping(chatId),
         chatRepository.isStreamOpen,
-    ) { chat, messages, typing, streamOpen ->
+        chatRepository.canSend(chatId),
+    ) { chat, messages, typing, streamOpen, known ->
         val (kind, title) = when (chat) {
             null -> return@combine ChatUiState(isMissing = true)
             is BellaClawChat -> ChatKind.BELLACLAW to null
@@ -60,6 +61,7 @@ class ChatViewModel(
             rows = chatRows(messages, zone),
             isTyping = typing,
             isStreamOpen = streamOpen,
+            isConversationKnown = known,
         )
     }
 
@@ -89,23 +91,32 @@ class ChatViewModel(
         local.update { it.copy(attachmentUri = null) }
     }
 
+    /** Sends the draft's text. */
     fun send() {
         val text = draft.value
-        val attachmentUri = local.value.attachmentUri
-        if (text.isBlank() && attachmentUri == null) {
+        if (text.isBlank()) {
             return
         }
-        draft.value = ""
-        local.update { it.copy(attachmentUri = null) }
-        viewModelScope.launch {
-            chatRepository.send(chatId, text.trim(), attachmentUri)
+        if (chatRepository.send(chatId, text.trim())) {
+            draft.value = ""
+            local.update { it.copy(attachmentUri = null) }
         }
+    }
+
+    /** Sends the failed message [messageId] again. */
+    fun retry(messageId: String) {
+        chatRepository.retry(chatId, messageId)
+    }
+
+    /** The reader reached the oldest loaded row. */
+    fun loadOlder() {
+        chatRepository.loadOlder(chatId)
     }
 
     fun openModelPicker() {
         viewModelScope.launch {
             val chat = chatRepository.chat(chatId).first()
-            if (chat is PlainChat) {
+            if (chat is PlainChat && chat.model != null) {
                 local.update { it.copy(pickerSelection = chat.model) }
             }
         }

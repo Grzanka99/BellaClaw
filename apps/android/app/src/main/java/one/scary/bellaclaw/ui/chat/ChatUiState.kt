@@ -21,9 +21,11 @@ data class ChatUiState(
     val picker: ModelPickerState? = null,
     /** True when no chat has this screen's id; the screen then returns to Home. */
     val isMissing: Boolean = false,
+    /** Whether the chat's conversation is known and, for a plain chat, its model; until then nothing can be sent. */
+    val isConversationKnown: Boolean = false,
 ) {
     val canSend: Boolean
-        get() = draft.isNotBlank() || attachmentUri != null
+        get() = isConversationKnown && (draft.isNotBlank() || attachmentUri != null)
 }
 
 /** One row of the conversation: a day label or a message. */

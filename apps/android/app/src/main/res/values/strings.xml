@@ -124,4 +124,8 @@
     <string name="error_link_incomplete">The login code is incomplete. Copy all of it.</string>
     <string name="error_link_cleartext">The link names a server without https://, which this app does not accept.</string>
     <string name="error_link_server_invalid">The link names an invalid server address.</string>
+    <string name="unread">Unread</string>
+    <string name="message_sending">Sending…</string>
+    <string name="message_not_sent">Not sent. Tap to try again.</string>
+    <string name="image_placeholder">Image</string>
 </resources>

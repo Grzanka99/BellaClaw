@@ -3,7 +3,13 @@ package one.scary.bellaclaw.data.remote
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import okhttp3.Call
 import okhttp3.Callback
@@ -56,6 +62,67 @@ class ApiClient(@PublishedApi internal val sessionStore: SessionStore) {
     /** DELETEs [path] on the session's server with its token. */
     suspend inline fun <reified R> deleteSignedIn(path: String): ApiResult<R> =
         signedIn("DELETE", path, body = null) { json.decodeFromString<R>(it) }
+
+    /**
+     * Reads the server-sent event stream at [path] on the session's server with its token, handing each
+     * event's type and data to [onEvent] (on an IO thread) until the stream ends: [ApiResult.Success]
+     * when the server closed it, [ApiResult.NetworkFailure] when the connection broke. Cancelling the
+     * caller closes the connection. A `401` ends the session as with [getSignedIn].
+     */
+    suspend fun streamSignedIn(path: String, onEvent: (type: String, data: String) -> Unit): ApiResult<Unit> {
+        val session = sessionStore.session.value ?: return ApiResult.ApiError(UNAUTHORIZED, null)
+        val request = try {
+            Request.Builder()
+                .header(CLIENT_HEADER, "app")
+                .header("Authorization", "Bearer ${session.token}")
+                .url(session.serverUrl + path)
+                .build()
+        } catch (_: IllegalArgumentException) {
+            return ApiResult.NetworkFailure
+        }
+        val call = http.newCall(request)
+        val result = coroutineScope {
+            // The blocking read below does not see cancellation; cancelling the call ends it.
+            val canceller = launch(start = CoroutineStart.UNDISPATCHED) {
+                try {
+                    awaitCancellation()
+                } finally {
+                    call.cancel()
+                }
+            }
+            try {
+                withContext(Dispatchers.IO) { readEvents(call, onEvent) }
+            } finally {
+                canceller.cancel()
+            }
+        }
+        if (result is ApiResult.ApiError && result.status == UNAUTHORIZED) {
+            sessionStore.end(session.token)
+        }
+        return result
+    }
+
+    private fun readEvents(call: Call, onEvent: (type: String, data: String) -> Unit): ApiResult<Unit> = try {
+        call.execute().use { response ->
+            if (!response.isSuccessful) {
+                return ApiResult.ApiError(response.code, errorText(response.body.string()))
+            }
+            val source = response.body.source()
+            var type = ""
+            while (true) {
+                val line = source.readUtf8Line() ?: break
+                when {
+                    line.startsWith("event:") -> type = line.removePrefix("event:").trim()
+                    line.startsWith("data:") -> onEvent(type, line.removePrefix("data:").trim())
+                    // The keep-alive comment.
+                    else -> Unit
+                }
+            }
+            ApiResult.Success(Unit)
+        }
+    } catch (_: IOException) {
+        ApiResult.NetworkFailure
+    }
 
     @PublishedApi
     internal suspend fun <R> signedIn(

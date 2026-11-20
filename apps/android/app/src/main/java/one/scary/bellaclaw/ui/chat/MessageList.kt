@@ -33,16 +33,30 @@ private const val TYPING_KEY = "typing"
  * The conversation, newest at the bottom. [rows] come newest first. [assistantInBubbles] draws
  * assistant replies in bubbles (BellaClaw); otherwise they are plain full-width text (plain chats).
  * A new bottom item scrolls into view when the reader was at the bottom; otherwise the list stays put.
+ * Reaching the oldest row asks for older ones with [onLoadOlder]; a failed send retries on [onRetry].
  */
 @Composable
 fun MessageList(
     rows: List<ChatRow>,
     isTyping: Boolean,
     assistantInBubbles: Boolean,
-    thumbnailLoader: ThumbnailLoader,
+    onRetry: (String) -> Unit,
+    onLoadOlder: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val listState = rememberLazyListState()
+    // The oldest row is the last item of the reversed list.
+    val atTop by remember {
+        derivedStateOf {
+            val last = listState.layoutInfo.visibleItemsInfo.lastOrNull()
+            last != null && last.index == listState.layoutInfo.totalItemsCount - 1
+        }
+    }
+    LaunchedEffect(atTop, rows.lastOrNull()?.key) {
+        if (atTop) {
+            onLoadOlder()
+        }
+    }
     val atBottom by remember { derivedStateOf { listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0 } }
     val bottomKey = if (isTyping) TYPING_KEY else rows.firstOrNull()?.key
     // Read while composing the new bottom item, so it reflects the layout from before that item.
@@ -69,7 +83,7 @@ fun MessageList(
         items(rows, key = { it.key }) { row ->
             when (row) {
                 is ChatRow.Day -> DayChip(row.date)
-                is ChatRow.Item -> MessageItem(row.message, assistantInBubbles, thumbnailLoader)
+                is ChatRow.Item -> MessageItem(row.message, assistantInBubbles, onRetry)
             }
         }
     }

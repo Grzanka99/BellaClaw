@@ -24,18 +24,19 @@ class HomeViewModel(private val chatRepository: ChatRepository) : ViewModel() {
     val uiState: StateFlow<HomeUiState> = combine(
         chatRepository.chats,
         chatRepository.latestMessages,
+        chatRepository.unread,
         createdChatId,
-    ) { chats, latest, created ->
+    ) { chats, latest, unread, created ->
         val bellaClaw = latest[BellaClawChat.id]
         HomeUiState(
-            bellaClaw = BellaClawSummary(BellaClawChat.id, bellaClaw?.text, bellaClaw?.sentAt),
+            bellaClaw = BellaClawSummary(BellaClawChat.id, bellaClaw?.text, bellaClaw?.sentAt, BellaClawChat.id in unread),
+            // The repository's order: the latest active first.
             chats = chats
                 .filterIsInstance<PlainChat>()
                 .map { chat ->
                     val last = latest[chat.id]
-                    PlainChatSummary(chat.id, chat.title, chat.icon, last?.text, last?.sentAt)
-                }
-                .sortedByDescending { it.lastActivity },
+                    PlainChatSummary(chat.id, chat.title, chat.icon, last?.text, last?.sentAt, chat.id in unread)
+                },
             createdChatId = created,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HomeUiState())
@@ -47,7 +48,12 @@ class HomeViewModel(private val chatRepository: ChatRepository) : ViewModel() {
         }
         isCreatingChat = true
         viewModelScope.launch {
-            createdChatId.value = chatRepository.createChat()
+            val created = chatRepository.createChat()
+            if (created == null) {
+                isCreatingChat = false
+            } else {
+                createdChatId.value = created
+            }
         }
     }
 

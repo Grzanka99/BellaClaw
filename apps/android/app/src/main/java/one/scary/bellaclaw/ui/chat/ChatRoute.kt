@@ -54,6 +54,8 @@ fun ChatRoute(
         onRemoveAttachment = viewModel::onRemoveAttachment,
         onSend = viewModel::send,
         onOpenModelPicker = viewModel::openModelPicker,
+        onRetry = viewModel::retry,
+        onLoadOlder = viewModel::loadOlder,
         pickerEvents = ModelPickerEvents(
             onProvider = viewModel::onPickerProvider,
             onModel = viewModel::onPickerModel,

@@ -12,6 +12,7 @@ import one.scary.bellaclaw.R
 import one.scary.bellaclaw.model.Author
 import one.scary.bellaclaw.model.ChatKind
 import one.scary.bellaclaw.model.Message
+import one.scary.bellaclaw.model.SendState
 import one.scary.bellaclaw.ui.theme.BellaClawTheme
 import java.time.Instant
 import java.time.ZoneId
@@ -25,6 +26,8 @@ fun ChatScreen(
     onRemoveAttachment: () -> Unit,
     onSend: () -> Unit,
     onOpenModelPicker: () -> Unit,
+    onRetry: (String) -> Unit,
+    onLoadOlder: () -> Unit,
     pickerEvents: ModelPickerEvents,
     thumbnailLoader: ThumbnailLoader,
     modifier: Modifier = Modifier,
@@ -66,7 +69,8 @@ fun ChatScreen(
             rows = state.rows,
             isTyping = state.isTyping,
             assistantInBubbles = isBellaClaw,
-            thumbnailLoader = thumbnailLoader,
+            onRetry = onRetry,
+            onLoadOlder = onLoadOlder,
             modifier = Modifier.padding(padding),
         )
     }
@@ -88,13 +92,14 @@ private fun BellaClawChatPreview() {
                 kind = ChatKind.BELLACLAW,
                 rows = chatRows(
                     listOf(
-                        Message("1", "b", Author.ASSISTANT, "Staging is live. Smoke tests passed.", null, now),
-                        Message("2", "b", Author.USER, "Ship to prod tomorrow 9:00", null, now),
+                        Message("1", "b", Author.ASSISTANT, "Staging is live. Smoke tests passed.", now),
+                        Message("2", "b", Author.USER, "Ship to prod tomorrow 9:00", now, sendState = SendState.PENDING),
                     ),
                     ZoneId.systemDefault(),
                 ),
                 isTyping = true,
                 isStreamOpen = true,
+                isConversationKnown = true,
             ),
             onBack = {},
             onDraftChange = {},
@@ -102,6 +107,8 @@ private fun BellaClawChatPreview() {
             onRemoveAttachment = {},
             onSend = {},
             onOpenModelPicker = {},
+            onRetry = {},
+            onLoadOlder = {},
             pickerEvents = noPickerEvents,
             thumbnailLoader = noThumbnails,
         )
@@ -118,11 +125,12 @@ private fun PlainChatPreview() {
                 title = "Kotlin flow vs channel",
                 rows = chatRows(
                     listOf(
-                        Message("1", "k", Author.USER, "When should I use Channel instead of SharedFlow?", null, now),
-                        Message("2", "k", Author.ASSISTANT, "Use a Channel when each event must be handled once.", null, now),
+                        Message("1", "k", Author.USER, "When should I use Channel instead of SharedFlow?", now),
+                        Message("2", "k", Author.ASSISTANT, "Use a Channel when each event must be handled once.", now),
                     ),
                     ZoneId.systemDefault(),
                 ),
+                isConversationKnown = true,
             ),
             onBack = {},
             onDraftChange = {},
@@ -130,6 +138,8 @@ private fun PlainChatPreview() {
             onRemoveAttachment = {},
             onSend = {},
             onOpenModelPicker = {},
+            onRetry = {},
+            onLoadOlder = {},
             pickerEvents = noPickerEvents,
             thumbnailLoader = noThumbnails,
         )

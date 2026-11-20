@@ -33,6 +33,9 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import one.scary.bellaclaw.R
 
+/** Whether the composer shows the attach button. */
+private const val SHOW_ATTACH = false
+
 /** The message box: attach button, text, the picked image above them, and the send button. */
 @Composable
 fun Composer(
@@ -63,8 +66,10 @@ fun Composer(
                     AttachmentPreview(uri = uri, loader = thumbnailLoader, onRemove = onRemoveAttachment)
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = onAttach, modifier = Modifier.padding(start = 4.dp)) {
-                        Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.action_attach_image))
+                    if (SHOW_ATTACH) {
+                        IconButton(onClick = onAttach, modifier = Modifier.padding(start = 4.dp)) {
+                            Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.action_attach_image))
+                        }
                     }
                     TextField(
                         value = draft,
