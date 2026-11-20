@@ -8,9 +8,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.Lifecycle
 import androidx.navigation.NavBackStackEntry
+import androidx.navigation.NavDestination.Companion.hasRoute
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.toRoute
 import one.scary.bellaclaw.model.BELLACLAW_CHAT_ID
 import one.scary.bellaclaw.ui.chat.ChatRoute
 import one.scary.bellaclaw.ui.home.HomeRoute
@@ -21,17 +23,30 @@ import one.scary.bellaclaw.ui.settings.theme.ThemeSettingsRoute
 import one.scary.bellaclaw.ui.signin.LinkRoute
 
 /**
- * The app's graph while signed in. Home sits under the BellaClaw chat, so Back from it lands on Home.
+ * The app's graph while signed in. Home sits under the BellaClaw chat, so Back from it lands on Home;
+ * [chatToOpen], from a tapped notification, replaces whatever is above Home unless that chat is already on
+ * top, and is then reported opened.
  * A screen navigates only while its entry is resumed, so repeated taps during a transition push or pop once.
  */
 @Composable
-fun BellaClawNavHost(hasPendingLink: Boolean) {
+fun BellaClawNavHost(hasPendingLink: Boolean, chatToOpen: String?, onChatOpened: () -> Unit) {
     val navController = rememberNavController()
     var openedBellaClaw by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         if (!openedBellaClaw) {
             openedBellaClaw = true
             navController.navigate(ChatDestination(BELLACLAW_CHAT_ID))
+        }
+    }
+    LaunchedEffect(chatToOpen) {
+        if (chatToOpen != null) {
+            val top = navController.currentBackStackEntry
+            val isOnTop = top?.destination?.hasRoute<ChatDestination>() == true &&
+                top.toRoute<ChatDestination>().chatId == chatToOpen
+            if (!isOnTop) {
+                navController.navigate(ChatDestination(chatToOpen)) { popUpTo(HomeDestination) }
+            }
+            onChatOpened()
         }
     }
     val onBack: NavBackStackEntry.() -> Unit = { ifResumed { navController.popBackStack() } }

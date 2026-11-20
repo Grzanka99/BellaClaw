@@ -97,8 +97,8 @@ class PushRepositoryTest {
     fun `a push that decrypts arrives, one that does not is dropped`() = runTest {
         server.answer(200, ok)
         val (_, push) = repositories(server.signedInStore())
-        val appPush = AppPush("bella:acct-1", messageId = 3, revision = 9, text = "Hi", truncated = true)
-        val json = """{"conversationKey":"bella:acct-1","messageId":3,"revision":9,"text":"Hi","truncated":true}"""
+        val appPush = AppPush("bella:acct-1", kind = "bella", messageId = 3, revision = 9, text = "Hi", truncated = true)
+        val json = """{"conversationKey":"bella:acct-1","kind":"bella","messageId":3,"revision":9,"text":"Hi","truncated":true}"""
 
         push.receive(encryptLikeServer(json, newSoftwareKeys()))
         push.receive(encryptLikeServer(json, keys))

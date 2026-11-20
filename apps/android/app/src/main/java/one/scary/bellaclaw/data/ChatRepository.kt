@@ -26,10 +26,12 @@ import one.scary.bellaclaw.data.remote.EmptyBody
 import one.scary.bellaclaw.data.remote.ModelBody
 import one.scary.bellaclaw.data.remote.SendBody
 import one.scary.bellaclaw.data.remote.StreamEventBody
+import one.scary.bellaclaw.model.AppPush
 import one.scary.bellaclaw.model.Author
 import one.scary.bellaclaw.model.BELLACLAW_CHAT_ID
 import one.scary.bellaclaw.model.BellaClawChat
 import one.scary.bellaclaw.model.Chat
+import one.scary.bellaclaw.model.ChatNotification
 import one.scary.bellaclaw.model.Effort
 import one.scary.bellaclaw.model.Loadable
 import one.scary.bellaclaw.model.Message
@@ -97,6 +99,11 @@ class ChatRepository(
             val newest = conversation.lastMessage?.id ?: return@filter false
             newest > (local.lastSeen[conversation.conversationKey] ?: -1)
         }.mapTo(HashSet()) { it.chatId() }
+    }.distinctUntilChanged()
+
+    /** The conversation keys of the chats whose screen is open. */
+    val openConversations: Flow<Set<String>> = combine(sync.openChats, state) { open, current ->
+        open.mapNotNullTo(HashSet()) { current.keyOf(it) }
     }.distinctUntilChanged()
 
     /** Whether the live stream to the server is open. */
@@ -178,6 +185,27 @@ class ChatRepository(
         val message = state.value.pending[key]?.firstOrNull { it.clientMessageId == messageId && it.state == SendState.FAILED } ?: return
         changePending(key, messageId) { it.copy(state = SendState.PENDING, failure = null) }
         scope.launch { post(key, message) }
+    }
+
+    /** Brings [conversationKey] up to date after a push, as on a `changed`: reads the list, then syncs its history. */
+    suspend fun catchUp(conversationKey: String) {
+        sync.refreshList()
+        sync.syncHistory(conversationKey)
+    }
+
+    /**
+     * What [push]'s notification shows: its chat from the push's kind, a plain chat's title once the list
+     * names it, and its row's text from history once fetched, else the push's.
+     */
+    fun notificationOf(push: AppPush): ChatNotification {
+        val current = state.value
+        val key = push.conversationKey
+        val text = current.histories[key]?.rows?.firstOrNull { it.id == push.messageId }?.text ?: push.text
+        if (push.kind == ChatState.BELLA) {
+            return ChatNotification(key, BELLACLAW_CHAT_ID, null, text)
+        }
+        val title = current.conversations.firstOrNull { it.conversationKey == key }?.title
+        return ChatNotification(key, key, title, text)
     }
 
     /** Creates an empty plain chat and returns its id, or null when the server could not. */

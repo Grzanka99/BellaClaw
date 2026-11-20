@@ -14,6 +14,7 @@ import one.scary.bellaclaw.data.local.ChatStore
 import one.scary.bellaclaw.data.local.SessionStore
 import one.scary.bellaclaw.data.local.ThemeStore
 import one.scary.bellaclaw.data.push.FirebasePushTokens
+import one.scary.bellaclaw.data.push.PushNotifications
 import one.scary.bellaclaw.data.push.PushRepository
 import one.scary.bellaclaw.data.push.loadDeviceKeys
 import one.scary.bellaclaw.data.remote.ApiClient
@@ -53,4 +54,8 @@ class AppContainer(context: Context) {
         deviceLock,
         applicationScope,
     )
+
+    init {
+        PushNotifications(pushRepository.pushes, chatRepository, sessionStore.session, foreground, AndroidNotifier(context), applicationScope)
+    }
 }

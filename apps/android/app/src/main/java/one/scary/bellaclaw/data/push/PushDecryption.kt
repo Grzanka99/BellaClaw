@@ -99,10 +99,11 @@ private fun hkdf(salt: ByteArray, ikm: ByteArray, info: ByteArray, bytes: Int): 
 @Serializable
 private class PushBody(
     val conversationKey: String,
+    val kind: String,
     val messageId: Long,
     val revision: Long,
     val text: String,
     val truncated: Boolean,
 ) {
-    fun toAppPush() = AppPush(conversationKey, messageId, revision, text, truncated)
+    fun toAppPush() = AppPush(conversationKey, kind, messageId, revision, text, truncated)
 }

@@ -75,6 +75,8 @@
 
     <string name="notifications_title">Notifications</string>
     <string name="notifications_summary">Open Android notification settings</string>
+    <string name="channel_bellaclaw">BellaClaw</string>
+    <string name="channel_chats">Chats</string>
 
     <string name="account_title">Account</string>
     <string name="sign_out">Sign out</string>

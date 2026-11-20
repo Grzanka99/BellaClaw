@@ -6,9 +6,9 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class PushDecryptionTest {
-    private val push = AppPush("bella:acct-1", messageId = 42, revision = 7, text = "Zażółć gęślą jaźń", truncated = false)
+    private val push = AppPush("bella:acct-1", kind = "bella", messageId = 42, revision = 7, text = "Zażółć gęślą jaźń", truncated = false)
     private val pushJson =
-        """{"conversationKey":"bella:acct-1","messageId":42,"revision":7,"text":"Zażółć gęślą jaźń","truncated":false}"""
+        """{"conversationKey":"bella:acct-1","kind":"bella","messageId":42,"revision":7,"text":"Zażółć gęślą jaźń","truncated":false}"""
 
     @Test
     fun `the RFC 8291 Appendix A message decrypts with the receiver's keys`() {

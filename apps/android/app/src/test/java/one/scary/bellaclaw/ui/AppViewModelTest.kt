@@ -5,6 +5,7 @@ import one.scary.bellaclaw.data.TestServer
 import one.scary.bellaclaw.model.ThemeMode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -56,5 +57,21 @@ class AppViewModelTest {
         viewModel.onLoginLink("bellaclaw://login?token=t")
 
         assertTrue(viewModel.uiState.value.hasPendingLink)
+    }
+
+    @Test
+    fun `a tapped notification opens its chat once, and only while signed in`() = runTest {
+        val store = gateway.signedInStore()
+        val viewModel = AppViewModel(gateway.settingsRepository(scope = backgroundScope), gateway.repository(store))
+
+        viewModel.onOpenChat("plain:ada:a")
+        assertEquals("plain:ada:a", viewModel.uiState.value.chatToOpen)
+        viewModel.onChatOpened()
+        assertNull(viewModel.uiState.value.chatToOpen)
+
+        store.end("t0")
+        viewModel.onOpenChat("plain:ada:a")
+
+        assertNull(viewModel.uiState.value.chatToOpen)
     }
 }

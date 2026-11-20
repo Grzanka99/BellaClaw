@@ -30,6 +30,7 @@ class MainActivity : ComponentActivity() {
         // A recreated activity saw its launch intent already.
         if (savedInstanceState == null) {
             handleLoginLink(intent)
+            handleNotification(intent)
         }
         setContent {
             val state by appViewModel.uiState.collectAsStateWithLifecycle()
@@ -45,7 +46,12 @@ class MainActivity : ComponentActivity() {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     // Each graph starts fresh, so signing in or out leaves no back stack behind.
                     if (state.isSignedIn) {
-                        BellaClawNavHost(hasPendingLink = state.hasPendingLink)
+                        AskNotificationPermission()
+                        BellaClawNavHost(
+                            hasPendingLink = state.hasPendingLink,
+                            chatToOpen = state.chatToOpen,
+                            onChatOpened = appViewModel::onChatOpened,
+                        )
                     } else {
                         SignInNavHost(hasPendingLink = state.hasPendingLink)
                     }
@@ -70,6 +76,15 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         handleLoginLink(intent)
+        handleNotification(intent)
+    }
+
+    /** A tapped notification opens its chat; one reopened from Recents does not again. */
+    private fun handleNotification(intent: Intent) {
+        val chatId = intent.getStringExtra(EXTRA_CHAT_ID)
+        if (chatId != null && (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) == 0) {
+            appViewModel.onOpenChat(chatId)
+        }
     }
 
     private fun handleLoginLink(intent: Intent) {
@@ -77,5 +92,10 @@ class MainActivity : ComponentActivity() {
         if (intent.action == Intent.ACTION_VIEW && link != null) {
             appViewModel.onLoginLink(link)
         }
+    }
+
+    companion object {
+        /** The chat a notification's tap opens. */
+        const val EXTRA_CHAT_ID = "one.scary.bellaclaw.CHAT_ID"
     }
 }

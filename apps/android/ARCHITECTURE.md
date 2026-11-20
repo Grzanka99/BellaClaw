@@ -9,17 +9,17 @@ module; every dependency and plugin version lives in `gradle/libs.versions.toml`
 
 | Package (`one.scary.bellaclaw.…`) | Holds |
 | --- | --- |
-| `model` | Plain Kotlin types (`Chat`, `Message`, `MessageImage`, `SendState`, `ModelChoice`, `ModelSettings`, `AiModel`, `ChatProvider`, `Personality`, `SettingsSnapshot`, `Loadable`, `Session`, `LoginLink`, `PendingLink`, `LinkStatus`, `AccountError`, …), and every type a ViewModel gets from a repository. No Android or Compose imports. |
+| `model` | Plain Kotlin types (`Chat`, `Message`, `MessageImage`, `SendState`, `ModelChoice`, `ModelSettings`, `AiModel`, `ChatProvider`, `Personality`, `SettingsSnapshot`, `Loadable`, `Session`, `LoginLink`, `PendingLink`, `LinkStatus`, `AccountError`, `AppPush`, `ChatNotification`, …), and every type a ViewModel gets from a repository. No Android or Compose imports. |
 | `data` | One repository per kind of data: `ChatRepository` (chats, messages, sends, typing, unread, the live stream; its state and sync in `ChatState` and `ChatSync`), `SettingsRepository` (one `SettingsSnapshot` flow: the account's models and personality and the plain chats' model list from the server, the phone's theme), `AccountRepository` (the session, sign-in, sign-out, the pending login link). `ServerUrls.kt`: the server address rule and the login link parser. |
 | `data.remote` | `ApiClient`, the one HTTP client of the gateway's app API (OkHttp, kotlinx.serialization JSON), its request and answer bodies (one file per area: `ApiBodies.kt`, `ChatBodies.kt` for conversations and the stream, `DeviceBodies.kt`, `SettingsBodies.kt`), and `ApiResult`. |
-| `data.push` | `PushRepository` (device registration, decrypted pushes as a flow), the device keys (`loadDeviceKeys`, `DeviceKeys`), RFC 8291 decryption (`decryptPush`), `PushTokens` (FCM's token, `FirebasePushTokens`). |
+| `data.push` | `PushRepository` (device registration, decrypted pushes as a flow), `PushNotifications` (a notification per push, behind the `Notifier` seam), the device keys (`loadDeviceKeys`, `DeviceKeys`), RFC 8291 decryption (`decryptPush`), `PushTokens` (FCM's token, `FirebasePushTokens`). |
 | `data.local` | `SessionStore`: the server address, session token and username in one app-private file. `ThemeStore`: the theme mode and Dynamic color in another. `ChatStore`: per conversation, the model picked for a plain chat and the newest row seen; and the model used last on this phone. |
 | `ui.<feature>` | `signin`, `home`, `chat`, `settings`, `settings.models`, `settings.personality`, `settings.theme`. |
 | `ui.components` | Composables and label mappings used by more than one feature. |
 | `ui.theme` | Colour schemes, extra colour tokens, typography, `BellaClawTheme`. |
 | `ui.navigation` | Typed destinations and the two `NavHost`s. |
-| `ui` (root) | `MainActivity`, `AppViewModel` (theme, signed in or not, a waiting login link), `appContainer()` for factories. |
-| root | `BellaClawApplication` and `AppContainer` (wiring only), `PushService` (FCM's entry point). |
+| `ui` (root) | `MainActivity`, `AppViewModel` (theme, signed in or not, a waiting login link, the chat a tapped notification opens), `AskNotificationPermission`, `appContainer()` for factories. |
+| root | `BellaClawApplication` and `AppContainer` (wiring only), `PushService` (FCM's entry point), `AndroidNotifier` (the notifications and their channels in Android). |
 
 No domain/use-case layer: add one only for logic that two ViewModels share.
 
@@ -66,6 +66,10 @@ sign-out, a `401`) leaves nothing to go back to. `BellaClawNavHost` starts at Ho
 BellaClaw chat once, so Back from it lands on Home. Both graphs hold the login link confirmation
 (`LinkDestination`, no arguments) and push it whenever a link starts waiting (`PendingLinkEffect`);
 every way out of it (Cancel, Done, Back) dismisses the link, and the screen closes once its link no longer waits.
+A tapped notification names its chat in the intent (`MainActivity.EXTRA_CHAT_ID`); `MainActivity` hands it to
+`AppViewModel` (only while signed in, and not for an intent relaunched from Recents), whose
+`chatToOpen` `BellaClawNavHost` opens above Home, replacing what was there (a chat already on top
+stays, with its draft), and then reports opened.
 Screens get navigation as lambdas, and those lambdas act only while their back stack entry is
 resumed, so taps during a transition push or pop once. The one exception is the missing-chat return
 to Home, which a restored entry reports before it resumes. A destination's arguments reach its
@@ -132,14 +136,39 @@ else from Firebase; the manifest turns off Firebase's default data collection an
   is deleted; the next sign-in gets a new one.
 - Receiving: `PushService` (not exported) takes the data field `ciphertext` and hands it to
   `PushRepository.receive`, which decrypts it (`decryptPush`: RFC 8291, `aes128gcm`, one record) into
-  `AppPush` and queues it on `pushes` (one collector; kept until collected). A message that arrives
+  `AppPush` (`conversationKey`, `kind`, `messageId`, `revision`, `text`, `truncated`; `kind` as the
+  list names it) and queues it on `pushes` (one collector; kept until collected). A message that arrives
   signed out, or does not decrypt or parse, is dropped, and one still waiting when its session is no
-  longer the session is dropped when its turn comes.
+  longer the session is dropped when its turn comes. A push counts as handled once its collector
+  returns; `PushService` waits for that (`awaitHandled`) for up to 9 s, inside the time FCM gives a
+  data message, so the fetch runs while FCM keeps the process.
+- Notifications: `PushNotifications`, created with the `AppContainer` (so FCM starting the process
+  starts it), collects `pushes` in the application scope. Each push shows at once as its
+  conversation's notification (`Notifier.show`, the one per conversation key replaced) with what
+  `ChatRepository.notificationOf` knows: the chat it opens, from the push's `kind` (the BellaClaw chat
+  for `bella`, else the plain chat whose id is the conversation key), a plain chat's title, null while
+  the list has not named it, and the push's text. `ChatRepository.catchUp` then reads the list and
+  syncs that conversation's history, for up to 8 s so a stalled read never holds the next push back
+  (a cut catch-up is left unfinished), and the notification is shown again, without alerting, if the
+  title or the text changed: the title once known, the whole text of row `messageId` for a
+  `truncated` push. A conversation whose chat is
+  open on screen while in the foreground gets none, and loses its notification when its chat opens;
+  any change of session clears all of them, and a show for a session that is no longer the session is
+  skipped. `AndroidNotifier` posts them, tagged with the conversation key, on two channels the person
+  switches in Android's settings: `bellaclaw` (the BellaClaw chat) and `chats` (plain chats), chosen by
+  the push's `kind`. The title is the BellaClaw chat's name, or the plain chat's title, "New chat"
+  while it has none or is not known; the text shows expanded. Tapping one opens its chat. Without the `POST_NOTIFICATIONS`
+  permission nothing is shown. Settings →
+  Notifications opens Android's notification settings for the app.
+- The permission is asked once the signed-in graph shows (`AskNotificationPermission`, once per
+  activity), only while not granted and Android reports no rationale: never asked, so after a refusal
+  nothing asks again.
 - Off without Firebase: the Google services plugin is applied only when `app/google-services.json`
   exists (gitignored, never committed). Without it, or without Google Play services, `FirebasePushTokens`
   gives no token and push is simply off.
-- Never log a push payload, a key, the auth secret or an FCM token; `DeviceBody` is a plain class.
-- Test seams: `DeviceKeys.agree` (the ECDH step, so JVM tests use a software key) and `PushTokens`.
+- Never log a push payload or its text, a key, the auth secret or an FCM token; `DeviceBody` is a plain class.
+- Test seams: `DeviceKeys.agree` (the ECDH step, so JVM tests use a software key), `PushTokens` and
+  `Notifier`.
 
 ## Settings
 
@@ -240,6 +269,10 @@ Everything it holds is one immutable `ChatState` in a `MutableStateFlow`, change
   effort when it can. A provider that cannot be used now is listed with its reason and cannot be picked.
 - **Kept on the phone** (`files/chats.json`, `ChatStore`): per conversation key, the picked model and
   the newest row id seen; and the model a plain chat was last set to or sent with.
+- **After a push** (`catchUp`), in the background too: the list is read and the pushed conversation's
+  history synced, as on a `changed`, so a history read this way stays in memory and is kept in step
+  like any loaded one. A failed read is retried only while the stream is open. `openConversations` names the
+  conversation keys of the chats on screen.
 
 ## Wiring
 
@@ -247,7 +280,7 @@ Everything it holds is one immutable `ChatState` in a `MutableStateFlow`, change
 the `ApiClient` and each repository once. It also owns
 one application-lifetime `CoroutineScope` and passes it to repositories whose work must outlive a
 screen (`ChatRepository`: the stream, list and history reads, sends; `SettingsRepository`: the session
-watch and model changes). ViewModel
+watch and model changes; `PushNotifications`: the pushes, on an `AndroidNotifier`). ViewModel
 factories read it through `CreationExtras.appContainer()`. No DI framework. Repositories are concrete
 classes; add an interface only when a second implementation exists.
 
@@ -269,6 +302,9 @@ ViewModel allows only in some state (submitting a form) wait for that state too.
 
 Push tests run the whole decryption with a software P-256 key (`DeviceKeys.agree`) against the RFC 8291
 Appendix A vector and messages encrypted as the server does, and replace `PushTokens` with a fake.
+Notification tests deliver such messages to the real `PushRepository`, `ChatRepository` and
+`PushNotifications` on `FakeGateway`, wait with `awaitHandled`, and read what a fake `Notifier` shows. The
+catch-up's 8 s bound runs on `Dispatchers.Default`, so it counts real time there too.
 
 `TestServer.settingsRepository` adds the real `SettingsRepository`, with a `ThemeStore` that writes in
 place and answers for the three settings reads; `TestServer.chatRepository` reads the models from one
@@ -284,8 +320,6 @@ Later chunks change repository internals, not their public `Flow`/`suspend` surf
 stay as they are:
 
 - Storage (cached history): a local store in `data.local` behind the same repositories.
-- Push notifications: collect `PushRepository.pushes` (see Push) and hand each to `ChatRepository`,
-  which syncs the conversation as on a `changed`.
 - Images: history keeps each user image (`MessageImage`: `mediaId`, `mimeType`) and the chat shows
   a placeholder for it. Upload goes through `ChatRepository.send`;
   the composer's attach button is hidden behind one flag (`SHOW_ATTACH` in `Composer.kt`), and the
