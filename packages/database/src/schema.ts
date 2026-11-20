@@ -66,18 +66,26 @@ export const memoriesTable = sqliteTable(
     author: text("author", { enum: ["system", "user", "assistant", "toolResult"] }).notNull(),
     message: text("message").notNull(),
     modelMessage: text("modelMessage"),
-    kind: text("kind", { enum: ["message", "tool"] })
+    // display: a command, its reply, a notice or a failure reply, shown in history and never
+    // replayed to the model
+    kind: text("kind", { enum: ["message", "tool", "display"] })
       .notNull()
       .default("message"),
     createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull(),
+    // the id the sending client gave the inbound message the row holds
+    clientMessageId: text("clientMessageId"),
   },
   (table) => [index("memories_chat_id_idx").on(table.chatId, table.id)],
 );
 
-// the conversations of an account, with their owner
+// the conversations with their owner; revision: raised on every change of the transcript;
+// rewriteRevision: the revision of the latest change that was not an append (a delete, or rows
+// moved in by a merge)
 export const conversationsTable = sqliteTable("conversations", {
   conversationKey: text("conversationKey").primaryKey(),
   ownerKey: text("ownerKey").notNull(),
+  revision: integer("revision").notNull().default(0),
+  rewriteRevision: integer("rewriteRevision").notNull().default(0),
 });
 
 export const conversationSummariesTable = sqliteTable("conversation_summaries", {

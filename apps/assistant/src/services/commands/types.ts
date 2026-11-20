@@ -2,7 +2,9 @@ import type { TEventContext } from "../events";
 
 export const COMMAND_PREFIX = "!";
 
-export type TCommandResult = string | { prompt: string };
+// confidential: a reply carrying a secret or a one-time link, or answering a command that carries
+// one; it is sent and neither it nor the command is stored
+export type TCommandResult = string | { prompt: string } | { confidential: string };
 
 export type TCommand = {
   name: string;

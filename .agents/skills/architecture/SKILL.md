@@ -43,8 +43,8 @@ only its own tables and reaches another service with a message: a **fact** it pu
   A command pending at boot is dead as `abandoned`: its requester is gone, and a repeated request
   revives it.
 - A dead delivery appends `event.dead_lettered`; a dead command also appends `command.rejected`.
-  Notices turns a dead fact into a chat notice, except for outbound types, dead letters and
-  commands. `apps/assistant/scripts/redrive-events.ts` lists dead rows and sets chosen ones back
+  Notices turns a dead fact into a chat notice, except for outbound types, `message.sent`, dead
+  letters and commands. `apps/assistant/scripts/redrive-events.ts` lists dead rows and sets chosen ones back
   to pending for the next boot.
 - Boot deletes events older than 30 days whose deliveries are all done, with their delivery rows.
   Error text in `lastError` and `command.rejected` passes through `sanitizeErrorMessage`.
@@ -144,6 +144,13 @@ Table owners: `memories`, `conversation_summaries`, `conversations` → Conversa
 `fact_distillation_state` → Memory · `cron_engine_jobs` → Cron · `automations`,
 `automation_drafts` → Automations · `user_configs` → Settings · `calendars` → Calendar ·
 `message_authorizations` → Authorization · `identity_links` → Identity · `events`, `event_deliveries` → EventBus.
+
+Every change of a transcript (`memories`) raises the conversation's revision in `conversations`
+and emits `conversation.changed` with it, in the same transaction. A change that is not an append
+(a delete, or rows moved in by a merge) also sets `rewriteRevision` to that revision, and the fact
+carries it: a client synced at or above it fetches by cursor, below it reloads. Conversation writes the rows
+of a sent reply, notice or delivery from `message.sent`; a reply with neither `transcript` nor
+`display` is not stored, which keeps a confidential one out of history.
 
 ## Adding a fact or command
 

@@ -84,6 +84,7 @@ describe("MessagingAdapter outbound", () => {
         sourceType: EEventType.NoticeReady,
         chars: 6,
         sentAt: expect.any(Number),
+        display: { text: "Notice" },
       },
     ]);
   });

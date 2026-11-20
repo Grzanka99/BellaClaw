@@ -8,7 +8,14 @@ import { logHandlerStarted, startHandlerSpan, startMemorySaveSpan } from "../app
 import { startSpan } from "../app-logger/span";
 import { ConversationStore } from "../conversation";
 import { IMAGE_MARKER, type TConversation } from "../conversation/types";
-import { ESubscriptionMode, EventBus, type TEventContext, type TEventRequester } from "../events";
+import type { TDatabaseHandle } from "../database";
+import {
+  ESubscriptionMode,
+  EventBus,
+  type TDerivedEmit,
+  type TEventContext,
+  type TEventRequester,
+} from "../events";
 import { ERejectionCode, type TEvent, type TMessageOrigin } from "../events/catalog";
 import { IdentityService } from "../identity";
 import { EIdentityLinkOwner } from "../identity/schema";
@@ -118,6 +125,12 @@ export class MessageHandler {
       backoffMs: [],
       handler: async (event, ctx) => {
         const { chatId, messageId } = event.payload;
+        let ownerKey = chatId;
+        const resolved = await IdentityService.instance.resolve(chatId);
+
+        if (resolved !== undefined) {
+          ownerKey = resolved.ownerKey;
+        }
 
         await ctx.complete(async (tx, emit) => {
           const messageIds = await this.conversations.deleteMessage(tx, chatId, messageId);
@@ -137,6 +150,7 @@ export class MessageHandler {
           }
 
           emit(EEventType.ConversationMessageDeleted, { chatId, messageIds }, undefined, undefined);
+          await this.changed(tx, emit, chatId, ownerKey, true, undefined);
         });
       },
     });
@@ -191,7 +205,17 @@ export class MessageHandler {
     }
 
     await ctx.complete(async (tx, emit) => {
-      await this.conversations.moveToBella(tx, chatKey, conversationKey, ownerKey, fused);
+      const moved = await this.conversations.moveToBella(
+        tx,
+        chatKey,
+        conversationKey,
+        ownerKey,
+        fused,
+      );
+
+      if (moved) {
+        await this.changed(tx, emit, conversationKey, ownerKey, true, undefined);
+      }
       emit(
         EEventType.IdentityLinkMoved,
         { ...event.payload, owner: EIdentityLinkOwner.Conversation },
@@ -205,9 +229,9 @@ export class MessageHandler {
     event: TEvent<EEventType.MessageSent>,
     ctx: TEventContext,
   ): Promise<void> {
-    const transcript = event.payload.transcript;
+    const { transcript, display } = event.payload;
 
-    if (transcript === undefined) {
+    if (transcript === undefined && display === undefined) {
       return;
     }
 
@@ -237,19 +261,41 @@ export class MessageHandler {
       return;
     }
 
-    const span = startMemorySaveSpan(event.trace, ERole.Assistant, transcript.text.length);
+    // an address whose rows still wait to be moved is not linked yet, so it resolves to itself
+    let ownerKey = chatId;
+    const resolved = await IdentityService.instance.resolve(chatId);
+
+    if (resolved !== undefined) {
+      ownerKey = resolved.ownerKey;
+    }
+
+    const span = startMemorySaveSpan(event.trace, ERole.Assistant, event.payload.chars);
     let failure: TOption<string>;
     try {
-      await ctx.complete((tx) =>
-        this.conversations.saveDeliveredMessage(
-          tx,
-          chatId,
-          event.payload.channel,
-          transcript.text,
-          transcript.notice,
-          event.payload.sentAt,
-        ),
-      );
+      await ctx.complete(async (tx, emit) => {
+        if (transcript !== undefined) {
+          await this.conversations.saveDeliveredMessage(
+            tx,
+            chatId,
+            event.payload.channel,
+            transcript.text,
+            transcript.notice,
+            event.payload.sentAt,
+          );
+        }
+
+        if (display !== undefined) {
+          await this.conversations.saveDisplayMessage(
+            tx,
+            chatId,
+            event.payload.channel,
+            display,
+            event.payload.sentAt,
+          );
+        }
+
+        await this.changed(tx, emit, chatId, ownerKey, false, undefined);
+      });
     } catch (error) {
       failure = String(error);
       throw error;
@@ -262,7 +308,7 @@ export class MessageHandler {
     event: TEvent<EEventType.TurnRequested>,
     ctx: TEventContext,
   ): Promise<void> {
-    const { content, attachments, receivedAt, ...requested } = event.payload;
+    const { content, attachments, receivedAt, clientMessageId, ...requested } = event.payload;
     let origin: TMessageOrigin = requested;
     const trace = event.trace;
     const handleMessageStart = performance.now();
@@ -350,8 +396,10 @@ export class MessageHandler {
             ERole.User,
             storedText,
             new Date(receivedAt),
+            clientMessageId,
           );
           emit(EEventType.TurnStarted, { ...origin, userMessageId: row.id }, undefined, undefined);
+          await this.changed(tx, emit, conversationKey, ownerKey, false, "started");
           return row;
         });
       } catch (error) {
@@ -403,7 +451,12 @@ export class MessageHandler {
         }
 
         await ctx.complete(async (_tx, emit) => {
-          emit(EEventType.ReplyReady, { ...origin, text: fallback }, undefined, undefined);
+          emit(
+            EEventType.ReplyReady,
+            { ...origin, text: fallback, display: { text: fallback } },
+            undefined,
+            undefined,
+          );
           emit(
             EEventType.TurnFailed,
             { ...origin, reason: "no_final_response" },
@@ -438,6 +491,7 @@ export class MessageHandler {
             undefined,
             undefined,
           );
+          await this.changed(tx, emit, conversationKey, ownerKey, false, "completed");
           return state;
         });
       } catch (error) {
@@ -454,7 +508,12 @@ export class MessageHandler {
     } catch (error) {
       this.logger.error(`handleTurn: failed: ${String(error)}`);
       await ctx.complete(async (_tx, emit) => {
-        emit(EEventType.ReplyReady, { ...origin, text: FAILED_REPLY }, "failed", undefined);
+        emit(
+          EEventType.ReplyReady,
+          { ...origin, text: FAILED_REPLY, display: { text: FAILED_REPLY } },
+          "failed",
+          undefined,
+        );
         emit(EEventType.TurnFailed, { ...origin, reason: "error" }, undefined, undefined);
       });
       span.fail("failed", 0, String(error));
@@ -468,6 +527,30 @@ export class MessageHandler {
     // acked; the chat lane is still held, so the next turn waits for compaction.
     // compact() reports its own failures
     await this.compact(origin, persisted, settings, trace, ctx);
+  }
+
+  // the revision and the fact commit with the transcript change they report; rewrite: the change
+  // is not an append (a delete, or rows moved in by a merge)
+  private async changed(
+    tx: TDatabaseHandle,
+    emit: TDerivedEmit,
+    conversationKey: string,
+    ownerKey: string,
+    rewrite: boolean,
+    step: TOption<string>,
+  ): Promise<void> {
+    const { revision, rewriteRevision } = await this.conversations.raiseRevision(
+      tx,
+      conversationKey,
+      ownerKey,
+      rewrite,
+    );
+    emit(
+      EEventType.ConversationChanged,
+      { conversationKey, revision, rewriteRevision },
+      step,
+      undefined,
+    );
   }
 
   private async compact(

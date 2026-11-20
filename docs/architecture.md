@@ -41,8 +41,12 @@ Requesters are conversation tools, slash commands, scheduling and the internal A
    checkpoint, runs Main with the structured replay, and commits the turn with `reply.ready` and
    `turn.completed`. Tool writes go out as commands to their owning service. Compaction runs after
    the reply is committed, and the chat's next turn starts only after it finishes.
-5. Outbound sends the reply and records `message.sent`. Memory distills facts from
-   `turn.completed`.
+5. Outbound sends the reply and records `message.sent`. From it Conversation stores a command with
+   its reply, a notice or a failure reply as display-only rows, shown in history and never
+   replayed to the model; a confidential reply, such as a login link, is not stored. Every
+   transcript change emits `conversation.changed` with the conversation's new revision and the
+   revision of its latest change that was not an append (`rewriteRevision`), below which a client
+   reloads instead of fetching by cursor. Memory distills facts from `turn.completed`.
 6. After a restart, unfinished deliveries replay. A turn that was interrupted mid-model gets one
    notice instead of a second model run.
 

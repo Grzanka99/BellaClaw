@@ -44,7 +44,7 @@ export const aiAuthCommand: TCommand = {
             timeoutMs: undefined,
           },
         );
-        return started.payload.instructions;
+        return { confidential: started.payload.instructions };
       }
 
       if (action === "logout") {

@@ -217,6 +217,8 @@ export class AuthorizationService {
         return result;
       }
 
+      // the activation answers are confidential, not stored: the message they answer holds the
+      // activation token
       if (result.decision === EAuthorizationDecision.Activated) {
         emit(EEventType.ReplyReady, { ...origin, text: "Activated." }, undefined, conversationKey);
         return result;

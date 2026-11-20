@@ -29,6 +29,24 @@ const STranscript = z.object({ text: z.string(), notice: z.string() }).strict();
 
 export type TDeliveryTranscript = z.infer<typeof STranscript>;
 
+// a message shown in history and never replayed to the model; request: the command it answers,
+// stored before it
+const SDisplay = z
+  .object({
+    text: z.string(),
+    request: z
+      .object({
+        text: z.string(),
+        receivedAt: z.number().int(),
+        clientMessageId: z.string().optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+
+export type TDisplay = z.infer<typeof SDisplay>;
+
 // a message's conversation, its owner, and the channel and address it came from and its reply
 // goes to. Only channel drivers and Outbound read the address
 const SMessageOrigin = {
@@ -46,6 +64,8 @@ const SInboundMessage = z
     content: z.string(),
     attachments: z.array(SAttachmentRef),
     receivedAt: z.number().int(),
+    // the id the sending client gave the message, stored on its transcript row
+    clientMessageId: z.string().optional(),
   })
   .strict();
 
@@ -63,6 +83,8 @@ const STurnRequested = z
     content: z.string(),
     attachments: z.array(SAttachmentRef),
     receivedAt: z.number().int(),
+    // the id the sending client gave the message, stored on its transcript row
+    clientMessageId: z.string().optional(),
   })
   .strict();
 
@@ -74,8 +96,15 @@ const STurnFailed = z
   .object({ ...SMessageOrigin, reason: z.enum(["interrupted", "no_final_response", "error"]) })
   .strict();
 
+// transcript and display: what Conversation stores once the reply is sent. A reply with neither
+// is stored already, as a turn's, or is confidential: it carries a secret or a one-time link
 const SReplyReady = z
-  .object({ ...SMessageOrigin, text: z.string(), transcript: STranscript.optional() })
+  .object({
+    ...SMessageOrigin,
+    text: z.string(),
+    transcript: STranscript.optional(),
+    display: SDisplay.optional(),
+  })
   .strict();
 
 const SNoticeReady = z.object({ chatId: z.string(), text: z.string() }).strict();
@@ -93,6 +122,7 @@ const SMessageSent = z
     chars: z.number().int(),
     sentAt: z.number().int(),
     transcript: STranscript.optional(),
+    display: SDisplay.optional(),
   })
   .strict();
 
@@ -451,6 +481,18 @@ const SConversationSummariesFused = z
 
 export type TFusedSummary = z.infer<typeof SConversationSummariesFused>;
 
+// a conversation's transcript changed: rows appended, deleted or merged in; revision: the
+// conversation's new revision, committed with the change; rewriteRevision: the revision of its
+// latest change that was not an append, so a client synced at or above it fetches by cursor and
+// one below it reloads
+const SConversationChanged = z
+  .object({
+    conversationKey: z.string(),
+    revision: z.number().int(),
+    rewriteRevision: z.number().int(),
+  })
+  .strict();
+
 // errorCode: the handler's stable code for an expected failure, such as job-not-found
 const SCommandRejected = z
   .object({
@@ -553,6 +595,7 @@ export type TEventPayloads = {
   [EEventType.IdentityLinkMoved]: z.infer<typeof SIdentityLinkProgress>;
   [EEventType.IdentityLinked]: z.infer<typeof SIdentityLinked>;
   [EEventType.ConversationSummariesFused]: TFusedSummary;
+  [EEventType.ConversationChanged]: z.infer<typeof SConversationChanged>;
   [EEventType.CommandRejected]: z.infer<typeof SCommandRejected>;
   [EEventType.EventDeadLettered]: z.infer<typeof SEventDeadLettered>;
   [EEventType.AppStarted]: z.infer<typeof SAppStarted>;
@@ -637,6 +680,7 @@ export const EVENT_SCHEMAS: { [K in EEventType]: z.ZodType<TEventPayloads[K]> } 
   [EEventType.IdentityLinkMoved]: SIdentityLinkProgress,
   [EEventType.IdentityLinked]: SIdentityLinked,
   [EEventType.ConversationSummariesFused]: SConversationSummariesFused,
+  [EEventType.ConversationChanged]: SConversationChanged,
   [EEventType.CommandRejected]: SCommandRejected,
   [EEventType.EventDeadLettered]: SEventDeadLettered,
   [EEventType.AppStarted]: SAppStarted,
@@ -719,6 +763,7 @@ export const EVENT_KINDS: Record<EEventType, EEventKind> = {
   [EEventType.IdentityLinkMoved]: EEventKind.Event,
   [EEventType.IdentityLinked]: EEventKind.Event,
   [EEventType.ConversationSummariesFused]: EEventKind.Event,
+  [EEventType.ConversationChanged]: EEventKind.Event,
   [EEventType.CommandRejected]: EEventKind.Event,
   [EEventType.EventDeadLettered]: EEventKind.Event,
   [EEventType.AppStarted]: EEventKind.Event,

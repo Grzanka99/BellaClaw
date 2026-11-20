@@ -72,6 +72,7 @@ describe("Memory", () => {
           ERole.User,
           `Fact source ${index}`,
           new Date(),
+          undefined,
         );
       }
       await ConversationStore.instance.saveUserMessage(
@@ -81,6 +82,7 @@ describe("Memory", () => {
         ERole.User,
         "Another chat fact source",
         new Date(),
+        undefined,
       );
 
       const result = await memory.commitLiveFactWindow({
@@ -183,6 +185,7 @@ describe("Memory", () => {
         ERole.User,
         "The bicycle is named Comet again.",
         new Date(),
+        undefined,
       );
       await DatabaseConnector.instance.database.transaction((tx) =>
         memory.rememberFact(
@@ -211,6 +214,34 @@ describe("Memory", () => {
       ).toEqual(["The bicycle is named Comet again."]);
     });
 
+    test("rejects a typed command stored for display as a remembered fact's source", async () => {
+      const memory = Memory.instance;
+      await ConversationStore.instance.saveDisplayMessage(
+        DatabaseConnector.instance.database,
+        "chat-display-source",
+        EMessagePlatform.Signal,
+        {
+          text: "Usage",
+          request: { text: "!dashboard", receivedAt: 1, clientMessageId: undefined },
+        },
+        2,
+      );
+
+      await expect(
+        DatabaseConnector.instance.database.transaction((tx) =>
+          memory.rememberFact(
+            tx,
+            "chat-display-source",
+            "chat-display-source",
+            "The user asked for the dashboard.",
+            "!dashboard",
+            embedding(1),
+            [],
+          ),
+        ),
+      ).rejects.toThrow("A remembered fact requires its exact same-chat user transcript source");
+    });
+
     test("discovers chats and carries both transcript roles through ordered bounded windows", async () => {
       const memory = Memory.instance;
       for (let index = 1; index <= 8; index++) {
@@ -226,6 +257,7 @@ describe("Memory", () => {
           author,
           `Window message ${index}`,
           new Date(),
+          undefined,
         );
       }
       await ConversationStore.instance.saveUserMessage(
@@ -235,6 +267,7 @@ describe("Memory", () => {
         ERole.User,
         "Other chat message",
         new Date(),
+        undefined,
       );
 
       expect(await ConversationStore.instance.findChatIds()).toEqual(["chat-other", "chat-window"]);
@@ -276,6 +309,7 @@ describe("Memory", () => {
         ERole.User,
         "The bicycle used to be called Spark.",
         new Date(),
+        undefined,
       );
       const initial = await memory.commitLiveFactWindow({
         chatId: "chat-atomic",
@@ -307,6 +341,7 @@ describe("Memory", () => {
         ERole.User,
         "The bicycle is now called Comet.",
         new Date(),
+        undefined,
       );
       const replacement = await memory.commitLiveFactWindow({
         chatId: "chat-atomic",
@@ -334,6 +369,7 @@ describe("Memory", () => {
         ERole.User,
         "This transaction must roll back.",
         new Date(),
+        undefined,
       );
       await expect(
         memory.commitLiveFactWindow({
@@ -366,6 +402,7 @@ describe("Memory", () => {
           ERole.User,
           `Stale source ${index}`,
           new Date(),
+          undefined,
         );
       }
       await memory.commitLiveFactWindow({
@@ -419,6 +456,7 @@ describe("Memory", () => {
         ERole.Assistant,
         "Assistant context only",
         new Date(),
+        undefined,
       );
 
       await expect(
@@ -507,6 +545,7 @@ describe("Memory", () => {
         ERole.User,
         "My bike is red.",
         new Date(),
+        undefined,
       );
 
       const remembered = await remember("chat-cmd", "The user's bike is red.", "My bike is red.");
@@ -553,6 +592,7 @@ describe("Memory", () => {
         ERole.User,
         "My bike is red.",
         new Date(),
+        undefined,
       );
       const remembered = await remember("chat-cmd", "The user's bike is red.", "My bike is red.");
       const factId = remembered.payload.factId;

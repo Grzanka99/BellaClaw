@@ -88,7 +88,7 @@ export class Commands {
     event: TEvent<EEventType.MessageAuthorized>,
     ctx: TEventContext,
   ): Promise<void> {
-    const { content, attachments, receivedAt, ...origin } = event.payload;
+    const { content, attachments, receivedAt, clientMessageId, ...origin } = event.payload;
     // NOTE: commands act for the owner: its calendars, credentials and logins; activation is
     // per address
     const result = await runCommand(
@@ -103,7 +103,21 @@ export class Commands {
 
     await ctx.complete(async (_tx, emit) => {
       if (typeof result === "string") {
-        emit(EEventType.ReplyReady, { ...origin, text: result }, undefined, undefined);
+        emit(
+          EEventType.ReplyReady,
+          {
+            ...origin,
+            text: result,
+            display: { text: result, request: { text: content, receivedAt, clientMessageId } },
+          },
+          undefined,
+          undefined,
+        );
+        return;
+      }
+
+      if (result !== undefined && "confidential" in result) {
+        emit(EEventType.ReplyReady, { ...origin, text: result.confidential }, undefined, undefined);
         return;
       }
 
@@ -116,7 +130,7 @@ export class Commands {
 
       emit(
         EEventType.TurnRequested,
-        { ...origin, content: prompt, attachments: images, receivedAt },
+        { ...origin, content: prompt, attachments: images, receivedAt, clientMessageId },
         undefined,
         undefined,
       );

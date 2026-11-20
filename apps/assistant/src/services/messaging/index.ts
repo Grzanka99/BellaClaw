@@ -4,7 +4,7 @@ import type { TOption } from "@bellaclaw/shared";
 import { createLogger, type TLogger } from "@bellaclaw/shared";
 import { startSpan } from "../app-logger/span";
 import { ESubscriptionMode, EventBus, type TEventContext } from "../events";
-import type { TDeliveryTranscript, TEvent } from "../events/catalog";
+import type { TDeliveryTranscript, TDisplay, TEvent } from "../events/catalog";
 import { IdentityService, type TChatAddress } from "../identity";
 import type { EMessagePlatform, TAttachmentRef, TMessageTransport } from "./types";
 
@@ -59,6 +59,7 @@ export class MessagingAdapter {
           { channel: event.payload.channel, address: event.payload.replyAddress },
           event.payload.text,
           event.payload.transcript,
+          event.payload.display,
           event,
           ctx,
         ),
@@ -74,17 +75,27 @@ export class MessagingAdapter {
           undefined,
           event.payload.text,
           event.payload.transcript,
+          undefined,
           event,
           ctx,
         ),
     });
+    // a notice is shown in history and never replayed to the model
     bus.subscribe({
       consumer: "outbound",
       type: EEventType.NoticeReady,
       mode: ESubscriptionMode.Durable,
       backoffMs: this.outboundBackoffMs,
       handler: (event, ctx) =>
-        this.send(event.payload.chatId, undefined, event.payload.text, undefined, event, ctx),
+        this.send(
+          event.payload.chatId,
+          undefined,
+          event.payload.text,
+          undefined,
+          { text: event.payload.text },
+          event,
+          ctx,
+        ),
     });
   }
 
@@ -95,6 +106,7 @@ export class MessagingAdapter {
     origin: TOption<TChatAddress>,
     text: string,
     transcript: TOption<TDeliveryTranscript>,
+    display: TOption<TDisplay>,
     event: TEvent,
     ctx: TEventContext,
   ): Promise<void> {
@@ -123,6 +135,7 @@ export class MessagingAdapter {
           chars: text.length,
           sentAt: Date.now(),
           transcript,
+          display,
         },
         undefined,
         // the conversation's lane, so the transcript append orders with its turns

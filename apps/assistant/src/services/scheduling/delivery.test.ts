@@ -158,7 +158,7 @@ function setupAutomationDelivery() {
   };
   const save = mock(async () => undefined);
   Object.assign(MessageHandler.instance, {
-    conversations: { saveDeliveredMessage: save },
+    conversations: { saveDeliveredMessage: save, raiseRevision: mock(async () => 1) },
   });
   const sendText = mock(async () => undefined);
   MessagingAdapter.instance.registerTransport({
@@ -355,7 +355,7 @@ describe("ScheduledDelivery", () => {
   test("conversation appends on message.sent only", async () => {
     const save = mock(async () => undefined);
     Object.assign(MessageHandler.instance, {
-      conversations: { saveDeliveredMessage: save },
+      conversations: { saveDeliveredMessage: save, raiseRevision: mock(async () => 1) },
     });
     const sendText = mock(async () => undefined);
     const adapter = MessagingAdapter.instance;
@@ -395,7 +395,7 @@ describe("ScheduledDelivery", () => {
     };
     const save = mock(async () => undefined);
     Object.assign(MessageHandler.instance, {
-      conversations: { saveDeliveredMessage: save },
+      conversations: { saveDeliveredMessage: save, raiseRevision: mock(async () => 1) },
     });
     const sendText = mock(async () => undefined);
     const release = Promise.withResolvers<void>();

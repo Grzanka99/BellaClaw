@@ -134,6 +134,13 @@
       "when": 1795123479169,
       "tag": "0018_identity_link_cutover",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1795141786380,
+      "tag": "0019_transcript_display",
+      "breakpoints": true
     }
   ]
 }

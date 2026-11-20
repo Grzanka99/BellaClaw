@@ -35,7 +35,7 @@ import type { TConversation } from "../conversation/types";
 import { CronScheduler } from "../cron";
 import { DatabaseConnector } from "../database";
 import { resetEventTables, resetIdentityLinksTable } from "../database/test-utils";
-import { CommandRejectedError, EventBus, type TEventContext } from "../events";
+import { CommandRejectedError, ESubscriptionMode, EventBus, type TEventContext } from "../events";
 import type { TEvent } from "../events/catalog";
 import { testEventRequester, testMessageOrigin } from "../events/test-utils";
 import { setupMcpAuth } from "../mcp/auth";
@@ -325,6 +325,12 @@ afterEach(async () => {
 describe("linking an address to an account", () => {
   test("into an empty account: every owner's rows move to the account, the link becomes active, and running the moves again changes nothing", async () => {
     await seedChat("signal:+900", "Europe/Warsaw");
+    await database().insert(conversationsTable).values({
+      conversationKey: "signal:+900",
+      ownerKey: "signal:+900",
+      revision: 4,
+      rewriteRevision: 0,
+    });
     const fusions = stubFusion(0);
     await setupOwners(async () => true);
     await EventBus.instance.start();
@@ -355,9 +361,24 @@ describe("linking an address to an account", () => {
     expect(
       (await SettingsService.instance.getAll("account:acct-9"))[EConfigKey.AiInstructionsTimezone],
     ).toBe("Europe/Warsaw");
+    // the merge is one change of the Bella conversation, which moves rows in, so it is also its
+    // rewriteRevision; the address leaves the registry
     expect(await database().select().from(conversationsTable)).toEqual([
-      { conversationKey: "bella:acct-9", ownerKey: "account:acct-9" },
+      {
+        conversationKey: "bella:acct-9",
+        ownerKey: "account:acct-9",
+        revision: 1,
+        rewriteRevision: 1,
+      },
     ]);
+    expect(
+      (
+        await database()
+          .select()
+          .from(eventsTable)
+          .where(eq(eventsTable.type, EEventType.ConversationChanged))
+      ).map((event) => event.payload),
+    ).toEqual([{ conversationKey: "bella:acct-9", revision: 1, rewriteRevision: 1 }]);
     expect((await IdentityService.instance.resolve("signal:+900"))?.conversationKey).toBe(
       "bella:acct-9",
     );
@@ -397,6 +418,114 @@ describe("linking an address to an account", () => {
         .from(eventsTable)
         .where(eq(eventsTable.type, EEventType.IdentityLinked)),
     ).toHaveLength(1);
+  });
+
+  test("an address with no transcript rows: the link completes, and the Bella conversation is listed with no change", async () => {
+    await setupOwners(async () => true);
+    await EventBus.instance.start();
+
+    await requestLink("acct-13", "+980");
+    await EventBus.instance.idle();
+
+    expect(await database().select().from(identityLinksTable)).toMatchObject([
+      { address: "+980", accountId: "acct-13", state: EIdentityLinkState.Active },
+    ]);
+    expect(await database().select().from(conversationsTable)).toEqual([
+      {
+        conversationKey: "bella:acct-13",
+        ownerKey: "account:acct-13",
+        revision: 0,
+        rewriteRevision: 0,
+      },
+    ]);
+    expect(
+      await database()
+        .select()
+        .from(eventsTable)
+        .where(eq(eventsTable.type, EEventType.ConversationChanged)),
+    ).toEqual([]);
+  });
+
+  test("a notice in the Bella conversation before the first merge: the account owns it, and the merge raises its revision from there", async () => {
+    await transcript("signal:+990", 1);
+    const drained = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    await setupOwners(async () => {
+      drained.resolve();
+      await release.promise;
+      return true;
+    });
+    const changed = Promise.withResolvers<void>();
+    EventBus.instance.subscribe({
+      consumer: "test",
+      type: EEventType.ConversationChanged,
+      mode: ESubscriptionMode.Live,
+      backoffMs: [],
+      handler: async () => {
+        changed.resolve();
+      },
+    });
+    await EventBus.instance.start();
+
+    await requestLink("acct-14", "+990");
+    await drained.promise;
+    await EventBus.instance.publish({
+      type: EEventType.MessageSent,
+      source: "test",
+      key: "bella:acct-14",
+      trace: { turnId: "test:notice", chatId: "bella:acct-14", platform: undefined },
+      payload: {
+        chatId: "bella:acct-14",
+        channel: EMessagePlatform.Signal,
+        sourceType: EEventType.NoticeReady,
+        chars: 6,
+        sentAt: Date.now(),
+        display: { text: "Notice" },
+      },
+      causationId: undefined,
+      dedupeKey: undefined,
+    });
+    // the memory move still waits, so the link has not merged anything yet
+    await changed.promise;
+
+    expect(await database().select().from(conversationsTable)).toEqual([
+      {
+        conversationKey: "bella:acct-14",
+        ownerKey: "account:acct-14",
+        revision: 1,
+        rewriteRevision: 0,
+      },
+    ]);
+
+    release.resolve();
+    await EventBus.instance.idle();
+
+    expect(await database().select().from(conversationsTable)).toEqual([
+      {
+        conversationKey: "bella:acct-14",
+        ownerKey: "account:acct-14",
+        revision: 2,
+        rewriteRevision: 2,
+      },
+    ]);
+    expect(
+      (
+        await database()
+          .select()
+          .from(eventsTable)
+          .where(eq(eventsTable.type, EEventType.ConversationChanged))
+      ).map((event) => event.payload),
+    ).toEqual([
+      { conversationKey: "bella:acct-14", revision: 1, rewriteRevision: 0 },
+      { conversationKey: "bella:acct-14", revision: 2, rewriteRevision: 2 },
+    ]);
+    expect(
+      await database()
+        .select({ kind: memoriesTable.kind })
+        .from(memoriesTable)
+        .where(eq(memoriesTable.chatId, "bella:acct-14"))
+        .orderBy(asc(memoriesTable.id)),
+    ).toEqual([{ kind: "message" }, { kind: "display" }]);
   });
 
   test("a second identity with its own data: one transcript in id order, the facts of both, clashing names renamed, the account's settings, calendars and credentials kept", async () => {
@@ -492,7 +621,12 @@ describe("linking an address to an account", () => {
       "account%3Aacct-10:notes:first",
     ]);
     expect(await database().select().from(conversationsTable)).toEqual([
-      { conversationKey: "bella:acct-10", ownerKey: "account:acct-10" },
+      {
+        conversationKey: "bella:acct-10",
+        ownerKey: "account:acct-10",
+        revision: expect.any(Number),
+        rewriteRevision: expect.any(Number),
+      },
     ]);
   });
 

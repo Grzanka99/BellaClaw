@@ -138,6 +138,10 @@ test("logs in with a device code through ai.auth.login.requested and confirms in
   expect(await send("discord:1", "!ai-auth login openai-codex")).toEqual([
     "Open https://example.test/device and enter code ABCD-EFGH to connect openai-codex.",
   ]);
+  // the device code is confidential: not carried for the history
+  expect(JSON.stringify((await rowsOf(EEventType.ReplyReady))[0]?.payload)).not.toContain(
+    "display",
+  );
   expect((await rowsOf(EEventType.AiAuthLoginRequested))[0]?.key).toBe("global");
 
   approve();

@@ -11,11 +11,11 @@ import {
   type Message,
   type UserMessage,
 } from "@earendil-works/pi-ai";
-import { and, asc, desc, eq, gt, inArray, isNotNull, lt, lte, or } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNotNull, lt, lte, or, sql } from "drizzle-orm";
 import { emptyUsage } from "../ai/llm";
 import { ERole } from "../ai/types";
 import { DatabaseConnector, type TDatabaseHandle } from "../database";
-import type { TFusedSummary } from "../events/catalog";
+import type { TDisplay, TFusedSummary } from "../events/catalog";
 import type { EMessagePlatform, TAttachmentRef } from "../messaging/types";
 import { SAttachmentBlock, SConversationMessage, type TConversation } from "./types";
 
@@ -40,11 +40,45 @@ export class ConversationStore {
     author: ERole,
     message: string,
     createdAt: Date,
+    clientMessageId: TOption<string>,
   ): Promise<TSelectMemory> {
     return db
       .insert(memoriesTable)
-      .values({ chatId, channel, author, message, createdAt })
+      .values({ chatId, channel, author, message, createdAt, clientMessageId })
       .returning()
+      .get();
+  }
+
+  // Raises the conversation's revision, in the caller's transaction with the change, and lists a
+  // conversation missing from the registry under its owner. A rewrite (any change but an append)
+  // also moves rewriteRevision to the new revision, so a client synced below it reloads instead of
+  // fetching by cursor
+  public async raiseRevision(
+    db: TDatabaseHandle,
+    conversationKey: string,
+    ownerKey: string,
+    rewrite: boolean,
+  ): Promise<{ revision: number; rewriteRevision: number }> {
+    const raised = sql`${conversationsTable.revision} + 1`;
+    let rewriteRevision = sql`${conversationsTable.rewriteRevision}`;
+    let firstRewriteRevision = 0;
+
+    if (rewrite) {
+      rewriteRevision = raised;
+      firstRewriteRevision = 1;
+    }
+
+    return db
+      .insert(conversationsTable)
+      .values({ conversationKey, ownerKey, revision: 1, rewriteRevision: firstRewriteRevision })
+      .onConflictDoUpdate({
+        target: conversationsTable.conversationKey,
+        set: { revision: raised, rewriteRevision },
+      })
+      .returning({
+        revision: conversationsTable.revision,
+        rewriteRevision: conversationsTable.rewriteRevision,
+      })
       .get();
   }
 
@@ -139,17 +173,23 @@ export class ConversationStore {
   }
 
   // Moves a chat's transcript into an account's Bella conversation and lists that conversation
-  // in the registry. Rows keep their ids, so they fall into time order with the conversation's.
+  // in the registry instead of the chat. Rows keep their ids, so they fall into time order with
+  // the conversation's.
   // fused: the summary that replaces both summaries; without it the chat's summary, if any,
   // becomes the conversation's
+  // Returns whether any transcript row moved
   public async moveToBella(
     db: TDatabaseHandle,
     chatId: string,
     conversationKey: string,
     ownerKey: string,
     fused: TOption<TFusedSummary>,
-  ): Promise<void> {
-    await db.insert(conversationsTable).values({ conversationKey, ownerKey }).onConflictDoNothing();
+  ): Promise<boolean> {
+    await db
+      .insert(conversationsTable)
+      .values({ conversationKey, ownerKey })
+      .onConflictDoUpdate({ target: conversationsTable.conversationKey, set: { ownerKey } });
+    await db.delete(conversationsTable).where(eq(conversationsTable.conversationKey, chatId));
     if (fused !== undefined) {
       const replaced = await db
         .select({ compactionBoundaries: conversationSummariesTable.compactionBoundaries })
@@ -182,10 +222,12 @@ export class ConversationStore {
         .set({ chatId: conversationKey })
         .where(eq(conversationSummariesTable.chatId, chatId));
     }
-    await db
+    const moved = await db
       .update(memoriesTable)
       .set({ chatId: conversationKey })
-      .where(eq(memoriesTable.chatId, chatId));
+      .where(eq(memoriesTable.chatId, chatId))
+      .returning({ id: memoriesTable.id });
+    return moved.length > 0;
   }
 
   public load(chatId: string): Promise<TOption<TConversation>> {
@@ -324,9 +366,38 @@ export class ConversationStore {
     });
   }
 
+  // display: stored with kind display and no model message, so it is never replayed
+  public async saveDisplayMessage(
+    db: TDatabaseHandle,
+    chatId: string,
+    channel: EMessagePlatform,
+    display: TDisplay,
+    sentAt: number,
+  ): Promise<void> {
+    if (display.request !== undefined) {
+      await db.insert(memoriesTable).values({
+        chatId,
+        channel,
+        kind: "display",
+        author: ERole.User,
+        message: display.request.text,
+        createdAt: new Date(display.request.receivedAt),
+        clientMessageId: display.request.clientMessageId,
+      });
+    }
+    await db.insert(memoriesTable).values({
+      chatId,
+      channel,
+      kind: "display",
+      author: ERole.Assistant,
+      message: display.text,
+      createdAt: new Date(sentAt),
+    });
+  }
+
   // Deletes one transcript message. An assistant reply takes the tool rows of its turn with it:
-  // the chat's rows after the transcript message before it, so no tool call or result stays in
-  // the replay without its reply.
+  // the chat's tool rows after the transcript message before it, so no tool call or result stays
+  // in the replay without its reply. Display rows stay.
   // Returns the deleted row ids, or undefined when messageId is no user or assistant transcript
   // message of this chat.
   public async deleteMessage(
@@ -349,7 +420,7 @@ export class ConversationStore {
     if (target === undefined) {
       return undefined;
     }
-    // the chat's rows in (after, messageId] go
+    // the message goes, with the chat's tool rows in (after, messageId)
     let after = messageId - 1;
     if (target.author === ERole.Assistant) {
       const previous = await db
@@ -372,8 +443,14 @@ export class ConversationStore {
       .where(
         and(
           eq(memoriesTable.chatId, chatId),
-          gt(memoriesTable.id, after),
-          lte(memoriesTable.id, messageId),
+          or(
+            eq(memoriesTable.id, messageId),
+            and(
+              eq(memoriesTable.kind, "tool"),
+              gt(memoriesTable.id, after),
+              lt(memoriesTable.id, messageId),
+            ),
+          ),
         ),
       )
       .returning({ id: memoriesTable.id });

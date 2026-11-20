@@ -28,6 +28,7 @@ test("replays native messages after restart; compaction preserves fact source hi
     ERole.User,
     "Check calendar",
     new Date(),
+    undefined,
   );
   const call = fauxAssistantMessage(fauxToolCall("calendar", {}, { id: "calendar-1" }));
   call.content.push({
@@ -82,6 +83,7 @@ test("appends later turns, skips rows without replay and reloads the retained ta
     ERole.User,
     "failed turn",
     new Date(),
+    undefined,
   );
   expect(await store.load(chatId)).toBeUndefined();
   let state: TConversation | undefined;
@@ -93,6 +95,7 @@ test("appends later turns, skips rows without replay and reloads the retained ta
       ERole.User,
       text,
       new Date(),
+      undefined,
     );
     let history: Message[] = [];
     if (state !== undefined) {
@@ -185,6 +188,7 @@ test("after three kept compactions, saveSummary returns the images of the droppe
       ERole.User,
       "[Image]",
       new Date(),
+      undefined,
     );
     const ref = {
       id: name,

@@ -7,6 +7,7 @@ import {
   memoriesTable,
   type TSelectMemory,
 } from "@bellaclaw/database";
+import type { TOption } from "@bellaclaw/shared";
 import type { Message } from "@earendil-works/pi-ai";
 import {
   fauxAssistantMessage,
@@ -125,6 +126,7 @@ function mockConversationStore() {
         author: ERole,
         message: string,
         createdAt: Date,
+        clientMessageId: TOption<string>,
       ): Promise<TSelectMemory> => ({
         id: 100,
         chatId,
@@ -134,8 +136,10 @@ function mockConversationStore() {
         modelMessage: null,
         kind: "message",
         createdAt,
+        clientMessageId: clientMessageId ?? null,
       }),
     ),
+    raiseRevision: mock(async () => 1),
     saveTurn: mock(
       async (
         _db: TDatabaseHandle,
@@ -385,6 +389,7 @@ describe("MessageHandler", () => {
           modelMessage: null,
           kind: "message",
           createdAt: savedAt,
+          clientMessageId: null,
         };
         saved.push(row);
         return row;
@@ -601,7 +606,11 @@ describe("MessageHandler", () => {
     expect(internals.ai.runMain).not.toHaveBeenCalled();
     expect(internals.conversations.saveUserMessage).toHaveBeenCalledTimes(1);
     expect(await payloadsOf(EEventType.ReplyReady)).toEqual([
-      { ...testMessageOrigin(chatId, EMessagePlatform.Discord), text: "Something went wrong." },
+      {
+        ...testMessageOrigin(chatId, EMessagePlatform.Discord),
+        text: "Something went wrong.",
+        display: { text: "Something went wrong." },
+      },
     ]);
     expect(await payloadsOf(EEventType.TurnFailed)).toEqual([
       { ...testMessageOrigin(chatId, EMessagePlatform.Discord), reason: "error" },
@@ -621,7 +630,11 @@ describe("MessageHandler", () => {
     await turn(chatId, "hello");
 
     expect(await payloadsOf(EEventType.ReplyReady)).toEqual([
-      { ...testMessageOrigin(chatId, EMessagePlatform.Discord), text: "Something went wrong." },
+      {
+        ...testMessageOrigin(chatId, EMessagePlatform.Discord),
+        text: "Something went wrong.",
+        display: { text: "Something went wrong." },
+      },
     ]);
     expect(await payloadsOf(EEventType.TurnFailed)).toEqual([
       { ...testMessageOrigin(chatId, EMessagePlatform.Discord), reason: "error" },
@@ -797,7 +810,11 @@ describe("MessageHandler", () => {
     await turn(chatId, "hello");
 
     expect(await payloadsOf(EEventType.ReplyReady)).toEqual([
-      { ...testMessageOrigin(chatId, EMessagePlatform.Discord), text: "Something went wrong." },
+      {
+        ...testMessageOrigin(chatId, EMessagePlatform.Discord),
+        text: "Something went wrong.",
+        display: { text: "Something went wrong." },
+      },
     ]);
     expect(await payloadsOf(EEventType.TurnFailed)).toEqual([
       { ...testMessageOrigin(chatId, EMessagePlatform.Discord), reason: "no_final_response" },
@@ -828,6 +845,7 @@ describe("MessageHandler", () => {
       {
         ...testMessageOrigin(chatId, EMessagePlatform.Discord),
         text: "opencode-go is not connected. Run !ai-auth login opencode-go.",
+        display: { text: "opencode-go is not connected. Run !ai-auth login opencode-go." },
       },
     ]);
   });

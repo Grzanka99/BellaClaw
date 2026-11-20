@@ -12,6 +12,7 @@ const NO_DEAD_LETTER_NOTICE: ReadonlySet<string> = new Set([
   EEventType.ReplyReady,
   EEventType.DeliveryReady,
   EEventType.NoticeReady,
+  EEventType.MessageSent,
   EEventType.EventDeadLettered,
 ]);
 const SEventType = z.enum(EEventType);

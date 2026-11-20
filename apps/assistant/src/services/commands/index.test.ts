@@ -110,14 +110,23 @@ describe("commands consumer", () => {
       {
         ...testMessageOrigin("discord:100", EMessagePlatform.Discord),
         text: "Self-update is unavailable: the bot is not running under its supervisor.",
+        display: {
+          text: "Self-update is unavailable: the bot is not running under its supervisor.",
+          request: { text: "!update", receivedAt: 1 },
+        },
       },
       {
         ...testMessageOrigin("discord:100", EMessagePlatform.Discord),
         text: "Checking for an update.",
+        display: { text: "Checking for an update.", request: { text: "!update", receivedAt: 2 } },
       },
       {
         ...testMessageOrigin("discord:999", EMessagePlatform.Discord),
         text: "Updating requires BELLACLAW_ACTIVATION_TOKEN and an activated chat.",
+        display: {
+          text: "Updating requires BELLACLAW_ACTIVATION_TOKEN and an activated chat.",
+          request: { text: "!update", receivedAt: 3 },
+        },
       },
     ]);
   });
@@ -150,7 +159,11 @@ describe("commands consumer", () => {
       const reply = await withEventContext((ctx) =>
         runCommand("account:acct-1", "signal:+100", "!dashboard", ctx),
       );
-      const token = String(reply).match(/token=([^\s]+)/)?.[1] ?? "";
+      let text = "";
+      if (typeof reply === "object" && "confidential" in reply) {
+        text = reply.confidential;
+      }
+      const token = text.match(/token=([^\s]+)/)?.[1] ?? "";
 
       expect(verifyDashboardLinkToken("dashboard-secret", token, Date.now())?.chatId).toBe(
         "signal:+100",
@@ -214,12 +227,22 @@ describe("commands consumer", () => {
       {
         ...testMessageOrigin("discord:channel-1", EMessagePlatform.Discord),
         text: "MCP prompt request failed: Error: Unknown MCP profile: missing",
+        display: {
+          text: "MCP prompt request failed: Error: Unknown MCP profile: missing",
+          request: { text: "!mcp-prompt missing summarize", receivedAt: 1 },
+        },
       },
       {
         ...testMessageOrigin("discord:channel-1", EMessagePlatform.Discord),
         text: expect.stringContaining(
           "MCP prompt listing failed: Error: Invalid MCP configuration:",
         ),
+        display: {
+          text: expect.stringContaining(
+            "MCP prompt listing failed: Error: Invalid MCP configuration:",
+          ),
+          request: { text: "!mcp-prompts", receivedAt: 2 },
+        },
       },
     ]);
     expect(await payloadsOf(EEventType.TurnRequested)).toEqual([]);

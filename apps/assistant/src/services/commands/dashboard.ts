@@ -15,6 +15,8 @@ export const dashboardCommand: TCommand = {
 
     const token = createDashboardLinkToken(secret, addressKey, Date.now());
 
-    return `${publicUrl.replace(/\/$/, "")}/link?token=${token}\nThis link works once and expires in 10 minutes.`;
+    return {
+      confidential: `${publicUrl.replace(/\/$/, "")}/link?token=${token}\nThis link works once and expires in 10 minutes.`,
+    };
   },
 };

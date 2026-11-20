@@ -62,6 +62,7 @@ async function saveTurn(
     ERole.User,
     text,
     new Date(),
+    undefined,
   );
   const history = previous?.entries.map((entry) => entry.message) ?? [];
 
@@ -145,6 +146,37 @@ test("deleting an assistant reply removes it with its tool rows and forgets the 
     kept,
   );
   expect(await liveFacts(chatId)).toEqual(["from the user message"]);
+});
+
+test("deleting a delivered message removes it with its notice row and keeps the display rows before it", async () => {
+  const chatId = "delete-delivered";
+  const db = DatabaseConnector.instance.database;
+  const store = ConversationStore.instance;
+  await saveTurn(chatId, "first", [], undefined);
+  await store.saveDisplayMessage(
+    db,
+    chatId,
+    EMessagePlatform.Signal,
+    { text: "Updated.", request: { text: "!update", receivedAt: 1 } },
+    2,
+  );
+  await store.saveDeliveredMessage(
+    db,
+    chatId,
+    EMessagePlatform.Signal,
+    "Tea time",
+    "a reminder",
+    3,
+  );
+  const ids = await rowIds(chatId);
+  // [first, reply, command, command reply, reminder notice, reminder]
+  const [, , , , noticeId = 0, reminderId = 0] = ids;
+
+  const deleted = await requestDelete(chatId, reminderId);
+  await EventBus.instance.idle();
+
+  expect(deleted.payload).toEqual({ chatId, messageIds: [noticeId, reminderId] });
+  expect(await rowIds(chatId)).toEqual(ids.slice(0, 4));
 });
 
 test("a message id of another chat is rejected and nothing is deleted", async () => {

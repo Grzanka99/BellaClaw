@@ -309,6 +309,7 @@ export class Memory {
       .where(
         and(
           eq(memoriesTable.chatId, conversationKey),
+          eq(memoriesTable.kind, "message"),
           eq(memoriesTable.author, ERole.User),
           eq(memoriesTable.message, sourceMessage),
         ),

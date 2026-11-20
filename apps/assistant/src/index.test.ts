@@ -296,12 +296,22 @@ describe("crash recovery", () => {
     expect(Object.keys(await Bun.file(join(directory, "mcp-credentials.json")).json())).toEqual([
       "account%3Aacct-crash:notes:abc",
     ]);
-    expect(
-      (await db.select().from(memoriesTable).where(eq(memoriesTable.chatId, "bella:acct-crash")))
-        .length,
-    ).toBe(3);
+    const moved = await db
+      .select()
+      .from(memoriesTable)
+      .where(eq(memoriesTable.chatId, "bella:acct-crash"));
+    expect(moved.filter((row) => row.kind !== "display")).toHaveLength(3);
+    // the boot's AI login notice, once sent, is shown in history and never replayed
+    for (const row of moved.filter((row) => row.kind === "display")) {
+      expect(row.message).toContain("AI login needed");
+    }
     expect(await db.select().from(conversationsTable)).toEqual([
-      { conversationKey: "bella:acct-crash", ownerKey: "account:acct-crash" },
+      {
+        conversationKey: "bella:acct-crash",
+        ownerKey: "account:acct-crash",
+        revision: expect.any(Number),
+        rewriteRevision: expect.any(Number),
+      },
     ]);
     expect(await lines("model.log")).toEqual(["hello"]);
     // the boot's AI login notice reaches the account once its link is active
