@@ -82,6 +82,7 @@ import { DatabaseConnector } from "../database";
 import { CommandRejectedError, ESubscriptionMode, EventBus } from "../events";
 import type { TEventPayloads, TModelChoice } from "../events/catalog";
 import { IdentityService, type TAccountKeys } from "../identity";
+import type { TIdentityLink } from "../identity/schema";
 import { parseCanonicalChatKey } from "../messaging/chat-key";
 import { EMessagePlatform, SUPPORTED_IMAGE_TYPES } from "../messaging/types";
 import { SettingsService, type TConfigUpdate } from "../settings";
@@ -104,14 +105,35 @@ const MAX_JSON_BODY_BYTES = 65_536;
 // NOTE: well under both servers' 255 s idle timeout, so an idle stream stays open
 const STREAM_KEEP_ALIVE_MS = 25_000;
 
+// the outcome facts of the commands the API publishes
+type TOutcomeType =
+  | EEventType.SettingsChanged
+  | EEventType.ConversationMessageDeleted
+  | EEventType.IdentityLinkStarted
+  | EEventType.ConversationCreated
+  | EEventType.ConversationDeleted
+  | EEventType.AppDeviceRegistered
+  | EEventType.AppDeviceUnregistered;
+
+const OUTCOME_TYPES: TOutcomeType[] = [
+  EEventType.SettingsChanged,
+  EEventType.ConversationMessageDeleted,
+  EEventType.IdentityLinkStarted,
+  EEventType.ConversationCreated,
+  EEventType.ConversationDeleted,
+  EEventType.AppDeviceRegistered,
+  EEventType.AppDeviceUnregistered,
+];
+
+// a command waiting for its outcome: settled by its outcome type or by command.rejected
+type TPendingOutcome = {
+  type: TOutcomeType;
+  resolve(payload: TEventPayloads[TOutcomeType]): void;
+  reject(error: Error): void;
+};
+
 // commands waiting for their outcome, by the turn id of the command
-const pendingUpdates = new Map<string, PromiseWithResolvers<TConfigRecord>>();
-const pendingDeletes = new Map<string, PromiseWithResolvers<number[]>>();
-const pendingLinks = new Map<string, PromiseWithResolvers<void>>();
-const pendingCreates = new Map<string, PromiseWithResolvers<TGatewayConversationCreated>>();
-const pendingConversationDeletes = new Map<string, PromiseWithResolvers<void>>();
-const pendingDeviceRegistrations = new Map<string, PromiseWithResolvers<void>>();
-const pendingDeviceUnregistrations = new Map<string, PromiseWithResolvers<void>>();
+const pending = new Map<string, TPendingOutcome>();
 let server: TOption<ReturnType<typeof Bun.serve>>;
 
 // NOTE: a request is no bus handler, so it has no ctx.request. It publishes the command under a
@@ -119,70 +141,22 @@ let server: TOption<ReturnType<typeof Bun.serve>>;
 export function setupInternalApi(): void {
   const bus = EventBus.instance;
 
-  bus.subscribe({
-    consumer: "internal-api",
-    type: EEventType.SettingsChanged,
-    mode: ESubscriptionMode.Live,
-    backoffMs: [],
-    handler: async (event) => {
-      pendingUpdates.get(event.trace.turnId)?.resolve(event.payload.record);
-    },
-  });
-  bus.subscribe({
-    consumer: "internal-api",
-    type: EEventType.ConversationMessageDeleted,
-    mode: ESubscriptionMode.Live,
-    backoffMs: [],
-    handler: async (event) => {
-      pendingDeletes.get(event.trace.turnId)?.resolve(event.payload.messageIds);
-    },
-  });
-  bus.subscribe({
-    consumer: "internal-api",
-    type: EEventType.IdentityLinkStarted,
-    mode: ESubscriptionMode.Live,
-    backoffMs: [],
-    handler: async (event) => {
-      pendingLinks.get(event.trace.turnId)?.resolve();
-    },
-  });
-  bus.subscribe({
-    consumer: "internal-api",
-    type: EEventType.ConversationCreated,
-    mode: ESubscriptionMode.Live,
-    backoffMs: [],
-    handler: async (event) => {
-      const { conversationKey, createdAt } = event.payload;
-      pendingCreates.get(event.trace.turnId)?.resolve({ conversationKey, createdAt });
-    },
-  });
-  bus.subscribe({
-    consumer: "internal-api",
-    type: EEventType.ConversationDeleted,
-    mode: ESubscriptionMode.Live,
-    backoffMs: [],
-    handler: async (event) => {
-      pendingConversationDeletes.get(event.trace.turnId)?.resolve();
-    },
-  });
-  bus.subscribe({
-    consumer: "internal-api",
-    type: EEventType.AppDeviceRegistered,
-    mode: ESubscriptionMode.Live,
-    backoffMs: [],
-    handler: async (event) => {
-      pendingDeviceRegistrations.get(event.trace.turnId)?.resolve();
-    },
-  });
-  bus.subscribe({
-    consumer: "internal-api",
-    type: EEventType.AppDeviceUnregistered,
-    mode: ESubscriptionMode.Live,
-    backoffMs: [],
-    handler: async (event) => {
-      pendingDeviceUnregistrations.get(event.trace.turnId)?.resolve();
-    },
-  });
+  for (const type of OUTCOME_TYPES) {
+    bus.subscribe({
+      consumer: "internal-api",
+      type,
+      mode: ESubscriptionMode.Live,
+      backoffMs: [],
+      handler: async (event) => {
+        const waiter = pending.get(event.trace.turnId);
+
+        if (waiter?.type === event.type) {
+          waiter.resolve(event.payload);
+        }
+      },
+    });
+  }
+
   bus.subscribe({
     consumer: "internal-api",
     type: EEventType.CommandRejected,
@@ -190,30 +164,29 @@ export function setupInternalApi(): void {
     backoffMs: [],
     handler: async (event) => {
       const { code, message, errorCode } = event.payload;
-      const error = new CommandRejectedError(code, message, errorCode);
-      pendingUpdates.get(event.trace.turnId)?.reject(error);
-      pendingDeletes.get(event.trace.turnId)?.reject(error);
-      pendingLinks.get(event.trace.turnId)?.reject(error);
-      pendingCreates.get(event.trace.turnId)?.reject(error);
-      pendingConversationDeletes.get(event.trace.turnId)?.reject(error);
-      pendingDeviceRegistrations.get(event.trace.turnId)?.reject(error);
-      pendingDeviceUnregistrations.get(event.trace.turnId)?.reject(error);
+      pending.get(event.trace.turnId)?.reject(new CommandRejectedError(code, message, errorCode));
     },
   });
 }
 
-// publishes a command on the key's lane and waits for the outcome the live subscriptions settle
-async function requestOutcome<T extends EEventType, R>(
-  pending: Map<string, PromiseWithResolvers<R>>,
+// publishes a command on the key's lane and waits for the outcome the live subscriptions settle.
+// toResult: what the request answers with, from the outcome's payload
+async function requestOutcome<T extends EEventType, O extends TOutcomeType, R>(
   trace: TBehaviorTraceContext,
   key: string,
   type: T,
   payload: TEventPayloads[T],
+  outcomeType: O,
+  toResult: (outcomePayload: TEventPayloads[O]) => R,
   timeoutMs: number,
   timeoutMessage: string,
 ): Promise<R> {
   const outcome = Promise.withResolvers<R>();
-  pending.set(trace.turnId, outcome);
+  pending.set(trace.turnId, {
+    type: outcomeType,
+    resolve: (outcomePayload: TEventPayloads[O]) => outcome.resolve(toResult(outcomePayload)),
+    reject: outcome.reject,
+  });
   const timer = setTimeout(() => {
     outcome.reject(new Error(timeoutMessage));
   }, timeoutMs);
@@ -323,11 +296,12 @@ async function updateModel(
   }
 
   return requestOutcome(
-    pendingUpdates,
     trace,
     ownerKey,
     EEventType.SettingsUpdateRequested,
     { ownerKey, updates },
+    EEventType.SettingsChanged,
+    (outcome) => outcome.record,
     COMMAND_TIMEOUT_MS,
     "Settings update timed out",
   );
@@ -372,11 +346,12 @@ async function updatePersonality(
   }
 
   return requestOutcome(
-    pendingUpdates,
     systemTrace(conversationKey),
     ownerKey,
     EEventType.SettingsUpdateRequested,
     { ownerKey, updates },
+    EEventType.SettingsChanged,
+    (outcome) => outcome.record,
     COMMAND_TIMEOUT_MS,
     "Settings update timed out",
   );
@@ -444,11 +419,12 @@ async function requestLink(body: unknown): Promise<TGatewayLinkStarted> {
   }
 
   await requestOutcome(
-    pendingLinks,
     systemTrace(chatKey),
     chatKey,
     EEventType.IdentityLinkRequested,
     { accountId, channel: address.platform, address: address.chatId },
+    EEventType.IdentityLinkStarted,
+    () => undefined,
     COMMAND_TIMEOUT_MS,
     "Link request timed out",
   );
@@ -519,6 +495,381 @@ function errorResponse(error: string, status: number, code: TOption<string>): Re
   return Response.json(body, { status });
 }
 
+// a read: checking a code changes nothing, so no command is published
+async function handleActivationCheck(request: Request): Promise<Response> {
+  const check = SGatewayActivationCheckRequest.safeParse(await request.json());
+
+  if (!check.success) {
+    throw new Error("Invalid activation code check");
+  }
+
+  const matches = AuthorizationService.instance.matchesActivationToken(check.data.code);
+  const body: TGatewayActivationCheck = { result: "unset" };
+
+  if (matches === true) {
+    body.result = "valid";
+  } else if (matches === false) {
+    body.result = "invalid";
+  }
+
+  return Response.json(body);
+}
+
+async function handlePresence(request: Request): Promise<Response> {
+  const presence = SGatewayPresence.safeParse(await request.json());
+
+  if (!presence.success) {
+    throw new Error("Invalid presence");
+  }
+
+  AppChannel.instance.reportPresence(presence.data.accountIds);
+  const body: TGatewayPresenceAccepted = { ok: true };
+
+  return Response.json(body);
+}
+
+async function handleChatLink(chatKey: string): Promise<Response> {
+  const link = await IdentityService.instance.link(chatKey);
+  const body: TGatewayChatLink = { link: undefined };
+
+  if (link !== undefined) {
+    body.link = { accountId: link.accountId, state: link.state };
+  }
+
+  return Response.json(body);
+}
+
+function handleAccount(account: TAccountKeys & { links: TIdentityLink[] }): Response {
+  const body: TGatewayAccount = {
+    conversationKey: account.conversationKey,
+    ownerKey: account.ownerKey,
+    links: account.links.map((link) => ({
+      chatKey: IdentityService.instance.addressKey(link),
+      state: link.state,
+      linkedAt: link.linkedAt.getTime(),
+    })),
+  };
+
+  return Response.json(body);
+}
+
+// NOTE: the send answers once message.received is stored and waits for no outcome. The client's
+// id is the dedupe key, so a repeated send stores nothing and answers the same. Authorization
+// checks the ownership again before the message reaches a turn. A plain chat's send carries
+// its model, checked here; the Bella conversation runs on the account's settings
+async function handleAppMessage(
+  request: Request,
+  accountId: string,
+  account: TAccountKeys,
+  conversationKey: string,
+  kind: EConversationKind,
+): Promise<Response> {
+  const message = SGatewayAppMessage.safeParse(await request.json());
+
+  if (!message.success) {
+    throw new Error(describeIssues(message.error));
+  }
+
+  const { clientMessageId, text, images = [] } = message.data;
+  const dedupeKey = `app:${conversationKey}:${clientMessageId}`;
+  const body: TGatewayAppMessageAccepted = { clientMessageId };
+
+  // NOTE: a repeated send is the stored message, answered before the model check: its provider
+  // may have become unusable since
+  if (await EventBus.instance.holds(dedupeKey)) {
+    return Response.json(body);
+  }
+
+  let model: TOption<TModelChoice>;
+
+  if (kind === EConversationKind.Plain) {
+    if (message.data.model === undefined) {
+      throw new Error("A message to a plain chat names its model");
+    }
+
+    model = await checkModelChoice(message.data.model);
+  } else if (message.data.model !== undefined) {
+    throw new Error("The Bella conversation runs on the account's model settings");
+  }
+
+  // the message names its images; their bytes stay in the App channel's store
+  const attachments = await DatabaseConnector.instance.run((db) =>
+    AppChannel.instance.findAttachments(db, accountId, conversationKey, images),
+  );
+
+  if (attachments.length !== images.length) {
+    throw new Error("An image was not uploaded to this chat");
+  }
+
+  await EventBus.instance.publish({
+    type: EEventType.MessageReceived,
+    source: "internal-api",
+    key: conversationKey,
+    trace: {
+      turnId: createMessageTurnId(),
+      chatId: conversationKey,
+      platform: EMessagePlatform.App,
+    },
+    // the app has no address; the account stands for it
+    payload: {
+      conversationKey,
+      ownerKey: account.ownerKey,
+      channel: EMessagePlatform.App,
+      replyAddress: accountId,
+      content: text,
+      attachments,
+      receivedAt: Date.now(),
+      clientMessageId,
+      model,
+    },
+    causationId: undefined,
+    dedupeKey,
+  });
+
+  return Response.json(body);
+}
+
+// NOTE: everything is checked before anything is stored: the conversation, the declared type,
+// the size while the body is read, and the format the bytes really have
+async function handleMediaUpload(
+  request: Request,
+  accountId: string,
+  account: TAccountKeys,
+  conversationKey: string,
+): Promise<Response> {
+  const mimeType = request.headers.get("content-type") ?? "";
+
+  if (!SUPPORTED_IMAGE_TYPES.includes(mimeType)) {
+    return errorResponse("Unsupported image type", 415, undefined);
+  }
+
+  const data = await readBody(request, MAX_IMAGE_BYTES);
+
+  if (data === undefined) {
+    return errorResponse("The image is larger than 5 MB", 413, undefined);
+  }
+
+  if (imageTypeOf(data) !== mimeType) {
+    return errorResponse(`The content is not ${mimeType}`, 415, undefined);
+  }
+
+  const body: TOption<TGatewayMedia> = await AppChannel.instance.store(
+    accountId,
+    account,
+    conversationKey,
+    mimeType,
+    data,
+  );
+
+  // the plain chat was deleted while the body was read
+  if (body === undefined) {
+    return errorResponse("Not found", 404, undefined);
+  }
+
+  return Response.json(body);
+}
+
+// 410 for an image this conversation does not keep
+async function handleMediaDownload(conversationKey: string, mediaId: string): Promise<Response> {
+  const media = await AppChannel.instance.open(conversationKey, mediaId);
+
+  if (media === undefined) {
+    return errorResponse("Gone", 410, undefined);
+  }
+
+  return new Response(media.file, {
+    headers: { "Content-Type": media.mimeType, "Cache-Control": "no-store" },
+  });
+}
+
+// NOTE: on the global lane, so a device's registers and unregisters apply in order. An
+// unregister of a device the account does not hold is a 404
+async function handleDevice(
+  request: Request,
+  accountId: string,
+  account: TAccountKeys,
+  rawDeviceId: string,
+): Promise<Response> {
+  const deviceId = SGatewayDeviceId.safeParse(rawDeviceId);
+
+  if (!deviceId.success) {
+    throw new Error("Invalid device id");
+  }
+
+  const trace = systemTrace(account.conversationKey);
+  const body: TGatewayDevice = { deviceId: deviceId.data };
+
+  if (request.method === "PUT") {
+    const registration = SGatewayDeviceRegistration.safeParse(await request.json());
+
+    if (!registration.success) {
+      throw new Error(describeIssues(registration.error));
+    }
+
+    if (!(await isP256PublicKey(registration.data.publicKey))) {
+      throw new Error("Expected a P-256 public key");
+    }
+
+    await requestOutcome(
+      trace,
+      "global",
+      EEventType.AppDeviceRegisterRequested,
+      { deviceId: deviceId.data, accountId, ...registration.data },
+      EEventType.AppDeviceRegistered,
+      () => undefined,
+      COMMAND_TIMEOUT_MS,
+      "Registering the device timed out",
+    );
+
+    return Response.json(body);
+  }
+
+  try {
+    await requestOutcome(
+      trace,
+      "global",
+      EEventType.AppDeviceUnregisterRequested,
+      { deviceId: deviceId.data, accountId },
+      EEventType.AppDeviceUnregistered,
+      () => undefined,
+      COMMAND_TIMEOUT_MS,
+      "Unregistering the device timed out",
+    );
+  } catch (error) {
+    if (error instanceof CommandRejectedError && error.errorCode === DEVICE_NOT_FOUND) {
+      return errorResponse("Not found", 404, undefined);
+    }
+
+    throw error;
+  }
+
+  return Response.json(body);
+}
+
+// every device of the account, one unregister each; one gone meanwhile counts as removed
+async function handleAccountDevices(accountId: string, account: TAccountKeys): Promise<Response> {
+  const body: TGatewayDevicesRemoved = {
+    deviceIds: await AppChannel.instance.listDeviceIds(accountId),
+  };
+
+  for (const deviceId of body.deviceIds) {
+    const trace = systemTrace(account.conversationKey);
+
+    try {
+      await requestOutcome(
+        trace,
+        "global",
+        EEventType.AppDeviceUnregisterRequested,
+        { deviceId, accountId },
+        EEventType.AppDeviceUnregistered,
+        () => undefined,
+        COMMAND_TIMEOUT_MS,
+        "Unregistering the device timed out",
+      );
+    } catch (error) {
+      if (!(error instanceof CommandRejectedError && error.errorCode === DEVICE_NOT_FOUND)) {
+        throw error;
+      }
+    }
+  }
+
+  return Response.json(body);
+}
+
+async function handleConversationCreate(account: TAccountKeys): Promise<Response> {
+  const body: TGatewayConversationCreated = await requestOutcome(
+    systemTrace(account.conversationKey),
+    account.ownerKey,
+    EEventType.ConversationCreateRequested,
+    { ownerKey: account.ownerKey },
+    EEventType.ConversationCreated,
+    ({ conversationKey, createdAt }) => ({ conversationKey, createdAt }),
+    COMMAND_TIMEOUT_MS,
+    "Creating the chat timed out",
+  );
+
+  return Response.json(body);
+}
+
+// NOTE: on the chat's lane, behind its running turn. Only a listed plain chat of the account
+// reaches the lane; Conversation checks the owner and the kind again in the delete's
+// transaction
+async function handleConversationDelete(
+  account: TAccountKeys,
+  conversationKey: string,
+  kind: EConversationKind,
+): Promise<Response> {
+  if (kind !== EConversationKind.Plain) {
+    return errorResponse("Not found", 404, undefined);
+  }
+
+  try {
+    await requestOutcome(
+      systemTrace(conversationKey),
+      conversationKey,
+      EEventType.ConversationDeleteRequested,
+      { conversationKey, ownerKey: account.ownerKey },
+      EEventType.ConversationDeleted,
+      () => undefined,
+      DELETE_TIMEOUT_MS,
+      // the command stays queued on the lane
+      "The assistant is busy with this chat. The chat is deleted once it finishes.",
+    );
+  } catch (error) {
+    if (error instanceof CommandRejectedError && error.errorCode === CONVERSATION_NOT_FOUND) {
+      return errorResponse("Not found", 404, undefined);
+    }
+
+    throw error;
+  }
+
+  const body: TGatewayConversationDeleted = { conversationKey };
+
+  return Response.json(body);
+}
+
+async function handleMessageDelete(account: TAccountKeys, messageId: number): Promise<Response> {
+  const { conversationKey } = account;
+  const body: TGatewayMessageDeleted = {
+    deletedMessageIds: await requestOutcome(
+      systemTrace(conversationKey),
+      conversationKey,
+      EEventType.ConversationMessageDeleteRequested,
+      { chatId: conversationKey, messageId },
+      EEventType.ConversationMessageDeleted,
+      (outcome) => outcome.messageIds,
+      DELETE_TIMEOUT_MS,
+      // the command stays queued on the lane
+      "The assistant is busy with this chat. The message is deleted once it finishes.",
+    ),
+  };
+
+  return Response.json(body);
+}
+
+async function handlePersonality(request: Request, account: TAccountKeys): Promise<Response> {
+  let settings: TConfigRecord;
+
+  if (request.method === "PUT") {
+    settings = await updatePersonality(account, await request.json());
+  } else {
+    settings = await SettingsService.instance.getAll(account.ownerKey);
+  }
+
+  return Response.json(createPersonality(settings));
+}
+
+async function handleModel(request: Request, account: TAccountKeys): Promise<Response> {
+  if (request.method === "PUT") {
+    return Response.json(createModelState(await updateModel(account, await request.json())));
+  }
+
+  const settings = await SettingsService.instance.getAll(account.ownerKey);
+  await refreshAiModels(resolveAiProvider(settings), true);
+
+  return Response.json(createModelState(settings));
+}
+
 export async function handleInternalApiRequest(
   request: Request,
   secret: string,
@@ -550,12 +901,13 @@ export async function handleInternalApiRequest(
   const segments = pathname.split("/");
   const messageId = Number(segments[5]);
   let key = "";
-  let conversationKey = "";
+  // a conversation key, or a device id on the device route
+  let itemKey = "";
   let mediaId = "";
 
   try {
     key = decodeURIComponent(segments[3] ?? "");
-    conversationKey = decodeURIComponent(segments[5] ?? "");
+    itemKey = decodeURIComponent(segments[5] ?? "");
     mediaId = decodeURIComponent(segments[7] ?? "");
   } catch {
     // a malformed escape is an unknown route
@@ -587,8 +939,8 @@ export async function handleInternalApiRequest(
   const appMessageRoute =
     request.method === "POST" &&
     key.length > 0 &&
-    conversationKey.length > 0 &&
-    pathname === gatewayAccountConversationMessagesPath(key, conversationKey);
+    itemKey.length > 0 &&
+    pathname === gatewayAccountConversationMessagesPath(key, itemKey);
   const conversationCreateRoute =
     request.method === "POST" &&
     key.length > 0 &&
@@ -596,26 +948,25 @@ export async function handleInternalApiRequest(
   const conversationDeleteRoute =
     request.method === "DELETE" &&
     key.length > 0 &&
-    conversationKey.length > 0 &&
-    pathname === gatewayAccountConversationPath(key, conversationKey);
+    itemKey.length > 0 &&
+    pathname === gatewayAccountConversationPath(key, itemKey);
 
   const mediaUploadRoute =
     request.method === "POST" &&
     key.length > 0 &&
-    conversationKey.length > 0 &&
-    pathname === gatewayAccountConversationMediaPath(key, conversationKey);
+    itemKey.length > 0 &&
+    pathname === gatewayAccountConversationMediaPath(key, itemKey);
   const mediaDownloadRoute =
     request.method === "GET" &&
     key.length > 0 &&
-    conversationKey.length > 0 &&
+    itemKey.length > 0 &&
     mediaId.length > 0 &&
-    pathname === gatewayAccountConversationMediaFilePath(key, conversationKey, mediaId);
-  // segment 5 is the device id here
+    pathname === gatewayAccountConversationMediaFilePath(key, itemKey, mediaId);
   const deviceRoute =
     (request.method === "PUT" || request.method === "DELETE") &&
     key.length > 0 &&
-    conversationKey.length > 0 &&
-    pathname === gatewayAccountDevicePath(key, conversationKey);
+    itemKey.length > 0 &&
+    pathname === gatewayAccountDevicePath(key, itemKey);
   const accountDevicesRoute =
     request.method === "DELETE" && key.length > 0 && pathname === gatewayAccountDevicesPath(key);
 
@@ -647,24 +998,8 @@ export async function handleInternalApiRequest(
   }
 
   try {
-    // a read: checking a code changes nothing, so no command is published
     if (activationRoute) {
-      const check = SGatewayActivationCheckRequest.safeParse(await request.json());
-
-      if (!check.success) {
-        throw new Error("Invalid activation code check");
-      }
-
-      const matches = AuthorizationService.instance.matchesActivationToken(check.data.code);
-      const body: TGatewayActivationCheck = { result: "unset" };
-
-      if (matches === true) {
-        body.result = "valid";
-      } else if (matches === false) {
-        body.result = "invalid";
-      }
-
-      return Response.json(body);
+      return await handleActivationCheck(request);
     }
 
     if (streamRoute) {
@@ -672,16 +1007,7 @@ export async function handleInternalApiRequest(
     }
 
     if (presenceRoute) {
-      const presence = SGatewayPresence.safeParse(await request.json());
-
-      if (!presence.success) {
-        throw new Error("Invalid presence");
-      }
-
-      AppChannel.instance.reportPresence(presence.data.accountIds);
-      const body: TGatewayPresenceAccepted = { ok: true };
-
-      return Response.json(body);
+      return await handlePresence(request);
     }
 
     if (linkRequestRoute) {
@@ -689,312 +1015,54 @@ export async function handleInternalApiRequest(
     }
 
     if (chatLinkRoute) {
-      const link = await IdentityService.instance.link(key);
-      const body: TGatewayChatLink = { link: undefined };
-
-      if (link !== undefined) {
-        body.link = { accountId: link.accountId, state: link.state };
-      }
-
-      return Response.json(body);
+      return await handleChatLink(key);
     }
 
     const account = await IdentityService.instance.account(key);
 
     if (accountRoute) {
-      const body: TGatewayAccount = {
-        conversationKey: account.conversationKey,
-        ownerKey: account.ownerKey,
-        links: account.links.map((link) => ({
-          chatKey: IdentityService.instance.addressKey(link),
-          state: link.state,
-          linkedAt: link.linkedAt.getTime(),
-        })),
-      };
-
-      return Response.json(body);
+      return handleAccount(account);
     }
 
     // a conversation route answers 404 for a conversation that is not the account's
-    let kind: TOption<EConversationKind>;
-
     if (appMessageRoute || mediaUploadRoute || mediaDownloadRoute || conversationDeleteRoute) {
-      kind = await DatabaseConnector.instance.run((db) =>
-        findOwnedConversationKind(db, conversationKey, account),
+      const kind = await DatabaseConnector.instance.run((db) =>
+        findOwnedConversationKind(db, itemKey, account),
       );
 
       if (kind === undefined) {
         return errorResponse("Not found", 404, undefined);
       }
+
+      if (appMessageRoute) {
+        return await handleAppMessage(request, key, account, itemKey, kind);
+      }
+
+      if (mediaUploadRoute) {
+        return await handleMediaUpload(request, key, account, itemKey);
+      }
+
+      if (mediaDownloadRoute) {
+        return await handleMediaDownload(itemKey, mediaId);
+      }
+
+      return await handleConversationDelete(account, itemKey, kind);
     }
 
-    // NOTE: the send answers once message.received is stored and waits for no outcome. The client's
-    // id is the dedupe key, so a repeated send stores nothing and answers the same. Authorization
-    // checks the ownership again before the message reaches a turn. A plain chat's send carries
-    // its model, checked here; the Bella conversation runs on the account's settings
-    if (appMessageRoute) {
-      const message = SGatewayAppMessage.safeParse(await request.json());
-
-      if (!message.success) {
-        throw new Error(describeIssues(message.error));
-      }
-
-      const { clientMessageId, text, images = [] } = message.data;
-      const dedupeKey = `app:${conversationKey}:${clientMessageId}`;
-      const body: TGatewayAppMessageAccepted = { clientMessageId };
-
-      // NOTE: a repeated send is the stored message, answered before the model check: its provider
-      // may have become unusable since
-      if (await EventBus.instance.holds(dedupeKey)) {
-        return Response.json(body);
-      }
-
-      let model: TOption<TModelChoice>;
-
-      if (kind === EConversationKind.Plain) {
-        if (message.data.model === undefined) {
-          throw new Error("A message to a plain chat names its model");
-        }
-
-        model = await checkModelChoice(message.data.model);
-      } else if (message.data.model !== undefined) {
-        throw new Error("The Bella conversation runs on the account's model settings");
-      }
-
-      // the message names its images; their bytes stay in the App channel's store
-      const attachments = await DatabaseConnector.instance.run((db) =>
-        AppChannel.instance.findAttachments(db, key, conversationKey, images),
-      );
-
-      if (attachments.length !== images.length) {
-        throw new Error("An image was not uploaded to this chat");
-      }
-
-      await EventBus.instance.publish({
-        type: EEventType.MessageReceived,
-        source: "internal-api",
-        key: conversationKey,
-        trace: {
-          turnId: createMessageTurnId(),
-          chatId: conversationKey,
-          platform: EMessagePlatform.App,
-        },
-        // the app has no address; the account stands for it
-        payload: {
-          conversationKey,
-          ownerKey: account.ownerKey,
-          channel: EMessagePlatform.App,
-          replyAddress: key,
-          content: text,
-          attachments,
-          receivedAt: Date.now(),
-          clientMessageId,
-          model,
-        },
-        causationId: undefined,
-        dedupeKey,
-      });
-
-      return Response.json(body);
-    }
-
-    // NOTE: everything is checked before anything is stored: the conversation, the declared type,
-    // the size while the body is read, and the format the bytes really have
-    if (mediaUploadRoute) {
-      const mimeType = request.headers.get("content-type") ?? "";
-
-      if (!SUPPORTED_IMAGE_TYPES.includes(mimeType)) {
-        return errorResponse("Unsupported image type", 415, undefined);
-      }
-
-      const data = await readBody(request, MAX_IMAGE_BYTES);
-
-      if (data === undefined) {
-        return errorResponse("The image is larger than 5 MB", 413, undefined);
-      }
-
-      if (imageTypeOf(data) !== mimeType) {
-        return errorResponse(`The content is not ${mimeType}`, 415, undefined);
-      }
-
-      const body: TOption<TGatewayMedia> = await AppChannel.instance.store(
-        key,
-        account,
-        conversationKey,
-        mimeType,
-        data,
-      );
-
-      // the plain chat was deleted while the body was read
-      if (body === undefined) {
-        return errorResponse("Not found", 404, undefined);
-      }
-
-      return Response.json(body);
-    }
-
-    // 404 for a conversation that is not the account's, 410 for an image this conversation does not
-    // keep
-    if (mediaDownloadRoute) {
-      const media = await AppChannel.instance.open(conversationKey, mediaId);
-
-      if (media === undefined) {
-        return errorResponse("Gone", 410, undefined);
-      }
-
-      return new Response(media.file, {
-        headers: { "Content-Type": media.mimeType, "Cache-Control": "no-store" },
-      });
-    }
-
-    // NOTE: on the global lane, so a device's registers and unregisters apply in order. An
-    // unregister of a device the account does not hold is a 404
     if (deviceRoute) {
-      const deviceId = SGatewayDeviceId.safeParse(conversationKey);
-
-      if (!deviceId.success) {
-        throw new Error("Invalid device id");
-      }
-
-      const trace = systemTrace(account.conversationKey);
-      const body: TGatewayDevice = { deviceId: deviceId.data };
-
-      if (request.method === "PUT") {
-        const registration = SGatewayDeviceRegistration.safeParse(await request.json());
-
-        if (!registration.success) {
-          throw new Error(describeIssues(registration.error));
-        }
-
-        if (!(await isP256PublicKey(registration.data.publicKey))) {
-          throw new Error("Expected a P-256 public key");
-        }
-
-        await requestOutcome(
-          pendingDeviceRegistrations,
-          trace,
-          "global",
-          EEventType.AppDeviceRegisterRequested,
-          { deviceId: deviceId.data, accountId: key, ...registration.data },
-          COMMAND_TIMEOUT_MS,
-          "Registering the device timed out",
-        );
-
-        return Response.json(body);
-      }
-
-      try {
-        await requestOutcome(
-          pendingDeviceUnregistrations,
-          trace,
-          "global",
-          EEventType.AppDeviceUnregisterRequested,
-          { deviceId: deviceId.data, accountId: key },
-          COMMAND_TIMEOUT_MS,
-          "Unregistering the device timed out",
-        );
-      } catch (error) {
-        if (error instanceof CommandRejectedError && error.errorCode === DEVICE_NOT_FOUND) {
-          return errorResponse("Not found", 404, undefined);
-        }
-
-        throw error;
-      }
-
-      return Response.json(body);
+      return await handleDevice(request, key, account, itemKey);
     }
 
-    // every device of the account, one unregister each; one gone meanwhile counts as removed
     if (accountDevicesRoute) {
-      const body: TGatewayDevicesRemoved = {
-        deviceIds: await AppChannel.instance.listDeviceIds(key),
-      };
-
-      for (const deviceId of body.deviceIds) {
-        const trace = systemTrace(account.conversationKey);
-
-        try {
-          await requestOutcome(
-            pendingDeviceUnregistrations,
-            trace,
-            "global",
-            EEventType.AppDeviceUnregisterRequested,
-            { deviceId, accountId: key },
-            COMMAND_TIMEOUT_MS,
-            "Unregistering the device timed out",
-          );
-        } catch (error) {
-          if (!(error instanceof CommandRejectedError && error.errorCode === DEVICE_NOT_FOUND)) {
-            throw error;
-          }
-        }
-      }
-
-      return Response.json(body);
+      return await handleAccountDevices(key, account);
     }
 
     if (conversationCreateRoute) {
-      const body: TGatewayConversationCreated = await requestOutcome(
-        pendingCreates,
-        systemTrace(account.conversationKey),
-        account.ownerKey,
-        EEventType.ConversationCreateRequested,
-        { ownerKey: account.ownerKey },
-        COMMAND_TIMEOUT_MS,
-        "Creating the chat timed out",
-      );
-
-      return Response.json(body);
-    }
-
-    // NOTE: on the chat's lane, behind its running turn. Only a listed plain chat of the account
-    // reaches the lane; Conversation checks the owner and the kind again in the delete's
-    // transaction
-    if (conversationDeleteRoute) {
-      if (kind !== EConversationKind.Plain) {
-        return errorResponse("Not found", 404, undefined);
-      }
-
-      try {
-        await requestOutcome(
-          pendingConversationDeletes,
-          systemTrace(conversationKey),
-          conversationKey,
-          EEventType.ConversationDeleteRequested,
-          { conversationKey, ownerKey: account.ownerKey },
-          DELETE_TIMEOUT_MS,
-          // the command stays queued on the lane
-          "The assistant is busy with this chat. The chat is deleted once it finishes.",
-        );
-      } catch (error) {
-        if (error instanceof CommandRejectedError && error.errorCode === CONVERSATION_NOT_FOUND) {
-          return errorResponse("Not found", 404, undefined);
-        }
-
-        throw error;
-      }
-
-      const body: TGatewayConversationDeleted = { conversationKey };
-
-      return Response.json(body);
+      return await handleConversationCreate(account);
     }
 
     if (messageDeleteRoute) {
-      const { conversationKey } = account;
-      const body: TGatewayMessageDeleted = {
-        deletedMessageIds: await requestOutcome(
-          pendingDeletes,
-          systemTrace(conversationKey),
-          conversationKey,
-          EEventType.ConversationMessageDeleteRequested,
-          { chatId: conversationKey, messageId },
-          DELETE_TIMEOUT_MS,
-          // the command stays queued on the lane
-          "The assistant is busy with this chat. The message is deleted once it finishes.",
-        ),
-      };
-
-      return Response.json(body);
+      return await handleMessageDelete(account, messageId);
     }
 
     if (modelsRoute) {
@@ -1002,25 +1070,10 @@ export async function handleInternalApiRequest(
     }
 
     if (personalityRoute) {
-      let settings: TConfigRecord;
-
-      if (request.method === "PUT") {
-        settings = await updatePersonality(account, await request.json());
-      } else {
-        settings = await SettingsService.instance.getAll(account.ownerKey);
-      }
-
-      return Response.json(createPersonality(settings));
+      return await handlePersonality(request, account);
     }
 
-    if (request.method === "PUT") {
-      return Response.json(createModelState(await updateModel(account, await request.json())));
-    }
-
-    const settings = await SettingsService.instance.getAll(account.ownerKey);
-    await refreshAiModels(resolveAiProvider(settings), true);
-
-    return Response.json(createModelState(settings));
+    return await handleModel(request, account);
   } catch (error) {
     let message = String(error);
     let code: TOption<string>;
