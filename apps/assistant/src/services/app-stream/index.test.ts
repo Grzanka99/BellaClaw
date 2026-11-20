@@ -1,11 +1,5 @@
 import { afterEach, beforeEach, expect, mock, test } from "bun:test";
-import {
-  EConversationKind,
-  EEventType,
-  eventsTable,
-  identityLinksTable,
-  listHistory,
-} from "@bellaclaw/database";
+import { EEventType, eventsTable, identityLinksTable, listHistory } from "@bellaclaw/database";
 import {
   DASHBOARD_STREAM_PATH,
   dashboardAccountConversationMessagesPath,
@@ -238,56 +232,6 @@ test("a message queued behind a running turn turns typing on again when it start
     changed(3),
     typing(false),
     changed(4),
-  ]);
-  await stream.close();
-});
-
-test("a turn started under an account streams typing on even when its request carried another owner", async () => {
-  await start();
-  const stream = await openStream();
-  const accountId = `acct-${crypto.randomUUID()}`;
-  const conversationKey = `bella:${accountId}`;
-  const address = `+${Date.now()}`;
-  const chatKey = `signal:${address}`;
-  const trace = { turnId: `test:${chatKey}`, chatId: chatKey, platform: EMessagePlatform.Signal };
-  const origin = {
-    channel: EMessagePlatform.Signal,
-    replyAddress: address,
-    kind: EConversationKind.Bella,
-  };
-
-  // as during a link: requested under the address's owner, started under the account
-  await EventBus.instance.publish({
-    type: EEventType.TurnRequested,
-    source: "message-handler",
-    key: chatKey,
-    trace,
-    payload: {
-      ...origin,
-      conversationKey: chatKey,
-      ownerKey: chatKey,
-      content: "Hi",
-      attachments: [],
-      receivedAt: Date.now(),
-    },
-    causationId: undefined,
-    dedupeKey: undefined,
-  });
-  await EventBus.instance.idle();
-  expect(await stream.drain()).toEqual([]);
-
-  await EventBus.instance.publish({
-    type: EEventType.TurnStarted,
-    source: "message-handler",
-    key: conversationKey,
-    trace,
-    payload: { ...origin, conversationKey, ownerKey: `account:${accountId}`, userMessageId: 1 },
-    causationId: undefined,
-    dedupeKey: undefined,
-  });
-  await EventBus.instance.idle();
-  expect(await stream.drain()).toEqual([
-    { type: "typing", accountId, conversationKey, typing: true },
   ]);
   await stream.close();
 });

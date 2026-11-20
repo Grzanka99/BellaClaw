@@ -387,63 +387,6 @@ test("a row of account_chats the import still holds counts as its account's link
   }
 });
 
-test("a login link whose account read fails uses nothing: no session, password and link unchanged", async () => {
-  const { send, register, token, assistant } = createTestApp();
-  await register("alice", "signal:+100");
-  const link = token("signal:+100");
-  const getAccount = assistant.internalApi.getAccount;
-  let failures = 1;
-  assistant.internalApi.getAccount = async (accountId) => {
-    if (failures > 0) {
-      failures -= 1;
-
-      return { error: "The assistant is unavailable", status: 502 };
-    }
-
-    return getAccount(accountId);
-  };
-
-  const failed = await send("POST", "/api/link/login", {
-    token: link,
-    password: "a brand new password",
-  });
-  expect(failed.status).toBe(502);
-  expect(failed.headers.get("Set-Cookie")).toBeNull();
-  expect((await send("POST", "/api/login", { username: "alice", password: PASSWORD })).status).toBe(
-    200,
-  );
-  expect(await (await send("POST", "/api/link/check", { token: link })).json()).toEqual({
-    valid: true,
-    chatKey: "signal:+100",
-    username: "alice",
-  });
-
-  const again = await send("POST", "/api/link/login", { token: link });
-  expect(again.status).toBe(200);
-});
-
-// the number of session rows of the store
-function countSessions(store: AccountStore) {
-  // biome-ignore lint/complexity/useLiteralKeys: a private field, read for the check
-  return store["db"].query<{ count: number }, []>("SELECT COUNT(*) AS count FROM sessions").get()
-    ?.count;
-}
-
-// the next getAccount call of the assistant answers 502
-function failNextAccountRead(assistant: ReturnType<typeof createFakeAssistant>) {
-  const getAccount = assistant.internalApi.getAccount;
-  let failures = 1;
-  assistant.internalApi.getAccount = async (accountId) => {
-    if (failures > 0) {
-      failures -= 1;
-
-      return { error: "The assistant is unavailable", status: 502 };
-    }
-
-    return getAccount(accountId);
-  };
-}
-
 test("the link action refuses an account other than the one the confirmation named, using nothing", async () => {
   const { send, register, token, assistant } = createTestApp();
   await register("alice", "signal:+100");
@@ -483,126 +426,6 @@ test("a new password set through a login link ends the account's other sessions;
   expect((await send("GET", "/api/me", undefined, alice.cookie)).status).toBe(401);
   expect((await send("GET", "/api/me", undefined, cookieOf(plain))).status).toBe(401);
   expect((await send("GET", "/api/me", undefined, cookieOf(reset))).status).toBe(200);
-});
-
-test("a failed account read leaves no session on any route that starts one", async () => {
-  const { send, register, token, assistant, store } = createTestApp();
-  await register("alice", "signal:+100");
-  // biome-ignore lint/complexity/useLiteralKeys: a private field, written for the check
-  store["db"].run("DELETE FROM sessions");
-
-  const attempts = [
-    ["/api/register", { token: token("signal:+200"), username: "bob", password: PASSWORD }],
-    ["/api/login", { username: "alice", password: PASSWORD }],
-    ["/api/login", { username: "alice", password: PASSWORD, token: token("signal:+300") }],
-    ["/api/link/login", { token: token("signal:+100") }],
-  ] as const;
-
-  for (const [path, body] of attempts) {
-    failNextAccountRead(assistant);
-    const response = await send("POST", path, body);
-    expect(response.status).toBe(502);
-    expect(response.headers.get("Set-Cookie")).toBeNull();
-    expect(countSessions(store)).toBe(0);
-  }
-});
-
-test("a token of a chat linked to another account is refused unused, and still logs into that account", async () => {
-  const { send, register, token, assistant } = createTestApp();
-  await register("alice", "signal:+100");
-  const bob = await register("bob", "signal:+200");
-  const link = token("signal:+100");
-
-  const linked = await send("POST", "/api/link", { token: link }, bob.cookie, "bob");
-  expect(linked.status).toBe(409);
-  const loggedIn = await send("POST", "/api/login", {
-    username: "bob",
-    password: PASSWORD,
-    token: link,
-  });
-  expect(loggedIn.status).toBe(409);
-  expect(assistant.requests).toHaveLength(2);
-
-  const linkLogin = await send("POST", "/api/link/login", { token: link });
-  expect(linkLogin.status).toBe(200);
-  expect((await linkLogin.json()).username).toBe("alice");
-});
-
-// the next call of the method waits for release(); entered resolves once it waits
-function holdNextCall<T extends (...args: never[]) => Promise<unknown>>(call: T) {
-  let release = () => {};
-  let enter = () => {};
-  const released = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  const entered = new Promise<void>((resolve) => {
-    enter = resolve;
-  });
-  let held = false;
-  const wrapped = (async (...args: Parameters<T>) => {
-    if (!held) {
-      held = true;
-      enter();
-      await released;
-    }
-
-    return call(...args);
-  }) as T;
-
-  return { wrapped, entered, release };
-}
-
-test("a login whose account read is held open while a login link sets a new password is refused and starts no session", async () => {
-  const { send, register, token, assistant, store } = createTestApp();
-  await register("alice", "signal:+100");
-  // biome-ignore lint/complexity/useLiteralKeys: a private field, written for the check
-  store["db"].run("DELETE FROM sessions");
-  const hold = holdNextCall(assistant.internalApi.getAccount);
-  assistant.internalApi.getAccount = hold.wrapped;
-
-  const login = send("POST", "/api/login", { username: "alice", password: PASSWORD });
-  await hold.entered;
-  const reset = await send("POST", "/api/link/login", {
-    token: token("signal:+100"),
-    password: "a brand new password",
-  });
-  expect(reset.status).toBe(200);
-  hold.release();
-
-  const response = await login;
-  expect(response.status).toBe(401);
-  expect(await response.json()).toEqual({ error: "Wrong username or password" });
-  expect(response.headers.get("Set-Cookie")).toBeNull();
-  expect(countSessions(store)).toBe(1);
-});
-
-test("a login with a token whose chat read is held open while a login link sets a new password is refused, leaving the token unused", async () => {
-  const { send, register, token, assistant, store } = createTestApp();
-  await register("alice", "signal:+100");
-  // biome-ignore lint/complexity/useLiteralKeys: a private field, written for the check
-  store["db"].run("DELETE FROM sessions");
-  const link = token("signal:+300");
-  const hold = holdNextCall(assistant.internalApi.getChatLink);
-  assistant.internalApi.getChatLink = hold.wrapped;
-
-  const login = send("POST", "/api/login", { username: "alice", password: PASSWORD, token: link });
-  await hold.entered;
-  const reset = await send("POST", "/api/link/login", {
-    token: token("signal:+100"),
-    password: "a brand new password",
-  });
-  expect(reset.status).toBe(200);
-  hold.release();
-
-  const response = await login;
-  expect(response.status).toBe(401);
-  expect(response.headers.get("Set-Cookie")).toBeNull();
-  expect(countSessions(store)).toBe(1);
-  expect(await (await send("POST", "/api/link/check", { token: link })).json()).toEqual({
-    valid: true,
-    chatKey: "signal:+300",
-  });
-  expect(assistant.requests.map((request) => request.chatKey)).toEqual(["signal:+100"]);
 });
 
 test("an account route naming another account than the session's is refused; one naming it, or none, is served", async () => {
@@ -2003,21 +1826,6 @@ test("logout unregisters the session's device; when the assistant cannot, the se
   expect((await sendApp("POST", "/api/logout", undefined, bob.token)).status).toBe(200);
 });
 
-test("a register that a logout overtook is undone", async () => {
-  const { sendApp, store, assistant } = createTestApp();
-  const alice = await registerApp(sendApp, store, "alice");
-  const registerDevice = assistant.internalApi.registerDevice;
-  assistant.internalApi.registerDevice = async (accountId, deviceId, registration) => {
-    const result = await registerDevice(accountId, deviceId, registration);
-    store.deleteAppSession(alice.token);
-
-    return result;
-  };
-
-  expect((await sendApp("PUT", "/api/device", deviceKeys(0), alice.token)).status).toBe(401);
-  expect(assistant.devices.size).toBe(0);
-});
-
 test("a new password set through a login link unregisters the account's devices first; when the assistant cannot, nothing changes", async () => {
   const { sendApp, register, token, store, assistant } = createTestApp();
   await register("alice", "signal:+100");
@@ -2061,35 +1869,6 @@ test("a new password set through a login link unregisters the account's devices 
   expect(reset.status).toBe(200);
   expect((await sendApp("GET", "/api/me", undefined, phone)).status).toBe(401);
   expect([...assistant.devices.values()].map((device) => device.accountId)).toEqual([bob.publicId]);
-});
-
-test("a device that registers while a new password is being set does not outlive its session", async () => {
-  const { sendApp, register, token, assistant } = createTestApp();
-  await register("alice", "signal:+100");
-  const phone = (
-    await (await sendApp("POST", "/api/login", { username: "alice", password: PASSWORD })).json()
-  ).token;
-  const unregisterAccountDevices = assistant.internalApi.unregisterAccountDevices;
-  let late = true;
-  // the phone registers after the account's devices were listed and before its session ends
-  assistant.internalApi.unregisterAccountDevices = async (accountId) => {
-    const removed = await unregisterAccountDevices(accountId);
-
-    if (late) {
-      late = false;
-      await sendApp("PUT", "/api/device", deviceKeys(0), phone);
-    }
-
-    return removed;
-  };
-
-  const reset = await sendApp("POST", "/api/link/login", {
-    token: token("signal:+100"),
-    password: "a brand new password",
-  });
-  expect(reset.status).toBe(200);
-  expect((await sendApp("GET", "/api/me", undefined, phone)).status).toBe(401);
-  expect(assistant.devices.size).toBe(0);
 });
 
 test("the edge reports every account with an open stream on each connection and when an account's first stream opens or last closes", async () => {

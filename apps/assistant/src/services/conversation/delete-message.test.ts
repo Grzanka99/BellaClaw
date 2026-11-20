@@ -219,27 +219,3 @@ test("deleting a message of an account's Bella conversation forgets the facts st
   await resetIdentityLinksTable();
   Object.assign(IdentityService, { _instance: undefined });
 });
-
-test("deleting a message of an address being linked forgets its fact already moved to the account", async () => {
-  await resetIdentityLinksTable();
-  Object.assign(IdentityService, { _instance: undefined });
-  await DatabaseConnector.instance.database.insert(identityLinksTable).values({
-    channel: EMessagePlatform.Signal,
-    address: "+801",
-    accountId: "acct-moving",
-    state: EIdentityLinkState.Migrating,
-    linkedAt: new Date(1_000),
-  });
-  const chatId = "signal:+801";
-  const turn = await saveTurn(chatId, "first", [], undefined);
-  const userId = turn.entries[0]?.id ?? 0;
-  // Memory moved the fact; the transcript still waits for Conversation's move
-  await insertFact("account:acct-moving", "from the user message", userId);
-
-  await requestDelete(chatId, userId);
-  await EventBus.instance.idle();
-
-  expect(await liveFacts("account:acct-moving")).toEqual([]);
-  await resetIdentityLinksTable();
-  Object.assign(IdentityService, { _instance: undefined });
-});

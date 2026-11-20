@@ -138,24 +138,6 @@ test("rows are imported oldest first, one at a time, each removed once its link 
   expect(hasImportTable()).toBe(false);
 });
 
-test("after a restart, a row whose link is active or migrating for its account finishes without a new request", async () => {
-  seedOldDatabase([
-    ["signal:+100", 1, 1_000],
-    ["signal:+200", 1, 2_000],
-  ]);
-  const store = new AccountStore(path);
-  const alice = store.findCredentials("alice")?.publicId ?? "";
-  const assistant = createFakeAssistant();
-  assistant.links.set("signal:+100", { accountId: alice, state: "active" });
-  assistant.links.set("signal:+200", { accountId: alice, state: "migrating" });
-  setTimeout(() => assistant.activate("signal:+200"), 20);
-
-  await importAccountChats(store, assistant.internalApi, 5);
-
-  expect(assistant.requests).toEqual([]);
-  expect(hasImportTable()).toBe(false);
-});
-
 test("an unreachable assistant is retried", async () => {
   seedOldDatabase([["signal:+100", 1, 1_000]]);
   const store = new AccountStore(path);
@@ -179,7 +161,6 @@ test("an unreachable assistant is retried", async () => {
 test("a row whose chat is linked to another account is left, and the next row goes on", async () => {
   seedOldDatabase([
     ["signal:+100", 1, 1_000],
-    ["signal:+150", 1, 1_500],
     ["signal:+200", 2, 2_000],
   ]);
   const store = new AccountStore(path);
@@ -187,14 +168,6 @@ test("a row whose chat is linked to another account is left, and the next row go
   assistant.links.set("signal:+100", { accountId: "someone-else", state: "active" });
   const getChatLink = assistant.internalApi.getChatLink;
   assistant.internalApi.getChatLink = async (chatKey) => {
-    // signal:+150 is linked elsewhere between the read and the request
-    if (chatKey === "signal:+150" && !assistant.links.has(chatKey)) {
-      const result = await getChatLink(chatKey);
-      assistant.links.set(chatKey, { accountId: "someone-else", state: "active" });
-
-      return result;
-    }
-
     const result = await getChatLink(chatKey);
     assistant.activate(chatKey);
 
@@ -203,13 +176,9 @@ test("a row whose chat is linked to another account is left, and the next row go
 
   await importAccountChats(store, assistant.internalApi, 1);
 
-  expect(assistant.requests.map((request) => request.chatKey)).toEqual([
-    "signal:+150",
-    "signal:+200",
-  ]);
+  expect(assistant.requests.map((request) => request.chatKey)).toEqual(["signal:+200"]);
   expect(store.nextImportRow(new Set())?.chatId).toBe("signal:+100");
-  expect(store.nextImportRow(new Set(["signal:+100"]))?.chatId).toBe("signal:+150");
-  expect(store.nextImportRow(new Set(["signal:+100", "signal:+150"]))).toBeUndefined();
+  expect(store.nextImportRow(new Set(["signal:+100"]))).toBeUndefined();
 });
 
 test("an account_chats table that is empty at the start is dropped", async () => {

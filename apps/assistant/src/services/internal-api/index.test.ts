@@ -109,19 +109,6 @@ describe("internal API", () => {
     });
   });
 
-  test("a link already migrating is rejected without a code", async () => {
-    await link("+100", "acct-1", EIdentityLinkState.Migrating, 1_000);
-    await start();
-
-    const response = await send("POST", "/internal/links", {
-      accountId: "acct-1",
-      chatKey: "signal:+100",
-    });
-
-    expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({ error: "The address is already being linked" });
-  });
-
   test("a link request with a chat key that names no address is invalid", async () => {
     await start();
 

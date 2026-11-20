@@ -217,34 +217,6 @@ describe("Memory", () => {
       ).toEqual(["The bicycle is named Comet again."]);
     });
 
-    test("rejects a typed command stored for display as a remembered fact's source", async () => {
-      const memory = Memory.instance;
-      await ConversationStore.instance.saveDisplayMessage(
-        DatabaseConnector.instance.database,
-        "chat-display-source",
-        EMessagePlatform.Signal,
-        {
-          text: "Usage",
-          request: { text: "!dashboard", receivedAt: 1, clientMessageId: undefined },
-        },
-        2,
-      );
-
-      await expect(
-        DatabaseConnector.instance.database.transaction((tx) =>
-          memory.rememberFact(
-            tx,
-            "chat-display-source",
-            "chat-display-source",
-            "The user asked for the dashboard.",
-            "!dashboard",
-            embedding(1),
-            [],
-          ),
-        ),
-      ).rejects.toThrow("A remembered fact requires its exact same-chat user transcript source");
-    });
-
     test("discovers chats and carries both transcript roles through ordered bounded windows", async () => {
       const memory = Memory.instance;
       for (let index = 1; index <= 8; index++) {

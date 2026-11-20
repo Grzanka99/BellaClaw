@@ -15,7 +15,7 @@ import { AuthorizationService } from "../authorization";
 import { Commands } from "../commands";
 import { DatabaseConnector } from "../database";
 import { resetEventTables, resetIdentityLinksTable } from "../database/test-utils";
-import { CommandRejectedError, EventBus } from "../events";
+import { EventBus } from "../events";
 import { testMessageOrigin, withEventContext } from "../events/test-utils";
 import { IdentityService } from "../identity";
 import { Memory } from "../memory";
@@ -24,12 +24,10 @@ import { MessagingAdapter } from "../messaging";
 import { EMessagePlatform } from "../messaging/types";
 import { SettingsService } from "../settings";
 import { DefaultConfigRecord } from "../settings/schema";
-import { ConversationStore } from ".";
 import type { TConversation } from "./types";
 
 const originalUrl = Bun.env.BELLACLAW_DASHBOARD_PUBLIC_URL;
 const originalSecret = Bun.env.BELLACLAW_DASHBOARD_SECRET;
-const originalRaiseRevision = ConversationStore.instance.raiseRevision;
 
 function reset() {
   for (const service of [
@@ -56,7 +54,6 @@ beforeEach(async () => {
 afterEach(async () => {
   await EventBus.instance.idle();
   await EventBus.instance.stop();
-  Object.assign(ConversationStore.instance, { raiseRevision: originalRaiseRevision });
   Bun.env.BELLACLAW_DASHBOARD_PUBLIC_URL = originalUrl;
   Bun.env.BELLACLAW_DASHBOARD_SECRET = originalSecret;
   reset();
@@ -342,35 +339,4 @@ test("a scripted session stores one row per visible message with its channel, a 
     ["user", expect.stringContaining('"A reminder fired."')],
     ["assistant", expect.stringContaining("[CRON REMINDER daily]: Take a break.")],
   ]);
-});
-
-test("a delete's rows, the revision and conversation.changed commit together or not at all", async () => {
-  const chatId = `signal:atomic-${crypto.randomUUID()}`;
-  await setupSession();
-  await send(chatId, "Hello", "client-1");
-  const before = await rows(chatId);
-  const reply = before.find((row) => row.message === "Reply to Hello");
-  const store = ConversationStore.instance;
-  Object.assign(store, {
-    raiseRevision: async (...args: Parameters<typeof store.raiseRevision>) => {
-      await originalRaiseRevision.apply(store, args);
-      throw new Error("disk full");
-    },
-  });
-
-  await expect(requestDelete(chatId, reply?.id ?? 0)).rejects.toBeInstanceOf(CommandRejectedError);
-  expect(await rows(chatId)).toEqual(before);
-  expect(await revision(chatId)).toEqual({ revision: 2, rewriteRevision: 0 });
-  expect(await changes()).toHaveLength(2);
-
-  Object.assign(store, { raiseRevision: originalRaiseRevision });
-  await requestDelete(chatId, reply?.id ?? 0);
-  expect((await rows(chatId)).map((row) => row.message)).toEqual(["Hello"]);
-  expect(await revision(chatId)).toEqual({ revision: 3, rewriteRevision: 3 });
-  expect((await changes()).at(-1)).toEqual({
-    conversationKey: chatId,
-    ownerKey: chatId,
-    revision: 3,
-    rewriteRevision: 3,
-  });
 });

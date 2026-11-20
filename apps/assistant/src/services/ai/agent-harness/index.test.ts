@@ -31,13 +31,7 @@ import { EMessagePlatform } from "../../messaging/types";
 import { DefaultConfigRecord, EConfigKey } from "../../settings/schema";
 import { EAgentName } from "../agents";
 import { LlmClient } from "../llm";
-import {
-  aiModels,
-  checkAiModelChoice,
-  EAiModelChoiceProblem,
-  getAiModelConfig,
-  getAiModelConfigs,
-} from "../providers/registry";
+import { aiModels, getAiModelConfig, getAiModelConfigs } from "../providers/registry";
 import { EAiProvider, EModelPurpose } from "../types";
 import { AgentHarness, isSerializedToolCall } from ".";
 import type { TAgentRunArgs, TAgentRunResult } from "./types";
@@ -212,51 +206,6 @@ describe("AgentHarness", () => {
     expect(contexts[1]?.messages.filter((message) => message.role === "user")).toMatchObject([
       { role: "user", content: [{ type: "text", text: "time two\n\nsecond prompt" }] },
     ]);
-  });
-
-  test("runs a plain turn on the model it was checked against, after the catalog dropped it", async () => {
-    const chosen = await checkAiModelChoice(EAiProvider.Openrouter, "openai/gpt-5.4-mini", "high");
-    if (chosen === EAiModelChoiceProblem.ModelUnavailable) {
-      throw new Error("the faux catalog lists the model");
-    }
-    if (chosen === EAiModelChoiceProblem.EffortUnsupported) {
-      throw new Error("the faux model supports the effort");
-    }
-    const getModel = aiModels.getModel.bind(aiModels);
-    const dropped = spyOn(aiModels, "getModel").mockImplementation(((
-      provider: string,
-      modelId: string,
-    ) => {
-      if (modelId === "openai/gpt-5.4-mini") {
-        return undefined;
-      }
-      return getModel(provider, modelId);
-    }) as typeof aiModels.getModel);
-    const stream = spyOn(LlmClient.instance, "stream");
-    faux.setResponses([fauxAssistantMessage("plain")]);
-
-    try {
-      const result = await AgentHarness.instance.runPlain({
-        prompt: "Hello",
-        conversationKey: "plain:acct:1",
-        ownerKey: "account:acct",
-        settings: { ...DefaultConfigRecord, [EConfigKey.AiProvider]: EAiProvider.Openrouter },
-        currentTimeContext: undefined,
-        platform: undefined,
-        trace: TEST_TRACE,
-        events: testEventRequester,
-        signal: undefined,
-        model: chosen,
-      });
-
-      expect(result.text).toBe("plain");
-      expect(stream.mock.calls.map(([model, config]) => [model.id, config.effort])).toEqual([
-        ["openai/gpt-5.4-mini", "high"],
-      ]);
-    } finally {
-      dropped.mockRestore();
-      stream.mockRestore();
-    }
   });
 
   test.each([

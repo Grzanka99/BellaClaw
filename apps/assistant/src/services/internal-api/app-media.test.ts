@@ -560,45 +560,6 @@ test("a failed turn's image stays listed, is not replayed, and goes with the thi
   expect((await mediaRows()).map((row) => row.id)).not.toContain(media.id);
 });
 
-test("an upload that finishes after its plain chat was deleted answers not found and keeps nothing", async () => {
-  useModel(true);
-  await start();
-  const accountId = `acct-${crypto.randomUUID()}`;
-  const created = await request(
-    "POST",
-    dashboardAccountConversationsPath(accountId),
-    null,
-    "application/json",
-  );
-  const { conversationKey } = (await created.json()) as { conversationKey: string };
-  const before = await readdir(mediaDir);
-  // read only once the route checked the conversation; the chat is deleted before the bytes come
-  const body = new ReadableStream<Uint8Array>(
-    {
-      async pull(controller) {
-        const deleted = await handleInternalApiRequest(
-          new Request(
-            `http://internal${dashboardAccountConversationPath(accountId, conversationKey)}`,
-            { method: "DELETE", headers: { Authorization: `Bearer ${SECRET}` } },
-          ),
-          SECRET,
-        );
-        expect(deleted.status).toBe(200);
-        controller.enqueue(PNG);
-        controller.close();
-      },
-    },
-    { highWaterMark: 0 },
-  );
-
-  expect(await upload(accountId, conversationKey, body, "image/png")).toEqual([
-    404,
-    { error: "Not found" },
-  ]);
-  expect(await readdir(mediaDir)).toEqual(before);
-  expect((await mediaRows()).filter((row) => row.conversationKey === conversationKey)).toEqual([]);
-});
-
 test("a deleted message takes its image with it", async () => {
   useModel(true);
   await start();

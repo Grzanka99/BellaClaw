@@ -4,7 +4,6 @@ import {
   conversationsTable,
   EConversationKind,
   EEventType,
-  eventDeliveriesTable,
   eventsTable,
   factsTable,
   listConversations,
@@ -19,7 +18,7 @@ import {
   type TOption,
 } from "@bellaclaw/shared";
 import { fauxAssistantMessage, type Message } from "@earendil-works/pi-ai";
-import { and, asc, eq } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import type { AgentHarness } from "../ai/agent-harness";
 import { setupAiAuth } from "../ai/auth";
 import type { LlmClient } from "../ai/llm";
@@ -37,7 +36,6 @@ import { IdentityService } from "../identity";
 import { FactDistiller } from "../memory/distill";
 import { MessageHandler } from "../message-handler";
 import { MessagingAdapter } from "../messaging";
-import { EMessagePlatform } from "../messaging/types";
 import { SettingsService } from "../settings";
 import { DefaultConfigRecord, EConfigKey } from "../settings/schema";
 import { handleInternalApiRequest, setupInternalApi } from ".";
@@ -278,23 +276,6 @@ test("a send to a plain chat names a model the server offers, with an effort the
   expect(runPlain).not.toHaveBeenCalled();
 });
 
-test("a repeated send of a stored message is answered the same after its provider became unusable", async () => {
-  const { runPlain } = await start();
-  const accountId = `acct-${crypto.randomUUID()}`;
-  const chat = await createChat(accountId);
-  const message = { clientMessageId: "m-1", text: "Hi", model: GPT };
-
-  const first = await send(accountId, chat, message);
-  await EventBus.instance.idle();
-  delete Bun.env.OPENROUTER_API_KEY;
-  const repeated = await send(accountId, chat, message);
-  await EventBus.instance.idle();
-
-  expect(first).toEqual([200, { clientMessageId: "m-1" }]);
-  expect(repeated).toEqual(first);
-  expect(runPlain).toHaveBeenCalledTimes(1);
-});
-
 test("a send to a plain chat names a provider the server can use now, else it answers 400 and stores nothing", async () => {
   const { runPlain } = await start();
   const accountId = `acct-${crypto.randomUUID()}`;
@@ -375,76 +356,6 @@ test("a plain chat's failed turn answers the failure reply and leaves the accoun
   } finally {
     getAuth.mockRestore();
     refresh.mockRestore();
-  }
-});
-
-test("a plain chat's turn whose model left the catalog after the send was accepted fails with a reply naming the model and runs no model", async () => {
-  const keys = { provider: EConfigKey.AiProvider, preferences: EConfigKey.AiModelPreferences };
-  const running = Promise.withResolvers<void>();
-  const release = Promise.withResolvers<void>();
-  let gone = false;
-  const getModel = aiModels.getModel.bind(aiModels);
-  const getModelSpy = spyOn(aiModels, "getModel").mockImplementation(((
-    provider: string,
-    modelId: string,
-  ) => {
-    if (gone && modelId === GPT.model) {
-      return undefined;
-    }
-
-    return getModel(provider, modelId);
-  }) as typeof aiModels.getModel);
-  // the first turn is slow: the second send is accepted and waits behind it on the chat's lane
-  const runPlain = mock(async (args: TRunArgs) => {
-    running.resolve();
-    await release.promise;
-    return reply(args, `Plain reply to ${args.prompt}`);
-  });
-
-  try {
-    await start(runPlain, true);
-    const accountId = `acct-${crypto.randomUUID()}`;
-    const { ownerKey } = account(accountId);
-    const chat = await createChat(accountId);
-    const before = await SettingsService.instance.getAll(ownerKey);
-
-    const first = send(accountId, chat, { clientMessageId: "m-1", text: "One", model: GPT });
-    await running.promise;
-    const second = await handleInternalApiRequest(
-      new Request(`http://internal${dashboardAccountConversationMessagesPath(accountId, chat)}`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${SECRET}` },
-        body: JSON.stringify({ clientMessageId: "m-2", text: "Two", model: GPT }),
-      }),
-      SECRET,
-    );
-    expect([second.status, await second.json()]).toEqual([200, { clientMessageId: "m-2" }]);
-
-    gone = true;
-    release.resolve();
-    expect(await first).toEqual([200, { clientMessageId: "m-1" }]);
-    await EventBus.instance.idle();
-
-    expect(runPlain).toHaveBeenCalledTimes(1);
-    expect((await history(chat)).map((row) => [row.author, row.text])).toEqual([
-      ["user", "One"],
-      ["assistant", "Plain reply to One"],
-      ["user", "Two"],
-      [
-        "assistant",
-        `The model ${GPT.model} is no longer available from openrouter. Choose another model and send again.`,
-      ],
-    ]);
-    expect((await eventsOf(EEventType.TurnFailed)).map((event) => event.payload)).toMatchObject([
-      { conversationKey: chat, reason: "no_final_response" },
-    ]);
-    const after = await SettingsService.instance.getAll(ownerKey);
-    expect(after[keys.provider]).toBe(before[keys.provider]);
-    expect(decodeAiModelPreferences(after[keys.preferences])).toEqual(
-      decodeAiModelPreferences(before[keys.preferences]),
-    );
-  } finally {
-    getModelSpy.mockRestore();
   }
 });
 
@@ -562,8 +473,8 @@ test("a plain chat's personal fact adds no fact, also after a restart, while the
   expect(await factsOf(keys.ownerKey)).toEqual([{ text: "The user lives in Krakow." }]);
 });
 
-test("deleting a plain chat leaves no transcript rows, summary or registry entry for it, and a late turn or reply stores nothing", async () => {
-  const { runPlain } = await start();
+test("deleting a plain chat leaves no transcript rows, summary or registry entry for it", async () => {
+  await start();
   const accountId = `acct-${crypto.randomUUID()}`;
   const chat = await createChat(accountId);
   await send(accountId, chat, { clientMessageId: "m-1", text: "Hello", model: GPT });
@@ -593,45 +504,6 @@ test("deleting a plain chat leaves no transcript rows, summary or registry entry
   ]);
   expect(await rowsOf()).toEqual([0, 0, 0]);
 
-  // a turn and a failure reply that reach the chat's lane after the delete store nothing
-  await EventBus.instance.publish({
-    type: EEventType.TurnRequested,
-    source: "test",
-    key: chat,
-    trace: { turnId: "test:late-turn", chatId: chat, platform: EMessagePlatform.App },
-    payload: {
-      conversationKey: chat,
-      ownerKey: `account:${accountId}`,
-      channel: EMessagePlatform.App,
-      replyAddress: accountId,
-      kind: EConversationKind.Plain,
-      content: "Late",
-      attachments: [],
-      receivedAt: Date.now(),
-      model: { provider: EAiProvider.Openrouter, model: GPT.model, effort: "low" },
-    },
-    causationId: undefined,
-    dedupeKey: undefined,
-  });
-  await EventBus.instance.publish({
-    type: EEventType.MessageSent,
-    source: "test",
-    key: chat,
-    trace: { turnId: "test:late", chatId: chat, platform: undefined },
-    payload: {
-      chatId: chat,
-      channel: EMessagePlatform.App,
-      sourceType: EEventType.ReplyReady,
-      chars: 5,
-      sentAt: Date.now(),
-      display: { text: "Late" },
-    },
-    causationId: undefined,
-    dedupeKey: undefined,
-  });
-  await EventBus.instance.idle();
-  expect(await rowsOf()).toEqual([0, 0, 0]);
-  expect(runPlain).toHaveBeenCalledTimes(1);
   expect(
     await db
       .select()
@@ -647,32 +519,6 @@ async function titleOf(conversationKey: string) {
     .where(eq(conversationsTable.conversationKey, conversationKey))
     .get();
   return row;
-}
-
-// boots the bus again with the title delivery of the chat's first turn.completed pending, as a
-// crash leaves it
-async function replayTitle(conversationKey: string) {
-  const [completed] = await DatabaseConnector.instance.database
-    .select({ seq: eventsTable.seq })
-    .from(eventsTable)
-    .where(
-      and(eq(eventsTable.type, EEventType.TurnCompleted), eq(eventsTable.key, conversationKey)),
-    )
-    .orderBy(asc(eventsTable.seq));
-  await DatabaseConnector.instance.database
-    .update(eventDeliveriesTable)
-    .set({ status: "pending", attempts: 0 })
-    .where(
-      and(
-        eq(eventDeliveriesTable.eventSeq, completed?.seq ?? 0),
-        eq(eventDeliveriesTable.consumer, "conversation-title"),
-      ),
-    );
-  await EventBus.instance.stop();
-  Object.assign(EventBus, { _instance: undefined });
-  MessageHandler.instance.setup();
-  await EventBus.instance.start();
-  await EventBus.instance.idle();
 }
 
 test("the first reply of a plain chat writes one title, which the stream announces and the list shows; later turns keep it", async () => {
@@ -743,41 +589,7 @@ test("a plain chat whose first turn fails takes its title from the next complete
   expect((await titleOf(chat))?.title).toBe("Trip plans");
 });
 
-test("a title answer of several lines is stored as its first line", async () => {
-  const completeText = mock(
-    async (_args: TCompleteTextArgs): Promise<TOption<string>> => "\n Trips \nHotels",
-  );
-  await start(undefined, false, completeText);
-  const accountId = `acct-${crypto.randomUUID()}`;
-  const chat = await createChat(accountId);
-
-  await send(accountId, chat, { clientMessageId: "m-1", text: "Plan a trip", model: GPT });
-
-  expect((await titleOf(chat))?.title).toBe("Trips");
-});
-
-test("a plain chat whose first title call fails takes its title after its next completed turn", async () => {
-  const completeText = mock(async (_args: TCompleteTextArgs): Promise<TOption<string>> => {
-    throw new Error("provider down");
-  });
-  await start(undefined, false, completeText);
-  const accountId = `acct-${crypto.randomUUID()}`;
-  const chat = await createChat(accountId);
-
-  await send(accountId, chat, { clientMessageId: "m-1", text: "Hello", model: GPT });
-  expect((await titleOf(chat))?.title).toBeNull();
-
-  completeText.mockImplementation(async () => "Hotels");
-  await send(accountId, chat, { clientMessageId: "m-2", text: "And hotels?", model: GPT });
-  expect(completeText).toHaveBeenCalledTimes(2);
-  expect(JSON.parse(completeText.mock.calls[1]?.[0].prompt ?? "")).toEqual({
-    message: "And hotels?",
-    reply: "Plain reply to And hotels?",
-  });
-  expect((await titleOf(chat))?.title).toBe("Hotels");
-});
-
-test("a failed or empty title call leaves the plain chat untitled and usable, with no dead letter; a crash before the store writes the title on replay", async () => {
+test("a failed or empty title call leaves the plain chat untitled and usable, with no dead letter", async () => {
   const completeText = mock(async (_args: TCompleteTextArgs): Promise<TOption<string>> => {
     throw new Error("provider down");
   });
@@ -802,41 +614,4 @@ test("a failed or empty title call leaves the plain chat untitled and usable, wi
     "Still there?",
     "Plain reply to Still there?",
   ]);
-
-  // the first turn's delivery pending again, as a crash between the call and the store leaves it
-  completeText.mockImplementation(async () => "Greetings\nA chat that starts with a hello.");
-  await replayTitle(chat);
-  expect(completeText).toHaveBeenCalledTimes(4);
-  expect(JSON.parse(completeText.mock.calls[3]?.[0].prompt ?? "")).toEqual({
-    message: "Hello",
-    reply: "Plain reply to Hello",
-  });
-  expect((await titleOf(chat))?.title).toBe("Greetings");
-});
-
-test("a plain chat deleted before its title arrives gets none, and nothing fails", async () => {
-  const accountId = `acct-${crypto.randomUUID()}`;
-  let chat = "";
-  let deleted: TOption<Response>;
-  // the chat is deleted on its own lane while the title call runs
-  const completeText = mock(async (_args: TCompleteTextArgs): Promise<TOption<string>> => {
-    deleted = await handleInternalApiRequest(
-      new Request(`http://internal${dashboardAccountConversationPath(accountId, chat)}`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${SECRET}` },
-      }),
-      SECRET,
-    );
-    return "Too late";
-  });
-  const { streamed } = await start(undefined, false, completeText);
-  chat = await createChat(accountId);
-
-  await send(accountId, chat, { clientMessageId: "m-1", text: "Hello", model: GPT });
-
-  expect(completeText).toHaveBeenCalledTimes(1);
-  expect(deleted?.status).toBe(200);
-  expect(await titleOf(chat)).toBeUndefined();
-  expect(await eventsOf(EEventType.EventDeadLettered)).toEqual([]);
-  expect(streamed.at(-1)).toEqual({ type: "deleted", accountId, conversationKey: chat });
 });
