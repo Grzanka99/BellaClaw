@@ -16,9 +16,10 @@ import { drizzle } from "drizzle-orm/libsql";
 import { migrate } from "drizzle-orm/libsql/migrator";
 import { ACCOUNT_HEADER } from "./account-header";
 import { AccountStore } from "./account-store";
-import { CLIENT_HEADER, createApp } from "./app";
+import { createApp } from "./app";
 import { createChatReader, type TChatReader } from "./chat-reader";
 import { createLiveStream } from "./live-stream";
+import { CLIENT_HEADER } from "./route-support";
 import { createFakeAssistant, FAKE_MODEL_CATALOG } from "./test-utils";
 
 const ORIGIN = "https://dashboard.test";
