@@ -60,9 +60,7 @@ export class ScheduledDelivery {
   private async handleCronFire(event: TEvent<EEventType.CronFired>, ctx: TEventContext) {
     // NOTE: a fire for a scope that is being linked waits for the link on its own lane, bounded
     // from the fire as an inbound message is, so it runs once, for the account
-    if (!(await IdentityService.instance.waitWhileLinking(event.payload.scope, event.occurredAt))) {
-      throw new Error("The link of this job's owner did not complete in time");
-    }
+    await IdentityService.instance.holdWhileLinking(event.payload.scope, event.occurredAt);
 
     // the scope is the job's owner; the delivery goes to the owner's conversation, and its text is
     // formatted for the channel that conversation is reached on

@@ -176,8 +176,7 @@ export class Notices {
   // recipient: an owner, conversation or address key; the notice goes to its conversation, on
   // that conversation's lane
   private async notify(ctx: TEventContext, recipient: string, text: string): Promise<void> {
-    const chatId =
-      (await IdentityService.instance.resolve(recipient))?.conversationKey ?? recipient;
+    const chatId = await IdentityService.instance.conversationKeyOf(recipient);
 
     await ctx.complete(async (_tx, emit) => {
       emit(EEventType.NoticeReady, { chatId, text }, undefined, chatId);

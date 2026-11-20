@@ -4,12 +4,7 @@ import {
   createSystemTurnId,
   type TBehaviorTraceContext,
 } from "@bellaclaw/behavior-logs";
-import {
-  EConversationKind,
-  EEventType,
-  findConversationKind,
-  findOwnedConversation,
-} from "@bellaclaw/database";
+import { EConversationKind, EEventType, findOwnedConversationKind } from "@bellaclaw/database";
 import {
   CONVERSATION_NOT_FOUND,
   DEVICE_NOT_FOUND,
@@ -244,6 +239,16 @@ async function requestOutcome<T extends EEventType, R>(
   }
 }
 
+// every issue of a refused body with its path, for the 400's message
+function describeIssues(error: z.ZodError): string {
+  return error.issues.map((issue) => [...issue.path, issue.message].join(": ")).join(", ");
+}
+
+// the trace of a command the API publishes for a chat
+function systemTrace(chatId: string): TBehaviorTraceContext {
+  return { turnId: createSystemTurnId(), chatId, platform: undefined };
+}
+
 function createModelState(settings: TConfigRecord): TGatewayModelState {
   const provider = resolveAiProvider(settings);
   const models = getAiModelConfigs(
@@ -300,12 +305,10 @@ async function updateModel(
   const args = SModelUpdate.safeParse(body);
 
   if (!args.success) {
-    throw new Error(
-      args.error.issues.map((issue) => [...issue.path, issue.message].join(": ")).join(", "),
-    );
+    throw new Error(describeIssues(args.error));
   }
 
-  const trace = { turnId: createSystemTurnId(), chatId: conversationKey, platform: undefined };
+  const trace = systemTrace(conversationKey);
   const updates: TConfigUpdate[] = [];
   const { settings } = await prepareAiSettingsUpdate(
     ownerKey,
@@ -348,9 +351,7 @@ async function updatePersonality(
   const update = SGatewayPersonalityUpdate.safeParse(body);
 
   if (!update.success) {
-    throw new Error(
-      update.error.issues.map((issue) => [...issue.path, issue.message].join(": ")).join(", "),
-    );
+    throw new Error(describeIssues(update.error));
   }
 
   const updates: TConfigUpdate[] = [];
@@ -372,7 +373,7 @@ async function updatePersonality(
 
   return requestOutcome(
     pendingUpdates,
-    { turnId: createSystemTurnId(), chatId: conversationKey, platform: undefined },
+    systemTrace(conversationKey),
     ownerKey,
     EEventType.SettingsUpdateRequested,
     { ownerKey, updates },
@@ -444,7 +445,7 @@ async function requestLink(body: unknown): Promise<TGatewayLinkStarted> {
 
   await requestOutcome(
     pendingLinks,
-    { turnId: createSystemTurnId(), chatId: chatKey, platform: undefined },
+    systemTrace(chatKey),
     chatKey,
     EEventType.IdentityLinkRequested,
     { accountId, channel: address.platform, address: address.chatId },
@@ -714,27 +715,28 @@ export async function handleInternalApiRequest(
       return Response.json(body);
     }
 
+    // a conversation route answers 404 for a conversation that is not the account's
+    let kind: TOption<EConversationKind>;
+
+    if (appMessageRoute || mediaUploadRoute || mediaDownloadRoute || conversationDeleteRoute) {
+      kind = await DatabaseConnector.instance.run((db) =>
+        findOwnedConversationKind(db, conversationKey, account),
+      );
+
+      if (kind === undefined) {
+        return errorResponse("Not found", 404, undefined);
+      }
+    }
+
     // NOTE: the send answers once message.received is stored and waits for no outcome. The client's
     // id is the dedupe key, so a repeated send stores nothing and answers the same. Authorization
     // checks the ownership again before the message reaches a turn. A plain chat's send carries
     // its model, checked here; the Bella conversation runs on the account's settings
     if (appMessageRoute) {
-      const kind = await DatabaseConnector.instance.run(async (db) => {
-        if ((await findOwnedConversation(db, conversationKey, account)) === undefined) {
-          return undefined;
-        }
-
-        return findConversationKind(db, conversationKey);
-      });
-
-      if (kind === undefined) {
-        return errorResponse("Not found", 404, undefined);
-      }
-
       const message = SGatewayAppMessage.safeParse(await request.json());
 
       if (!message.success) {
-        throw new Error(message.error.issues[0]?.message ?? "Invalid message");
+        throw new Error(describeIssues(message.error));
       }
 
       const { clientMessageId, text, images = [] } = message.data;
@@ -799,14 +801,6 @@ export async function handleInternalApiRequest(
     // NOTE: everything is checked before anything is stored: the conversation, the declared type,
     // the size while the body is read, and the format the bytes really have
     if (mediaUploadRoute) {
-      const owned = await DatabaseConnector.instance.run((db) =>
-        findOwnedConversation(db, conversationKey, account),
-      );
-
-      if (owned === undefined) {
-        return errorResponse("Not found", 404, undefined);
-      }
-
       const mimeType = request.headers.get("content-type") ?? "";
 
       if (!SUPPORTED_IMAGE_TYPES.includes(mimeType)) {
@@ -842,14 +836,6 @@ export async function handleInternalApiRequest(
     // 404 for a conversation that is not the account's, 410 for an image this conversation does not
     // keep
     if (mediaDownloadRoute) {
-      const owned = await DatabaseConnector.instance.run((db) =>
-        findOwnedConversation(db, conversationKey, account),
-      );
-
-      if (owned === undefined) {
-        return errorResponse("Not found", 404, undefined);
-      }
-
       const media = await AppChannel.instance.open(conversationKey, mediaId);
 
       if (media === undefined) {
@@ -870,18 +856,14 @@ export async function handleInternalApiRequest(
         throw new Error("Invalid device id");
       }
 
-      const trace = {
-        turnId: createSystemTurnId(),
-        chatId: account.conversationKey,
-        platform: undefined,
-      };
+      const trace = systemTrace(account.conversationKey);
       const body: TGatewayDevice = { deviceId: deviceId.data };
 
       if (request.method === "PUT") {
         const registration = SGatewayDeviceRegistration.safeParse(await request.json());
 
         if (!registration.success) {
-          throw new Error(registration.error.issues[0]?.message ?? "Invalid device");
+          throw new Error(describeIssues(registration.error));
         }
 
         if (!(await isP256PublicKey(registration.data.publicKey))) {
@@ -929,11 +911,7 @@ export async function handleInternalApiRequest(
       };
 
       for (const deviceId of body.deviceIds) {
-        const trace = {
-          turnId: createSystemTurnId(),
-          chatId: account.conversationKey,
-          platform: undefined,
-        };
+        const trace = systemTrace(account.conversationKey);
 
         try {
           await requestOutcome(
@@ -958,7 +936,7 @@ export async function handleInternalApiRequest(
     if (conversationCreateRoute) {
       const body: TGatewayConversationCreated = await requestOutcome(
         pendingCreates,
-        { turnId: createSystemTurnId(), chatId: account.conversationKey, platform: undefined },
+        systemTrace(account.conversationKey),
         account.ownerKey,
         EEventType.ConversationCreateRequested,
         { ownerKey: account.ownerKey },
@@ -973,14 +951,6 @@ export async function handleInternalApiRequest(
     // reaches the lane; Conversation checks the owner and the kind again in the delete's
     // transaction
     if (conversationDeleteRoute) {
-      const kind = await DatabaseConnector.instance.run(async (db) => {
-        if ((await findOwnedConversation(db, conversationKey, account)) === undefined) {
-          return undefined;
-        }
-
-        return findConversationKind(db, conversationKey);
-      });
-
       if (kind !== EConversationKind.Plain) {
         return errorResponse("Not found", 404, undefined);
       }
@@ -988,7 +958,7 @@ export async function handleInternalApiRequest(
       try {
         await requestOutcome(
           pendingConversationDeletes,
-          { turnId: createSystemTurnId(), chatId: conversationKey, platform: undefined },
+          systemTrace(conversationKey),
           conversationKey,
           EEventType.ConversationDeleteRequested,
           { conversationKey, ownerKey: account.ownerKey },
@@ -1014,7 +984,7 @@ export async function handleInternalApiRequest(
       const body: TGatewayMessageDeleted = {
         deletedMessageIds: await requestOutcome(
           pendingDeletes,
-          { turnId: createSystemTurnId(), chatId: conversationKey, platform: undefined },
+          systemTrace(conversationKey),
           conversationKey,
           EEventType.ConversationMessageDeleteRequested,
           { chatId: conversationKey, messageId },
@@ -1089,7 +1059,8 @@ export function startInternalApiServer(): void {
   server = Bun.serve({
     hostname: Bun.env.BELLACLAW_INTERNAL_API_HOSTNAME?.trim() || "127.0.0.1",
     port,
-    // an image upload; every other body is held to MAX_JSON_BODY_BYTES by its route
+    // an image upload; a declared Content-Length above MAX_JSON_BODY_BYTES is refused for every
+    // route but the upload
     maxRequestBodySize: MAX_IMAGE_BYTES,
     // NOTE: the maximum. A model change waits for a provider verification, far beyond the
     // default 10 s.

@@ -78,8 +78,7 @@ export class IdentityService {
           channel,
           address,
           chatKey,
-          conversationKey: `${BELLA_CONVERSATION_PREFIX}${accountId}`,
-          ownerKey: `${ACCOUNT_OWNER_PREFIX}${accountId}`,
+          ...this.accountKeys(accountId),
         };
 
         // NOTE: a repeated request for an active link of the same account leaves the row as it
@@ -240,13 +239,13 @@ export class IdentityService {
 
       return {
         conversationKey: key,
-        ownerKey: `${ACCOUNT_OWNER_PREFIX}${accountId}`,
+        ownerKey: this.accountKeys(accountId).ownerKey,
         destination: { channel: EMessagePlatform.App, address: accountId },
       };
     }
 
     if (key.startsWith(ACCOUNT_OWNER_PREFIX)) {
-      accountId = key.slice(ACCOUNT_OWNER_PREFIX.length);
+      accountId = this.accountIdOf(key);
     } else if (key.startsWith(BELLA_CONVERSATION_PREFIX)) {
       accountId = key.slice(BELLA_CONVERSATION_PREFIX.length);
     } else {
@@ -284,11 +283,7 @@ export class IdentityService {
         destination = { channel: first.channel, address: first.address };
       }
 
-      return {
-        conversationKey: `${BELLA_CONVERSATION_PREFIX}${accountId}`,
-        ownerKey: `${ACCOUNT_OWNER_PREFIX}${accountId}`,
-        destination,
-      };
+      return { ...this.accountKeys(accountId), destination };
     }
 
     const parsed = parseCanonicalChatKey(key);
@@ -313,10 +308,7 @@ export class IdentityService {
       return undefined;
     }
 
-    return {
-      conversationKey: `${BELLA_CONVERSATION_PREFIX}${link.accountId}`,
-      ownerKey: `${ACCOUNT_OWNER_PREFIX}${link.accountId}`,
-    };
+    return this.accountKeys(link.accountId);
   }
 
   // the link of an address, by its chat key
@@ -331,8 +323,7 @@ export class IdentityService {
     await this.load();
 
     return {
-      conversationKey: `${BELLA_CONVERSATION_PREFIX}${accountId}`,
-      ownerKey: `${ACCOUNT_OWNER_PREFIX}${accountId}`,
+      ...this.accountKeys(accountId),
       links: [...this.links.values()]
         .filter((link) => link.accountId === accountId)
         .sort((left, right) => left.linkedAt.getTime() - right.linkedAt.getTime()),
@@ -371,6 +362,23 @@ export class IdentityService {
     return promise;
   }
 
+  // Waits like waitWhileLinking and throws when the hold ends before the link completes
+  public async holdWhileLinking(key: string, arrivedAt: number): Promise<void> {
+    if (!(await this.waitWhileLinking(key, arrivedAt))) {
+      throw new Error("The link did not complete in time");
+    }
+  }
+
+  // the conversation a key resolves to, else the key itself
+  public async conversationKeyOf(key: string): Promise<string> {
+    return (await this.resolve(key))?.conversationKey ?? key;
+  }
+
+  // the owner a key resolves to, else the key itself
+  public async ownerKeyOf(key: string): Promise<string> {
+    return (await this.resolve(key))?.ownerKey ?? key;
+  }
+
   // the account id of an account's owner key; undefined for an address's own key
   public accountIdOf(ownerKey: string): TOption<string> {
     if (!ownerKey.startsWith(ACCOUNT_OWNER_PREFIX)) {
@@ -406,7 +414,9 @@ export class IdentityService {
   public async listNoticeRecipients(authorizedChatIds: string[]): Promise<string[]> {
     await this.load();
     const accounts = new Set(this.activeLinks().map((link) => link.accountId));
-    const recipients = [...accounts].map((accountId) => `${BELLA_CONVERSATION_PREFIX}${accountId}`);
+    const recipients = [...accounts].map(
+      (accountId) => this.accountKeys(accountId).conversationKey,
+    );
 
     for (const chatId of authorizedChatIds) {
       if (this.links.get(chatId)?.state !== EIdentityLinkState.Active) {
@@ -417,12 +427,15 @@ export class IdentityService {
     return recipients;
   }
 
-  private isLinking(key: string): boolean {
-    let accountId = this.links.get(key)?.accountId;
+  private accountKeys(accountId: string): TAccountKeys {
+    return {
+      conversationKey: `${BELLA_CONVERSATION_PREFIX}${accountId}`,
+      ownerKey: `${ACCOUNT_OWNER_PREFIX}${accountId}`,
+    };
+  }
 
-    if (key.startsWith(ACCOUNT_OWNER_PREFIX)) {
-      accountId = key.slice(ACCOUNT_OWNER_PREFIX.length);
-    }
+  private isLinking(key: string): boolean {
+    const accountId = this.accountIdOf(key) ?? this.links.get(key)?.accountId;
 
     return [...this.links.values()].some(
       (link) => link.accountId === accountId && link.state === EIdentityLinkState.Migrating,

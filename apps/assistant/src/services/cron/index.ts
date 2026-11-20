@@ -704,8 +704,7 @@ export class CronScheduler {
         return;
       }
 
-      const conversationKey =
-        (await IdentityService.instance.resolve(scope))?.conversationKey ?? scope;
+      const conversationKey = await IdentityService.instance.conversationKeyOf(scope);
       // NOTE: the job update and the cron.fired row commit together, so a crash cannot lose a fire
       const firedJob = await EventBus.instance.transact(async (tx, emit) => {
         const current = await tx

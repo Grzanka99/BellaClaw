@@ -3,8 +3,7 @@ import { AppLogger, EBehaviorLogLevel, type TBehaviorTraceContext } from "@bella
 import {
   EConversationKind,
   EEventType,
-  findConversationKind,
-  findOwnedConversation,
+  findOwnedConversationKind,
   messageAuthorizationsTable,
 } from "@bellaclaw/database";
 import type { TOption } from "@bellaclaw/shared";
@@ -227,9 +226,7 @@ export class AuthorizationService {
 
     // NOTE: held on its own lane while the address or its account is being linked, so it is
     // answered once, in the account's conversation; the bound counts from its arrival
-    if (!(await IdentityService.instance.waitWhileLinking(chatId, event.occurredAt))) {
-      throw new Error("The link of this address did not complete in time");
-    }
+    await IdentityService.instance.holdWhileLinking(chatId, event.occurredAt);
 
     const resolved = await IdentityService.instance.resolve(chatId);
     if (resolved === undefined) {
@@ -314,9 +311,7 @@ export class AuthorizationService {
   ): Promise<void> {
     const { conversationKey, ownerKey } = event.payload;
 
-    if (!(await IdentityService.instance.waitWhileLinking(ownerKey, event.occurredAt))) {
-      throw new Error("The link of this account did not complete in time");
-    }
+    await IdentityService.instance.holdWhileLinking(ownerKey, event.occurredAt);
 
     const account = await IdentityService.instance.resolve(ownerKey);
     if (account === undefined) {
@@ -324,11 +319,12 @@ export class AuthorizationService {
     }
 
     const owned = await ctx.complete(async (tx, emit) => {
-      if ((await findOwnedConversation(tx, conversationKey, account)) === undefined) {
+      const kind = await findOwnedConversationKind(tx, conversationKey, account);
+
+      if (kind === undefined) {
         return false;
       }
 
-      const kind = await findConversationKind(tx, conversationKey);
       // on the conversation's lane
       emit(EEventType.MessageAuthorized, { ...event.payload, kind }, undefined, conversationKey);
       return true;

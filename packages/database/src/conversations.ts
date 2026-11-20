@@ -106,6 +106,34 @@ export async function findConversationKind(
   return row?.kind ?? EConversationKind.Bella;
 }
 
+// The kind of a conversation the account owns, by findOwnedConversation's rule in one query;
+// undefined for one of another owner or one that does not exist, alike
+export async function findOwnedConversationKind(
+  db: TReadHandle,
+  conversationKey: string,
+  account: { conversationKey: string; ownerKey: string },
+): Promise<TOption<EConversationKind>> {
+  const row = await db
+    .select({ ownerKey: conversationsTable.ownerKey, kind: conversationsTable.kind })
+    .from(conversationsTable)
+    .where(eq(conversationsTable.conversationKey, conversationKey))
+    .get();
+
+  if (row === undefined) {
+    if (conversationKey === account.conversationKey) {
+      return EConversationKind.Bella;
+    }
+
+    return undefined;
+  }
+
+  if (row.ownerKey !== account.ownerKey) {
+    return undefined;
+  }
+
+  return row.kind;
+}
+
 // The account's conversations for the app's home: its Bella conversation first, then its plain
 // chats, the latest active first (by their newest row, else their creation)
 export async function listConversations(

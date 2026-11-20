@@ -38,11 +38,13 @@ export class AppStream {
       backoffMs: [],
       handler: async (event) => {
         const { conversationKey, ownerKey, revision, rewriteRevision } = event.payload;
-        const accountId = IdentityService.instance.accountIdOf(ownerKey);
-
-        if (accountId !== undefined) {
-          this.send({ type: "changed", accountId, conversationKey, revision, rewriteRevision });
-        }
+        this.send(ownerKey, (accountId) => ({
+          type: "changed",
+          accountId,
+          conversationKey,
+          revision,
+          rewriteRevision,
+        }));
       },
     });
 
@@ -54,11 +56,7 @@ export class AppStream {
       backoffMs: [],
       handler: async (event) => {
         const { conversationKey, ownerKey } = event.payload;
-        const accountId = IdentityService.instance.accountIdOf(ownerKey);
-
-        if (accountId !== undefined) {
-          this.send({ type: "deleted", accountId, conversationKey });
-        }
+        this.send(ownerKey, (accountId) => ({ type: "deleted", accountId, conversationKey }));
       },
     });
 
@@ -76,11 +74,7 @@ export class AppStream {
           return;
         }
 
-        const accountId = IdentityService.instance.accountIdOf(ownerKey);
-
-        if (accountId !== undefined) {
-          this.send({ type: "reply", accountId, conversationKey, text });
-        }
+        this.send(ownerKey, (accountId) => ({ type: "reply", accountId, conversationKey, text }));
       },
     });
 
@@ -148,14 +142,19 @@ export class AppStream {
   }
 
   private typing(ownerKey: string, conversationKey: string, typing: boolean): void {
-    const accountId = IdentityService.instance.accountIdOf(ownerKey);
-
-    if (accountId !== undefined) {
-      this.send({ type: "typing", accountId, conversationKey, typing });
-    }
+    this.send(ownerKey, (accountId) => ({ type: "typing", accountId, conversationKey, typing }));
   }
 
-  private send(event: TGatewayStreamEvent): void {
+  // sends to the listeners only for an account's owner key
+  private send(ownerKey: string, createEvent: (accountId: string) => TGatewayStreamEvent): void {
+    const accountId = IdentityService.instance.accountIdOf(ownerKey);
+
+    if (accountId === undefined) {
+      return;
+    }
+
+    const event = createEvent(accountId);
+
     for (const listener of this.listeners) {
       listener(event);
     }

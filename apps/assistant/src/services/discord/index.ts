@@ -80,8 +80,7 @@ export class DiscordSingleton implements TMessageTransport {
     const receivedAt = Date.now();
     const chatId = createCanonicalChatKey(EMessagePlatform.Discord, message.author.id);
     // the trace names the conversation: an address with an active link means its account's
-    const conversationKey =
-      (await IdentityService.instance.resolve(chatId))?.conversationKey ?? chatId;
+    const conversationKey = await IdentityService.instance.conversationKeyOf(chatId);
 
     try {
       await EventBus.instance.publish({

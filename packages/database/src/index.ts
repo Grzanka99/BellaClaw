@@ -1,6 +1,7 @@
 export {
   findConversationKind,
   findOwnedConversation,
+  findOwnedConversationKind,
   IMAGE_MARKER,
   listConversations,
   listHistory,

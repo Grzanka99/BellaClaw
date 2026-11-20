@@ -552,8 +552,7 @@ export async function handleMcpAuthCallback(request: Request): Promise<Response>
     });
     try {
       // the trace names the conversation the owner key belongs to
-      const conversationKey =
-        (await IdentityService.instance.resolve(pending.chatId))?.conversationKey ?? pending.chatId;
+      const conversationKey = await IdentityService.instance.conversationKeyOf(pending.chatId);
       await EventBus.instance.publish({
         type: EEventType.McpAuthConnected,
         source: "mcp-auth",

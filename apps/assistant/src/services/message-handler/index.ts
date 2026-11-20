@@ -197,12 +197,7 @@ export class MessageHandler {
       backoffMs: [],
       handler: async (event, ctx) => {
         const { chatId, messageId } = event.payload;
-        let ownerKey = chatId;
-        const resolved = await IdentityService.instance.resolve(chatId);
-
-        if (resolved !== undefined) {
-          ownerKey = resolved.ownerKey;
-        }
+        const ownerKey = await IdentityService.instance.ownerKeyOf(chatId);
 
         const attachments = await ctx.complete(async (tx, emit) => {
           const deleted = await this.conversations.deleteMessage(tx, chatId, messageId);
@@ -432,12 +427,7 @@ export class MessageHandler {
     }
 
     // an address whose rows still wait to be moved is not linked yet, so it resolves to itself
-    let ownerKey = chatId;
-    const resolved = await IdentityService.instance.resolve(chatId);
-
-    if (resolved !== undefined) {
-      ownerKey = resolved.ownerKey;
-    }
+    const ownerKey = await IdentityService.instance.ownerKeyOf(chatId);
 
     const span = startMemorySaveSpan(event.trace, ERole.Assistant, event.payload.chars);
     let failure: TOption<string>;
@@ -524,14 +514,14 @@ export class MessageHandler {
       let lane = holdKey;
 
       if (event.key === holdKey) {
-        if (
-          !(await IdentityService.instance.waitWhileLinking(
+        try {
+          await IdentityService.instance.holdWhileLinking(
             requested.conversationKey,
             event.occurredAt,
-          ))
-        ) {
+          );
+        } catch (error) {
           span.fail("link hold expired", 0);
-          throw new Error("The link of this address did not complete in time");
+          throw error;
         }
 
         lane = account.conversationKey;

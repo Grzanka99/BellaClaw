@@ -206,7 +206,7 @@ export class FactDistiller {
       const owners = new Map<string, string>();
 
       for (const chatId of chatIds) {
-        owners.set(chatId, (await IdentityService.instance.resolve(chatId))?.ownerKey ?? chatId);
+        owners.set(chatId, await IdentityService.instance.ownerKeyOf(chatId));
       }
 
       await ctx.transact(async (_tx, emit) => {
