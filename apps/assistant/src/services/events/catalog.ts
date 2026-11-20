@@ -436,6 +436,21 @@ const SIdentityLinked = z.object({ ...SIdentityLinkKeys, linkedAt: z.number().in
 
 export type TIdentityLinkKeys = z.infer<typeof SIdentityLinkStarted>;
 
+// the summary of a linked address's chat fused with its account's Bella conversation's, before
+// the chat's rows move there; summarizedThroughId: the fused summary's mark, summaryTimestamp:
+// epoch ms
+const SConversationSummariesFused = z
+  .object({
+    chatKey: z.string(),
+    conversationKey: z.string(),
+    summary: z.string().min(1),
+    summarizedThroughId: z.number().int(),
+    summaryTimestamp: z.number().int(),
+  })
+  .strict();
+
+export type TFusedSummary = z.infer<typeof SConversationSummariesFused>;
+
 // errorCode: the handler's stable code for an expected failure, such as job-not-found
 const SCommandRejected = z
   .object({
@@ -537,6 +552,7 @@ export type TEventPayloads = {
   [EEventType.IdentityLinkQuiet]: TIdentityLinkKeys;
   [EEventType.IdentityLinkMoved]: z.infer<typeof SIdentityLinkProgress>;
   [EEventType.IdentityLinked]: z.infer<typeof SIdentityLinked>;
+  [EEventType.ConversationSummariesFused]: TFusedSummary;
   [EEventType.CommandRejected]: z.infer<typeof SCommandRejected>;
   [EEventType.EventDeadLettered]: z.infer<typeof SEventDeadLettered>;
   [EEventType.AppStarted]: z.infer<typeof SAppStarted>;
@@ -620,6 +636,7 @@ export const EVENT_SCHEMAS: { [K in EEventType]: z.ZodType<TEventPayloads[K]> } 
   [EEventType.IdentityLinkQuiet]: SIdentityLinkStarted,
   [EEventType.IdentityLinkMoved]: SIdentityLinkProgress,
   [EEventType.IdentityLinked]: SIdentityLinked,
+  [EEventType.ConversationSummariesFused]: SConversationSummariesFused,
   [EEventType.CommandRejected]: SCommandRejected,
   [EEventType.EventDeadLettered]: SEventDeadLettered,
   [EEventType.AppStarted]: SAppStarted,
@@ -701,6 +718,7 @@ export const EVENT_KINDS: Record<EEventType, EEventKind> = {
   [EEventType.IdentityLinkQuiet]: EEventKind.Event,
   [EEventType.IdentityLinkMoved]: EEventKind.Event,
   [EEventType.IdentityLinked]: EEventKind.Event,
+  [EEventType.ConversationSummariesFused]: EEventKind.Event,
   [EEventType.CommandRejected]: EEventKind.Event,
   [EEventType.EventDeadLettered]: EEventKind.Event,
   [EEventType.AppStarted]: EEventKind.Event,

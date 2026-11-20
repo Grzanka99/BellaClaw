@@ -49,7 +49,8 @@ only its own tables and reaches another service with a message: a **fact** it pu
 - Boot deletes events older than 30 days whose deliveries are all done, with their delivery rows.
   Error text in `lastError` and `command.rejected` passes through `sanitizeErrorMessage`.
 - An effect outside the database is uncertain after a crash. Save a checkpoint fact with
-  `ctx.transact` before it (`turn.started`, `cron.task.started`) and look for it with
+  `ctx.transact` before it (`turn.started`, `cron.task.started`), or after it with the result
+  that a later commit applies (`conversation.summaries.fused`), and look for it with
   `ctx.findCaused` on redelivery, so a model run never repeats.
 
 ## Database rules

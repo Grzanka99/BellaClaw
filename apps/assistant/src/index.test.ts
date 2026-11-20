@@ -313,6 +313,40 @@ describe("crash recovery", () => {
     expect(await pending()).toEqual([]);
   }, 30_000);
 
+  test("a link killed after the fusion's checkpoint: active after the next boot, one summary, the fusion ran once", async () => {
+    const now = new Date();
+    await db.insert(conversationSummariesTable).values([
+      { chatId, summary: "Address talk", summarizedThroughId: 0, createdAt: now },
+      {
+        chatId: "bella:acct-crash",
+        summary: "Account talk",
+        summarizedThroughId: 0,
+        createdAt: now,
+      },
+    ]);
+
+    expect(await boot("link-fused", [])).toBe("SIGKILL");
+    expect(await boot("none", [])).toBeNull();
+
+    expect(await db.select().from(identityLinksTable)).toMatchObject([
+      { channel: "signal", address: "+100", accountId: "acct-crash", state: "active" },
+    ]);
+    expect(
+      await db
+        .select({
+          chatId: conversationSummariesTable.chatId,
+          summary: conversationSummariesTable.summary,
+        })
+        .from(conversationSummariesTable),
+    ).toEqual([{ chatId: "bella:acct-crash", summary: "Fused" }]);
+    expect(await lines("fusions.log")).toEqual(["Account talk\n\nAddress talk"]);
+    expect(await db.select().from(memoriesTable).where(eq(memoriesTable.chatId, chatId))).toEqual(
+      [],
+    );
+    expect(await lines("model.log")).toEqual(["hello"]);
+    expect(await pending()).toEqual([]);
+  }, 30_000);
+
   test("a handler that kills the process on every attempt: dead after its attempts, one notice", async () => {
     // the first run is uncounted: dispatch writes no attempt
     expect(await boot("poison", [])).toBe("SIGKILL");

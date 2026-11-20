@@ -129,17 +129,6 @@ export class Memory {
         }
       },
     });
-    bus.subscribe({
-      consumer: "memory",
-      type: EEventType.IdentityLinkSettled,
-      mode: ESubscriptionMode.Durable,
-      backoffMs: [1_000, 5_000],
-      handler: async (event, ctx) => {
-        if (event.payload.owner === EIdentityLinkOwner.Memory) {
-          await this.moveLinkedFacts(event, ctx);
-        }
-      },
-    });
     // a deleted message takes the live facts it was the source of
     bus.subscribe({
       consumer: "memory",
@@ -174,9 +163,10 @@ export class Memory {
     });
   }
 
-  // NOTE: the address's facts join the account's; the account keeps its distillation checkpoint
-  // when it has one, otherwise the address's becomes it
-  private async moveLinkedFacts(
+  // NOTE: the address's facts join the account's, and the two distillation checkpoints join as the
+  // higher of them. Both transcripts must be drained to their ends first, so no row of either is
+  // skipped or distilled again; one that gained a row since its drain fails the move
+  public async moveLinkedFacts(
     event: TEvent<EEventType.IdentityLinkSettled>,
     ctx: TEventContext,
   ): Promise<void> {
@@ -184,21 +174,45 @@ export class Memory {
 
     await ctx.complete(async (tx, emit) => {
       await tx.update(factsTable).set({ chatId: ownerKey }).where(eq(factsTable.chatId, chatKey));
-      const kept = await tx
-        .select({ chatId: factDistillationStateTable.chatId })
+      const states = await tx
+        .select()
         .from(factDistillationStateTable)
-        .where(eq(factDistillationStateTable.chatId, conversationKey))
-        .get();
+        .where(inArray(factDistillationStateTable.chatId, [chatKey, conversationKey]));
 
-      if (kept !== undefined) {
+      for (const chatId of [chatKey, conversationKey]) {
+        const through =
+          states.find((state) => state.chatId === chatId)?.lastProcessedMessageId ?? 0;
+        const undistilled = await tx
+          .select({ id: memoriesTable.id })
+          .from(memoriesTable)
+          .where(
+            and(
+              eq(memoriesTable.chatId, chatId),
+              eq(memoriesTable.kind, "message"),
+              gt(memoriesTable.id, through),
+            ),
+          )
+          .limit(1)
+          .get();
+
+        if (undistilled !== undefined) {
+          throw new Error(`The transcript of ${chatId} gained rows after its fact drain`);
+        }
+      }
+
+      // the account's checkpoint stays as it is when the address has none
+      if (states.some((state) => state.chatId === chatKey)) {
         await tx
           .delete(factDistillationStateTable)
           .where(eq(factDistillationStateTable.chatId, chatKey));
-      } else {
+        const joined = {
+          lastProcessedMessageId: Math.max(...states.map((state) => state.lastProcessedMessageId)),
+          updatedAt: new Date(),
+        };
         await tx
-          .update(factDistillationStateTable)
-          .set({ chatId: conversationKey })
-          .where(eq(factDistillationStateTable.chatId, chatKey));
+          .insert(factDistillationStateTable)
+          .values({ chatId: conversationKey, ...joined })
+          .onConflictDoUpdate({ target: factDistillationStateTable.chatId, set: joined });
       }
 
       // on the account's lane, where Conversation's move follows

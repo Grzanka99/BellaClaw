@@ -29,6 +29,8 @@ import { AutomationService } from "../automation";
 import { EAutomationRunOutcome } from "../automation/runner";
 import { CalendarService } from "../calendar";
 import { Commands } from "../commands";
+import { ConversationStore } from "../conversation";
+import type { TConversation } from "../conversation/types";
 import { CronScheduler } from "../cron";
 import { DatabaseConnector } from "../database";
 import { resetEventTables, resetIdentityLinksTable } from "../database/test-utils";
@@ -38,6 +40,7 @@ import { testEventRequester, testMessageOrigin } from "../events/test-utils";
 import { setupMcpAuth } from "../mcp/auth";
 import { Memory } from "../memory";
 import { FactDistiller } from "../memory/distill";
+import type { TLiveFactWindow } from "../memory/types";
 import { MessageHandler } from "../message-handler";
 import { MessagingAdapter } from "../messaging";
 import { EMessagePlatform } from "../messaging/types";
@@ -92,9 +95,17 @@ async function resetOwnerTables() {
   }
 }
 
-// drain: the fact distillation of a chat, a model call
-function setupOwners(drain: () => Promise<boolean>) {
-  Object.assign(FactDistiller.instance, { drainLiveFactWindows: drain });
+// drain: runs before each fact drain of a chat, whose distillation, a model call, finds no facts;
+// false fails the drain
+function setupOwners(drain: (conversationKey: string) => Promise<boolean>) {
+  const drainLiveFactWindows = Reflect.get(FactDistiller.instance, "drainLiveFactWindows").bind(
+    FactDistiller.instance,
+  );
+  Object.assign(FactDistiller.instance, {
+    distill: async () => [],
+    drainLiveFactWindows: async (conversationKey: string, ...rest: unknown[]) =>
+      (await drain(conversationKey)) && drainLiveFactWindows(conversationKey, ...rest),
+  });
   SettingsService.instance.setup();
   CronScheduler.instance.subscribe();
   AutomationService.instance.setup();
@@ -126,6 +137,68 @@ async function transcript(chatId: string, at: number) {
     .returning()
     .get();
   return row.id;
+}
+
+// a transcript message the model's context replays
+async function replayed(chatId: string, kind: "user" | "assistant") {
+  let message: Message = { role: "user", content: `${chatId} asks`, timestamp: Date.now() };
+  if (kind === "assistant") {
+    message = fauxAssistantMessage(`${chatId} answers`);
+  }
+  const row = await database()
+    .insert(memoriesTable)
+    .values({
+      chatId,
+      channel: "signal",
+      author: kind,
+      message: `${chatId} ${kind}`,
+      modelMessage: JSON.stringify(message),
+      createdAt: new Date(),
+    })
+    .returning()
+    .get();
+  return row.id;
+}
+
+async function summarize(chatId: string, summary: string, summarizedThroughId: number) {
+  await database()
+    .insert(conversationSummariesTable)
+    .values({ chatId, summary, summarizedThroughId, createdAt: new Date(1) });
+}
+
+// the compaction engine, as the fusion of two summaries calls it: records each input, fails the
+// first `failures` calls, then answers "fused <call>"
+function stubFusion(failures: number) {
+  const inputs: { summary: string; mark: number; entryIds: number[]; force: unknown }[] = [];
+  const compactConversation = mock(async (state: TConversation, ...rest: unknown[]) => {
+    inputs.push({
+      summary: state.summary,
+      mark: state.summarizedThroughId,
+      entryIds: state.entries.map((entry) => entry.id),
+      force: rest.at(-1),
+    });
+    if (inputs.length <= failures) {
+      throw new Error("The model is unavailable");
+    }
+    return {
+      state: { ...state, summary: `fused ${inputs.length}`, summaryTimestamp: 5_000, entries: [] },
+      usage: undefined,
+      tokensBefore: 0,
+      tokensAfter: 0,
+    };
+  });
+  Object.assign(MessageHandler.instance, { ai: { compactConversation } });
+  return inputs;
+}
+
+async function summaries() {
+  return database()
+    .select({
+      chatId: conversationSummariesTable.chatId,
+      summary: conversationSummariesTable.summary,
+      summarizedThroughId: conversationSummariesTable.summarizedThroughId,
+    })
+    .from(conversationSummariesTable);
 }
 
 // one chat's rows in every owner's table; label tells the chats apart
@@ -251,11 +324,18 @@ afterEach(async () => {
 describe("linking an address to an account", () => {
   test("into an empty account: every owner's rows move to the account, the link becomes active, and running the moves again changes nothing", async () => {
     await seedChat("signal:+900", "Europe/Warsaw");
+    const fusions = stubFusion(0);
     await setupOwners(async () => true);
     await EventBus.instance.start();
 
     const started = await requestLink("acct-9", "+900");
     await EventBus.instance.idle();
+
+    // a plain re-key: no fusion, the address's summary is the conversation's
+    expect(fusions).toEqual([]);
+    expect(await summaries()).toEqual([
+      { chatId: "bella:acct-9", summary: "Europe/Warsaw summary", summarizedThroughId: 0 },
+    ]);
 
     expect(started.payload).toEqual({
       accountId: "acct-9",
@@ -337,6 +417,7 @@ describe("linking an address to an account", () => {
       await transcript("signal:+910", 3),
       await transcript("signal:+920", 4),
     ];
+    const fusions = stubFusion(0);
     await setupOwners(async () => true);
     await EventBus.instance.start();
 
@@ -354,6 +435,13 @@ describe("linking an address to an account", () => {
       .orderBy(asc(memoriesTable.id));
     expect(rows.map((row) => row.id).slice(-4)).toEqual(interleaved);
     expect(rows).toHaveLength(6);
+    // two summaries become one; no row is replayable, so the fusion gets none
+    expect(fusions).toEqual([
+      { summary: "first summary\n\nsecond summary", mark: 0, entryIds: [], force: true },
+    ]);
+    expect(await summaries()).toEqual([
+      { chatId: "bella:acct-10", summary: "fused 1", summarizedThroughId: 0 },
+    ]);
     const facts = await database()
       .select({ text: factsTable.text })
       .from(factsTable)
@@ -407,6 +495,128 @@ describe("linking an address to an account", () => {
     ]);
   });
 
+  test("two chats with their own summaries and marks, rows interleaved: one fused summary, and the Bella conversation replays exactly the rows above its mark, from both, in id order", async () => {
+    const b1 = await replayed("bella:acct-20", "user");
+    const a1 = await replayed("signal:+200", "user");
+    const a2 = await replayed("signal:+200", "assistant");
+    const b2 = await replayed("bella:acct-20", "assistant");
+    const b3 = await replayed("bella:acct-20", "user");
+    const a3 = await replayed("signal:+200", "user");
+    const b4 = await replayed("bella:acct-20", "assistant");
+    const a4 = await replayed("signal:+200", "assistant");
+    await summarize("bella:acct-20", "account summary", b2);
+    await summarize("signal:+200", "address summary", a1);
+    const fusions = stubFusion(0);
+    await setupOwners(async () => true);
+    await EventBus.instance.start();
+
+    await requestLink("acct-20", "+200");
+    await EventBus.instance.idle();
+
+    expect(b1).toBeLessThan(a1);
+    // the higher mark; a2, below it and not covered by the address's summary, is fused in
+    expect(fusions).toEqual([
+      { summary: "account summary\n\naddress summary", mark: b2, entryIds: [a2], force: true },
+    ]);
+    expect(await summaries()).toEqual([
+      { chatId: "bella:acct-20", summary: "fused 1", summarizedThroughId: b2 },
+    ]);
+    const conversation = await ConversationStore.instance.load("bella:acct-20");
+    expect(conversation?.summary).toBe("fused 1");
+    expect(conversation?.entries.map((entry) => entry.id)).toEqual([b3, a3, b4, a4]);
+    expect(await database().select().from(identityLinksTable)).toMatchObject([
+      { address: "+200", state: EIdentityLinkState.Active },
+    ]);
+  });
+
+  test("a summary on one side and rows only on the other: the rows a re-keyed summary would skip are fused in, the rest replayed", async () => {
+    const a1 = await replayed("signal:+210", "user");
+    const b1 = await replayed("bella:acct-21", "user");
+    const a2 = await replayed("signal:+210", "assistant");
+    const b2 = await replayed("bella:acct-21", "assistant");
+    const a3 = await replayed("signal:+210", "user");
+    await summarize("signal:+210", "address summary", a2);
+    const fusions = stubFusion(0);
+    await setupOwners(async () => true);
+    await EventBus.instance.start();
+
+    await requestLink("acct-21", "+210");
+    await EventBus.instance.idle();
+
+    expect(a1).toBeLessThan(b1);
+    expect(fusions).toEqual([
+      { summary: "address summary", mark: a2, entryIds: [b1], force: true },
+    ]);
+    const conversation = await ConversationStore.instance.load("bella:acct-21");
+    expect(conversation?.summary).toBe("fused 1");
+    expect(conversation?.summarizedThroughId).toBe(a2);
+    expect(conversation?.entries.map((entry) => entry.id)).toEqual([b2, a3]);
+    expect(await summaries()).toHaveLength(1);
+  });
+
+  test("both chats with undistilled rows: one checkpoint after the link, every row distilled once, and a further drain distills nothing again", async () => {
+    const a1 = await transcript("signal:+220", 1);
+    const b1 = await transcript("bella:acct-22", 2);
+    const b2 = await transcript("bella:acct-22", 3);
+    const a2 = await transcript("signal:+220", 4);
+    await setupOwners(async () => true);
+    const windows: number[][] = [];
+    Object.assign(FactDistiller.instance, {
+      distill: async (window: TLiveFactWindow) => {
+        windows.push(window.messages.map((message) => message.id));
+        return [];
+      },
+    });
+    await EventBus.instance.start();
+
+    await requestLink("acct-22", "+220");
+    await EventBus.instance.idle();
+
+    expect(windows).toEqual([
+      [a1, a2],
+      [b1, b2],
+    ]);
+    expect(
+      await database()
+        .select({
+          chatId: factDistillationStateTable.chatId,
+          through: factDistillationStateTable.lastProcessedMessageId,
+        })
+        .from(factDistillationStateTable),
+    ).toEqual([{ chatId: "bella:acct-22", through: a2 }]);
+
+    const later = await transcript("bella:acct-22", 5);
+    const drain = Reflect.get(FactDistiller.instance, "drainLiveFactWindows");
+    expect(
+      await drain(
+        "bella:acct-22",
+        "account:acct-22",
+        await SettingsService.instance.getAll("account:acct-22"),
+        { turnId: "test:drain", chatId: "bella:acct-22", platform: undefined },
+      ),
+    ).toBe(true);
+    expect(windows.slice(2)).toEqual([[later]]);
+  });
+
+  test("a fusion that fails once: the move retries, and the link becomes active with one summary", async () => {
+    await summarize("signal:+240", "address summary", 0);
+    await summarize("bella:acct-24", "account summary", 0);
+    const fusions = stubFusion(1);
+    await setupOwners(async () => true);
+    await EventBus.instance.start();
+
+    await requestLink("acct-24", "+240");
+    await EventBus.instance.idle();
+
+    expect(fusions).toHaveLength(2);
+    expect(await summaries()).toEqual([
+      { chatId: "bella:acct-24", summary: "fused 2", summarizedThroughId: 0 },
+    ]);
+    expect(await database().select().from(identityLinksTable)).toMatchObject([
+      { address: "+240", state: EIdentityLinkState.Active },
+    ]);
+  });
+
   test("a fact drain that fails once: the move waits for its retry, and the link becomes active with the address's facts", async () => {
     await seedChat("signal:+915", "retried");
     let drains = 0;
@@ -419,7 +629,8 @@ describe("linking an address to an account", () => {
     await requestLink("acct-15", "+915");
     await EventBus.instance.idle();
 
-    expect(drains).toBe(2);
+    // the address's drain failed and retried, then the account's
+    expect(drains).toBe(3);
     expect(await database().select().from(identityLinksTable)).toMatchObject([
       { address: "+915", state: EIdentityLinkState.Active },
     ]);
@@ -567,10 +778,11 @@ describe("linking an address to an account", () => {
       dedupeKey: undefined,
     });
     await Bun.sleep(50);
-    expect(run).not.toHaveBeenCalled();
+    const runsWhileHeld = run.mock.calls.length;
     release.resolve();
     await EventBus.instance.idle();
 
+    expect(runsWhileHeld).toBe(0);
     expect(run.mock.calls.map(([event]) => event.payload.scope)).toEqual(["account:acct-14"]);
     const deliveries = await database()
       .select({ payload: eventsTable.payload })
@@ -614,7 +826,7 @@ describe("linking an address to an account", () => {
     await seedChat("signal:+935", "repeated");
     const drained = Promise.withResolvers<void>();
     const release = Promise.withResolvers<void>();
-    const drain = mock(async () => {
+    const drain = mock(async (_conversationKey: string) => {
       drained.resolve();
       await release.promise;
       return true;
@@ -629,7 +841,8 @@ describe("linking an address to an account", () => {
     await EventBus.instance.idle();
 
     expect(rejected).toBeInstanceOf(CommandRejectedError);
-    expect(drain).toHaveBeenCalledTimes(1);
+    // one cutover: both transcripts' drains before the join
+    expect(drain.mock.calls).toEqual([["signal:+935"], ["bella:acct-935"]]);
     for (const type of [EEventType.IdentityLinkStarted, EEventType.IdentityLinked]) {
       expect(
         await database().select().from(eventsTable).where(eq(eventsTable.type, type)),
@@ -710,7 +923,8 @@ describe("linking an address to an account", () => {
         .from(cronEngineJobsTable),
     ).toEqual([{ scope: "account:acct-975", name: "water" }]);
     expect(await rowsUnder("signal:+975")).toEqual([]);
-    expect(await rowsUnder("bella:acct-975")).toHaveLength(2);
+    // the turn's two rows and the checkpoint of its fact drain
+    expect(await rowsUnder("bella:acct-975")).toHaveLength(3);
   });
 
   test("a turn of a linked address interrupted by a restart: its interrupted reply and failure carry the account's keys", async () => {

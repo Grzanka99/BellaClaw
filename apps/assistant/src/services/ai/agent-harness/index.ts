@@ -49,7 +49,7 @@ import { loadMcpProfiles } from "../../mcp/config";
 import { McpRunRegistry, type TMcpRunStatus } from "../../mcp/runs";
 import { createMcpSamplingRequest, createMcpSamplingResult } from "../../mcp/sampling";
 import type { TAttachmentRef } from "../../messaging/types";
-import type { TConfigRecord } from "../../settings/schema";
+import { EConfigKey, type TConfigRecord } from "../../settings/schema";
 import { AGENTS, EAgentName } from "../agents";
 import baseInstructions from "../instructions/base-system.xml" with { type: "text" };
 import { createPlatformInstructions } from "../instructions/platform";
@@ -117,8 +117,17 @@ export class AgentHarness {
     platform: TAgentRunArgs["platform"],
     trace: TBehaviorTraceContext,
     events: TAgentRunArgs["events"],
+    force: boolean,
   ) {
     const config = await this.llm.resolveModel(settings, AGENTS[EAgentName.Main].purpose);
+    let fallbackConfig = config;
+    // a forced compaction that fails on the selected model runs on the provider's default one
+    if (force) {
+      fallbackConfig = await this.llm.resolveModel(
+        { ...settings, [EConfigKey.AiModelPreferences]: "{}" },
+        AGENTS[EAgentName.Main].purpose,
+      );
+    }
     const args = {
       name: EAgentName.Main,
       settings,
@@ -143,14 +152,13 @@ export class AgentHarness {
         4,
     );
     const sessionId = this.llm.createSessionId(config.model.provider, conversationKey);
-    const model = {
-      ...config.model,
-      headers: {
-        ...config.model.headers,
-        ...this.llm.sessionHeaders(config.model.provider, sessionId),
-      },
+    const headers = this.llm.sessionHeaders(config.model.provider, sessionId);
+    const model = { ...config.model, headers: { ...config.model.headers, ...headers } };
+    const fallback = {
+      ...fallbackConfig.model,
+      headers: { ...fallbackConfig.model.headers, ...headers },
     };
-    return compactConversation(state, aiModels, model, fixedTokens, trace);
+    return compactConversation(state, aiModels, model, fixedTokens, trace, force, fallback);
   }
 
   private async run(

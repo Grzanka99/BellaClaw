@@ -15,6 +15,7 @@ import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { AgentHarness } from "../services/ai/agent-harness";
+import { emptyUsage } from "../services/ai/llm";
 import { DatabaseConnector } from "../services/database";
 import { ESubscriptionMode, EventBus, type TEventDraft } from "../services/events";
 import { EIdentityLinkOwner } from "../services/identity/schema";
@@ -38,6 +39,8 @@ enum ECrashPoint {
   LinkStarted = "link-started",
   // after identity.link.quiet, the barrier's fact, commits, before it is dispatched
   LinkQuiet = "link-quiet",
+  // after conversation.summaries.fused, the fusion's checkpoint, commits, before the move applies it
+  LinkFused = "link-fused",
   // inside Identity's transaction that would activate the link
   LinkActivation = "link-activation",
   None = "none",
@@ -106,7 +109,21 @@ Object.assign(AgentHarness.instance, {
       ],
     };
   },
-  compactConversation: async () => {
+  compactConversation: async (
+    ...[state, , , , , , , force]: Parameters<AgentHarness["compactConversation"]>
+  ) => {
+    // the fusion of two summaries at a link
+    if (force) {
+      record("fusions.log", state.summary);
+
+      return {
+        state: { ...state, summary: "Fused", summaryTimestamp: Date.now(), entries: [] },
+        usage: emptyUsage(),
+        tokensBefore: 0,
+        tokensAfter: 0,
+      };
+    }
+
     compactions += 1;
 
     // the first compaction of a fresh chat is the post-turn one
@@ -138,8 +155,8 @@ Object.assign(AgentHarness.instance, {
     return undefined;
   },
 });
-// the fact drain is a model call
-Object.assign(FactDistiller.instance, { drainLiveFactWindows: async () => true });
+// the fact distillation is a model call
+Object.assign(FactDistiller.instance, { distill: async () => [] });
 
 // biome-ignore lint/complexity/useLiteralKeys: a private method, reached for the crash point
 const afterCommit = bus["afterCommit"].bind(bus);
@@ -162,6 +179,13 @@ Object.assign(bus, {
     if (
       point === ECrashPoint.LinkQuiet &&
       appended.some((row) => row.type === EEventType.IdentityLinkQuiet)
+    ) {
+      kill();
+    }
+
+    if (
+      point === ECrashPoint.LinkFused &&
+      appended.some((row) => row.type === EEventType.ConversationSummariesFused)
     ) {
       kill();
     }

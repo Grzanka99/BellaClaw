@@ -895,6 +895,7 @@ describe("AgentHarness", () => {
       EMessagePlatform.Discord,
       TEST_TRACE,
       testEventRequester,
+      false,
     );
 
     expect(result?.state.summary).toBe("Earlier context summarized.");

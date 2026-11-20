@@ -98,28 +98,17 @@ export class MessageHandler {
       },
     });
     // NOTE: Conversation's move follows Memory's, on the Bella conversation's lane, so a message of
-    // the address forwarded there is stored before or after the move, never across it
+    // the address forwarded there is stored before or after the move, never across it. A failed
+    // fusion fails the handler, so the move waits for its retry
     bus.subscribe({
       consumer: "conversation",
       type: EEventType.IdentityLinkMoved,
       mode: ESubscriptionMode.Durable,
-      backoffMs: [1_000, 5_000],
+      backoffMs: [1_000, 5_000, 30_000],
       handler: async (event, ctx) => {
-        const { chatKey, conversationKey, ownerKey } = event.payload;
-
-        if (event.payload.owner !== EIdentityLinkOwner.Memory) {
-          return;
+        if (event.payload.owner === EIdentityLinkOwner.Memory) {
+          await this.moveToBella(event, ctx);
         }
-
-        await ctx.complete(async (tx, emit) => {
-          await this.conversations.moveToBella(tx, chatKey, conversationKey, ownerKey);
-          emit(
-            EEventType.IdentityLinkMoved,
-            { ...event.payload, owner: EIdentityLinkOwner.Conversation },
-            undefined,
-            chatKey,
-          );
-        });
       },
     });
     bus.subscribe({
@@ -150,6 +139,65 @@ export class MessageHandler {
           emit(EEventType.ConversationMessageDeleted, { chatId, messageIds }, undefined, undefined);
         });
       },
+    });
+  }
+
+  // NOTE: the two summaries are fused into one before the rows mix, when both chats have a
+  // summary or a row of either chat would otherwise be skipped or replayed. The fusion is a model
+  // call, so its result is saved as a checkpoint fact before it is applied, and a redelivery
+  // applies that instead of calling the model again
+  // NOTE: accepted risk: the fusion is one request to the account's main model and, when that
+  // fails, one to the provider's default main model, so an input above both context windows
+  // fails on every retry
+  private async moveToBella(
+    event: TEvent<EEventType.IdentityLinkMoved>,
+    ctx: TEventContext,
+  ): Promise<void> {
+    const { chatKey, conversationKey, ownerKey, channel } = event.payload;
+    let fused = (await ctx.findCaused(EEventType.ConversationSummariesFused, undefined))?.payload;
+
+    if (fused === undefined) {
+      const fusion = await this.conversations.loadFusion(chatKey, conversationKey);
+
+      if (fusion.summaries > 1 || fusion.state.entries.length > 0) {
+        const settings = await SettingsService.instance.getAll(ownerKey);
+        const result = await this.ai.compactConversation(
+          fusion.state,
+          settings,
+          conversationKey,
+          ownerKey,
+          channel,
+          event.trace,
+          ctx,
+          true,
+        );
+
+        if (result === undefined) {
+          throw new Error("The fusion of the two summaries returned no summary");
+        }
+
+        const summary = {
+          chatKey,
+          conversationKey,
+          summary: result.state.summary,
+          summarizedThroughId: fusion.state.summarizedThroughId,
+          summaryTimestamp: result.state.summaryTimestamp,
+        };
+        await ctx.transact(async (_tx, emit) => {
+          emit(EEventType.ConversationSummariesFused, summary, undefined, undefined);
+        });
+        fused = summary;
+      }
+    }
+
+    await ctx.complete(async (tx, emit) => {
+      await this.conversations.moveToBella(tx, chatKey, conversationKey, ownerKey, fused);
+      emit(
+        EEventType.IdentityLinkMoved,
+        { ...event.payload, owner: EIdentityLinkOwner.Conversation },
+        undefined,
+        chatKey,
+      );
     });
   }
 
@@ -439,6 +487,7 @@ export class MessageHandler {
         origin.channel,
         trace,
         events,
+        false,
       );
       if (result === undefined) {
         return state;

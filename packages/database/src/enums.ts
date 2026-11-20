@@ -87,6 +87,7 @@ export enum EEventType {
   CalendarEventDeleted = "calendar.event.deleted",
   ConversationMessageDeleteRequested = "conversation.message.delete.requested",
   ConversationMessageDeleted = "conversation.message.deleted",
+  ConversationSummariesFused = "conversation.summaries.fused",
   IdentityLinkRequested = "identity.link.requested",
   IdentityLinkStarted = "identity.link.started",
   IdentityLinkSettled = "identity.link.settled",

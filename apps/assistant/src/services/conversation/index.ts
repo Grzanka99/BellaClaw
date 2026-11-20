@@ -11,10 +11,11 @@ import {
   type Message,
   type UserMessage,
 } from "@earendil-works/pi-ai";
-import { and, asc, desc, eq, gt, inArray, isNotNull, lt, lte } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNotNull, lt, lte, or } from "drizzle-orm";
 import { emptyUsage } from "../ai/llm";
 import { ERole } from "../ai/types";
 import { DatabaseConnector, type TDatabaseHandle } from "../database";
+import type { TFusedSummary } from "../events/catalog";
 import type { EMessagePlatform, TAttachmentRef } from "../messaging/types";
 import { SAttachmentBlock, SConversationMessage, type TConversation } from "./types";
 
@@ -75,25 +76,106 @@ export class ConversationStore {
     });
   }
 
+  // The input of fusing a chat's summary with a conversation's before the chat's rows move there.
+  // The mark is the higher of the two summaries' marks, the lowest at which no row of either is
+  // both summarized and replayed. The state holds both summaries, the conversation's first, and
+  // every replayable row of either at or below the mark that its own summary does not cover, in
+  // id order. summaries: how many of the two exist
+  public loadFusion(
+    chatId: string,
+    conversationKey: string,
+  ): Promise<{ state: TConversation; summaries: number }> {
+    return this.database.run(async (db) => {
+      const kept = await db
+        .select()
+        .from(conversationSummariesTable)
+        .where(eq(conversationSummariesTable.chatId, conversationKey))
+        .get();
+      const moved = await db
+        .select()
+        .from(conversationSummariesTable)
+        .where(eq(conversationSummariesTable.chatId, chatId))
+        .get();
+      const summaries = [kept, moved].filter((summary) => summary !== undefined);
+      const mark = Math.max(0, ...summaries.map((summary) => summary.summarizedThroughId));
+      const rows = await db
+        .select()
+        .from(memoriesTable)
+        .where(
+          and(
+            or(
+              and(
+                eq(memoriesTable.chatId, conversationKey),
+                gt(memoriesTable.id, kept?.summarizedThroughId ?? 0),
+              ),
+              and(
+                eq(memoriesTable.chatId, chatId),
+                gt(memoriesTable.id, moved?.summarizedThroughId ?? 0),
+              ),
+            ),
+            lte(memoriesTable.id, mark),
+            isNotNull(memoriesTable.modelMessage),
+          ),
+        )
+        .orderBy(asc(memoriesTable.id));
+      const entries: TConversation["entries"] = [];
+      for (const row of rows) {
+        const parsed = SConversationMessage.safeParse(JSON.parse(row.modelMessage ?? "null"));
+        if (!parsed.success) {
+          throw new Error("Invalid persisted conversation message");
+        }
+        entries.push({ id: row.id, message: parsed.data });
+      }
+      return {
+        state: {
+          summary: summaries.map((summary) => summary.summary).join("\n\n"),
+          summaryTimestamp: Math.max(0, ...summaries.map((summary) => summary.createdAt.getTime())),
+          summarizedThroughId: mark,
+          entries,
+        },
+        summaries: summaries.length,
+      };
+    });
+  }
+
   // Moves a chat's transcript into an account's Bella conversation and lists that conversation
   // in the registry. Rows keep their ids, so they fall into time order with the conversation's.
-  // The conversation keeps its own summary when it has one; otherwise the chat's becomes it
+  // fused: the summary that replaces both summaries; without it the chat's summary, if any,
+  // becomes the conversation's
   public async moveToBella(
     db: TDatabaseHandle,
     chatId: string,
     conversationKey: string,
     ownerKey: string,
+    fused: TOption<TFusedSummary>,
   ): Promise<void> {
     await db.insert(conversationsTable).values({ conversationKey, ownerKey }).onConflictDoNothing();
-    const kept = await db
-      .select({ chatId: conversationSummariesTable.chatId })
-      .from(conversationSummariesTable)
-      .where(eq(conversationSummariesTable.chatId, conversationKey))
-      .get();
-    if (kept !== undefined) {
+    if (fused !== undefined) {
+      const replaced = await db
+        .select({ compactionBoundaries: conversationSummariesTable.compactionBoundaries })
+        .from(conversationSummariesTable)
+        .where(inArray(conversationSummariesTable.chatId, [chatId, conversationKey]));
+      const boundaries = [
+        ...new Set([
+          ...replaced.flatMap((summary) => summary.compactionBoundaries),
+          fused.summarizedThroughId,
+        ]),
+      ]
+        .sort((left, right) => left - right)
+        .slice(-KEPT_COMPACTIONS);
+      const values = {
+        summary: fused.summary,
+        summarizedThroughId: fused.summarizedThroughId,
+        compactionBoundaries: boundaries,
+        createdAt: new Date(fused.summaryTimestamp),
+      };
       await db
         .delete(conversationSummariesTable)
         .where(eq(conversationSummariesTable.chatId, chatId));
+      await db
+        .insert(conversationSummariesTable)
+        .values({ chatId: conversationKey, ...values })
+        .onConflictDoUpdate({ target: conversationSummariesTable.chatId, set: values });
     } else {
       await db
         .update(conversationSummariesTable)

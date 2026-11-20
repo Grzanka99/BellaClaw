@@ -124,31 +124,61 @@ export class FactDistiller {
         });
       },
     });
-    // NOTE: the address's facts move once its transcript is drained to its checkpoint, with the
-    // address's settings, which Settings moves only after Memory and Conversation. A failed drain
-    // fails the handler, so the move waits for its retry. The move runs on the account's lane,
-    // behind the drains of the account's turns
+    // NOTE: the barrier on Memory's lane of the address, behind any drain of the address still
+    // running; Memory's move follows on the account's lane
     bus.subscribe({
       consumer: "memory",
       type: EEventType.IdentityLinkQuiet,
       mode: ESubscriptionMode.Durable,
-      backoffMs: [1_000, 5_000, 30_000],
+      backoffMs: [1_000, 5_000],
       handler: async (event, ctx) => {
-        const { chatKey, conversationKey } = event.payload;
-        const settings = await SettingsService.instance.getAll(chatKey);
-
-        if (!(await this.drainLiveFactWindows(chatKey, chatKey, settings, event.trace))) {
-          throw new Error("The fact drain of the linked address failed");
-        }
-
         await ctx.complete(async (_tx, emit) => {
           emit(
             EEventType.IdentityLinkSettled,
             { ...event.payload, owner: EIdentityLinkOwner.Memory },
             undefined,
-            conversationKey,
+            event.payload.conversationKey,
           );
         });
+      },
+    });
+    // NOTE: on the account's lane, behind the drains of the account's turns. Both transcripts are
+    // drained to their ends before Memory joins their checkpoints, the address's with the
+    // address's settings, which Settings moves only after Memory and Conversation. A failed drain
+    // fails the handler, so the move waits for its retry
+    bus.subscribe({
+      consumer: "memory",
+      type: EEventType.IdentityLinkSettled,
+      mode: ESubscriptionMode.Durable,
+      backoffMs: [1_000, 5_000, 30_000],
+      handler: async (event, ctx) => {
+        const { owner, chatKey, conversationKey, ownerKey } = event.payload;
+
+        if (owner !== EIdentityLinkOwner.Memory) {
+          return;
+        }
+
+        const drains = [
+          { conversationKey: chatKey, ownerKey: chatKey },
+          { conversationKey, ownerKey },
+        ];
+
+        for (const drain of drains) {
+          const settings = await SettingsService.instance.getAll(drain.ownerKey);
+
+          if (
+            !(await this.drainLiveFactWindows(
+              drain.conversationKey,
+              drain.ownerKey,
+              settings,
+              event.trace,
+            ))
+          ) {
+            throw new Error(`The fact drain of ${drain.conversationKey} failed`);
+          }
+        }
+
+        await this.memory.moveLinkedFacts(event, ctx);
       },
     });
     bus.subscribe({
