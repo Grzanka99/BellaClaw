@@ -258,6 +258,7 @@ class FakeGateway : Dispatcher() {
         put("channel", "app")
         put("text", text)
         put("createdAt", createdAt)
+        put("scheduled", false)
         clientMessageId?.let { put("clientMessageId", it) }
         steps?.let { put("steps", Json.parseToJsonElement(it)) }
         if (imageIds.isNotEmpty()) {

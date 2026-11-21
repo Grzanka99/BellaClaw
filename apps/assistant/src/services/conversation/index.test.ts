@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { memoriesTable } from "@bellaclaw/database";
+import { listHistory, memoriesTable } from "@bellaclaw/database";
 import { fauxAssistantMessage, fauxToolCall, type Message } from "@earendil-works/pi-ai";
 import { and, desc, eq } from "drizzle-orm";
 import { ERole } from "../ai/types";
@@ -183,6 +183,46 @@ test("a scheduled delivery replays after a scheduler notice the model cannot mer
     "[CRON REMINDER oven]: Check the oven.",
   );
   expect(await transcriptMessages(chatId)).toEqual(["Check the oven."]);
+});
+
+test("history marks scheduled deliveries, not the restart notice", async () => {
+  const chatId = "conversation-scheduled-history";
+  const store = new ConversationStore();
+  const database = DatabaseConnector.instance.database;
+  await store.saveDeliveredMessage(
+    database,
+    chatId,
+    EMessagePlatform.App,
+    "Check the oven.",
+    "[CRON REMINDER oven]: Check the oven.",
+    "Scheduler notice, not from the user: reminder fired.",
+    Date.now(),
+  );
+  await store.saveDeliveredMessage(
+    database,
+    chatId,
+    EMessagePlatform.App,
+    "**Weather**\n3°C",
+    "[CRON TASK weather]: **Weather**\n3°C",
+    "Scheduler notice, not from the user: task ran.",
+    Date.now(),
+  );
+  await store.saveDeliveredMessage(
+    database,
+    chatId,
+    EMessagePlatform.App,
+    "I was restarted while answering.",
+    "I was restarted while answering.",
+    "System notice, not from the user: restart.",
+    Date.now(),
+  );
+
+  const history = await listHistory(database, chatId, undefined, 50);
+  expect(history.map((row) => [row.text, row.scheduled])).toEqual([
+    ["Check the oven.", true],
+    ["**Weather**\n3°C", true],
+    ["I was restarted while answering.", false],
+  ]);
 });
 
 test("after three kept compactions, saveSummary returns the images of the dropped range", async () => {

@@ -1,5 +1,5 @@
 import type { TOption } from "@bellaclaw/shared";
-import { and, asc, desc, eq, gt, inArray, lt } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, lt, sql } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import { z } from "zod";
 import { EConversationKind } from "./enums";
@@ -48,7 +48,8 @@ export type THistoryStep = {
 // text: of a user message with images, what the user typed, without the stored image markers;
 // createdAt: epoch ms; clientMessageId: the id the sending client gave an inbound message;
 // images: those of a user message, in order, none when it has no image; steps: the tool calls of
-// a reply's turn, by start, none when the turn used no tools
+// a reply's turn, by start, none when the turn used no tools; scheduled: a delivery of a scheduled
+// job, such as a reminder or an automation's output
 export type THistoryMessage = {
   id: number;
   author: "user" | "assistant";
@@ -59,6 +60,7 @@ export type THistoryMessage = {
   clientMessageId: TOption<string>;
   images: TOption<THistoryImage[]>;
   steps: TOption<THistoryStep[]>;
+  scheduled: boolean;
 };
 
 // NOTE: a user message's attachment references as the assistant stores them, as much of them as
@@ -245,6 +247,10 @@ export async function listHistory(
       steps: memoriesTable.steps,
       createdAt: memoriesTable.createdAt,
       clientMessageId: memoriesTable.clientMessageId,
+      // NOTE: the scheduler saves a delivery with the model scheduled-delivery and a model text
+      // prefixed [CRON REMINDER name] or [CRON TASK name]; the other scheduled-delivery row is the reply
+      // to a turn a restart interrupted
+      scheduled: sql<number>`coalesce(json_extract(${memoriesTable.modelMessage}, '$.model') = 'scheduled-delivery' and json_extract(${memoriesTable.modelMessage}, '$.content[0].text') like '[CRON %', 0)`,
     })
     .from(memoriesTable)
     .where(and(...conditions))
@@ -332,6 +338,7 @@ export async function listHistory(
         clientMessageId: row.clientMessageId ?? undefined,
         images,
         steps,
+        scheduled: row.scheduled === 1,
       });
     }
   }

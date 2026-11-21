@@ -124,6 +124,7 @@ internal fun HistoryRowBody.toMessage(chatId: String) = Message(
     sentAt = Instant.ofEpochMilli(createdAt),
     images = images.orEmpty().map { MessageImage(it.mediaId, it.mimeType) },
     steps = steps.orEmpty().map { ActivityStep(it.tool, it.label, it.detail, Instant.ofEpochMilli(it.startedAt), it.durationMs, it.failed) },
+    scheduled = scheduled,
 )
 
 /** Derived from the key, so it stays the same across starts. */

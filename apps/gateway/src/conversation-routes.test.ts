@@ -95,6 +95,7 @@ test("an app account with no chat lists its Bella conversation, sends, and reads
           text: "Hello",
           createdAt: 1_000,
           clientMessageId: "m-1",
+          scheduled: false,
         },
         {
           id: reply.id,
@@ -103,6 +104,7 @@ test("an app account with no chat lists its Bella conversation, sends, and reads
           channel: "app",
           text: "Hi",
           createdAt: 1_000,
+          scheduled: false,
         },
       ],
     });
