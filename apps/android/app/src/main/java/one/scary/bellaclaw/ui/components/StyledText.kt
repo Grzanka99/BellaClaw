@@ -12,6 +12,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
+import java.net.URI
 
 private const val MONOSPACE = "`"
 
@@ -32,7 +33,8 @@ private val MarkdownLink = Regex("""\[([^\[\]\n]*\S[^\[\]\n]*)]\((https?://[^\s(
  * A message's text with `**bold**`, `*italic*`, `` `monospace` `` and `~strikethrough~` styled and
  * their marks removed. A mark styles only with a closing mark on its line and non-blank text between,
  * the opening mark followed and the closing mark preceded by a non-space; anything else stays as typed. Nothing inside monospace is styled further.
- * A `[label](https://…)` link shows its label, underlined, and opens the address when tapped.
+ * A `[label](https://…)` link shows its label, underlined, and opens the address when tapped; the site
+ * follows in brackets when the label does not name it.
  * Monospace text gets [codeBackground].
  */
 fun styledText(text: String, codeBackground: Color = Color.Unspecified): AnnotatedString =
@@ -45,6 +47,11 @@ private fun AnnotatedString.Builder.appendStyled(text: String, codeBackground: C
         if (link != null) {
             val (label, url) = link.destructured
             withLink(LinkAnnotation.Url(url, LinkStyles)) { appendStyled(label, codeBackground) }
+            // a label that does not name the link's site gets the site after it, so a tap never surprises
+            val host = URI(url).host?.removePrefix("www.")
+            if (host != null && !label.contains(host, ignoreCase = true)) {
+                append(" ($host)")
+            }
             index = link.range.last + 1
             continue
         }

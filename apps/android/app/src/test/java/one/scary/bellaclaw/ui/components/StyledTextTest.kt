@@ -37,6 +37,14 @@ class StyledTextTest {
     }
 
     @Test
+    fun aLinkWhoseLabelDoesNotNameItsSiteShowsTheSite() {
+        val styled = styledText("Pay [your OVH invoice](https://www.attacker.example/pay) now.")
+        assertEquals("Pay your OVH invoice (attacker.example) now.", styled.text)
+        val links = styled.getLinkAnnotations(0, styled.length).map { Triple((it.item as LinkAnnotation.Url).url, it.start, it.end) }
+        assertEquals(listOf(Triple("https://www.attacker.example/pay", 4, 20)), links)
+    }
+
+    @Test
     fun anUnmatchedMarkStaysAsTyped() {
         listOf("2 * 3 = 6", "**open\nclosed**", "a ** b", "~ ~", "2 * 3 * 4", "~/Documents and ~/Downloads").forEach {
             val styled = styledText(it)
