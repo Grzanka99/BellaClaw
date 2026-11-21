@@ -13,12 +13,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.AssistChip
+import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledIconButton
@@ -37,6 +39,7 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import one.scary.bellaclaw.R
 import java.util.Locale
@@ -100,9 +103,16 @@ private fun LanguageChip(language: Locale, languages: List<Locale>, onPick: (Loc
     Box {
         AssistChip(
             onClick = { expanded = true },
-            label = { Text(language.language.uppercase(Locale.ROOT)) },
+            label = { Text(language.language.uppercase(Locale.ROOT), fontWeight = FontWeight.SemiBold) },
             trailingIcon = { Icon(Icons.Filled.ArrowDropDown, contentDescription = null, modifier = Modifier.size(18.dp)) },
-            modifier = Modifier.height(32.dp),
+            shape = CircleShape,
+            colors = AssistChipDefaults.assistChipColors(
+                containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                labelColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                trailingIconContentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+            ),
+            border = null,
+            modifier = Modifier.height(28.dp),
         )
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             languages.forEach { locale ->
