@@ -22,6 +22,12 @@
     <string name="attached_image">Attached image</string>
     <string name="error_image_too_large">Images can be up to 5 MB.</string>
     <string name="error_image_type">Only JPEG, PNG, WebP and GIF images can be sent.</string>
+    <string name="action_dictate">Dictate</string>
+    <string name="action_finish_dictation">Finish dictating</string>
+    <string name="dictation_listening">Listening…</string>
+    <string name="dictation_language_current">Current language</string>
+    <string name="error_dictation_language">Dictation isn\'t available in this language.</string>
+    <string name="error_dictation">Dictation stopped. Try again.</string>
     <string name="typing">Typing</string>
     <plurals name="activity_summary">
         <item quantity="one">%1$d step · %2$ds</item>
