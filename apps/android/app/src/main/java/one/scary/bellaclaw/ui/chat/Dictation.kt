@@ -58,6 +58,9 @@ class Dictation(
         private set
 
     private var isFinishing = false
+
+    /** A language switch cancelled the running recognition, which the speech service reports as an error. */
+    private var isSwitching = false
     private var heard by mutableStateOf("")
     private var hearing by mutableStateOf("")
 
@@ -86,6 +89,7 @@ class Dictation(
         savedLanguage = locale.toLanguageTag()
         onLanguagePicked(locale.toLanguageTag())
         keepHearing()
+        isSwitching = true
         listen()
     }
 
@@ -112,6 +116,7 @@ class Dictation(
         val result = text
         isListening = false
         isFinishing = false
+        isSwitching = false
         recognizer?.cancel()
         heard = ""
         hearing = ""
@@ -166,6 +171,10 @@ class Dictation(
             if (!isListening) {
                 return
             }
+            if (isSwitching) {
+                isSwitching = false
+                return
+            }
             if (error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT) {
                 nextRecognition()
                 return
@@ -185,7 +194,9 @@ class Dictation(
             }
         }
 
-        override fun onReadyForSpeech(params: Bundle?) {}
+        override fun onReadyForSpeech(params: Bundle?) {
+            isSwitching = false
+        }
         override fun onBeginningOfSpeech() {}
         override fun onBufferReceived(buffer: ByteArray?) {}
         override fun onEndOfSpeech() {}
