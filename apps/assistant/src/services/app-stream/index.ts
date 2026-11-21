@@ -1,13 +1,14 @@
 import { EEventType } from "@bellaclaw/database";
 import type { TGatewayStreamEvent, TOption } from "@bellaclaw/shared";
+import type { TAgentStep } from "../ai/agent-harness/types";
 import { ESubscriptionMode, EventBus } from "../events";
 import { IdentityService } from "../identity";
 import { EMessagePlatform } from "../messaging/types";
 
 type TAppStreamListener = (event: TGatewayStreamEvent) => void;
 
-// NOTE: the app's live stream: nudges, typing and confidential replies for the edge, which fans
-// them out per account. Live only: a stream that was not open misses nothing it can get back,
+// NOTE: the app's live stream: nudges, typing, steps and confidential replies for the edge, which
+// fans them out per account. Live only: a stream that was not open misses nothing it can get back,
 // because the app compares revisions on every connect and a confidential reply is never stored.
 // Only account conversations reach it
 export class AppStream {
@@ -139,6 +140,12 @@ export class AppStream {
     return () => {
       this.listeners.delete(listener);
     };
+  }
+
+  // a tool call of a conversation's reply turn, sent by the turn as it runs: no event carries it,
+  // and the reply row stores the turn's steps
+  public step(ownerKey: string, conversationKey: string, step: TAgentStep): void {
+    this.send(ownerKey, (accountId) => ({ type: "step", accountId, conversationKey, ...step }));
   }
 
   private typing(ownerKey: string, conversationKey: string, typing: boolean): void {

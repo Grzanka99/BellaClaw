@@ -33,6 +33,21 @@ export type TAgentRunArgs = {
   withoutMcp?: boolean;
   /** The model the root agent runs on instead of the one its settings resolve to. */
   model?: TLlmModelConfig;
+  /** The reply turn's tool calls as they start and end; delegated runs report none. */
+  onStep?: (step: TAgentStep) => void;
+};
+
+// a tool call of the reply turn. stepId: the tool call id; tool: the tool's name; label: the
+// tool's; detail: the argument a person recognises, such as a search's query, empty when none;
+// startedAt: epoch ms; durationMs: once it ended
+export type TAgentStep = {
+  stepId: string;
+  tool: string;
+  label: string;
+  detail: string;
+  state: "started" | "completed" | "failed";
+  startedAt: number;
+  durationMs: TOption<number>;
 };
 
 export type TTurnImages = {

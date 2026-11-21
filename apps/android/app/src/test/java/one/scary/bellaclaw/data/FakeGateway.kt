@@ -6,6 +6,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
@@ -25,7 +26,7 @@ import okio.BufferedSink
  * its rewrite revision. Each stream opens with `check`, then carries what [push] sends while it is open.
  */
 class FakeGateway : Dispatcher() {
-    class Row(val id: Long, val author: String, val text: String, val createdAt: Long, val clientMessageId: String?, val imageIds: List<String?>)
+    class Row(val id: Long, val author: String, val text: String, val createdAt: Long, val clientMessageId: String?, val imageIds: List<String?>, val steps: String?)
 
     class Conversation(val key: String, val kind: String, var title: String? = null) {
         val rows = mutableListOf<Row>()
@@ -82,11 +83,18 @@ class FakeGateway : Dispatcher() {
         conversations.add(1, Conversation(key, "plain", title))
     }
 
-    /** Appends a row to [key] and answers its id; the conversation moves up as the latest active. */
+    /** Appends a row to [key] and answers its id; the conversation moves up as the latest active. [steps] is the row's `steps`, as JSON. */
     @Synchronized
-    fun addRow(key: String, author: String, text: String, clientMessageId: String? = null, imageIds: List<String?> = emptyList()): Long {
+    fun addRow(
+        key: String,
+        author: String,
+        text: String,
+        clientMessageId: String? = null,
+        imageIds: List<String?> = emptyList(),
+        steps: String? = null,
+    ): Long {
         val conversation = conversation(key)
-        val row = Row(nextRowId++, author, text, CREATED_AT + nextRowId * 1000, clientMessageId, imageIds)
+        val row = Row(nextRowId++, author, text, CREATED_AT + nextRowId * 1000, clientMessageId, imageIds, steps)
         conversation.rows.add(row)
         conversation.revision++
         if (conversation.kind == "plain") {
@@ -251,6 +259,7 @@ class FakeGateway : Dispatcher() {
         put("text", text)
         put("createdAt", createdAt)
         clientMessageId?.let { put("clientMessageId", it) }
+        steps?.let { put("steps", Json.parseToJsonElement(it)) }
         if (imageIds.isNotEmpty()) {
             putJsonArray("images") {
                 imageIds.forEach { mediaId ->

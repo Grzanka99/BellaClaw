@@ -3,6 +3,7 @@ package one.scary.bellaclaw.data
 import one.scary.bellaclaw.data.remote.ConversationBody
 import one.scary.bellaclaw.data.remote.HistoryRowBody
 import one.scary.bellaclaw.data.remote.MediaBody
+import one.scary.bellaclaw.model.ActivityStep
 import one.scary.bellaclaw.model.Author
 import one.scary.bellaclaw.model.BELLACLAW_CHAT_ID
 import one.scary.bellaclaw.model.ChatIcon
@@ -31,6 +32,8 @@ internal data class ChatState(
     /** `reply` events by conversation key: shown once, kept for the session. */
     val replies: Map<String, List<Message>> = emptyMap(),
     val typing: Set<String> = emptySet(),
+    /** The steps of the reply in progress, by conversation key, then by step id in the order they came. */
+    val steps: Map<String, Map<String, ActivityStep>> = emptyMap(),
     val isStreamOpen: Boolean = false,
     /** New chat ids whose first send created their chat, to its conversation key. */
     val createdChats: Map<String, String> = emptyMap(),
@@ -58,6 +61,7 @@ internal data class ChatState(
         pending = pending - key,
         replies = replies - key,
         typing = typing - key,
+        steps = steps - key,
     )
 
     /** History, replies and accepted sends by time, then the sends the server has not accepted. */
@@ -119,6 +123,7 @@ internal fun HistoryRowBody.toMessage(chatId: String) = Message(
     text = text,
     sentAt = Instant.ofEpochMilli(createdAt),
     images = images.orEmpty().map { MessageImage(it.mediaId, it.mimeType) },
+    steps = steps.orEmpty().map { ActivityStep(it.tool, it.label, it.detail, Instant.ofEpochMilli(it.startedAt), it.durationMs, it.failed) },
 )
 
 /** Derived from the key, so it stays the same across starts. */

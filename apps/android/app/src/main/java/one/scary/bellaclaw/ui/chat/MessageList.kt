@@ -2,6 +2,7 @@ package one.scary.bellaclaw.ui.chat
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -31,8 +32,10 @@ import java.time.format.FormatStyle
 private const val TYPING_KEY = "typing"
 
 /**
- * The conversation, newest at the bottom. [rows] come newest first. [assistantInBubbles] draws
- * assistant replies in bubbles (BellaClaw); otherwise they are plain full-width text (plain chats).
+ * The conversation, newest at the bottom. [rows] come newest first. User messages are bubbles,
+ * assistant replies plain full-width text.
+ * While a reply is in progress its [liveActivity] shows below the newest row, or the typing dots while
+ * it has none; a reply that took steps has them in a chip above it.
  * A new bottom item scrolls into view when the reader was at the bottom; otherwise the list stays put.
  * Reaching the oldest row asks for older ones with [onLoadOlder]; a failed send retries on [onRetry];
  * a tapped image opens with [onOpenImage].
@@ -41,7 +44,7 @@ private const val TYPING_KEY = "typing"
 fun MessageList(
     rows: List<ChatRow>,
     isTyping: Boolean,
-    assistantInBubbles: Boolean,
+    liveActivity: List<ActivityRow>,
     onRetry: (String) -> Unit,
     onLoadOlder: () -> Unit,
     imageLoader: MessageImageLoader,
@@ -62,7 +65,8 @@ fun MessageList(
         }
     }
     val atBottom by remember { derivedStateOf { listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0 } }
-    val bottomKey = if (isTyping) TYPING_KEY else rows.firstOrNull()?.key
+    val inProgress = isTyping || liveActivity.isNotEmpty()
+    val bottomKey = if (inProgress) TYPING_KEY else rows.firstOrNull()?.key
     // Read while composing the new bottom item, so it reflects the layout from before that item.
     val follow = remember(bottomKey) { atBottom }
     LaunchedEffect(bottomKey) {
@@ -77,17 +81,28 @@ fun MessageList(
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        if (isTyping) {
+        if (inProgress) {
             item(key = TYPING_KEY) {
-                Box(modifier = Modifier.fillMaxWidth()) {
-                    TypingIndicator()
+                if (liveActivity.isEmpty()) {
+                    Box(modifier = Modifier.fillMaxWidth()) {
+                        TypingIndicator()
+                    }
+                } else {
+                    ActivitySteps(liveActivity)
                 }
             }
         }
         items(rows, key = { it.key }) { row ->
             when (row) {
                 is ChatRow.Day -> DayChip(row.date)
-                is ChatRow.Item -> MessageItem(row.message, assistantInBubbles, onRetry, imageLoader, onOpenImage)
+                is ChatRow.Item -> if (row.activity.isEmpty()) {
+                    MessageItem(row.message, onRetry, imageLoader, onOpenImage)
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        ActivityChip(row.activity, row.activitySeconds)
+                        MessageItem(row.message, onRetry, imageLoader, onOpenImage)
+                    }
+                }
             }
         }
     }

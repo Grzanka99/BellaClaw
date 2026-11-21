@@ -8,6 +8,7 @@ export {
   type THistoryCursor,
   type THistoryImage,
   type THistoryMessage,
+  type THistoryStep,
   type TListedConversation,
   type TOwnedConversation,
 } from "./conversations";

@@ -59,7 +59,7 @@ import { emptyUsage, LlmClient, type TLlmModelConfig } from "../llm";
 import { aiModels } from "../providers/registry";
 import { type TToolExecutionContext, validateToolArguments } from "../tools/define-tool";
 import { EModelPurpose } from "../types";
-import type { TAgentRunArgs, TAgentRunResult, TMainAgentRunResult } from "./types";
+import type { TAgentRunArgs, TAgentRunResult, TAgentStep, TMainAgentRunResult } from "./types";
 
 const SEQUENTIAL: "sequential" = "sequential";
 const NO_VISION_NOTE = "[User sent an image; the current model cannot view images]";
@@ -119,12 +119,13 @@ export class AgentHarness {
   }
 
   public async runScheduledTask(
-    args: Omit<TAgentRunArgs, "name" | "parentToolCallId">,
+    args: Omit<TAgentRunArgs, "name" | "parentToolCallId" | "onStep">,
   ): Promise<TAgentRunResult> {
     return this.run({
       ...args,
       name: EAgentName.ScheduledTask,
       parentToolCallId: undefined,
+      onStep: undefined,
       delegationCount: undefined,
     });
   }
@@ -216,6 +217,9 @@ export class AgentHarness {
     const sessionId = this.llm.createSessionId(modelConfig.model.provider, args.conversationKey);
 
     const toolSpans = new Map<string, TBehaviorSpan>();
+    // the started steps, by tool call id; empty without onStep
+    const steps = new Map<string, TAgentStep>();
+    const toolLabels = new Map(tools.map((tool) => [tool.name, tool.label]));
     const toolLogPolicies = new Map<string, TToolLogPolicy>(
       agentDefinition.tools.map((tool) => [tool.name, tool]),
     );
@@ -360,9 +364,36 @@ export class AgentHarness {
             parentToolCallId: args.parentToolCallId ?? null,
           },
         });
+
+        if (args.onStep !== undefined) {
+          const step: TAgentStep = {
+            stepId: event.toolCallId,
+            tool: event.toolName,
+            label: toolLabels.get(event.toolName) ?? event.toolName,
+            detail: stepDetail(event.toolName, event.args),
+            state: "started",
+            startedAt: Date.now(),
+            durationMs: undefined,
+          };
+          steps.set(event.toolCallId, step);
+          args.onStep(step);
+        }
       }
 
       if (event.type === "tool_execution_end") {
+        const step = steps.get(event.toolCallId);
+
+        if (step !== undefined) {
+          steps.delete(event.toolCallId);
+          let state: TAgentStep["state"] = "completed";
+
+          if (event.isError) {
+            state = "failed";
+          }
+
+          args.onStep?.({ ...step, state, durationMs: Date.now() - step.startedAt });
+        }
+
         let resultDetails: unknown = event.result;
         let resultError: TOption<string>;
 
@@ -762,6 +793,7 @@ export class AgentHarness {
             delegationCount: undefined,
             signal: delegationSignal,
             model: undefined,
+            onStep: undefined,
           });
 
           if (result.text === undefined || result.text.trim().length === 0) {
@@ -893,6 +925,7 @@ export class AgentHarness {
                   delegationCount: undefined,
                   mcp: { profile: session.profile, tools: session.tools },
                   model: undefined,
+                  onStep: undefined,
                 });
                 // Main gets the answer, not the specialist transcript.
                 return {
@@ -1089,6 +1122,42 @@ export function isSerializedToolCall(text: string, tools: Array<{ name: string }
 
     return typeof called === "string" && names.has(called) && hasArguments;
   });
+}
+
+// NOTE: the argument a step shows of its call, by tool: what a person recognises, never an id.
+// web-fetch and the specialist delegate tools have their own rule in stepDetail
+const STEP_DETAIL_FIELDS = new Map([
+  ["web-search", "query"],
+  ["delegate-mcp", "profileId"],
+]);
+
+// what a step shows of its call: a fetch's host, a delegation's task, or the field
+// STEP_DETAIL_FIELDS names, on one line
+export function stepDetail(toolName: string, args: unknown): string {
+  if (!isRecord(args)) {
+    return "";
+  }
+
+  let detail = "";
+  let field = STEP_DETAIL_FIELDS.get(toolName);
+
+  if (field === undefined && toolName.startsWith("delegate-")) {
+    field = "task";
+  }
+
+  if (field !== undefined) {
+    const value = args[field];
+
+    if (typeof value === "string") {
+      detail = value;
+    }
+  }
+
+  if (toolName === "web-fetch" && typeof args.url === "string" && URL.canParse(args.url)) {
+    detail = new URL(args.url).hostname.replace(/^www\./, "");
+  }
+
+  return detail.replace(/\s+/g, " ").trim().slice(0, 120);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

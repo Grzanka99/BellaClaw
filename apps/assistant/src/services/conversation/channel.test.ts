@@ -141,6 +141,7 @@ test("every transcript write stores its channel", async () => {
     ],
     source.id,
     undefined,
+    [],
   );
   await store.saveDeliveredMessage(
     database,

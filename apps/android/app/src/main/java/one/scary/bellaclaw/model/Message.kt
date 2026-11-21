@@ -44,8 +44,22 @@ sealed interface ImageCheck {
 }
 
 /**
+ * One thing the assistant did for a reply (a tool call), as the server labels it; [tool] is the tool's
+ * name. [durationMs] is null while it runs.
+ */
+data class ActivityStep(
+    val tool: String,
+    val label: String,
+    val detail: String,
+    val startedAt: Instant,
+    val durationMs: Long?,
+    val failed: Boolean = false,
+)
+
+/**
  * A row of a conversation: a message or a display row (a command and its reply, a notice), drawn by its
  * [author]. A [SendState.FAILED] send has the server's [failure] text when it gave one.
+ * An assistant reply has the [steps] that led to it, by start.
  */
 data class Message(
     val id: String,
@@ -56,4 +70,5 @@ data class Message(
     val images: List<MessageImage> = emptyList(),
     val sendState: SendState = SendState.STORED,
     val failure: String? = null,
+    val steps: List<ActivityStep> = emptyList(),
 )

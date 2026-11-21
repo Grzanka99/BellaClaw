@@ -1,5 +1,6 @@
 package one.scary.bellaclaw.ui.chat
 
+import one.scary.bellaclaw.model.ActivityStep
 import one.scary.bellaclaw.model.ChatKind
 import one.scary.bellaclaw.model.ChatProvider
 import one.scary.bellaclaw.model.Effort
@@ -17,6 +18,8 @@ data class ChatUiState(
     /** The conversation newest first, as the bottom-up list lays it out, with a day row above each day's messages. */
     val rows: List<ChatRow> = emptyList(),
     val isTyping: Boolean = false,
+    /** The reply in progress: its steps so far, oldest first; empty while there are none. */
+    val liveActivity: List<ActivityRow> = emptyList(),
     val isStreamOpen: Boolean = false,
     val draft: String = "",
     val attachmentUri: String? = null,
@@ -46,9 +49,25 @@ sealed interface ChatRow {
         override val key: String = "day-$firstMessageId"
     }
 
-    data class Item(val message: Message) : ChatRow {
+    /** A reply that took steps has them as [activity], which ran [activitySeconds] from the first start to the last end. */
+    data class Item(
+        val message: Message,
+        val activity: List<ActivityRow> = emptyList(),
+        val activitySeconds: Long = 0,
+    ) : ChatRow {
         override val key: String = "message-${message.id}"
     }
+}
+
+/** One row of a reply's activity. */
+sealed interface ActivityRow {
+    data class Step(val step: ActivityStep) : ActivityRow
+
+    /** The pause before the next step, when it lasted a second or more. */
+    data class Thought(val seconds: Long) : ActivityRow
+
+    /** No step runs, and the reply is not there yet. */
+    data object Thinking : ActivityRow
 }
 
 /**

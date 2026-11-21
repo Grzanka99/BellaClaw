@@ -93,6 +93,8 @@ const ALLOWED: Record<string, string> = {
   "message-handler -> ai/agent-harness":
     "runMain, runPlain and compactConversation, the stateless engine",
   "message-handler -> ai/llm": "driver: the Utility call that writes a plain chat's title",
+  "message-handler -> app-stream":
+    "AppStream.step: a reply turn's live steps to the open streams, ephemeral UI no event carries",
   "message-handler -> ai/providers/registry":
     "checkAiModelChoice: the model catalog, a plain chat's model for its turn",
   "message-handler -> conversation": "the same component: Conversation's handler and its store",

@@ -57,6 +57,7 @@ test("replays native messages after restart; compaction preserves fact source hi
     messages,
     source.id,
     undefined,
+    [],
   );
   expect((await new ConversationStore().load(chatId))?.entries).toEqual(persisted.entries);
   expect(persisted.entries.map((entry) => entry.message)).toEqual(messages);
@@ -115,6 +116,7 @@ test("appends later turns, skips rows without replay and reloads the retained ta
       ],
       source.id,
       state,
+      [],
     );
   }
   if (state === undefined) {
@@ -152,6 +154,7 @@ test("a missing user row fails the turn", async () => {
       [{ role: "user", content: "missing", timestamp: 2 }, fauxAssistantMessage("answer")],
       999999,
       undefined,
+      [],
     ),
   ).rejects.toThrow("missing");
   expect(await store.load(chatId)).toBeUndefined();
@@ -211,6 +214,7 @@ test("after three kept compactions, saveSummary returns the images of the droppe
       [{ role: "user", content: [attachmentBlock(ref)], timestamp: 1 }],
       row.id,
       undefined,
+      [],
     );
     ids.push(row.id);
   }

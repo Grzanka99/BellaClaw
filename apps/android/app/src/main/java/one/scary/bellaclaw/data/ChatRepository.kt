@@ -21,6 +21,7 @@ import one.scary.bellaclaw.data.local.PickedImages
 import one.scary.bellaclaw.data.local.LocalChats
 import one.scary.bellaclaw.data.remote.ApiClient
 import one.scary.bellaclaw.data.remote.ConversationBody
+import one.scary.bellaclaw.model.ActivityStep
 import one.scary.bellaclaw.model.AppPush
 import one.scary.bellaclaw.model.BELLACLAW_CHAT_ID
 import one.scary.bellaclaw.model.BellaClawChat
@@ -169,6 +170,11 @@ class ChatRepository(
 
     fun isTyping(chatId: String): Flow<Boolean> =
         state.map { current -> current.keyOf(chatId)?.let { it in current.typing } == true }.distinctUntilChanged()
+
+    /** The steps of the reply in progress in [chatId], by start; empty once its typing ends. */
+    fun liveSteps(chatId: String): Flow<List<ActivityStep>> = state.map { current ->
+        current.keyOf(chatId)?.let { current.steps[it] }.orEmpty().values.sortedBy { it.startedAt }
+    }.distinctUntilChanged()
 
     /** Loads the page of rows older than the chat's oldest, if there is one and it is not loading already. */
     fun loadOlder(chatId: String) {

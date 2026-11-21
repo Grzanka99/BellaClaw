@@ -9,7 +9,7 @@ module; every dependency and plugin version lives in `gradle/libs.versions.toml`
 
 | Package (`one.scary.bellaclaw.…`) | Holds |
 | --- | --- |
-| `model` | Plain Kotlin types (`Chat`, `Message`, `MessageImage`, `PickedImage`, `ImageCheck`, `SendState`, `ModelChoice`, `ModelSettings`, `AiModel`, `ChatProvider`, `Personality`, `SettingsSnapshot`, `Loadable`, `Session`, `LoginLink`, `PendingLink`, `LinkStatus`, `AccountError`, `AppPush`, `ChatNotification`, …), and every type a ViewModel gets from a repository. No Android or Compose imports. |
+| `model` | Plain Kotlin types (`Chat`, `Message`, `ActivityStep`, `MessageImage`, `PickedImage`, `ImageCheck`, `SendState`, `ModelChoice`, `ModelSettings`, `AiModel`, `ChatProvider`, `Personality`, `SettingsSnapshot`, `Loadable`, `Session`, `LoginLink`, `PendingLink`, `LinkStatus`, `AccountError`, `AppPush`, `ChatNotification`, …), and every type a ViewModel gets from a repository. No Android or Compose imports. |
 | `data` | One repository per kind of data: `ChatRepository` (chats, messages, sends and their images, typing, unread, the live stream; its state in `ChatState`; the live stream and its events in `ChatStream`; the list and history reads in `ChatSync`; sends in `ChatSends`; images in `ChatImages`), `SettingsRepository` (one `SettingsSnapshot` flow: the account's models and personality and the plain chats' model list from the server, the phone's theme), `AccountRepository` (the session, sign-in, sign-out, the pending login link). `ServerUrls.kt`: the server address rule and the login link parser. |
 | `data.remote` | `ApiClient`, the one HTTP client of the gateway's app API (OkHttp, kotlinx.serialization JSON), its request and answer bodies (one file per area: `ApiBodies.kt`, `ChatBodies.kt` for conversations and the stream, `DeviceBodies.kt`, `SettingsBodies.kt`), and `ApiResult`. |
 | `data.push` | `PushRepository` (device registration, decrypted pushes as a flow), `PushNotifications` (a notification per push, behind the `Notifier` seam), the device keys (`loadDeviceKeys`, `DeviceKeys`), RFC 8291 decryption (`decryptPush`), `PushTokens` (FCM's token, `FirebasePushTokens`). |
@@ -229,7 +229,14 @@ Everything it holds is one immutable `ChatState` in a `MutableStateFlow`, change
 - **Events.** `check`: typing off, read the list. `changed`: read the list. `typing`: mark or unmark the
   conversation. `deleted`: drop the plain chat; an open screen sees `isMissing`. `reply`: an assistant
   message kept in memory only (`ChatState.replies`), shown once in its conversation for as long as the
-  session lasts.
+  session lasts. `step`: a step of the reply in progress (`ChatState.steps`, by step id: `started`, then
+  `completed` or `failed`), kept until that conversation's typing ends, a `check`, or the stream ends.
+- **Activity steps.** While a reply is in progress the chat shows its steps where the reply will appear
+  (`ChatUiState.liveActivity`; the typing dots while there are none). A history row's `steps` come with its
+  `Message`, and show as a chip above the reply ("4 steps · 14s", from the first step's start to the
+  reply) that a tap opens; open or closed is the list's own state. `activityRows` shapes both: a
+  "Thought for Ns" row before a step that began a second or more after every earlier one ended, and
+  "Thinking…" last while typing with no step running.
 - **The list and revisions.** Reading the list (`ChatSync.refreshList`) replaces it, marks it loaded,
   drops what belongs to conversations no longer in it, and syncs each loaded history whose revision is
   below the list's, and the history of each open chat that has none (its first read failed, or the

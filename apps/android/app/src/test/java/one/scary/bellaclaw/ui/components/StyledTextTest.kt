@@ -1,6 +1,7 @@
 package one.scary.bellaclaw.ui.components
 
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
@@ -24,6 +25,31 @@ class StyledTextTest {
             val styled = styledText("At $marked.")
             assertEquals("At 20:46.", styled.text)
             assertEquals(listOf(Triple(style, 3, 8)), spans(styled))
+        }
+    }
+
+    @Test
+    fun aMarkdownLinkShowsItsLabelAndOpensItsAddress() {
+        val styled = styledText("See [bun.com/blog](https://bun.com/blog/bun-v1.4), z 20.")
+        assertEquals("See bun.com/blog, z 20.", styled.text)
+        val links = styled.getLinkAnnotations(0, styled.length).map { Triple((it.item as LinkAnnotation.Url).url, it.start, it.end) }
+        assertEquals(listOf(Triple("https://bun.com/blog/bun-v1.4", 4, 16)), links)
+    }
+
+    @Test
+    fun aLinkWhoseLabelDoesNotNameItsSiteShowsTheSite() {
+        val styled = styledText("Pay [your OVH invoice](https://www.attacker.example/pay) now.")
+        assertEquals("Pay your OVH invoice (attacker.example) now.", styled.text)
+        val links = styled.getLinkAnnotations(0, styled.length).map { Triple((it.item as LinkAnnotation.Url).url, it.start, it.end) }
+        assertEquals(listOf(Triple("https://www.attacker.example/pay", 4, 20)), links)
+    }
+
+    @Test
+    fun aLinkWithAnInvalidAddressStaysAsTyped() {
+        listOf("[click](https://a|b.com)", "[PayPal](https://pаypal.com/steal)").forEach {
+            val styled = styledText(it)
+            assertEquals(it, styled.text)
+            assertEquals(emptyList<Any>(), styled.getLinkAnnotations(0, styled.length))
         }
     }
 

@@ -12,12 +12,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import one.scary.bellaclaw.R
 import one.scary.bellaclaw.model.Author
@@ -25,43 +23,43 @@ import one.scary.bellaclaw.model.Message
 import one.scary.bellaclaw.model.MessageImage
 import one.scary.bellaclaw.model.SendState
 import one.scary.bellaclaw.ui.components.formatTime
-import one.scary.bellaclaw.ui.components.styledText
+import one.scary.bellaclaw.ui.components.MessageText
 
 private val BubbleShape = RoundedCornerShape(20.dp)
 
+/** A user message in a bubble at the end; an assistant reply as plain full-width text with its time below. */
 @Composable
 fun MessageItem(
     message: Message,
-    assistantInBubble: Boolean,
     onRetry: (String) -> Unit,
     imageLoader: MessageImageLoader,
     onOpenImage: (MessageImage) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val fromUser = message.author == Author.USER
-    if (!fromUser && !assistantInBubble) {
-        Text(
-            text = remember(message.text) { styledText(message.text) },
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = modifier.fillMaxWidth().padding(horizontal = 4.dp),
-        )
+    if (message.author != Author.USER) {
+        Column(modifier = modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
+            MessageText(
+                text = message.text,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = formatTime(message.sentAt),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+        }
         return
     }
-    val container = if (fromUser) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHighest
-    val content = if (fromUser) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
-    Row(
-        modifier = modifier.fillMaxWidth(),
-        horizontalArrangement = if (fromUser) Arrangement.End else Arrangement.Start,
-    ) {
-        if (fromUser) {
-            Spacer(Modifier.fillMaxWidth(BUBBLE_INSET_FRACTION))
-        }
+    val content = MaterialTheme.colorScheme.onPrimary
+    Row(modifier = modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+        Spacer(Modifier.fillMaxWidth(BUBBLE_INSET_FRACTION))
         val failed = message.sendState == SendState.FAILED
         val retry = if (failed) Modifier.clickable { onRetry(message.id) } else Modifier
         Surface(
             shape = BubbleShape,
-            color = container,
+            color = MaterialTheme.colorScheme.primary,
             contentColor = content,
             modifier = Modifier.weight(1f, fill = false).clip(BubbleShape).then(retry),
         ) {
@@ -75,12 +73,7 @@ fun MessageItem(
                     )
                 }
                 if (message.text.isNotEmpty()) {
-                    val text = if (fromUser) {
-                        AnnotatedString(message.text)
-                    } else {
-                        remember(message.text) { styledText(message.text) }
-                    }
-                    Text(text = text, style = MaterialTheme.typography.bodyLarge)
+                    Text(text = message.text, style = MaterialTheme.typography.bodyLarge)
                 }
                 message.failure?.let {
                     Text(text = it, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 4.dp))
@@ -98,13 +91,10 @@ fun MessageItem(
                 )
             }
         }
-        if (!fromUser) {
-            Spacer(Modifier.fillMaxWidth(BUBBLE_INSET_FRACTION))
-        }
     }
 }
 
-/** Share of the width a bubble leaves free on its far side. */
+/** Share of the width a bubble leaves free on its start side. */
 private const val BUBBLE_INSET_FRACTION = 0.2f
 private const val TIME_ALPHA = 0.7f
 

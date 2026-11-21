@@ -366,8 +366,9 @@ export type TGatewayActivationCheck = z.infer<typeof SGatewayActivationCheck>;
 // an empty line keeps an idle connection open. accountId: the account the event belongs to.
 // changed: the conversation's transcript changed, with its revisions; typing: a turn of the
 // conversation started (true) or ended (false); deleted: the plain chat is gone; reply: a
-// confidential reply to a message sent from the app, never stored, for app streams only. Nothing
-// replays
+// confidential reply to a message sent from the app, never stored, for app streams only; step: a
+// tool call of the reply turn started, completed or failed, stepId its tool call id, tool the
+// tool's name, startedAt epoch ms, durationMs once it ended. Nothing replays
 const SGatewayStreamEventBase = z.object({ accountId: z.string(), conversationKey: z.string() });
 
 export const SGatewayStreamEvent = z.discriminatedUnion("type", [
@@ -379,6 +380,16 @@ export const SGatewayStreamEvent = z.discriminatedUnion("type", [
   SGatewayStreamEventBase.extend({ type: z.literal("typing"), typing: z.boolean() }).strict(),
   SGatewayStreamEventBase.extend({ type: z.literal("deleted") }).strict(),
   SGatewayStreamEventBase.extend({ type: z.literal("reply"), text: z.string() }).strict(),
+  SGatewayStreamEventBase.extend({
+    type: z.literal("step"),
+    stepId: z.string(),
+    tool: z.string(),
+    label: z.string(),
+    detail: z.string(),
+    state: z.enum(["started", "completed", "failed"]),
+    startedAt: z.number().int(),
+    durationMs: z.number().int().optional(),
+  }).strict(),
 ]);
 
 export type TGatewayStreamEvent = z.infer<typeof SGatewayStreamEvent>;
