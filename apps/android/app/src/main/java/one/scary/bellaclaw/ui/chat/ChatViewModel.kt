@@ -157,7 +157,8 @@ class ChatViewModel(
         draft,
         local,
         settingsRepository.settings,
-    ) { chat, draft, local, settings ->
+        chatRepository.dictationLanguage,
+    ) { chat, draft, local, settings, dictationLanguage ->
         val picker = if (local.isPickerOpen) {
             val usable = settings.chatModels.map { providers -> providers.filter { it.isUsable } }
             ModelPickerState(usable, validSelection(local.pickerSelection, settings.chatModels))
@@ -171,11 +172,16 @@ class ChatViewModel(
             isCheckingAttachment = local.checkingUri != null,
             viewedImage = local.viewedImage,
             picker = picker,
+            dictationLanguage = dictationLanguage,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ChatUiState())
 
     fun onDraftChange(text: String) {
         draft.value = text
+    }
+
+    fun onDictationLanguage(languageTag: String) {
+        viewModelScope.launch { chatRepository.setDictationLanguage(languageTag) }
     }
 
     /**

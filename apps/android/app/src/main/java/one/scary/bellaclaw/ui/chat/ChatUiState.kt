@@ -35,6 +35,8 @@ data class ChatUiState(
     val isMissing: Boolean = false,
     /** Whether the chat's conversation is known and, for a plain chat, its model; until then nothing can be sent. */
     val isReadyToSend: Boolean = false,
+    /** The language last picked for dictation, as a BCP 47 tag; null means the phone's language. */
+    val dictationLanguage: String? = null,
 ) {
     val canSend: Boolean
         get() = isReadyToSend && !isCheckingAttachment && (draft.isNotBlank() || attachmentUri != null)

@@ -221,6 +221,13 @@ class ChatRepository(
         chatStore.setModel(chatId, model)
     }
 
+    /** The language last picked for dictation, as a BCP 47 tag; null until one is picked. */
+    val dictationLanguage: Flow<String?> = chatStore.chats.map { it.dictationLanguage }.distinctUntilChanged()
+
+    suspend fun setDictationLanguage(languageTag: String) {
+        chatStore.setDictationLanguage(languageTag)
+    }
+
     /** Forgets the model picked in the new chat [newChatId], closed without a send. */
     fun forgetNewChat(newChatId: String) {
         scope.launch { chatStore.forget(newChatId) }
