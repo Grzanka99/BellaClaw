@@ -7,7 +7,7 @@ import {
   ECronJobType,
   EEventType,
 } from "@bellaclaw/database";
-import type { TOption } from "@bellaclaw/shared";
+import { SListOperation, SListSnapshot, type TOption } from "@bellaclaw/shared";
 import { z } from "zod";
 import { SThinkingLevel } from "../ai/model-preferences";
 import { EAiProvider } from "../ai/types";
@@ -551,6 +551,20 @@ const SAppDeviceRegistered = z
 // a device the account holds; another account's device is left alone
 const SAppDevice = z.object({ deviceId: z.string(), accountId: z.string() }).strict();
 
+// the owner's list changes, applied in order, all or none
+const SListsUpdateRequested = z
+  .object({ ownerKey: z.string(), operations: z.array(SListOperation).min(1).max(50) })
+  .strict();
+
+// lists: the lists the command changed, after the change, without the deleted ones
+const SListsChanged = z
+  .object({
+    ownerKey: z.string(),
+    lists: z.array(SListSnapshot),
+    deletedListIds: z.array(z.string()),
+  })
+  .strict();
+
 // errorCode: the handler's stable code for an expected failure, such as job-not-found
 const SCommandRejected = z
   .object({
@@ -662,6 +676,8 @@ export type TEventPayloads = {
   [EEventType.ConversationCreated]: z.infer<typeof SConversationCreated>;
   [EEventType.ConversationDeleteRequested]: z.infer<typeof SConversationDeleteRequested>;
   [EEventType.ConversationDeleted]: z.infer<typeof SConversationDeleted>;
+  [EEventType.ListsUpdateRequested]: z.infer<typeof SListsUpdateRequested>;
+  [EEventType.ListsChanged]: z.infer<typeof SListsChanged>;
   [EEventType.CommandRejected]: z.infer<typeof SCommandRejected>;
   [EEventType.EventDeadLettered]: z.infer<typeof SEventDeadLettered>;
   [EEventType.AppStarted]: z.infer<typeof SAppStarted>;
@@ -755,6 +771,8 @@ export const EVENT_SCHEMAS: { [K in EEventType]: z.ZodType<TEventPayloads[K]> } 
   [EEventType.ConversationCreated]: SConversationCreated,
   [EEventType.ConversationDeleteRequested]: SConversationDeleteRequested,
   [EEventType.ConversationDeleted]: SConversationDeleted,
+  [EEventType.ListsUpdateRequested]: SListsUpdateRequested,
+  [EEventType.ListsChanged]: SListsChanged,
   [EEventType.CommandRejected]: SCommandRejected,
   [EEventType.EventDeadLettered]: SEventDeadLettered,
   [EEventType.AppStarted]: SAppStarted,
@@ -846,6 +864,8 @@ export const EVENT_KINDS: Record<EEventType, EEventKind> = {
   [EEventType.ConversationCreated]: EEventKind.Event,
   [EEventType.ConversationDeleteRequested]: EEventKind.Command,
   [EEventType.ConversationDeleted]: EEventKind.Event,
+  [EEventType.ListsUpdateRequested]: EEventKind.Command,
+  [EEventType.ListsChanged]: EEventKind.Event,
   [EEventType.CommandRejected]: EEventKind.Event,
   [EEventType.EventDeadLettered]: EEventKind.Event,
   [EEventType.AppStarted]: EEventKind.Event,

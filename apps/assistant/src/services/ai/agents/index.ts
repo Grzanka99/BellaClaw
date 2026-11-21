@@ -16,6 +16,7 @@ import { getSettings } from "../tools/get-settings";
 import { listCalendarEvents } from "../tools/list-calendar-events";
 import { listCalendars } from "../tools/list-calendars";
 import { listCronJobs } from "../tools/list-cron-jobs";
+import { listLists } from "../tools/list-lists";
 import { previewCronJob } from "../tools/preview-cron-job";
 import { rememberMemory } from "../tools/remember-memory";
 import { removeReadonlyCalendar } from "../tools/remove-readonly-calendar";
@@ -25,12 +26,14 @@ import { searchMemory } from "../tools/search-memory";
 import { unscheduleCronJob } from "../tools/unschedule-cron-job";
 import { updateCalendarEvent } from "../tools/update-calendar-event";
 import { updateCronJob } from "../tools/update-cron-job";
+import { updateLists } from "../tools/update-lists";
 import { updateSettings } from "../tools/update-settings";
 import { webFetch } from "../tools/web-fetch";
 import { webSearch } from "../tools/web-search";
 import { EModelPurpose } from "../types";
 import automationsInstructions from "./automations.xml" with { type: "text" };
 import calendarInstructions from "./calendar.xml" with { type: "text" };
+import listsInstructions from "./lists.xml" with { type: "text" };
 import mainInstructions from "./main.xml" with { type: "text" };
 import mcpInstructions from "./mcp.xml" with { type: "text" };
 import memoryInstructions from "./memory.xml" with { type: "text" };
@@ -42,6 +45,7 @@ import settingsInstructions from "./settings.xml" with { type: "text" };
 export enum EAgentName {
   Automations = "automations",
   Calendar = "calendar",
+  Lists = "lists",
   Main = "main",
   Mcp = "mcp",
   Memory = "memory",
@@ -113,6 +117,20 @@ export const AGENTS: Record<EAgentName, TAgentDefinition> = {
       mode: "sequential",
     },
   },
+  [EAgentName.Lists]: {
+    purpose: EModelPurpose.Specialist,
+    maxIterations: 12,
+    base: true,
+    instructions: listsInstructions,
+    tools: [listLists, updateLists],
+    delegates: [],
+    mcp: false,
+    delegation: {
+      description:
+        "Required for the user's named to-do lists (shopping, packing, errands): reading them, creating one, adding, ticking, editing, moving or deleting items, renaming, setting an end time, or deleting a list. Pass the user's own words about the list and items.",
+      mode: "sequential",
+    },
+  },
   [EAgentName.Main]: {
     purpose: EModelPurpose.Main,
     maxIterations: 30,
@@ -125,6 +143,7 @@ export const AGENTS: Record<EAgentName, TAgentDefinition> = {
       EAgentName.Settings,
       EAgentName.Scheduling,
       EAgentName.Automations,
+      EAgentName.Lists,
     ],
     mcp: true,
     delegation: undefined,

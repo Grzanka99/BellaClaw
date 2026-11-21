@@ -189,7 +189,7 @@ export function toCronJobResult(job: TCronJob) {
 
 export const LOCAL_FIRE_AT_PATTERN = "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(:\\d{2})?$";
 
-function formatLocalDateTime(timestamp: number, timezone: string): string {
+export function formatLocalDateTime(timestamp: number, timezone: string): string {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: timezone,
     year: "numeric",

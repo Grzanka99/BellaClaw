@@ -17,6 +17,8 @@ import {
   factDistillationStateTable,
   factsTable,
   identityLinksTable,
+  listItemsTable,
+  listsTable,
   memoriesTable,
   userConfigsTable,
 } from "@bellaclaw/database";
@@ -34,6 +36,7 @@ import { DatabaseConnector } from "../database";
 import { linkTestAddress, resetEventTables, resetIdentityLinksTable } from "../database/test-utils";
 import { CommandRejectedError, EventBus } from "../events";
 import { testEventRequester } from "../events/test-utils";
+import { ListsService } from "../lists";
 import { setupMcpAuth } from "../mcp/auth";
 import { Memory } from "../memory";
 import { FactDistiller } from "../memory/distill";
@@ -66,6 +69,7 @@ function reset() {
     SettingsService,
     CalendarService,
     AutomationService,
+    ListsService,
     Memory,
     FactDistiller,
     ScheduledDelivery,
@@ -87,6 +91,8 @@ async function resetOwnerTables() {
     "automation_drafts",
     "user_configs",
     "calendars",
+    "list_items",
+    "lists",
   ]) {
     await database().run(sql.raw(`DELETE FROM ${table}`));
   }
@@ -106,6 +112,7 @@ function setupOwners(drain: (conversationKey: string) => Promise<boolean>) {
   SettingsService.instance.setup();
   CronScheduler.instance.subscribe();
   AutomationService.instance.setup();
+  ListsService.instance.setup();
   Memory.instance.setup();
   FactDistiller.instance.setup();
   MessageHandler.instance.setup();
@@ -256,6 +263,21 @@ async function seedChat(chatId: string, label: string) {
     outputCapBytes: 1,
     createdAt: now,
   });
+  const listId = Bun.randomUUIDv7();
+  await database()
+    .insert(listsTable)
+    .values({ id: listId, ownerKey: chatId, name: "shopping", createdAt: now, updatedAt: now });
+  await database()
+    .insert(listItemsTable)
+    .values({
+      id: Bun.randomUUIDv7(),
+      listId,
+      text: `${label} item`,
+      done: false,
+      position: 0,
+      createdAt: now,
+      updatedAt: now,
+    });
   const credentials = await Bun.file(credentialsPath).json();
   await Bun.write(
     credentialsPath,
@@ -292,6 +314,7 @@ async function rowsUnder(key: string) {
       .select()
       .from(automationDraftsTable)
       .where(eq(automationDraftsTable.scope, key))),
+    ...(await database().select().from(listsTable).where(eq(listsTable.ownerKey, key))),
     ...Object.keys(credentials).filter((name) => name.startsWith(`${encodeURIComponent(key)}:`)),
   ];
 }
@@ -400,7 +423,7 @@ describe("linking an address to an account", () => {
     ]);
     expect(await rowsUnder("signal:+900")).toEqual([]);
     expect(await rowsUnder("bella:acct-9")).toHaveLength(3);
-    expect(await rowsUnder("account:acct-9")).toHaveLength(7);
+    expect(await rowsUnder("account:acct-9")).toHaveLength(8);
     expect(
       (await SettingsService.instance.getAll("account:acct-9"))[EConfigKey.AiInstructionsTimezone],
     ).toBe("Europe/Warsaw");
@@ -679,7 +702,7 @@ describe("linking an address to an account", () => {
     expect(await database().select().from(identityLinksTable)).toMatchObject([
       { address: "+930", accountId: "acct-owner" },
     ]);
-    expect(await rowsUnder("signal:+930")).toHaveLength(10);
+    expect(await rowsUnder("signal:+930")).toHaveLength(11);
     expect(
       await database()
         .select()

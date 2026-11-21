@@ -41,6 +41,7 @@ const EXPECTED_TOOL_NAMES: Record<EAgentName, readonly string[]> = {
     "web-search",
     "web-fetch",
   ],
+  [EAgentName.Lists]: ["list-lists", "update-lists"],
   [EAgentName.Main]: [
     "web-search",
     "web-fetch",
@@ -49,6 +50,7 @@ const EXPECTED_TOOL_NAMES: Record<EAgentName, readonly string[]> = {
     "delegate-settings",
     "delegate-scheduling",
     "delegate-automations",
+    "delegate-lists",
   ],
   [EAgentName.Mcp]: [],
   [EAgentName.Memory]: ["search-memory", "remember-memory", "forget-memory"],
@@ -134,7 +136,9 @@ describe("agent permissions", () => {
             tool.name === "schedule-once" ||
             tool.name === "schedule-recurring" ||
             tool.name === "update-cron-job" ||
-            tool.name === "unschedule-cron-job"
+            tool.name === "unschedule-cron-job" ||
+            tool.name === "delegate-lists" ||
+            tool.name === "update-lists"
           ) {
             expect(tool.executionMode).toBe("sequential");
           }

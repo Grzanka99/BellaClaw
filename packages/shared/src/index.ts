@@ -16,6 +16,7 @@ export {
   gatewayAccountConversationsPath,
   gatewayAccountDevicePath,
   gatewayAccountDevicesPath,
+  gatewayAccountListsPath,
   gatewayAccountMessagePath,
   gatewayAccountModelPath,
   gatewayAccountModelsPath,
@@ -82,6 +83,17 @@ export {
   type TGatewayStreamEvent,
   verifyGatewayLinkToken,
 } from "./gateway";
+export {
+  ITEM_NOT_FOUND,
+  LIST_NOT_FOUND,
+  SGatewayListsChanged,
+  SGatewayListsUpdate,
+  SListOperation,
+  SListSnapshot,
+  type TGatewayListsChanged,
+  type TGatewayListsUpdate,
+  type TListOperation,
+} from "./lists";
 export { createLogger, logger, type TLogger, writeJsonLog } from "./logger";
 export type { TOption } from "./option";
 export { REPOSITORY_ROOT, repositoryPath } from "./paths";
