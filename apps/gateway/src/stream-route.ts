@@ -23,7 +23,8 @@ export function registerStreamRoute(app: Hono<TEnv>, { store, liveStream }: TGat
 
   // NOTE: the app's live stream: nudges, typing and steps of the signed-in account only, keys and
   // revisions, and to an app session the account's confidential replies. It opens with a check,
-  // so the client compares revisions for whatever changed before it connected. It belongs to the
+  // so the client compares revisions for whatever changed before it connected, then the typing and
+  // steps of the account's running turns, which the check made the client drop. It belongs to the
   // session that opened it: before each event and keep-alive the session is read, without sliding
   // it, and a session that ended closes the stream. Closing the connection releases the listener
   // and the timer. HEAD opens no stream. An account holds MAX_ACCOUNT_STREAMS at most: one more
@@ -103,6 +104,7 @@ export function registerStreamRoute(app: Hono<TEnv>, { store, liveStream }: TGat
         accountEnds.push({ end, appSession });
         c.req.raw.signal.addEventListener("abort", release, { once: true });
         send({ type: "check" });
+        liveStream.replay(accountId, send);
       },
       cancel() {
         release();

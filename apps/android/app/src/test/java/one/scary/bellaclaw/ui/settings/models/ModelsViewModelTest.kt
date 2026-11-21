@@ -16,9 +16,11 @@ import one.scary.bellaclaw.model.AccountError
 import one.scary.bellaclaw.model.Effort
 import one.scary.bellaclaw.model.Loadable
 import one.scary.bellaclaw.model.ModelRole
+import one.scary.bellaclaw.model.ServiceTier
 import one.scary.bellaclaw.ui.MainDispatcherRule
 import one.scary.bellaclaw.ui.collectIn
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -52,8 +54,8 @@ class ModelsViewModelTest {
         assertEquals(listOf("opencode-go", "openai-codex"), state.providers)
         assertEquals("opencode-go", state.providerId)
         assertEquals(ModelRole.entries, state.roles.map { it.role })
-        assertEquals(RoleRow(ModelRole.UTILITY, "GLM 5", Effort.LOW), state.row(ModelRole.UTILITY))
-        assertEquals(RoleRow(ModelRole.MAIN, "Kimi K3.1 Pro", null), state.row(ModelRole.MAIN))
+        assertEquals(RoleRow(ModelRole.UTILITY, "GLM 5", Effort.LOW, ServiceTier.DEFAULT), state.row(ModelRole.UTILITY))
+        assertEquals(RoleRow(ModelRole.MAIN, "Kimi K3.1 Pro", null, ServiceTier.DEFAULT), state.row(ModelRole.MAIN))
         assertEquals("Bearer t0", gateway.takeRequest("GET", "/api/model").headers["Authorization"])
     }
 
@@ -77,12 +79,65 @@ class ModelsViewModelTest {
         assertNull(changing.editor)
         assertEquals("Kimi K3.1 Pro", changing.row(ModelRole.MAIN).model)
         val state = viewModel.uiState.first { !it.isChanging }
-        assertEquals(RoleRow(ModelRole.MAIN, "GLM 5", null), state.row(ModelRole.MAIN))
+        assertEquals(RoleRow(ModelRole.MAIN, "GLM 5", null, ServiceTier.DEFAULT), state.row(ModelRole.MAIN))
         assertNull(state.changeError)
         val body = gateway.takeRequest("PUT", "/api/model").json()
         assertEquals("Main", body["aiModelPurpose"]?.jsonPrimitive?.content)
         assertEquals("glm-5", body["aiModel"]?.jsonPrimitive?.content)
         assertEquals("high", body["aiReasoningEffort"]?.jsonPrimitive?.content)
+    }
+
+    @Test
+    fun `the service tier is offered only for a model that supports one`() = runTest {
+        val viewModel = loadedModels()
+        gateway.route("PUT", "/api/model", 200, modelAnswer(mainModel = "glm-5"))
+
+        viewModel.openRole(ModelRole.MAIN)
+        assertTrue(viewModel.uiState.first { it.editor != null }.editor?.showsServiceTier == true)
+        viewModel.onEditorServiceTier(ServiceTier.FLEX)
+        viewModel.onEditorModel("glm-5")
+        assertFalse(viewModel.uiState.first { it.editor?.model == "glm-5" }.editor?.showsServiceTier == true)
+        viewModel.saveRole()
+        viewModel.uiState.first { it.isChanging }
+        viewModel.uiState.first { !it.isChanging }
+
+        // GLM 5 takes no tier: none is sent.
+        val body = gateway.takeRequest("PUT", "/api/model").json()
+        assertEquals("glm-5", body["aiModel"]?.jsonPrimitive?.content)
+        assertNull(body["aiServiceTier"])
+    }
+
+    @Test
+    fun `a changed service tier is sent and shown once verified`() = runTest {
+        val viewModel = loadedModels()
+        gateway.route("PUT", "/api/model", 200, modelAnswer(mainServiceTier = "flex"))
+
+        viewModel.openRole(ModelRole.MAIN)
+        assertEquals(ServiceTier.DEFAULT, viewModel.uiState.first { it.editor != null }.editor?.serviceTier)
+        viewModel.onEditorServiceTier(ServiceTier.FLEX)
+        viewModel.uiState.first { it.editor?.serviceTier == ServiceTier.FLEX }
+        viewModel.saveRole()
+        viewModel.uiState.first { it.isChanging }
+
+        val state = viewModel.uiState.first { !it.isChanging }
+        assertEquals(RoleRow(ModelRole.MAIN, "Kimi K3.1 Pro", null, ServiceTier.FLEX), state.row(ModelRole.MAIN))
+        val body = gateway.takeRequest("PUT", "/api/model").json()
+        assertEquals("Main", body["aiModelPurpose"]?.jsonPrimitive?.content)
+        assertEquals("flex", body["aiServiceTier"]?.jsonPrimitive?.content)
+        assertNull(body["aiModel"])
+    }
+
+    @Test
+    fun `saving an unchanged role sends nothing`() = runTest {
+        val repository = gateway.settingsRepository(gateway.signedInStore(), backgroundScope)
+        val viewModel = loadedModels(repository)
+
+        viewModel.openRole(ModelRole.MAIN)
+        viewModel.uiState.first { it.editor != null }
+        viewModel.saveRole()
+
+        viewModel.uiState.first { it.editor == null }
+        assertFalse(repository.settings.value.isChangingModels)
     }
 
     @Test
@@ -124,20 +179,20 @@ class ModelsViewModelTest {
         viewModel.uiState.first { it.editor != null }
         // The provider was changed in the dashboard: its catalog has no Kimi.
         val purposes = listOf("Utility", "Main", "Specialist", "SpecialistAccurate", "ScheduledTask").joinToString(",") {
-            """{"purpose":"$it","model":"gpt-6","effort":"high"}"""
+            """{"purpose":"$it","model":"gpt-6","effort":"high","serviceTier":"default"}"""
         }
         gateway.route(
             "GET",
             "/api/model",
             200,
             """{"provider":"openai-codex","providers":["opencode-go","openai-codex"],"purposes":[$purposes],""" +
-                """"availableModels":[{"id":"gpt-6","name":"GPT 6","supportedEfforts":["low","high"]}]}""",
+                """"availableModels":[{"id":"gpt-6","name":"GPT 6","supportedEfforts":["low","high"],"supportsServiceTier":false}]}""",
         )
 
         viewModel.retry()
 
         val state = viewModel.uiState.first { it.providerId == "openai-codex" && it.editor == null }
-        assertEquals(RoleRow(ModelRole.MAIN, "GPT 6", Effort.HIGH), state.row(ModelRole.MAIN))
+        assertEquals(RoleRow(ModelRole.MAIN, "GPT 6", Effort.HIGH, ServiceTier.DEFAULT), state.row(ModelRole.MAIN))
     }
 
     @Test

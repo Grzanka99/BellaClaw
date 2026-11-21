@@ -85,6 +85,8 @@ class ChatViewModelTest {
 
     private fun ChatUiState.messages() = rows.filterIsInstance<ChatRow.Item>().map { it.message }
 
+    private fun ChatUiState.liveCard() = (rows.firstOrNull() as? ChatRow.Activity)?.takeIf { it.isLive }
+
     /** Waits off the test thread, so the repository's work in the test scope keeps running meanwhile. */
     private suspend fun takeSend(): JsonObject =
         checkNotNull(withContext(Dispatchers.IO) { gateway.sends.poll(5, TimeUnit.SECONDS) }) { "no send arrived" }
@@ -111,7 +113,7 @@ class ChatViewModelTest {
         assertEquals(listOf("Look", "All good.", "!status"), state.messages().map { it.text })
         assertEquals(listOf(Author.USER, Author.ASSISTANT, Author.USER), state.messages().map { it.author })
         assertEquals(listOf(MessageImage("m1", "image/jpeg"), MessageImage(null, "image/jpeg")), state.messages()[0].images)
-        assertFalse(state.isTyping)
+        assertNull(state.liveCard())
     }
 
     private suspend fun takeUpload(): Pair<String?, ByteArray> =
@@ -268,43 +270,57 @@ class ChatViewModelTest {
         assertFalse("model" in body)
 
         gateway.push("typing", """{"conversationKey":"$BELLA_KEY","typing":true}""")
-        viewModel.uiState.first { it.isTyping }
+        viewModel.uiState.first { it.liveCard() != null }
         gateway.addRow(BELLA_KEY, "user", "Ship it", clientMessageId = body.clientMessageId())
         gateway.addRow(BELLA_KEY, "assistant", "Shipped.")
         gateway.push("typing", """{"conversationKey":"$BELLA_KEY","typing":false}""")
         gateway.push("changed", """{"conversationKey":"$BELLA_KEY","revision":3,"rewriteRevision":0}""")
 
-        val stored = viewModel.uiState.first { it.messages().size == 3 && !it.isTyping }
+        val stored = viewModel.uiState.first { it.messages().size == 3 && it.liveCard() == null }
         assertEquals(listOf("Shipped.", "Ship it", "Hi"), stored.messages().map { it.text })
         assertEquals(setOf(SendState.STORED), stored.messages().map { it.sendState }.toSet())
     }
 
     @Test
-    fun `step events show the reply's steps as they run and end, and typing off clears them`() = runTest {
+    fun `a reply's live card shows its steps as they run and end, and stays the same card above the reply`() = runTest {
         val viewModel = viewModel(BELLACLAW_CHAT_ID, repository())
         viewModel.uiState.first { it.isReadyToSend && it.isStreamOpen }
-        val startedAt = FakeGateway.CREATED_AT
+        val startedAt = FakeGateway.CREATED_AT + 60_000
 
         gateway.push("typing", """{"conversationKey":"$BELLA_KEY","typing":true}""")
+        val typing = checkNotNull(viewModel.uiState.first { it.liveCard() != null }.liveCard())
+        assertEquals(emptyList<ActivityRow>(), typing.rows)
+
         gateway.push(
             "step",
             """{"conversationKey":"$BELLA_KEY","stepId":"s1","tool":"web-search","label":"Web search","detail":"OVH invoice terms","state":"started","startedAt":$startedAt}""",
         )
-        val running = viewModel.uiState.first { it.liveActivity.isNotEmpty() }
-        assertEquals(listOf(ActivityRow.Step(ActivityStep("web-search", "Web search", "OVH invoice terms", Instant.ofEpochMilli(startedAt), null))), running.liveActivity)
+        val running = checkNotNull(viewModel.uiState.first { it.liveCard()?.rows.orEmpty().isNotEmpty() }.liveCard())
+        assertEquals(typing.key, running.key)
+        assertEquals(listOf(ActivityRow.Step(ActivityStep("web-search", "Web search", "OVH invoice terms", Instant.ofEpochMilli(startedAt), null))), running.rows)
 
         gateway.push(
             "step",
             """{"conversationKey":"$BELLA_KEY","stepId":"s1","tool":"web-search","label":"Web search","detail":"OVH invoice terms","state":"completed","startedAt":$startedAt,"durationMs":2100}""",
         )
-        val done = viewModel.uiState.first { it.liveActivity.size == 2 }
+        val done = checkNotNull(viewModel.uiState.first { it.liveCard()?.rows?.size == 2 }.liveCard())
         assertEquals(
             listOf(ActivityRow.Step(ActivityStep("web-search", "Web search", "OVH invoice terms", Instant.ofEpochMilli(startedAt), 2100)), ActivityRow.Thinking),
-            done.liveActivity,
+            done.rows,
         )
 
+        // Typing ends before the reply lands; the card waits for it, then shows above it under the same key.
         gateway.push("typing", """{"conversationKey":"$BELLA_KEY","typing":false}""")
-        viewModel.uiState.first { it.liveActivity.isEmpty() && !it.isTyping }
+        gateway.addRow(
+            BELLA_KEY,
+            "assistant",
+            "Due Nov 28.",
+            steps = """[{"tool":"web-search","label":"Web search","detail":"OVH invoice terms","startedAt":$startedAt,"durationMs":2100,"failed":false}]""",
+        )
+        gateway.push("changed", """{"conversationKey":"$BELLA_KEY","revision":1,"rewriteRevision":0}""")
+        val replied = viewModel.uiState.first { it.messages().isNotEmpty() }
+        assertNull(replied.liveCard())
+        assertEquals(listOf("message-${replied.messages().single().id}", typing.key), replied.rows.take(2).map { it.key })
     }
 
     @Test
@@ -321,7 +337,7 @@ class ChatViewModelTest {
         )
         val viewModel = viewModel(BELLACLAW_CHAT_ID, repository())
 
-        val row = viewModel.uiState.first { it.rows.isNotEmpty() }.rows.filterIsInstance<ChatRow.Item>().single()
+        val row = viewModel.uiState.first { it.rows.isNotEmpty() }.rows.filterIsInstance<ChatRow.Activity>().single()
 
         assertEquals(
             listOf(
@@ -329,10 +345,10 @@ class ChatViewModelTest {
                 ActivityRow.Thought(2),
                 ActivityRow.Step(ActivityStep("web-search", "Web search", "", Instant.ofEpochMilli(startedAt + 2500), 300, failed = true)),
             ),
-            row.activity,
+            row.rows,
         )
         // The steps ran 2.8 s, from the first start to the last end.
-        assertEquals(3L, row.activitySeconds)
+        assertEquals(3L, row.seconds)
     }
 
     @Test

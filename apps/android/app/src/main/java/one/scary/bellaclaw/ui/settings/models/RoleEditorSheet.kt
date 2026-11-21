@@ -24,12 +24,14 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import one.scary.bellaclaw.R
 import one.scary.bellaclaw.model.Effort
+import one.scary.bellaclaw.model.ServiceTier
 import one.scary.bellaclaw.ui.components.OptionDropdown
 import one.scary.bellaclaw.ui.components.label
 
 class RoleEditorEvents(
     val onModel: (String) -> Unit,
     val onEffort: (Effort?) -> Unit,
+    val onServiceTier: (ServiceTier) -> Unit,
     val onSave: () -> Unit,
     val onReset: () -> Unit,
     val onDismiss: () -> Unit,
@@ -39,7 +41,10 @@ class RoleEditorEvents(
 @StringRes
 fun effortLabel(effort: Effort?): Int = effort?.label ?: R.string.effort_default
 
-/** One role's model and effort (the model's own default or one it supports), with Reset to default and Save. */
+/**
+ * One role's model, effort (the model's own default or one it supports) and, for a model that supports
+ * one, service tier, with Reset to default and Save.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RoleEditorSheet(state: RoleEditorState, events: RoleEditorEvents) {
@@ -73,6 +78,17 @@ fun RoleEditorSheet(state: RoleEditorState, events: RoleEditorEvents) {
                 optionText = { effortLabels.getValue(it) },
                 onSelect = events.onEffort,
             )
+            if (state.showsServiceTier) {
+                Spacer(Modifier.height(16.dp))
+                val tierLabels = ServiceTier.entries.associateWith { stringResource(it.label) }
+                OptionDropdown(
+                    label = stringResource(R.string.label_service_tier),
+                    options = ServiceTier.entries,
+                    selected = state.serviceTier,
+                    optionText = { tierLabels.getValue(it) },
+                    onSelect = events.onServiceTier,
+                )
+            }
             Spacer(Modifier.height(24.dp))
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 TextButton(onClick = events.onReset) {

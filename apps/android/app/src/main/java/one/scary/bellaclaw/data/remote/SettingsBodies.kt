@@ -14,12 +14,18 @@ data class ModelStateBody(
     val availableModels: List<AvailableModelBody>,
 )
 
-/** [effort] is `default` for the model's own default. */
+/** [effort] is `default` for the model's own default; [serviceTier] is `default` for no tier. */
 @Serializable
-data class PurposeBody(val purpose: String, val model: String, val effort: String)
+data class PurposeBody(val purpose: String, val model: String, val effort: String, val serviceTier: String)
 
+/** The model list of GET /api/models has no [supportsServiceTier]. */
 @Serializable
-data class AvailableModelBody(val id: String, val name: String, val supportedEfforts: List<String>)
+data class AvailableModelBody(
+    val id: String,
+    val name: String,
+    val supportedEfforts: List<String>,
+    val supportsServiceTier: Boolean = false,
+)
 
 /** The answer of GET /api/models: every provider a plain chat may use. */
 @Serializable
@@ -39,6 +45,7 @@ data class ModelUpdateBody(
     val aiModelPurpose: String? = null,
     val aiModel: String? = null,
     val aiReasoningEffort: String? = null,
+    val aiServiceTier: String? = null,
     val resetAiModel: Boolean? = null,
     val resetAiReasoningEffort: Boolean? = null,
 )

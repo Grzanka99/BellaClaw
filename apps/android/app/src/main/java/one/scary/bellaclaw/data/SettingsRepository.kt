@@ -141,7 +141,10 @@ class SettingsRepository(
         }
     }
 
-    /** Sends what differs from the role's current model and effort; nothing when nothing does. */
+    /**
+     * Sends what differs from the role's current model, effort and service tier; nothing when nothing
+     * does. The tier is sent only for a model that supports one.
+     */
     fun setRoleModel(role: ModelRole, model: RoleModel) {
         val current = state.value.models.valueOrNull?.roles?.get(role) ?: return
         var newModel: String? = null
@@ -157,7 +160,12 @@ class SettingsRepository(
                 effort = model.effort.wireName()
             }
         }
-        if (newModel == null && effort == null && resetEffort == null) {
+        var serviceTier: String? = null
+        val supportsServiceTier = state.value.models.valueOrNull?.models?.firstOrNull { it.id == model.model }?.supportsServiceTier == true
+        if (supportsServiceTier && model.serviceTier != current.serviceTier) {
+            serviceTier = model.serviceTier.wireName()
+        }
+        if (newModel == null && effort == null && resetEffort == null && serviceTier == null) {
             return
         }
         changeModels(
@@ -165,6 +173,7 @@ class SettingsRepository(
                 aiModelPurpose = role.purpose(),
                 aiModel = newModel,
                 aiReasoningEffort = effort,
+                aiServiceTier = serviceTier,
                 resetAiReasoningEffort = resetEffort,
             ),
         )

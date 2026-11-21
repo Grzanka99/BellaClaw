@@ -72,8 +72,6 @@ fun ChatScreen(
     ) { padding ->
         MessageList(
             rows = state.rows,
-            isTyping = state.isTyping,
-            liveActivity = state.liveActivity,
             onRetry = onRetry,
             onLoadOlder = onLoadOlder,
             imageLoader = imageLoader,
@@ -101,14 +99,13 @@ private fun BellaClawChatPreview() {
         ChatScreen(
             state = ChatUiState(
                 kind = ChatKind.BELLACLAW,
-                rows = chatRows(
+                rows = listOf(ChatRow.Activity("live", emptyList(), isLive = true)) + chatRows(
                     listOf(
                         Message("1", "b", Author.ASSISTANT, "Staging is live. Smoke tests passed.", now),
                         Message("2", "b", Author.USER, "Ship to prod tomorrow 9:00", now, sendState = SendState.PENDING),
                     ),
                     ZoneId.systemDefault(),
                 ),
-                isTyping = true,
                 isStreamOpen = true,
                 isReadyToSend = true,
             ),
