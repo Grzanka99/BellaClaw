@@ -151,9 +151,7 @@ export const listItemsTable = sqliteTable(
   "list_items",
   {
     id: text("id").primaryKey(),
-    listId: text("listId")
-      .notNull()
-      .references(() => listsTable.id, { onDelete: "cascade" }),
+    listId: text("listId").notNull(),
     text: text("text").notNull(),
     done: integer("done", { mode: "boolean" }).notNull().default(false),
     position: integer("position").notNull(),

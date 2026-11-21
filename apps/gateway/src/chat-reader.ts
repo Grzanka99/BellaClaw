@@ -8,10 +8,9 @@ import {
   type THistoryCursor,
   type THistoryMessage,
   type TListedConversation,
-  type TListSnapshot,
   type TOwnedConversation,
 } from "@bellaclaw/database";
-import type { TOption } from "@bellaclaw/shared";
+import type { TListSnapshot, TOption } from "@bellaclaw/shared";
 import { and, desc, eq, inArray, isNull, lt } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/libsql";
 import type { TChatMessage } from "./api-types";

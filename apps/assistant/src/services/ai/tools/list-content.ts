@@ -1,4 +1,4 @@
-import type { TListSnapshot } from "@bellaclaw/database";
+import type { TListSnapshot } from "@bellaclaw/shared";
 import { formatLocalDateTime } from "./cron-content";
 
 /**

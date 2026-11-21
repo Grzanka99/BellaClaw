@@ -5,8 +5,7 @@ CREATE TABLE `list_items` (
 	`done` integer DEFAULT false NOT NULL,
 	`position` integer NOT NULL,
 	`createdAt` integer NOT NULL,
-	`updatedAt` integer NOT NULL,
-	FOREIGN KEY (`listId`) REFERENCES `lists`(`id`) ON UPDATE no action ON DELETE cascade
+	`updatedAt` integer NOT NULL
 );
 --> statement-breakpoint
 CREATE INDEX `list_items_list_position_idx` ON `list_items` (`listId`,`position`);--> statement-breakpoint

@@ -7,7 +7,7 @@ import {
   ECronJobType,
   EEventType,
 } from "@bellaclaw/database";
-import { SListOperation, SListSnapshot, type TOption } from "@bellaclaw/shared";
+import { SListOperations, SListSnapshot, type TOption } from "@bellaclaw/shared";
 import { z } from "zod";
 import { SThinkingLevel } from "../ai/model-preferences";
 import { EAiProvider } from "../ai/types";
@@ -553,7 +553,7 @@ const SAppDevice = z.object({ deviceId: z.string(), accountId: z.string() }).str
 
 // the owner's list changes, applied in order, all or none
 const SListsUpdateRequested = z
-  .object({ ownerKey: z.string(), operations: z.array(SListOperation).min(1).max(50) })
+  .object({ ownerKey: z.string(), operations: SListOperations })
   .strict();
 
 // lists: the lists the command changed, after the change, without the deleted ones

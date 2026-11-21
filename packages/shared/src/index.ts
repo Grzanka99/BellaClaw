@@ -89,10 +89,12 @@ export {
   SGatewayListsChanged,
   SGatewayListsUpdate,
   SListOperation,
+  SListOperations,
   SListSnapshot,
   type TGatewayListsChanged,
   type TGatewayListsUpdate,
   type TListOperation,
+  type TListSnapshot,
 } from "./lists";
 export { createLogger, logger, type TLogger, writeJsonLog } from "./logger";
 export type { TOption } from "./option";

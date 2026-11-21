@@ -1,12 +1,13 @@
 // The JSON shapes of the gateway's HTTP API, for the browser. Types only: import with
 // `import type`, so no server code reaches the client bundle.
-import type { THistoryMessage, TListedConversation, TListSnapshot } from "@bellaclaw/database";
+import type { THistoryMessage, TListedConversation } from "@bellaclaw/database";
 import type {
   TGatewayConversationCreated,
   TGatewayConversationDeleted,
   TGatewayLinkState,
   TGatewayMedia,
   TGatewayMessageDeleted,
+  TListSnapshot,
 } from "@bellaclaw/shared";
 
 // a row the app shows: a message, or a display row (a command with its reply, a notice, a failure
@@ -165,11 +166,10 @@ export type TFactsResponse = { nodes: TFactNode[]; links: TFactLink[] };
 
 // a list and its items, by position. createdAt, updatedAt and expiresAt: epoch ms; expiresAt: when
 // the list ends, null for never
-export type { TListItemSnapshot, TListSnapshot } from "@bellaclaw/database";
 // POST /api/lists/changes body: the changes, applied in order, all or none. expiresAt: epoch ms or
 // null; index: where add_items inserts, the end without one; toIndex past the end moves the item to
 // the end
-export type { TGatewayListsUpdate, TListOperation } from "@bellaclaw/shared";
+export type { TGatewayListsUpdate, TListOperation, TListSnapshot } from "@bellaclaw/shared";
 
 // GET /api/lists answer, and POST /api/lists/changes answer after the change: the account's lists
 // that have not ended, oldest first. A change naming a list or an item the account does not hold

@@ -1,24 +1,10 @@
-import type { TOption } from "@bellaclaw/shared";
+import type { TListSnapshot, TOption } from "@bellaclaw/shared";
 import { and, asc, eq, inArray } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import { listItemsTable, listsTable } from "./schema";
 
 // the assistant's handle or transaction, or the gateway's read-only connection
 type TReadHandle = Pick<BaseSQLiteDatabase<"async", unknown>, "select">;
-
-// position: the item's place in its list, dense from 0
-export type TListItemSnapshot = { id: string; text: string; done: boolean; position: number };
-
-// createdAt, updatedAt and expiresAt: epoch ms; expiresAt: the end time, null for none, kept once
-// it has passed (null survives the event log's JSON); items: by position
-export type TListSnapshot = {
-  id: string;
-  name: string;
-  expiresAt: number | null;
-  createdAt: number;
-  updatedAt: number;
-  items: TListItemSnapshot[];
-};
 
 // The owner's lists, oldest first, each with its items in order
 export async function listLists(db: TReadHandle, ownerKey: string): Promise<TListSnapshot[]> {

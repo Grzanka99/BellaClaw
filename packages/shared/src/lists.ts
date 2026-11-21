@@ -67,11 +67,14 @@ export const SListSnapshot = z
   })
   .strict();
 
+export type TListSnapshot = z.infer<typeof SListSnapshot>;
+
+// a batch of list changes, applied in order, all or none
+export const SListOperations = z.array(SListOperation).min(1).max(50);
+
 // POST /internal/accounts/:accountId/lists body, and POST /api/lists/changes of the edge: the
 // account's list changes, applied in order, all or none
-export const SGatewayListsUpdate = z
-  .object({ operations: z.array(SListOperation).min(1).max(50) })
-  .strict();
+export const SGatewayListsUpdate = z.object({ operations: SListOperations }).strict();
 
 export type TGatewayListsUpdate = z.infer<typeof SGatewayListsUpdate>;
 

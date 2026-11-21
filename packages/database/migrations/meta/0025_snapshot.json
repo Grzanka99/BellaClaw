@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "b2fe7709-2bdf-4ad1-8eaf-697287001192",
+  "id": "c6962fa5-f83c-425b-a269-ea73226a4858",
   "prevId": "678a6022-28dc-4d7d-a2fb-fc28da318860",
   "tables": {
     "app_devices": {
@@ -1057,21 +1057,7 @@
           "isUnique": false
         }
       },
-      "foreignKeys": {
-        "list_items_listId_lists_id_fk": {
-          "name": "list_items_listId_lists_id_fk",
-          "tableFrom": "list_items",
-          "tableTo": "lists",
-          "columnsFrom": [
-            "listId"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
+      "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {}
