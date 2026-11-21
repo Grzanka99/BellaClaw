@@ -1,6 +1,7 @@
 package one.scary.bellaclaw.ui.chat
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,8 +20,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material3.AssistChip
-import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledIconButton
@@ -35,6 +34,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -56,7 +56,7 @@ fun DictationBar(dictation: Dictation, onFinish: () -> Unit, onEditText: () -> U
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
             modifier = Modifier.fillMaxWidth().clickable(onClick = onEditText),
         ) {
-            Column(modifier = Modifier.padding(start = 16.dp, end = 12.dp, bottom = 12.dp)) {
+            Column(modifier = Modifier.padding(start = 16.dp, top = 12.dp, end = 12.dp, bottom = 12.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         text = stringResource(R.string.dictation_listening),
@@ -70,6 +70,7 @@ fun DictationBar(dictation: Dictation, onFinish: () -> Unit, onEditText: () -> U
                         onPick = dictation::switchLanguage,
                     )
                 }
+                Spacer(Modifier.height(4.dp))
                 // Newest words stay in sight; the card stops growing so the bar below stays on screen.
                 Text(
                     text = dictation.text,
@@ -101,19 +102,29 @@ fun DictationBar(dictation: Dictation, onFinish: () -> Unit, onEditText: () -> U
 private fun LanguageChip(language: Locale, languages: List<Locale>, onPick: (Locale) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
     Box {
-        AssistChip(
-            onClick = { expanded = true },
-            label = { Text(language.language.uppercase(Locale.ROOT), fontWeight = FontWeight.SemiBold) },
-            trailingIcon = { Icon(Icons.Filled.ArrowDropDown, contentDescription = null, modifier = Modifier.size(18.dp)) },
-            shape = CircleShape,
-            colors = AssistChipDefaults.assistChipColors(
-                containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                labelColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                trailingIconContentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-            ),
-            border = null,
-            modifier = Modifier.height(28.dp),
-        )
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .height(28.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.secondaryContainer)
+                .clickable { expanded = true }
+                .padding(start = 10.dp, end = 4.dp),
+        ) {
+            Text(
+                text = language.language.uppercase(Locale.ROOT),
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
+            )
+            Spacer(Modifier.width(2.dp))
+            Icon(
+                Icons.Filled.ArrowDropDown,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                modifier = Modifier.size(20.dp),
+            )
+        }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             languages.forEach { locale ->
                 DropdownMenuItem(
