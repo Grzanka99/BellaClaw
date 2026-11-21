@@ -3,16 +3,20 @@ import { EConversationKind, EEventType } from "@bellaclaw/database";
 import {
   CONVERSATION_NOT_FOUND,
   DEVICE_NOT_FOUND,
+  ITEM_NOT_FOUND,
   isP256PublicKey,
+  LIST_NOT_FOUND,
   MAX_IMAGE_BYTES,
   SGatewayAppMessage,
   SGatewayDeviceId,
   SGatewayDeviceRegistration,
+  SGatewayListsUpdate,
   type TGatewayAppMessageAccepted,
   type TGatewayConversationCreated,
   type TGatewayConversationDeleted,
   type TGatewayDevice,
   type TGatewayDevicesRemoved,
+  type TGatewayListsChanged,
   type TGatewayMedia,
   type TGatewayMessageDeleted,
   type TOption,
@@ -351,4 +355,41 @@ export async function handleMessageDelete(
   };
 
   return Response.json(body);
+}
+
+// NOTE: on the owner's lane, so the app's changes and the model's apply in order. A list or an
+// item the owner does not hold is a 404 with its code
+export async function handleListsUpdate(
+  request: Request,
+  account: TAccountKeys,
+): Promise<Response> {
+  const update = SGatewayListsUpdate.safeParse(await request.json());
+
+  if (!update.success) {
+    throw new Error(describeIssues(update.error));
+  }
+
+  try {
+    const body: TGatewayListsChanged = await requestOutcome(
+      systemTrace(account.conversationKey),
+      account.ownerKey,
+      EEventType.ListsUpdateRequested,
+      { ownerKey: account.ownerKey, operations: update.data.operations },
+      EEventType.ListsChanged,
+      ({ lists, deletedListIds }) => ({ lists, deletedListIds }),
+      COMMAND_TIMEOUT_MS,
+      "Changing the lists timed out",
+    );
+
+    return Response.json(body);
+  } catch (error) {
+    if (
+      error instanceof CommandRejectedError &&
+      (error.errorCode === LIST_NOT_FOUND || error.errorCode === ITEM_NOT_FOUND)
+    ) {
+      return errorResponse(error.message, 404, error.errorCode);
+    }
+
+    throw error;
+  }
 }

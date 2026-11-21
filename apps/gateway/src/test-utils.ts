@@ -5,6 +5,8 @@ import { join } from "node:path";
 import {
   conversationsTable,
   EConversationKind,
+  listItemsTable,
+  listsTable,
   MIGRATIONS_FOLDER,
   memoriesTable,
 } from "@bellaclaw/database";
@@ -15,6 +17,7 @@ import {
   type TGatewayChatLink,
   type TGatewayDeviceRegistration,
   type TGatewayLinkState,
+  type TGatewayListsUpdate,
   type TGatewayModelCatalog,
   type TGatewayPersonality,
   type TGatewayStreamEvent,
@@ -57,7 +60,8 @@ export const FAKE_MODEL_CATALOG: TGatewayModelCatalog = {
 // and a download of that id with the bytes. devices: by device id, as the assistant keeps them;
 // unreachableCalls also counts registerDevice, unregisterDevice and unregisterAccountDevices.
 // presence: every set reportPresence delivered, oldest first; failingPresenceReports: how many
-// next reportPresence calls answer 502
+// next reportPresence calls answer 502. listUpdates: every list change, accepted as the assistant
+// does without changing rows, except one naming the list id "missing", which answers 404
 export function createFakeAssistant() {
   const personalities = new Map<string, TGatewayPersonality>();
   const defaultPersonality: TGatewayPersonality = {
@@ -92,6 +96,7 @@ export function createFakeAssistant() {
     { accountId: string; registration: TGatewayDeviceRegistration }
   >();
   const presence: string[][] = [];
+  const listUpdates: { accountId: string; update: TGatewayListsUpdate }[] = [];
   const encoder = new TextEncoder();
 
   function reachable(): boolean {
@@ -283,6 +288,19 @@ export function createFakeAssistant() {
 
       return { data: { deviceIds } };
     },
+    updateLists: async (accountId, update) => {
+      if (
+        update.operations.some(
+          (operation) => "listId" in operation && operation.listId === "missing",
+        )
+      ) {
+        return { error: "List missing not found", status: 404, code: "list-not-found" };
+      }
+
+      listUpdates.push({ accountId, update });
+
+      return { data: { lists: [], deletedListIds: [] } };
+    },
     openStream: async (signal) => {
       const body = new ReadableStream<Uint8Array>({
         start(controller) {
@@ -313,6 +331,7 @@ export function createFakeAssistant() {
     streams,
     devices,
     presence,
+    listUpdates,
     push(event: TGatewayStreamEvent) {
       streams.at(-1)?.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
     },
@@ -358,6 +377,11 @@ export function createTestApp(path = ":memory:", reader?: TChatReader, streamSil
       findConversation: async () => undefined,
       listConversations: async () => [],
       listHistory: async () => [],
+      listLists: async (ownerKey) => {
+        reads.push(ownerKey);
+
+        return [];
+      },
     },
     internalApi: assistant.internalApi,
     liveStream,
@@ -527,9 +551,46 @@ export async function createAssistantDatabase() {
       .where(eq(conversationsTable.conversationKey, conversationKey));
   }
 
+  // a list of the owner with its items in order, as the assistant stores it; expiresAt: epoch ms
+  async function insertList(
+    id: string,
+    ownerKey: string,
+    name: string,
+    expiresAt: TOption<number>,
+    items: string[],
+  ) {
+    let expires: TOption<Date>;
+
+    if (expiresAt !== undefined) {
+      expires = new Date(expiresAt);
+    }
+
+    await db.insert(listsTable).values({
+      id,
+      ownerKey,
+      name,
+      expiresAt: expires,
+      createdAt: new Date(1_000),
+      updatedAt: new Date(1_000),
+    });
+
+    for (const [position, text] of items.entries()) {
+      await db.insert(listItemsTable).values({
+        id: `${id}-${position}`,
+        listId: id,
+        text,
+        done: false,
+        position,
+        createdAt: new Date(1_000),
+        updatedAt: new Date(1_000),
+      });
+    }
+  }
+
   return {
     db,
     reader: createChatReader(url, ""),
+    insertList,
     insertRow,
     setRevision,
     createPlain,

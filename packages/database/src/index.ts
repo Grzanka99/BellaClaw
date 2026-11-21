@@ -13,5 +13,6 @@ export {
   type TOwnedConversation,
 } from "./conversations";
 export * from "./enums";
+export { findLists, listLists } from "./lists";
 export { DRIZZLE_TEST_CONFIG_PATH, MIGRATIONS_FOLDER } from "./paths";
 export * from "./schema";

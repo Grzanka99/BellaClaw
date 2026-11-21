@@ -3,13 +3,14 @@ import {
   findOwnedConversation,
   listConversations,
   listHistory,
+  listLists,
   memoriesTable,
   type THistoryCursor,
   type THistoryMessage,
   type TListedConversation,
   type TOwnedConversation,
 } from "@bellaclaw/database";
-import type { TOption } from "@bellaclaw/shared";
+import type { TListSnapshot, TOption } from "@bellaclaw/shared";
 import { and, desc, eq, inArray, isNull, lt } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/libsql";
 import type { TChatMessage } from "./api-types";
@@ -41,6 +42,8 @@ export type TChatReader = {
     cursor: TOption<THistoryCursor>,
     limit: number,
   ): Promise<THistoryMessage[]>;
+  // the owner's lists that have not ended at now (epoch ms), oldest first, items by position
+  listLists(ownerKey: string, now: number): Promise<TListSnapshot[]>;
 };
 
 // NOTE: the assistant's database. The gateway only reads it; writes go through the internal API.
@@ -94,6 +97,12 @@ export function createChatReader(url: string, authToken: string): TChatReader {
 
     listHistory: (conversationKey, cursor, limit) =>
       listHistory(db, conversationKey, cursor, limit),
+
+    async listLists(ownerKey, now) {
+      const lists = await listLists(db, ownerKey);
+
+      return lists.filter((list) => list.expiresAt === null || list.expiresAt > now);
+    },
 
     async listFacts(ownerKey) {
       const rows = await db

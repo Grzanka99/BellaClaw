@@ -110,6 +110,8 @@ export enum EEventType {
   AppDeviceRegistered = "app.device.registered",
   AppDeviceUnregisterRequested = "app.device.unregister.requested",
   AppDeviceUnregistered = "app.device.unregistered",
+  ListsUpdateRequested = "lists.update.requested",
+  ListsChanged = "lists.changed",
   CommandRejected = "command.rejected",
   EventDeadLettered = "event.dead_lettered",
   AppStarted = "app.started",

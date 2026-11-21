@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { appMediaTable, memoriesTable } from "@bellaclaw/database";
+import type { TListOperation } from "@bellaclaw/shared";
 import { createAssistantDatabase, createTestApp, PASSWORD, registerApp } from "./test-utils";
 
 test("the app reads its personality settings, changes each and reads the change back; an invalid change answers 400 and changes nothing; another account's are its own", async () => {
@@ -442,6 +443,109 @@ test("history lists a user message's images: an app image while the assistant ke
     expect(messages[0].images[1].mediaId).toBeUndefined();
     expect(messages[0].images[2].mediaId).toBeUndefined();
     expect(messages[1].images).toBeUndefined();
+  } finally {
+    await database.remove();
+  }
+});
+
+test("the app reads its own lists that have not ended, items in order, and needs a session", async () => {
+  const database = await createAssistantDatabase();
+
+  try {
+    const { sendApp, store } = createTestApp(":memory:", database.reader);
+    const alice = await registerApp(sendApp, store, "alice");
+    const bob = await registerApp(sendApp, store, "bob");
+    const later = Date.now() + 60_000;
+    await database.insertList("shopping", `account:${alice.publicId}`, "Shopping", undefined, [
+      "milk",
+      "eggs",
+    ]);
+    await database.insertList("trip", `account:${alice.publicId}`, "Trip", later, ["tickets"]);
+    await database.insertList("ended", `account:${alice.publicId}`, "Ended", Date.now() - 1, []);
+    await database.insertList("bobs", `account:${bob.publicId}`, "Bob's", undefined, ["x"]);
+
+    const response = await sendApp("GET", "/api/lists", undefined, alice.token);
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toEqual({
+      lists: [
+        {
+          id: "shopping",
+          name: "Shopping",
+          expiresAt: null,
+          createdAt: 1_000,
+          updatedAt: 1_000,
+          items: [
+            { id: "shopping-0", text: "milk", done: false, position: 0 },
+            { id: "shopping-1", text: "eggs", done: false, position: 1 },
+          ],
+        },
+        {
+          id: "trip",
+          name: "Trip",
+          expiresAt: later,
+          createdAt: 1_000,
+          updatedAt: 1_000,
+          items: [{ id: "trip-0", text: "tickets", done: false, position: 0 }],
+        },
+      ],
+    });
+
+    expect((await sendApp("GET", "/api/lists", undefined, "wrong-token")).status).toBe(401);
+  } finally {
+    await database.remove();
+  }
+});
+
+test("the app's list changes go to the assistant for its account and answer its lists; a missing list is 404, an invalid change 400, and a change needs a session", async () => {
+  const database = await createAssistantDatabase();
+
+  try {
+    const { sendApp, store, assistant } = createTestApp(":memory:", database.reader);
+    const alice = await registerApp(sendApp, store, "alice");
+    await database.insertList("shopping", `account:${alice.publicId}`, "Shopping", undefined, []);
+    const change = async (body: unknown, token = alice.token) => {
+      const response = await sendApp("POST", "/api/lists/changes", body, token);
+      return [response.status, await response.json()];
+    };
+    const operations: TListOperation[] = [
+      { op: "add_items", listId: "shopping", items: ["milk"] },
+      { op: "create_list", name: "Trip", expiresAt: null },
+    ];
+
+    const [status, body] = await change({ operations });
+    expect(status).toBe(200);
+    expect(body).toEqual({
+      lists: [
+        {
+          id: "shopping",
+          name: "Shopping",
+          expiresAt: null,
+          createdAt: 1_000,
+          updatedAt: 1_000,
+          items: [],
+        },
+      ],
+    });
+    expect(assistant.listUpdates).toEqual([{ accountId: alice.publicId, update: { operations } }]);
+
+    expect(await change({ operations: [{ op: "delete_list", listId: "missing" }] })).toEqual([
+      404,
+      { error: "List missing not found" },
+    ]);
+
+    for (const invalid of [
+      { operations: [] },
+      { operations: [{ op: "rename_list", listId: "shopping", name: " " }] },
+      { operations: [{ op: "update_item", itemId: "item" }] },
+      { operations: [{ op: "explode" }] },
+      { ownerKey: "account:other", operations },
+    ]) {
+      expect((await change(invalid))[0]).toBe(400);
+    }
+
+    expect((await change({ operations }, "wrong-token"))[0]).toBe(401);
+    expect(assistant.listUpdates).toHaveLength(1);
   } finally {
     await database.remove();
   }

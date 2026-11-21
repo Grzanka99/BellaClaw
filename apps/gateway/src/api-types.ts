@@ -7,6 +7,7 @@ import type {
   TGatewayLinkState,
   TGatewayMedia,
   TGatewayMessageDeleted,
+  TListSnapshot,
 } from "@bellaclaw/shared";
 
 // a row the app shows: a message, or a display row (a command with its reply, a notice, a failure
@@ -133,7 +134,8 @@ export type THistoryResponse = TConversationRevision & {
 // confidential reply to a message sent from the app, shown once and never stored, sent to app
 // sessions' streams only; step: a tool call of the conversation's reply turn started, completed or
 // failed, stepId its tool call id, tool the tool's name, startedAt epoch ms, durationMs once it
-// ended. A client that missed a delete finds the chat gone from the list
+// ended; lists: the account's lists changed, read them again. A client that missed a delete finds
+// the chat gone from the list
 export type TAppStreamEvent =
   | { type: "check" }
   | ({ type: "changed"; conversationKey: string } & TConversationRevision)
@@ -150,7 +152,8 @@ export type TAppStreamEvent =
       state: "started" | "completed" | "failed";
       startedAt: number;
       durationMs?: number;
-    };
+    }
+  | { type: "lists" };
 
 // createdAt: epoch ms
 export type TFactNode = { id: number; text: string; createdAt: number };
@@ -160,3 +163,15 @@ export type TFactLink = { source: number; target: number };
 
 // GET /api/facts answer: the account's facts
 export type TFactsResponse = { nodes: TFactNode[]; links: TFactLink[] };
+
+// a list and its items, by position. createdAt, updatedAt and expiresAt: epoch ms; expiresAt: when
+// the list ends, null for never
+// POST /api/lists/changes body: the changes, applied in order, all or none. expiresAt: epoch ms or
+// null; index: where add_items inserts, the end without one; toIndex past the end moves the item to
+// the end
+export type { TGatewayListsUpdate, TListOperation, TListSnapshot } from "@bellaclaw/shared";
+
+// GET /api/lists answer, and POST /api/lists/changes answer after the change: the account's lists
+// that have not ended, oldest first. A change naming a list or an item the account does not hold
+// answers 404 and changes nothing; an invalid one 400
+export type TListsResponse = { lists: TListSnapshot[] };

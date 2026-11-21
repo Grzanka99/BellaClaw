@@ -176,6 +176,13 @@
       "when": 1795275284206,
       "tag": "0024_scheduled_delivery_text",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1795284528333,
+      "tag": "0025_lists",
+      "breakpoints": true
     }
   ]
 }

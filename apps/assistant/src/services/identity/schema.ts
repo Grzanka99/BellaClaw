@@ -15,6 +15,7 @@ export enum EIdentityLinkOwner {
   Cron = "cron",
   Automations = "automations",
   McpAuth = "mcp-auth",
+  Lists = "lists",
 }
 
 export const SIdentityLink = z.object({
