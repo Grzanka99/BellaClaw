@@ -326,6 +326,32 @@ class ChatViewModelTest {
     }
 
     @Test
+    fun `a reconnect mid-turn keeps the live card and its steps while the turn replays`() = runTest {
+        val viewModel = viewModel(BELLACLAW_CHAT_ID, repository())
+        viewModel.uiState.first { it.isReadyToSend && it.isStreamOpen }
+        val startedAt = FakeGateway.CREATED_AT + 60_000
+        val step = """{"conversationKey":"$BELLA_KEY","stepId":"s1","tool":"web-search","label":"Web search","detail":"OVH invoice terms","state":"completed","startedAt":$startedAt,"durationMs":2100}"""
+        val searched = ActivityRow.Step(ActivityStep("web-search", "Web search", "OVH invoice terms", Instant.ofEpochMilli(startedAt), 2100))
+
+        gateway.push("typing", """{"conversationKey":"$BELLA_KEY","typing":true}""")
+        gateway.push("step", step)
+        val before = checkNotNull(viewModel.uiState.first { it.liveCard()?.rows?.size == 2 }.liveCard())
+
+        // A new stream opens with check, which ends typing; the card keeps its step meanwhile.
+        gateway.push("check", "{}")
+        val checked = checkNotNull(viewModel.uiState.first { it.liveCard()?.rows?.size == 1 }.liveCard())
+        assertEquals(before.key, checked.key)
+        assertEquals(listOf(searched), checked.rows)
+
+        // The gateway replays the running turn: the same card types again.
+        gateway.push("typing", """{"conversationKey":"$BELLA_KEY","typing":true}""")
+        gateway.push("step", step)
+        val replayed = checkNotNull(viewModel.uiState.first { it.liveCard()?.rows?.size == 2 }.liveCard())
+        assertEquals(before.key, replayed.key)
+        assertEquals(listOf(searched, ActivityRow.Thinking), replayed.rows)
+    }
+
+    @Test
     fun `a reply shows the steps history gives it, the pause between them and how long they took`() = runTest {
         val startedAt = FakeGateway.CREATED_AT
         gateway.addRow(

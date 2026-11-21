@@ -135,8 +135,10 @@ class ChatViewModel(
         chatRepository.isTyping(chatId),
         chatRepository.liveSteps(chatId),
         messages,
-    ) { typing, steps, messages -> Triple(typing, steps, messages.lastOrNull { it.author == Author.ASSISTANT }?.id) }
-        .scan(Turns()) { turns, (typing, steps, newest) -> turns.next(typing, steps, newest) }
+    ) { typing, steps, messages -> Triple(typing, steps, messages) }
+        .scan(Turns()) { turns, (typing, steps, messages) ->
+            turns.next(typing, steps, messages.lastOrNull { it.author == Author.ASSISTANT }?.id, messages.lastOrNull()?.id)
+        }
         .distinctUntilChanged()
         .transformLatest { turns ->
             emit(turns)
@@ -309,12 +311,14 @@ class ChatViewModel(
 /**
  * A reply in progress, or one whose typing ended and whose reply has not shown yet: its card's [key] and its
  * [steps], kept once typing ends. [newestAtEnd] is the newest reply then; another one is this turn's.
+ * [lastAtEnd] is the newest message then.
  */
 private data class Turn(
     val key: String,
     val steps: List<ActivityStep>,
     val isTyping: Boolean,
     val newestAtEnd: String? = null,
+    val lastAtEnd: String? = null,
 )
 
 /** The [current] turn, and the card key of every turn that took steps, by its first step's start; [count] names the next. */
@@ -323,14 +327,16 @@ private data class Turns(
     val keys: Map<Instant, String> = emptyMap(),
     val count: Int = 0,
 ) {
-    fun next(typing: Boolean, steps: List<ActivityStep>, newest: String?): Turns {
-        val ongoing = current?.takeIf { it.isTyping || it.newestAtEnd == newest }
-        // A turn whose typing ended is not resumed: the next one gets its own card key.
-        val running = ongoing?.takeIf { it.isTyping }
+    fun next(typing: Boolean, steps: List<ActivityStep>, newestReply: String?, newest: String?): Turns {
+        val ongoing = current?.takeIf { it.isTyping || it.newestAtEnd == newestReply }
+        // A reconnect's check ends the turn and its replay types again: with no message since, it is the
+        // same turn and keeps its card and steps until they come again. After a message it is a new turn.
+        val running = ongoing?.takeIf { it.isTyping || it.lastAtEnd == newest }
         val turn = when {
-            typing || steps.isNotEmpty() -> Turn(running?.key ?: "activity-live-$count", steps, isTyping = true)
+            typing || steps.isNotEmpty() ->
+                Turn(running?.key ?: "activity-live-$count", steps.ifEmpty { running?.steps.orEmpty() }, isTyping = true)
             ongoing == null -> null
-            ongoing.isTyping -> ongoing.copy(isTyping = false, newestAtEnd = newest)
+            ongoing.isTyping -> ongoing.copy(isTyping = false, newestAtEnd = newestReply, lastAtEnd = newest)
             else -> ongoing
         }
         val first = turn?.steps?.firstOrNull()

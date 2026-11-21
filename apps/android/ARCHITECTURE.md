@@ -227,16 +227,16 @@ Everything it holds is one immutable `ChatState` in a `MutableStateFlow`, change
   an open chat's history, is tried again with the same delays in the stream's scope (`ChatSync.live`),
   so the retrying ends with a success, a session change or the background; one retry loop at most per
   list or conversation, so a `check` or `changed` meanwhile reads once but starts no second loop. `isStreamOpen` is true from that
-  first event until the stream ends; typing marks end with it.
+  first event until the stream ends; typing marks and steps stay until the next `check`.
 - **Events.** `check`: typing off, read the list. `changed`: read the list. `typing`: mark or unmark the
   conversation. `deleted`: drop the plain chat; an open screen sees `isMissing`. `reply`: an assistant
   message kept in memory only (`ChatState.replies`), shown once in its conversation for as long as the
   session lasts. `step`: a step of the reply in progress (`ChatState.steps`, by step id: `started`, then
-  `completed` or `failed`), kept until that conversation's typing ends, a `check`, or the stream ends.
+  `completed` or `failed`), kept until that conversation's typing ends or a `check`.
 - **Activity steps.** A reply's activity is one card, a `ChatRow.Activity` list item. While a reply is in
   progress it is the first row (`isLive`): the typing dots, then its steps appended as they come. Typing
   ends before the reply lands, so the ViewModel keeps the ended turn's card until another message is the
-  newest, 10 s at most. A history row's `steps` come with its `Message` and show as a card above the reply,
+  newest, 10 s at most; typing again with no message since (a reconnect's replay) resumes it. A history row's `steps` come with its `Message` and show as a card above the reply,
   folded to "4 steps · 14s" (from the first step's start to the last end), which a tap unfolds; open or
   closed is the list's own state. A turn seen live keys its card from typing on, and the reply whose
   first step started then keeps that key, so the live card folds in place; any other reply's card is
