@@ -9,12 +9,12 @@ module; every dependency and plugin version lives in `gradle/libs.versions.toml`
 
 | Package (`one.scary.bellaclaw.…`) | Holds |
 | --- | --- |
-| `model` | Plain Kotlin types (`Chat`, `Message`, `ActivityStep`, `MessageImage`, `PickedImage`, `ImageCheck`, `SendState`, `ModelChoice`, `ModelSettings`, `AiModel`, `ChatProvider`, `Personality`, `SettingsSnapshot`, `Loadable`, `Session`, `LoginLink`, `PendingLink`, `LinkStatus`, `AccountError`, `AppPush`, `ChatNotification`, …), and every type a ViewModel gets from a repository. No Android or Compose imports. |
-| `data` | One repository per kind of data: `ChatRepository` (chats, messages, sends and their images, typing, unread, the live stream; its state in `ChatState`; the live stream and its events in `ChatStream`; the list and history reads in `ChatSync`; sends in `ChatSends`; images in `ChatImages`), `SettingsRepository` (one `SettingsSnapshot` flow: the account's models and personality and the plain chats' model list from the server, the phone's theme), `AccountRepository` (the session, sign-in, sign-out, the pending login link). `ServerUrls.kt`: the server address rule and the login link parser. |
-| `data.remote` | `ApiClient`, the one HTTP client of the gateway's app API (OkHttp, kotlinx.serialization JSON), its request and answer bodies (one file per area: `ApiBodies.kt`, `ChatBodies.kt` for conversations and the stream, `DeviceBodies.kt`, `SettingsBodies.kt`), and `ApiResult`. |
+| `model` | Plain Kotlin types (`Chat`, `Message`, `ActivityStep`, `MessageImage`, `PickedImage`, `ImageCheck`, `SendState`, `ModelChoice`, `ModelSettings`, `AiModel`, `ChatProvider`, `Personality`, `SettingsSnapshot`, `Loadable`, `Session`, `LoginLink`, `PendingLink`, `LinkStatus`, `AccountError`, `AppPush`, `ChatNotification`, `TodoList`, `TodoItem`, `ListChange`, `FinishedList`, …), and every type a ViewModel gets from a repository. No Android or Compose imports. |
+| `data` | One repository per kind of data: `ChatRepository` (chats, messages, sends and their images, typing, unread, the live stream; its state in `ChatState`; the live stream and its events in `ChatStream`; the list and history reads in `ChatSync`; sends in `ChatSends`; images in `ChatImages`), `SettingsRepository` (one `SettingsSnapshot` flow: the account's models and personality and the plain chats' model list from the server, the phone's theme), `AccountRepository` (the session, sign-in, sign-out, the pending login link), `ListsRepository` (the account's to-do lists and the app's changes to them). `ServerUrls.kt`: the server address rule and the login link parser. |
+| `data.remote` | `ApiClient`, the one HTTP client of the gateway's app API (OkHttp, kotlinx.serialization JSON), its request and answer bodies (one file per area: `ApiBodies.kt`, `ChatBodies.kt` for conversations and the stream, `DeviceBodies.kt`, `SettingsBodies.kt`, `ListBodies.kt`), and `ApiResult`. |
 | `data.push` | `PushRepository` (device registration, decrypted pushes as a flow), `PushNotifications` (a notification per push, behind the `Notifier` seam), the device keys (`loadDeviceKeys`, `DeviceKeys`), RFC 8291 decryption (`decryptPush`), `PushTokens` (FCM's token, `FirebasePushTokens`). |
-| `data.local` | `SessionStore`: the server address, session token and username in one app-private file. `ThemeStore`: the theme mode and Dynamic color in another. `ChatStore`: per conversation, the model picked for a plain chat and the newest row seen; the model used last on this phone; and the dictation language picked last. `ImageCache`: history's images in the cache directory. `PickedImages`: reads a picked image, at most a given number of bytes (`ContentPickedImages`, on the `ContentResolver`). |
-| `ui.<feature>` | `signin`, `home`, `chat`, `settings`, `settings.models`, `settings.personality`, `settings.theme`. `chat` also holds `Dictation`, speech to text on the phone's `SpeechRecognizer`, which `ChatRoute` creates along with the microphone permission request. |
+| `data.local` | `SessionStore`: the server address, session token and username in one app-private file. `ThemeStore`: the theme mode and Dynamic color in another. `ChatStore`: per conversation, the model picked for a plain chat and the newest row seen; the model used last on this phone; the dictation language picked last; and the finished lists swiped away. `ImageCache`: history's images in the cache directory. `PickedImages`: reads a picked image, at most a given number of bytes (`ContentPickedImages`, on the `ContentResolver`). |
+| `ui.<feature>` | `signin`, `home`, `chat`, `lists`, `settings`, `settings.models`, `settings.personality`, `settings.theme`. `chat` also holds `Dictation`, speech to text on the phone's `SpeechRecognizer`, which `ChatRoute` creates along with the microphone permission request. |
 | `ui.components` | Composables and label mappings used by more than one feature. |
 | `ui.theme` | Colour schemes, extra colour tokens, typography, `BellaClawTheme`. |
 | `ui.navigation` | Typed destinations and the two `NavHost`s. |
@@ -332,12 +332,39 @@ Everything it holds is one immutable `ChatState` in a `MutableStateFlow`, change
   like any loaded one. A failed read is retried only while the stream is open. `openConversations` names the
   conversation keys of the chats on screen.
 
+## Lists
+
+`ListsRepository` holds the account's to-do lists (`GET /api/lists`) in memory for the session, dropped
+when it changes. The live stream's `check` and `lists` events have it read them again (`ChatRepository`
+takes its `refresh` as `onListsChanged`, which `ChatStream` calls). Reads and changes go one request at
+a time, in the application scope, so changes reach the server in the order they were made. A change
+(`ListChange`, sent as one operation of `POST /api/lists/changes`) shows at once on top of the lists
+read, as the list's last change; the answer replaces the lists. A refused or failed change is dropped,
+sets `error` (the lists screen shows it once) and the lists are read again.
+
+- **What shows** (`lists`): not ended (`endsAt`), and not swiped away; a finished list without an end
+  shows for an hour after its last change (`TodoList.disappearsAt`). A swiped finished list is hidden
+  through `ChatStore` until its last change moves past the one it had. The lists are shown at the time
+  a minute ticker gives (`now`, which tests set), so a list leaves on time while the screen is open.
+  Ordered by end, the nearest first, lists without an end last, then oldest first.
+- **The pill** (`ListPill`), BellaClaw's chat only, under its bar: the first list, its progress ring,
+  end and count, "+N" for the others; green (`ExtraColors.doneContainer`) once every item is ticked,
+  and only then swipeable. A tap opens the lists screen (`ListsDestination`) on that list.
+- **The lists screen** (`ui.lists`): the picked list, else the first, and a chip per list when there are
+  more; ticking, editing an item in place (a tap; Done or leaving the field saves a changed, non-blank
+  text), adding (`Add…`), a swipe to delete an item, a drag handle to reorder (`ReorderState`: the
+  move is sent on release), and the menu's rename and delete (with a confirmation). Once the lists are
+  read and none is left to show, the screen closes.
+- **The finished card.** History's row with `listFinished` (written by the server the first time a list's
+  last open item is ticked) is a `Message` with `finishedList`, drawn as an outlined card with the
+  app's own strings.
+
 ## Wiring
 
 `BellaClawApplication` creates one `AppContainer` on first use, which creates the `SessionStore`,
 the `ApiClient` and each repository once. It also owns
 one application-lifetime `CoroutineScope` and passes it to repositories whose work must outlive a
-screen (`ChatRepository`: the stream, list and history reads, sends; `SettingsRepository`: the session
+screen (`ChatRepository`: the stream, list and history reads, sends; `ListsRepository`: list reads and changes; `SettingsRepository`: the session
 watch and model changes; `PushNotifications`: the pushes, on an `AndroidNotifier`). ViewModel
 factories read it through `CreationExtras.appContainer()`. No DI framework. Repositories are concrete
 classes; add an interface only when a second implementation exists.
@@ -348,7 +375,7 @@ JVM unit tests in `app/src/test` for every ViewModel: construct it with real rep
 its state (`collectIn`), send events, assert the exposed state. Chat tests run the real
 `ChatRepository` against `FakeGateway` (`TestServer.gateway()`): in-memory conversations behind the
 conversation and media routes, and a stream that opens with `check` and carries what the test pushes;
-the photo picker's files come from `TestServer.pickedImages` (`FakePickedImages`). A test
+the photo picker's files come from `TestServer.pickedImages` (`FakePickedImages`). `FakeGateway` also answers the list routes with its `lists` JSON and records each change (`listChanges`); `TestServer.listsRepository` shows the lists at a time the test sets. A test
 waits for a request off the test thread (`withContext(Dispatchers.IO)`), so the repository's work in
 the test scope keeps running. Account tests use `TestServer`: a
 `MockWebServer` on 127.0.0.1 (not `localhost`, which OkHttp tries as `::1` first) plus the real `SessionStore`, `ApiClient` and `AccountRepository` on a session

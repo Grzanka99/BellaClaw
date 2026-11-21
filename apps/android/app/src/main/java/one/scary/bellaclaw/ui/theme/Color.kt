@@ -81,8 +81,16 @@ internal val DarkColors = darkColorScheme(
     surfaceContainerHighest = Color(0xFF37333C),
 )
 
-/** Colours the Material scheme has no role for. */
-data class ExtraColors(val online: Color)
+/** Colours the Material scheme has no role for. [online] also fills a finished list's mark, on [doneContainer]. */
+data class ExtraColors(val online: Color, val doneContainer: Color, val onDoneContainer: Color)
 
-internal val LightExtraColors = ExtraColors(online = Color(0xFF2FBF71))
-internal val DarkExtraColors = ExtraColors(online = Color(0xFF5FD99A))
+internal val LightExtraColors = ExtraColors(
+    online = Color(0xFF2FBF71),
+    doneContainer = Color(0xFFD7F3E2),
+    onDoneContainer = Color(0xFF0D3B22),
+)
+internal val DarkExtraColors = ExtraColors(
+    online = Color(0xFF5FD99A),
+    doneContainer = Color(0xFF1C3A29),
+    onDoneContainer = Color(0xFFC9F2DA),
+)

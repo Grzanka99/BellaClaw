@@ -21,6 +21,7 @@ import one.scary.bellaclaw.model.Message
  * [firstRetryMillis], doubling to [maxRetryMillis]. A `check` or `changed` has [sync] read the list, and
  * [sync]'s failed reads are tried again in the stream's scope. A `deleted` event has the phone [forget]
  * the conversation; a `reply` is dated by [clock]. A `step` is kept until its conversation's typing ends or a `check`.
+ * A `check` or `lists` event calls [onListsChanged], so the lists are read again.
  */
 internal class ChatStream(
     private val api: ApiClient,
@@ -31,6 +32,7 @@ internal class ChatStream(
     private val clock: Clock,
     private val firstRetryMillis: Long,
     private val maxRetryMillis: Long,
+    private val onListsChanged: () -> Unit,
 ) {
     /**
      * Keeps the stream open, reconnecting after a drop with a growing delay, until cancelled (background, a
@@ -83,7 +85,9 @@ internal class ChatStream(
             "check" -> {
                 state.update { it.copy(isStreamOpen = true, typing = emptySet(), steps = emptyMap()) }
                 scope.launch { sync.refreshList() }
+                onListsChanged()
             }
+            "lists" -> onListsChanged()
             "changed" -> scope.launch { sync.refreshList() }
             "typing" -> if (key != null) {
                 state.update {

@@ -25,6 +25,7 @@ import kotlinx.coroutines.flow.transformLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import one.scary.bellaclaw.data.ChatRepository
+import one.scary.bellaclaw.data.ListsRepository
 import one.scary.bellaclaw.data.SettingsRepository
 import one.scary.bellaclaw.model.ActivityStep
 import one.scary.bellaclaw.model.Author
@@ -41,6 +42,7 @@ import one.scary.bellaclaw.model.MessageImage
 import one.scary.bellaclaw.model.ModelChoice
 import one.scary.bellaclaw.model.PickedImage
 import one.scary.bellaclaw.model.PlainChat
+import one.scary.bellaclaw.model.TodoList
 import one.scary.bellaclaw.model.isNewChatId
 import one.scary.bellaclaw.ui.appContainer
 import one.scary.bellaclaw.ui.navigation.ChatDestination
@@ -58,6 +60,7 @@ class ChatViewModel(
     chatId: String,
     private val chatRepository: ChatRepository,
     private val settingsRepository: SettingsRepository,
+    private val listsRepository: ListsRepository,
     private val savedStateHandle: SavedStateHandle,
     private val zone: ZoneId = ZoneId.systemDefault(),
     /** How long an ended turn waits for its reply. Tests pass [Duration.INFINITE]: their virtual clock skips ahead while they wait for the stream. */
@@ -157,8 +160,8 @@ class ChatViewModel(
         draft,
         local,
         settingsRepository.settings,
-        chatRepository.dictationLanguage,
-    ) { chat, draft, local, settings, dictationLanguage ->
+        combine(chatRepository.dictationLanguage, listsRepository.lists, ::Pair),
+    ) { chat, draft, local, settings, (dictationLanguage, lists) ->
         val picker = if (local.isPickerOpen) {
             val usable = settings.chatModels.map { providers -> providers.filter { it.isUsable } }
             ModelPickerState(usable, validSelection(local.pickerSelection, settings.chatModels))
@@ -173,6 +176,7 @@ class ChatViewModel(
             viewedImage = local.viewedImage,
             picker = picker,
             dictationLanguage = dictationLanguage,
+            lists = if (chat.kind == ChatKind.BELLACLAW) lists.orEmpty() else emptyList(),
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ChatUiState())
 
@@ -228,6 +232,11 @@ class ChatViewModel(
 
     fun closeImage() {
         local.update { it.copy(viewedImage = null) }
+    }
+
+    /** Hides the finished list [list] until it changes again. */
+    fun dismissList(list: TodoList) {
+        listsRepository.dismiss(list)
     }
 
     /** Sends the failed message [messageId] again. */
@@ -310,6 +319,7 @@ class ChatViewModel(
                     chatId = savedStateHandle.toRoute<ChatDestination>().chatId,
                     chatRepository = container.chatRepository,
                     settingsRepository = container.settingsRepository,
+                    listsRepository = container.listsRepository,
                     savedStateHandle = savedStateHandle,
                 )
             }

@@ -22,7 +22,8 @@ data class ConversationBody(
 /**
  * A row of history: a message or a display row. [author] is `user` or `assistant`; [createdAt] epoch ms.
  * An assistant row has the [steps] of its reply, by start, when there were any; [scheduled] marks a
- * delivery of a scheduled job, such as a reminder or an automation's output.
+ * delivery of a scheduled job, such as a reminder or an automation's output; [listFinished] marks the row
+ * written when a list's last item was ticked.
  */
 @Serializable
 data class HistoryRowBody(
@@ -34,6 +35,7 @@ data class HistoryRowBody(
     val images: List<HistoryImageBody>? = null,
     val steps: List<StepBody>? = null,
     val scheduled: Boolean,
+    val listFinished: ListFinishedBody? = null,
 )
 
 /** A finished step of a reply; [startedAt] epoch ms. */

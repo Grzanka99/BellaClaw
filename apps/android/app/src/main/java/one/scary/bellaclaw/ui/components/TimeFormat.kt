@@ -4,6 +4,8 @@ import android.text.format.DateFormat
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLocale
+import androidx.compose.ui.res.stringResource
+import one.scary.bellaclaw.R
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -29,4 +31,25 @@ fun formatListTime(instant: Instant): String {
         return date.dayOfWeek.getDisplayName(TextStyle.SHORT, LocalLocale.current.platformLocale)
     }
     return date.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.SHORT))
+}
+
+/** A coming moment: "today 20:00", "tomorrow 9:00", the weekday within a week ("Sat 20:00"), else the date and time. */
+@Composable
+fun formatEndTime(instant: Instant): String {
+    val zone = ZoneId.systemDefault()
+    val date = instant.atZone(zone).toLocalDate()
+    val today = LocalDate.now(zone)
+    val time = formatTime(instant)
+    if (date == today) {
+        return stringResource(R.string.time_today, time)
+    }
+    if (date == today.plusDays(1)) {
+        return stringResource(R.string.time_tomorrow, time)
+    }
+    val day = if (date.isBefore(today.plusDays(7))) {
+        date.dayOfWeek.getDisplayName(TextStyle.SHORT, LocalLocale.current.platformLocale)
+    } else {
+        date.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM))
+    }
+    return stringResource(R.string.time_day, day, time)
 }

@@ -1,5 +1,6 @@
 package one.scary.bellaclaw.ui.chat
 
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -14,6 +15,8 @@ import one.scary.bellaclaw.model.ChatKind
 import one.scary.bellaclaw.model.Message
 import one.scary.bellaclaw.model.MessageImage
 import one.scary.bellaclaw.model.SendState
+import one.scary.bellaclaw.model.TodoItem
+import one.scary.bellaclaw.model.TodoList
 import one.scary.bellaclaw.ui.theme.BellaClawTheme
 import java.time.Instant
 import java.time.ZoneId
@@ -36,6 +39,8 @@ fun ChatScreen(
     onCloseImage: () -> Unit,
     dictation: Dictation,
     onDictate: () -> Unit,
+    onOpenList: (String) -> Unit,
+    onDismissList: (TodoList) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val isBellaClaw = state.kind == ChatKind.BELLACLAW
@@ -43,7 +48,10 @@ fun ChatScreen(
         modifier = modifier,
         topBar = {
             if (isBellaClaw) {
-                BellaClawTopBar(isStreamOpen = state.isStreamOpen, onBack = onBack)
+                Column {
+                    BellaClawTopBar(isStreamOpen = state.isStreamOpen, onBack = onBack)
+                    ListPill(lists = state.lists, onOpen = onOpenList, onDismiss = onDismissList)
+                }
             } else {
                 PlainChatTopBar(
                     title = state.title ?: stringResource(R.string.new_chat_title),
@@ -112,6 +120,16 @@ private fun BellaClawChatPreview() {
                 ),
                 isStreamOpen = true,
                 isReadyToSend = true,
+                lists = listOf(
+                    TodoList(
+                        "l1",
+                        "Shopping",
+                        now.plusSeconds(3_600),
+                        now,
+                        listOf(TodoItem("1", "Milk", true), TodoItem("2", "Bread", false), TodoItem("3", "Eggs", false)),
+                    ),
+                    TodoList("l2", "Packing", null, now, listOf(TodoItem("4", "Charger", false))),
+                ),
             ),
             onBack = {},
             onDraftChange = {},
@@ -128,6 +146,8 @@ private fun BellaClawChatPreview() {
             onCloseImage = {},
             dictation = rememberDictation({}, { _, _ -> }),
             onDictate = {},
+            onOpenList = {},
+            onDismissList = {},
         )
     }
 }
@@ -164,6 +184,8 @@ private fun PlainChatPreview() {
             onCloseImage = {},
             dictation = rememberDictation({}, { _, _ -> }),
             onDictate = {},
+            onOpenList = {},
+            onDismissList = {},
         )
     }
 }

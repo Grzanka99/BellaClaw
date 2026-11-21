@@ -1,6 +1,9 @@
 package one.scary.bellaclaw.data
 
 import java.io.File
+import java.time.Clock
+import java.time.Instant
+import java.time.ZoneOffset
 import java.net.InetAddress
 import java.util.concurrent.ConcurrentHashMap
 import java.nio.file.Files
@@ -31,6 +34,9 @@ import one.scary.bellaclaw.model.Session
 import org.junit.rules.ExternalResource
 
 private const val LOOPBACK = "127.0.0.1"
+
+/** 2026-11-19T12:00:00Z, the time lists are shown at in tests. */
+val LISTS_NOW: Instant = Instant.ofEpochMilli(FakeGateway.CREATED_AT)
 
 /** A mock gateway on 127.0.0.1, and the real store, client and repository on it with a session file in a fresh folder. */
 class TestServer : ExternalResource() {
@@ -113,6 +119,7 @@ class TestServer : ExternalResource() {
         foreground: Flow<Boolean> = MutableStateFlow(true),
         settings: SettingsRepository = settingsRepository(store, scope),
         retryMillis: Long = 1_000L,
+        onListsChanged: () -> Unit = {},
     ) = ChatRepository(
         ApiClient(store),
         store.session,
@@ -123,7 +130,15 @@ class TestServer : ExternalResource() {
         ImageCache(imageCacheDir),
         scope,
         retryMillis = retryMillis,
+        onListsChanged = onListsChanged,
     )
+
+    /** The real lists repository on [store]'s session, shown at the times [now] ticks, [LISTS_NOW] unless the test passes its own. */
+    fun listsRepository(
+        store: SessionStore,
+        scope: CoroutineScope,
+        now: Flow<Instant> = MutableStateFlow(LISTS_NOW),
+    ) = ListsRepository(ApiClient(store), store.session, ChatStore(File(folder, "lists-chats.json")), scope, Clock.fixed(LISTS_NOW, ZoneOffset.UTC), now)
 
     fun answer(code: Int, body: String) {
         server.enqueue(MockResponse.Builder().code(code).body(body).build())
@@ -244,3 +259,14 @@ fun chatModelsAnswer(codexReason: String? = "The OpenAI Codex login is not conne
 /** GET and PUT /api/personality. */
 fun personalityAnswer(bella: String = "You are BellaClaw.", useInChats: Boolean = true, chats: String = "Keep it short.") =
     """{"bellaPersona":"$bella","plainChatsUseBellaPersona":$useInChats,"plainChatsPersona":"$chats"}"""
+
+/** A list of `GET /api/lists`: [items] as id to (text, done); [expiresAt] and [updatedAt] epoch ms. */
+fun listAnswer(id: String, name: String, items: List<Pair<String, Pair<String, Boolean>>>, expiresAt: Long? = null, updatedAt: Long = FakeGateway.CREATED_AT): String {
+    val rows = items.mapIndexed { index, (itemId, item) ->
+        """{"id":"$itemId","text":"${item.first}","done":${item.second},"position":$index}"""
+    }
+    val end = expiresAt?.toString() ?: "null"
+    return """{"id":"$id","name":"$name","expiresAt":$end,"createdAt":${FakeGateway.CREATED_AT},"updatedAt":$updatedAt,"items":[${rows.joinToString(",")}]}"""
+}
+
+fun listsAnswer(vararg lists: String) = """{"lists":[${lists.joinToString(",")}]}"""
