@@ -59,7 +59,8 @@ data class ActivityStep(
 /**
  * A row of a conversation: a message or a display row (a command and its reply, a notice), drawn by its
  * [author]. A [SendState.FAILED] send has the server's [failure] text when it gave one.
- * An assistant reply has the [steps] that led to it, by start.
+ * An assistant reply has the [steps] that led to it, by start; a [scheduled] one is a delivery of a
+ * scheduled job.
  */
 data class Message(
     val id: String,
@@ -71,4 +72,5 @@ data class Message(
     val sendState: SendState = SendState.STORED,
     val failure: String? = null,
     val steps: List<ActivityStep> = emptyList(),
+    val scheduled: Boolean = false,
 )

@@ -21,7 +21,8 @@ data class ConversationBody(
 
 /**
  * A row of history: a message or a display row. [author] is `user` or `assistant`; [createdAt] epoch ms.
- * An assistant row has the [steps] of its reply, by start, when there were any.
+ * An assistant row has the [steps] of its reply, by start, when there were any; [scheduled] marks a
+ * delivery of a scheduled job, such as a reminder or an automation's output.
  */
 @Serializable
 data class HistoryRowBody(
@@ -32,6 +33,7 @@ data class HistoryRowBody(
     val clientMessageId: String? = null,
     val images: List<HistoryImageBody>? = null,
     val steps: List<StepBody>? = null,
+    val scheduled: Boolean,
 )
 
 /** A finished step of a reply; [startedAt] epoch ms. */
