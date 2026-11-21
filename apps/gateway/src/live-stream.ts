@@ -91,23 +91,26 @@ export function createLiveStream(internalApi: TInternalApi, retryMs: number, sil
     }
 
     const { accountId, ...event } = parsed.data;
-    const accountTurns = turns.get(accountId) ?? new Map<string, TTurn>();
-    const turn = accountTurns.get(event.conversationKey) ?? { typing: false, steps: new Map() };
 
-    if (event.type === "typing" && event.typing) {
-      turn.typing = true;
-      accountTurns.set(event.conversationKey, turn);
-    } else if ((event.type === "typing" && !event.typing) || event.type === "deleted") {
-      accountTurns.delete(event.conversationKey);
-    } else if (event.type === "step") {
-      turn.steps.set(event.stepId, event);
-      accountTurns.set(event.conversationKey, turn);
-    }
+    if (event.type === "typing" || event.type === "deleted" || event.type === "step") {
+      const accountTurns = turns.get(accountId) ?? new Map<string, TTurn>();
+      const turn = accountTurns.get(event.conversationKey) ?? { typing: false, steps: new Map() };
 
-    if (accountTurns.size === 0) {
-      turns.delete(accountId);
-    } else {
-      turns.set(accountId, accountTurns);
+      if (event.type === "typing" && event.typing) {
+        turn.typing = true;
+        accountTurns.set(event.conversationKey, turn);
+      } else if (event.type === "step") {
+        turn.steps.set(event.stepId, event);
+        accountTurns.set(event.conversationKey, turn);
+      } else {
+        accountTurns.delete(event.conversationKey);
+      }
+
+      if (accountTurns.size === 0) {
+        turns.delete(accountId);
+      } else {
+        turns.set(accountId, accountTurns);
+      }
     }
 
     for (const [listener, app] of listeners.get(accountId) ?? []) {
