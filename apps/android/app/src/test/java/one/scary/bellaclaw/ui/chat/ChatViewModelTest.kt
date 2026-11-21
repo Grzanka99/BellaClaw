@@ -311,6 +311,8 @@ class ChatViewModelTest {
 
         // Typing ends before the reply lands; the card waits for it, then shows above it under the same key.
         gateway.push("typing", """{"conversationKey":"$BELLA_KEY","typing":false}""")
+        val ended = checkNotNull(viewModel.uiState.first { it.liveCard()?.rows?.size == 1 }.liveCard())
+        assertEquals(typing.key, ended.key)
         gateway.addRow(
             BELLA_KEY,
             "assistant",

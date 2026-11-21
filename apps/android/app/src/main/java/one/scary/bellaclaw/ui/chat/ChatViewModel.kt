@@ -325,9 +325,10 @@ private data class Turns(
 ) {
     fun next(typing: Boolean, steps: List<ActivityStep>, newest: String?): Turns {
         val ongoing = current?.takeIf { it.isTyping || it.newestAtEnd == newest }
+        // A turn whose typing ended is not resumed: the next one gets its own card key.
+        val running = ongoing?.takeIf { it.isTyping }
         val turn = when {
-            // Typing and steps change apart, so a running turn keeps its steps while none are known.
-            typing || steps.isNotEmpty() -> Turn(ongoing?.key ?: "activity-live-$count", steps.ifEmpty { ongoing?.steps.orEmpty() }, isTyping = true)
+            typing || steps.isNotEmpty() -> Turn(running?.key ?: "activity-live-$count", steps, isTyping = true)
             ongoing == null -> null
             ongoing.isTyping -> ongoing.copy(isTyping = false, newestAtEnd = newest)
             else -> ongoing
@@ -336,7 +337,7 @@ private data class Turns(
         return Turns(
             current = turn,
             keys = if (turn != null && first != null) keys + (first.startedAt to turn.key) else keys,
-            count = if (turn != null && ongoing == null) count + 1 else count,
+            count = if (turn?.isTyping == true && running == null) count + 1 else count,
         )
     }
 }
