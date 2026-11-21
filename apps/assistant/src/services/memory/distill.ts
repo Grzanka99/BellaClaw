@@ -1,5 +1,5 @@
 import type { TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
-import { EEventType, type TSelectMemory } from "@bellaclaw/database";
+import { EConversationKind, EEventType, type TSelectMemory } from "@bellaclaw/database";
 import type { TOption } from "@bellaclaw/shared";
 import { createLogger } from "@bellaclaw/shared";
 import { z } from "zod";
@@ -8,6 +8,8 @@ import { EModelPurpose, ERole } from "../ai/types";
 import { ConversationStore } from "../conversation";
 import { EmbeddingClient } from "../embedding";
 import { commandFailed, ESubscriptionMode, EventBus, type TEventContext } from "../events";
+import { IdentityService } from "../identity";
+import { EIdentityLinkOwner } from "../identity/schema";
 import { SettingsService } from "../settings";
 import type { TConfigRecord } from "../settings/schema";
 import { Memory } from ".";
@@ -32,8 +34,10 @@ const DISTILLATION_ATTEMPTS = 2;
 
 export type TDistilledFact = z.infer<typeof SDistilledFact>;
 
+// window: a conversation's transcript window; ownerKey: whose facts it writes and supersedes
 export type TProcessFactWindowArgs = {
   window: TLiveFactWindow;
+  ownerKey: string;
   settings: TConfigRecord;
   trace: TBehaviorTraceContext;
 };
@@ -67,12 +71,24 @@ export class FactDistiller {
       mode: ESubscriptionMode.Durable,
       backoffMs: [],
       handler: async (event) => {
-        const chatId = event.payload.chatId;
-        const settings = await SettingsService.instance.getAll(chatId);
+        const { conversationKey, ownerKey, kind } = event.payload;
+
+        // NOTE: a plain chat has no memory; the boot catch-up skips it too
+        if (kind === EConversationKind.Plain) {
+          return;
+        }
+
+        // NOTE: an address that is linked or being linked is drained by its move, and its later
+        // rows in the account's conversation
+        if ((await IdentityService.instance.linkedAccount(conversationKey)) !== undefined) {
+          return;
+        }
+
+        const settings = await SettingsService.instance.getAll(ownerKey);
 
         // NOTE: acked anyway: the checkpoint in fact_distillation_state makes the next drain
         // cover this window
-        if (!(await this.drainLiveFactWindows(chatId, settings, event.trace))) {
+        if (!(await this.drainLiveFactWindows(conversationKey, ownerKey, settings, event.trace))) {
           this.logger.error("turn.completed: fact drain failed");
         }
       },
@@ -83,12 +99,17 @@ export class FactDistiller {
       mode: ESubscriptionMode.Durable,
       backoffMs: [],
       handler: async (event, ctx) => {
-        const chatId = event.key;
+        const conversationKey = event.key;
+        const { ownerKey } = event.payload;
 
         try {
-          const settings = await SettingsService.instance.getAll(chatId);
+          const settings = await SettingsService.instance.getAll(ownerKey);
+          const linked = await IdentityService.instance.linkedAccount(conversationKey);
 
-          if (!(await this.drainLiveFactWindows(chatId, settings, event.trace))) {
+          if (
+            linked === undefined &&
+            !(await this.drainLiveFactWindows(conversationKey, ownerKey, settings, event.trace))
+          ) {
             throw new Error("Pending fact distillation failed");
           }
         } catch (error) {
@@ -108,6 +129,63 @@ export class FactDistiller {
         });
       },
     });
+    // NOTE: the barrier on Memory's lane of the address, behind any drain of the address still
+    // running; Memory's move follows on the account's lane
+    bus.subscribe({
+      consumer: "memory",
+      type: EEventType.IdentityLinkQuiet,
+      mode: ESubscriptionMode.Durable,
+      backoffMs: [1_000, 5_000],
+      handler: async (event, ctx) => {
+        await ctx.complete(async (_tx, emit) => {
+          emit(
+            EEventType.IdentityLinkSettled,
+            { ...event.payload, owner: EIdentityLinkOwner.Memory },
+            undefined,
+            event.payload.conversationKey,
+          );
+        });
+      },
+    });
+    // NOTE: on the account's lane, behind the drains of the account's turns. Both transcripts are
+    // drained to their ends before Memory joins their checkpoints, the address's with the
+    // address's settings, which Settings moves only after Memory and Conversation. A failed drain
+    // fails the handler, so the move waits for its retry
+    bus.subscribe({
+      consumer: "memory",
+      type: EEventType.IdentityLinkSettled,
+      mode: ESubscriptionMode.Durable,
+      backoffMs: [1_000, 5_000, 30_000],
+      handler: async (event, ctx) => {
+        const { owner, chatKey, conversationKey, ownerKey } = event.payload;
+
+        if (owner !== EIdentityLinkOwner.Memory) {
+          return;
+        }
+
+        const drains = [
+          { conversationKey: chatKey, ownerKey: chatKey },
+          { conversationKey, ownerKey },
+        ];
+
+        for (const drain of drains) {
+          const settings = await SettingsService.instance.getAll(drain.ownerKey);
+
+          if (
+            !(await this.drainLiveFactWindows(
+              drain.conversationKey,
+              drain.ownerKey,
+              settings,
+              event.trace,
+            ))
+          ) {
+            throw new Error(`The fact drain of ${drain.conversationKey} failed`);
+          }
+        }
+
+        await this.memory.moveLinkedFacts(event, ctx);
+      },
+    });
     bus.subscribe({
       consumer: "memory",
       type: EEventType.AppStarted,
@@ -121,14 +199,19 @@ export class FactDistiller {
   // very first recall after a deploy answers from an unpopulated store. Catching up is best-effort
   // and must never fail boot — messaging works fine against a partially distilled store.
   // NOTE: one refresh command per chat puts each catch-up drain on that chat's memory lane; no one
-  // waits for their outcome
+  // waits for their outcome. Identity names the owner of each stored transcript
   public async scheduleFactDrainForAllChats(ctx: TEventContext): Promise<void> {
     try {
       const chatIds = await this.conversations.findChatIds();
+      const owners = new Map<string, string>();
+
+      for (const chatId of chatIds) {
+        owners.set(chatId, await IdentityService.instance.ownerKeyOf(chatId));
+      }
 
       await ctx.transact(async (_tx, emit) => {
-        for (const chatId of chatIds) {
-          emit(EEventType.MemoryFactsRefreshRequested, {}, chatId, chatId);
+        for (const [chatId, ownerKey] of owners) {
+          emit(EEventType.MemoryFactsRefreshRequested, { ownerKey }, chatId, chatId);
         }
       });
     } catch (error) {
@@ -233,6 +316,7 @@ export class FactDistiller {
 
     const result = await this.memory.commitLiveFactWindow({
       chatId: args.window.state.chatId,
+      ownerKey: args.ownerKey,
       expectedLastProcessedMessageId: args.window.state.lastProcessedMessageId,
       lastProcessedMessageId: finalMessage.id,
       facts,
@@ -268,10 +352,7 @@ export class FactDistiller {
         throw new Error("embedding result did not match distilled facts");
       }
 
-      const searchResults = await this.memory.findLiveFactCandidates(
-        args.window.state.chatId,
-        embedding,
-      );
+      const searchResults = await this.memory.findLiveFactCandidates(args.ownerKey, embedding);
       const candidates = searchResults.filter(
         (candidate) => !selectedSupersededFactIds.has(candidate.id),
       );
@@ -336,18 +417,19 @@ export class FactDistiller {
   }
 
   private async drainLiveFactWindows(
-    chatId: string,
+    conversationKey: string,
+    ownerKey: string,
     settings: TConfigRecord,
     trace: TBehaviorTraceContext,
   ): Promise<boolean> {
     while (true) {
-      const window = await this.memory.loadLiveFactWindow(chatId);
+      const window = await this.memory.loadLiveFactWindow(conversationKey);
       if (window.messages.length === 0) {
         return true;
       }
 
       try {
-        await this.processWindow({ window, settings, trace });
+        await this.processWindow({ window, ownerKey, settings, trace });
       } catch (error) {
         this.logger.error(`drainLiveFactWindows: stopped after failure: ${String(error)}`);
         return false;

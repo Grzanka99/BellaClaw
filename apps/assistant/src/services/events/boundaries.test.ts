@@ -3,11 +3,14 @@ import { join, relative, resolve } from "node:path";
 import { EEventType } from "@bellaclaw/database";
 import { Glob } from "bun";
 import { setupAiAuth } from "../ai/auth";
+import { AppChannel } from "../app";
+import { AppStream } from "../app-stream";
 import { AuthorizationService } from "../authorization";
 import { AutomationService } from "../automation";
 import { CalendarService } from "../calendar";
 import { Commands } from "../commands";
 import { CronScheduler } from "../cron";
+import { IdentityService } from "../identity";
 import { setupInternalApi } from "../internal-api";
 import { McpService } from "../mcp";
 import { setupMcpAuth } from "../mcp/auth";
@@ -43,34 +46,67 @@ const ALLOWED: Record<string, string> = {
   "ai -> mcp/runs": "McpRunRegistry: live abort controllers and resolvers",
   "ai -> mcp/sampling": "pure request and result mappers",
   "ai -> memory": "Memory.searchFacts read; request timeout and error constants",
-  "ai -> messaging/chat-key": "pure functions",
+  "ai -> identity": "IdentityService.resolve, a cached read model",
   "ai -> scheduling/cron-automations": "preview dry runs",
   "automation -> ai/tools/automation-summary": "pure mapper",
   "commands -> ai/auth": "status reads",
   "commands -> authorization": "listAuthorizedChatIds, a cached read model",
+  "commands -> identity": "IdentityService.addressKey, a pure function",
   "commands -> mcp": "status read: lists a profile's prompts",
+  "commands -> messaging": "deleteAttachment: a driver call, no stored state",
   "commands -> mcp/auth": "status read",
   "commands -> mcp/config": "profile config reads",
+  "app -> conversation": "ConversationStore.findMessage read: the text of the row a push carries",
+  "app -> identity": "IdentityService.accountIdOf, a pure function",
+  "app -> messaging": "registerAttachmentStore: boot wiring of the app's files, no stored state",
+  "app-stream -> identity":
+    "IdentityService.resolve, a cached read model, and accountIdOf, a pure function",
+  "authorization -> identity": "IdentityService.resolve, a cached read model",
+  "cron -> identity": "IdentityService.resolve for a fire's trace, a cached read model",
   "conversation -> ai/instructions/compaction.xml": "prompt text",
   "conversation -> ai/llm": "driver helper",
   "discord -> messaging": "registerTransport: boot wiring of the driver, no stored state",
   "discord -> messaging/chat-key": "pure functions",
+  "discord -> identity": "IdentityService.resolve for a message's trace, a cached read model",
+  "identity -> messaging/chat-key": "pure functions",
   "events -> automation/runner": "enums the catalog payloads use",
+  "events -> ai/model-preferences": "the effort enum the catalog payloads use",
+  "internal-api -> ai/auth": "findAiLoginProblem, a read of a provider's login state",
   "internal-api -> ai/llm": "driver",
+  "internal-api -> authorization": "matchesActivationToken, a read of the configured code",
   "internal-api -> ai/model-preferences": "pure helpers",
   "internal-api -> ai/providers/registry": "driver: the model catalog",
   "internal-api -> ai/tools/get-settings": "resolveAiProvider, a pure helper",
   "internal-api -> ai/tools/update-settings/ai-settings":
     "checks and verification that prepare the settings command",
+  "internal-api -> identity": "IdentityService.link, account and addressKey, a cached read model",
+  "internal-api -> app-stream": "AppStream.listen: live listeners an event cannot carry",
+  "internal-api -> app":
+    "AppChannel.store, open and findAttachments: an upload's bytes, which no event may carry, go to the App channel's store; reads of it. openEdgeConnection and reportPresence: the edge's presence, live state an event cannot carry. listDeviceIds, a cached read model that prepares the unregister commands",
+  "internal-api -> messaging/chat-key": "pure functions",
   "mcp -> ai/llm": "driver helper",
+  "mcp -> identity": "IdentityService.resolve for a connection's trace, a cached read model",
   "memory -> ai/llm": "driver",
   "memory -> conversation": "ConversationStore.findChatIds read",
   "memory -> embedding": "driver",
-  "message-handler -> ai/agent-harness": "runMain and compactConversation, the stateless engine",
+  "memory -> identity": "IdentityService.resolve, a cached read model",
+  "message-handler -> ai/agent-harness":
+    "runMain, runPlain and compactConversation, the stateless engine",
+  "message-handler -> ai/llm": "driver: the Utility call that writes a plain chat's title",
+  "message-handler -> ai/providers/registry":
+    "checkAiModelChoice: the model catalog, a plain chat's model for its turn",
   "message-handler -> conversation": "the same component: Conversation's handler and its store",
+  "message-handler -> identity":
+    "IdentityService.linkedAccount and waitWhileLinking, a cached read model; plainConversationKey, isPlainConversation and accountIdOf, pure functions",
   "message-handler -> messaging":
     "fetchAttachment and deleteAttachment: driver calls, no stored state",
+  "messaging -> identity":
+    "IdentityService.resolve, a cached read model, and accountIdOf, a pure function",
+  "messaging -> app": "AppChannel.hasDevice, a cached read model: the app is the main channel",
   "notices -> authorization": "listAuthorizedChatIds, a cached read model",
+  "notices -> identity": "listNoticeRecipients and account, a cached read model",
+  "notices -> app":
+    "AppChannel.listDeviceAccounts, a cached read model: an account with a device hears global notices",
   "scheduling -> ai/agent-harness": "runScheduledTask, the stateless engine",
   "scheduling -> ai/instructions/base-system.xml": "prompt text",
   "scheduling -> ai/instructions/platform": "pure prompt helper",
@@ -78,22 +114,28 @@ const ALLOWED: Record<string, string> = {
   "scheduling -> ai/llm": "driver",
   "scheduling -> automation": "getByIds read; failure limit constant",
   "scheduling -> automation/runner": "run-mode and outcome enums, timeout constant",
-  "scheduling -> messaging/chat-key": "pure functions",
+  "scheduling -> identity": "IdentityService.resolve and waitWhileLinking, a cached read model",
   "settings -> ai/model-preferences": "pure helpers",
+  "settings -> ai/instructions/inject-config": "injectConfig, the prompt builder's pure resolver",
   "signal -> messaging": "registerTransport: boot wiring of the driver, no stored state",
+  "signal -> identity": "IdentityService.resolve, a cached read model",
   "signal -> messaging/chat-key": "pure functions",
 };
 
 // Who may wait on whom through request() or waitFor() (section 6). A cycle would hang a lane
 // until the timeout.
 const ALLOWED_WAITS: Record<string, string[]> = {
-  conversation: ["cron", "automations", "settings", "memory", "calendar", "ai-auth"],
-  // a scheduled task's search-memory tool refreshes the facts first
-  scheduling: ["automations", "memory"],
+  // a turn of an address is held on its own lane while the address or its account is being linked
+  conversation: ["cron", "automations", "settings", "memory", "calendar", "ai-auth", "identity"],
+  // a scheduled task's search-memory tool refreshes the facts first; a cron fire is held while
+  // its address or account is being linked
+  scheduling: ["automations", "memory", "identity"],
   commands: ["mcp-auth", "ai-auth", "calendar"],
   "ai-auth": ["settings"],
+  // a message held while its address or account is being linked
+  authorization: ["identity"],
   // an HTTP request, on no lane: it awaits the outcome through live subscriptions
-  "internal-api": ["settings", "conversation"],
+  "internal-api": ["settings", "conversation", "identity", "app"],
 };
 
 const STATIC_IMPORT =
@@ -250,6 +292,9 @@ describe("boundaries", () => {
       setupMcpAuth();
       McpService.instance.setup();
       setupInternalApi();
+      AppStream.instance.setup();
+      await AppChannel.instance.setup();
+      await IdentityService.instance.setup();
       await AuthorizationService.instance.setup();
       await CalendarService.instance.setup();
     });
@@ -280,6 +325,9 @@ describe("boundaries", () => {
         "setupMcpAuth",
         "McpService.setup",
         "setupInternalApi",
+        "AppStream.setup",
+        "AppChannel.setup",
+        "IdentityService.setup",
         "AuthorizationService.setup",
         "CalendarService.setup",
       ]);

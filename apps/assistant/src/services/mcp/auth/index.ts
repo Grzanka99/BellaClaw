@@ -10,6 +10,8 @@ import type {
 } from "@modelcontextprotocol/sdk/shared/auth.js";
 import type { FetchLike } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { commandFailed, ESubscriptionMode, EventBus } from "../../events";
+import { IdentityService } from "../../identity";
+import { EIdentityLinkOwner } from "../../identity/schema";
 import { getMcpProfile, type TMcpProfile } from "../config";
 import { McpAuthCredentialStore } from "./store";
 
@@ -419,6 +421,46 @@ export function setupMcpAuth(): void {
       });
     },
   });
+  // NOTE: the account keeps its credentials when it has any; otherwise the address's move to it.
+  // The file is written before the ack, and a second run finds nothing left to move
+  bus.subscribe({
+    consumer: "mcp-auth",
+    type: EEventType.IdentityLinkQuiet,
+    mode: ESubscriptionMode.Durable,
+    backoffMs: [1_000, 5_000],
+    handler: async (event, ctx) => {
+      const { chatKey, ownerKey } = event.payload;
+      const from = `${encodeURIComponent(chatKey)}:`;
+      const moved = await credentialStore.moveAll(from, `${encodeURIComponent(ownerKey)}:`);
+      const profileIds = new Set<string>();
+
+      for (const key of moved) {
+        runtimeProviders.delete(key);
+        const rest = key.slice(from.length);
+        profileIds.add(rest.slice(0, rest.lastIndexOf(":")));
+      }
+
+      await ctx.complete(async (_tx, emit) => {
+        for (const profileId of profileIds) {
+          for (const chatId of [chatKey, ownerKey]) {
+            emit(
+              EEventType.McpAuthCredentialsChanged,
+              { chatId, profileId },
+              `${chatId}:${profileId}`,
+              undefined,
+            );
+          }
+        }
+
+        emit(
+          EEventType.IdentityLinkMoved,
+          { ...event.payload, owner: EIdentityLinkOwner.McpAuth },
+          undefined,
+          undefined,
+        );
+      });
+    },
+  });
 }
 
 export function createMcpAuthFetch(chatId: string, profileId: string): FetchLike {
@@ -509,11 +551,13 @@ export async function handleMcpAuthCallback(request: Request): Promise<Response>
       }
     });
     try {
+      // the trace names the conversation the owner key belongs to
+      const conversationKey = await IdentityService.instance.conversationKeyOf(pending.chatId);
       await EventBus.instance.publish({
         type: EEventType.McpAuthConnected,
         source: "mcp-auth",
         key: pending.chatId,
-        trace: { turnId: createSystemTurnId(), chatId: pending.chatId, platform: undefined },
+        trace: { turnId: createSystemTurnId(), chatId: conversationKey, platform: undefined },
         payload: { chatId: pending.chatId, profileId: pending.profileId },
         causationId: undefined,
         dedupeKey: undefined,

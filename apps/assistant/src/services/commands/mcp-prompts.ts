@@ -9,7 +9,7 @@ export const mcpPromptsCommand: TCommand = {
   name: "mcp-prompts",
   description: "List MCP profiles, or list a profile's prompt templates",
   usage: "!mcp-prompts [PROFILE]",
-  handler: async (_chatId, args) => {
+  handler: async (ownerKey, args) => {
     try {
       const profileId = args.trim();
       if (profileId.length === 0) {
@@ -19,7 +19,7 @@ export const mcpPromptsCommand: TCommand = {
             .join("\n") || "No MCP profiles configured."
         );
       }
-      const session = await McpService.instance.open({ chatId: _chatId, profileId });
+      const session = await McpService.instance.open({ ownerKey, profileId });
       try {
         const list = session.tools.find((tool) => tool.name === "mcp-list-prompts");
         if (list === undefined) {

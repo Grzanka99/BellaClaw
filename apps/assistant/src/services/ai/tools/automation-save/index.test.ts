@@ -10,7 +10,8 @@ import { automationSave } from ".";
 
 function createTool(chatId: string) {
   return automationSave.createAgentTool({
-    chatId,
+    conversationKey: chatId,
+    ownerKey: chatId,
     settings: DefaultConfigRecord,
     trace: { turnId: "test", chatId: undefined, platform: undefined },
     events: testEventRequester,

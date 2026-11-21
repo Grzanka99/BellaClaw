@@ -14,7 +14,8 @@ import { DefaultConfigRecord } from "../../../settings/schema";
 import { automationDelete } from ".";
 
 const tool = automationDelete.createAgentTool({
-  chatId: "discord:1",
+  conversationKey: "discord:1",
+  ownerKey: "discord:1",
   settings: DefaultConfigRecord,
   trace: { turnId: "test", chatId: undefined, platform: undefined },
   events: testEventRequester,

@@ -47,10 +47,15 @@ export const SMcpProfile = z.object({
       }),
   ]),
   tools: z.array(z.string()).optional(),
-  contextArguments: z.record(z.string(), z.enum(["chatId", "turnId"])).default({}),
+  contextArguments: z
+    .record(z.string(), z.enum(["ownerKey", "conversationKey", "turnId"]))
+    .default({}),
   resources: z.boolean().default(true),
   prompts: z.boolean().default(true),
   sampling: z.boolean().default(true),
+  // true: the app's plain chats may use the profile; closed to them by default, as a profile may
+  // hold the user's personal notes
+  plainChats: z.boolean().default(false),
   requestTimeoutMs: z.number().int().positive().default(120_000),
   inputTimeoutMs: z.number().int().positive().default(900_000),
 });

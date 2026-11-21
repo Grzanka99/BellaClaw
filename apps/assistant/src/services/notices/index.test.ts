@@ -1,11 +1,13 @@
 import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
-import { EEventType, eventsTable } from "@bellaclaw/database";
+import { appDevicesTable, EEventType, eventsTable } from "@bellaclaw/database";
 import { eq } from "drizzle-orm";
+import { AppChannel } from "../app";
 import { AuthorizationService } from "../authorization";
 import { DatabaseConnector } from "../database";
-import { resetEventTables } from "../database/test-utils";
+import { linkTestAddress, resetEventTables, resetIdentityLinksTable } from "../database/test-utils";
 import { EventBus, type TEventDraft } from "../events";
 import type { TEventPayloads } from "../events/catalog";
+import { IdentityService } from "../identity";
 import { MessagingAdapter } from "../messaging";
 import { EMessagePlatform } from "../messaging/types";
 import { Notices } from ".";
@@ -117,6 +119,40 @@ describe("Notices", () => {
     ]);
   });
 
+  test("a supervisor notice reaches an app-only account with a device and a linked account with a device in their Bella conversations, once each", async () => {
+    await resetIdentityLinksTable();
+    await linkTestAddress("+300", "acct-1");
+    const device = { fcmToken: "token", publicKey: "key", authSecret: "secret" };
+    await DatabaseConnector.instance.database.insert(appDevicesTable).values([
+      { ...device, id: "device-1", accountId: "acct-1", registeredAt: new Date(1_000) },
+      { ...device, id: "device-2", accountId: "acct-2", registeredAt: new Date(1_000) },
+      { ...device, id: "device-3", accountId: "acct-2", registeredAt: new Date(1_000) },
+    ]);
+    Object.assign(IdentityService, { _instance: undefined });
+    Object.assign(AppChannel, { _instance: undefined });
+    const authorized = spyOn(
+      AuthorizationService.instance,
+      "listAuthorizedChatIds",
+    ).mockResolvedValue(["signal:+300"]);
+
+    try {
+      await Notices.instance.handleSupervisorMessage({ type: "notice", text: "Updated" });
+      await bus.idle();
+    } finally {
+      authorized.mockRestore();
+      await resetIdentityLinksTable();
+      await DatabaseConnector.instance.database.delete(appDevicesTable);
+      Object.assign(IdentityService, { _instance: undefined });
+      Object.assign(AppChannel, { _instance: undefined });
+    }
+
+    const notices = await DatabaseConnector.instance.database
+      .select()
+      .from(eventsTable)
+      .where(eq(eventsTable.type, EEventType.NoticeReady));
+    expect(notices.map((row) => row.key)).toEqual(["bella:acct-1", "bella:acct-2"]);
+  });
+
   test("login outcomes become chat notices", async () => {
     await bus.publish(
       draft(EEventType.AiAuthLoginCompleted, "signal:+100", {
@@ -137,6 +173,35 @@ describe("Notices", () => {
     expect(sendText.mock.calls).toEqual([
       ["+100", "Connected openai-codex. It is now this chat's AI provider."],
       ["+100", "Login for opencode-go failed: Error: denied"],
+    ]);
+  });
+
+  test("a notice to a linked account goes to its Bella conversation, on that conversation's lane", async () => {
+    await resetIdentityLinksTable();
+    await linkTestAddress("+300", "acct-1");
+    Object.assign(IdentityService, { _instance: undefined });
+
+    try {
+      await bus.publish(
+        draft(EEventType.AiAuthLoginFailed, "account:acct-1", {
+          chatId: "account:acct-1",
+          providerId: "opencode-go",
+          error: "Error: denied",
+        }),
+      );
+      await bus.idle();
+    } finally {
+      await resetIdentityLinksTable();
+      Object.assign(IdentityService, { _instance: undefined });
+    }
+
+    expect(sendText.mock.calls).toEqual([["+300", "Login for opencode-go failed: Error: denied"]]);
+    const notices = await DatabaseConnector.instance.database
+      .select()
+      .from(eventsTable)
+      .where(eq(eventsTable.type, EEventType.NoticeReady));
+    expect(notices.map((row) => ({ key: row.key, payload: row.payload }))).toEqual([
+      { key: "bella:acct-1", payload: expect.objectContaining({ chatId: "bella:acct-1" }) },
     ]);
   });
 

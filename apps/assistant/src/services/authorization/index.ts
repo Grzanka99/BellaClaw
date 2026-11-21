@@ -1,5 +1,11 @@
+import { createHash, timingSafeEqual } from "node:crypto";
 import { AppLogger, EBehaviorLogLevel, type TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
-import { EEventType, messageAuthorizationsTable } from "@bellaclaw/database";
+import {
+  EConversationKind,
+  EEventType,
+  findOwnedConversationKind,
+  messageAuthorizationsTable,
+} from "@bellaclaw/database";
 import type { TOption } from "@bellaclaw/shared";
 import { createLogger, type TLogger } from "@bellaclaw/shared";
 import { eq } from "drizzle-orm";
@@ -7,6 +13,8 @@ import { z } from "zod";
 import { DatabaseConnector, type TDatabaseHandle } from "../database";
 import { ESubscriptionMode, EventBus, type TEventContext } from "../events";
 import type { TEvent } from "../events/catalog";
+import { IdentityService, type TChatAddress } from "../identity";
+import { EMessagePlatform } from "../messaging/types";
 import {
   EAuthorizationDecision,
   EAuthorizationStatus,
@@ -79,6 +87,32 @@ export class AuthorizationService {
       .map((state) => state.chatId);
   }
 
+  // NOTE: an app message counts as activated exactly when an activation token is configured: then
+  // every account came through the gate, by the activation code at registration or by a link only
+  // an activated chat is answered with; with none, anyone can get an account, as anyone is
+  // answered in a chat. A chat counts when its address is authorized
+  public async isActivated(address: TChatAddress): Promise<boolean> {
+    if (address.channel === EMessagePlatform.App) {
+      return this.activationToken !== undefined;
+    }
+
+    return (await this.listAuthorizedChatIds()).includes(
+      IdentityService.instance.addressKey(address),
+    );
+  }
+
+  // Whether the code, trimmed as a chat message is, is the activation token; undefined when none is
+  // configured. Digests have one length, so the comparison is constant-time for any code.
+  public matchesActivationToken(code: string): TOption<boolean> {
+    if (this.activationToken === undefined) {
+      return undefined;
+    }
+
+    const digest = (value: string) => createHash("sha256").update(value).digest();
+
+    return timingSafeEqual(digest(code.trim()), digest(this.activationToken));
+  }
+
   // NOTE: a chat that is not authorized in the cache is read from the handle, so the decision
   // never depends on when authorization.changed reaches the cache
   public async authorize(
@@ -112,7 +146,7 @@ export class AuthorizationService {
     }
 
     if (current?.status === EAuthorizationStatus.Authorized) {
-      if (normalizedContent === this.activationToken) {
+      if (this.matchesActivationToken(normalizedContent) === true) {
         return {
           decision: EAuthorizationDecision.AlreadyActivated,
           failedAttempts: 0,
@@ -139,7 +173,7 @@ export class AuthorizationService {
     let failedAttempts = 0;
     let decision = EAuthorizationDecision.Activated;
 
-    if (normalizedContent !== this.activationToken) {
+    if (this.matchesActivationToken(normalizedContent) !== true) {
       failedAttempts = (current?.failedAttempts ?? 0) + 1;
       status = EAuthorizationStatus.Pending;
       decision = EAuthorizationDecision.FailedAttempt;
@@ -179,7 +213,35 @@ export class AuthorizationService {
     event: TEvent<EEventType.MessageReceived>,
     ctx: TEventContext,
   ): Promise<void> {
-    const { chatId, content } = event.payload;
+    const { channel, replyAddress, content } = event.payload;
+
+    if (channel === EMessagePlatform.App) {
+      await this.authorizeAppMessage(event, ctx);
+      return;
+    }
+
+    // NOTE: a channel message arrives under the chat key of its address, which the gate
+    // authorizes; an address linked to an account resolves to the account's Bella conversation
+    const chatId = event.payload.conversationKey;
+
+    // NOTE: held on its own lane while the address or its account is being linked, so it is
+    // answered once, in the account's conversation; the bound counts from its arrival
+    await IdentityService.instance.holdWhileLinking(chatId, event.occurredAt);
+
+    const resolved = await IdentityService.instance.resolve(chatId);
+    if (resolved === undefined) {
+      throw new Error(`Unknown chat key ${chatId}`);
+    }
+
+    const { conversationKey, ownerKey } = resolved;
+    // a channel message reaches only a Bella conversation or the chat of an unlinked address
+    const origin = {
+      conversationKey,
+      ownerKey,
+      channel,
+      replyAddress,
+      kind: EConversationKind.Bella,
+    };
 
     const result = await ctx.complete(async (tx, emit) => {
       const result = await this.authorize(tx, chatId, content);
@@ -189,17 +251,30 @@ export class AuthorizationService {
       }
 
       if (result.decision === EAuthorizationDecision.Allow) {
-        emit(EEventType.MessageAuthorized, event.payload, undefined, undefined);
+        // on the conversation's lane
+        emit(
+          EEventType.MessageAuthorized,
+          { ...event.payload, ...origin },
+          undefined,
+          conversationKey,
+        );
         return result;
       }
 
+      // the activation answers are confidential, not stored: the message they answer holds the
+      // activation token
       if (result.decision === EAuthorizationDecision.Activated) {
-        emit(EEventType.ReplyReady, { chatId, text: "Activated." }, undefined, undefined);
+        emit(EEventType.ReplyReady, { ...origin, text: "Activated." }, undefined, conversationKey);
         return result;
       }
 
       if (result.decision === EAuthorizationDecision.AlreadyActivated) {
-        emit(EEventType.ReplyReady, { chatId, text: "Already activated." }, undefined, undefined);
+        emit(
+          EEventType.ReplyReady,
+          { ...origin, text: "Already activated." },
+          undefined,
+          conversationKey,
+        );
         return result;
       }
 
@@ -215,7 +290,7 @@ export class AuthorizationService {
     if (result.decision === EAuthorizationDecision.Allow) {
       logMessageReceived(
         event.trace,
-        event.payload.platform,
+        channel,
         content.length,
         event.payload.attachments.map((attachment) => attachment.mimeType),
       );
@@ -223,6 +298,44 @@ export class AuthorizationService {
     }
 
     logAuthorizationDecision(event.trace, result);
+  }
+
+  // NOTE: an app message is sent by the account the gateway verified, as its owner key, under
+  // the conversation key the app named. The session stands for the activation gate; the message
+  // passes only when the conversation belongs to that account, and is dropped alike for a
+  // conversation of another account and one that does not exist. It leaves with the kind the
+  // registry names. Held like a channel message while the account is being linked
+  private async authorizeAppMessage(
+    event: TEvent<EEventType.MessageReceived>,
+    ctx: TEventContext,
+  ): Promise<void> {
+    const { conversationKey, ownerKey } = event.payload;
+
+    await IdentityService.instance.holdWhileLinking(ownerKey, event.occurredAt);
+
+    const account = await IdentityService.instance.resolve(ownerKey);
+    if (account === undefined) {
+      throw new Error(`Unknown owner key ${ownerKey}`);
+    }
+
+    const owned = await ctx.complete(async (tx, emit) => {
+      const kind = await findOwnedConversationKind(tx, conversationKey, account);
+
+      if (kind === undefined) {
+        return false;
+      }
+
+      // on the conversation's lane
+      emit(EEventType.MessageAuthorized, { ...event.payload, kind }, undefined, conversationKey);
+      return true;
+    });
+
+    if (!owned) {
+      this.logger.warning("An app message for a conversation its account does not own is dropped");
+      return;
+    }
+
+    logMessageReceived(event.trace, EMessagePlatform.App, event.payload.content.length, []);
   }
 
   private load(): Promise<void> {

@@ -1,0 +1,5 @@
+<resources>
+    <style name="Theme.BellaClaw" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">#FDF7FF</item>
+    </style>
+</resources>

@@ -17,7 +17,7 @@ export const removeReadonlyCalendar = defineTool({
   mode: "sequential",
   logSafe: [],
   execute: async (context, args) => {
-    const chatId = requireChatId(context.chatId);
+    const chatId = requireChatId(context.ownerKey);
     await context.events.request(
       EEventType.CalendarSourceRemoveRequested,
       { chatId, calendarId: args.calendarId },

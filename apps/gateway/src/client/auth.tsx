@@ -1,0 +1,256 @@
+/** @jsxImportSource hono/jsx/dom */
+import type { TOption } from "@bellaclaw/shared";
+import { useRef, useState } from "hono/jsx/dom";
+import type { TLinkLoginRequest, TMeResponse } from "../api-types";
+import { api } from "./api";
+
+type TAuthCardProps = {
+  // the link to redeem; without one only a login is possible
+  token: TOption<string>;
+  // registered: whether the account was created, which redeemed the link
+  onAuthenticated: (me: TMeResponse, registered: boolean) => void;
+};
+
+export function AuthCard({ token, onAuthenticated }: TAuthCardProps) {
+  const [registering, setRegistering] = useState(token !== undefined);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<TOption<string>>(undefined);
+  const form = useRef<HTMLFormElement>(null);
+
+  async function submit(event: Event) {
+    event.preventDefault();
+    const data = new FormData(form.current ?? undefined);
+    let path = "/api/login";
+    // NOTE: a login does not redeem the link, the confirmation card that names the chat does
+    let linkToken: TOption<string>;
+
+    if (registering) {
+      path = "/api/register";
+      linkToken = token;
+    }
+
+    setBusy(true);
+    setError(undefined);
+    const result = await api<TMeResponse>("POST", path, {
+      token: linkToken,
+      username: data.get("username"),
+      password: data.get("password"),
+    });
+
+    if ("error" in result) {
+      setBusy(false);
+      setError(result.error);
+      return;
+    }
+
+    onAuthenticated(result.data, registering);
+  }
+
+  let intro = (
+    <p class="muted">
+      No account yet? Send <code>!dashboard</code> to the bot to create one.
+    </p>
+  );
+  let fields = (
+    <>
+      <label class="field">
+        <span>Username</span>
+        <input name="username" autocomplete="username" autocapitalize="none" required />
+      </label>
+      <label class="field">
+        <span>Password</span>
+        <input name="password" type="password" autocomplete="current-password" required />
+      </label>
+    </>
+  );
+  let submitLabel = "Log in";
+
+  if (token !== undefined) {
+    intro = (
+      <>
+        <p class="muted">Create an account or log in to connect this chat.</p>
+        <div class="tabs" role="tablist">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={String(registering)}
+            onClick={() => setRegistering(true)}
+          >
+            Create account
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={String(!registering)}
+            onClick={() => setRegistering(false)}
+          >
+            Log in
+          </button>
+        </div>
+      </>
+    );
+  }
+
+  if (registering) {
+    fields = (
+      <>
+        <label class="field">
+          <span>Username</span>
+          <input
+            name="username"
+            autocomplete="username"
+            autocapitalize="none"
+            pattern="[A-Za-z0-9_.\-]{3,32}"
+            required
+          />
+          <small>3 to 32 characters: letters, digits, _ . -</small>
+        </label>
+        <label class="field">
+          <span>Password</span>
+          <input
+            name="password"
+            type="password"
+            autocomplete="new-password"
+            minlength={10}
+            maxlength={256}
+            required
+          />
+          <small>At least 10 characters</small>
+        </label>
+      </>
+    );
+    submitLabel = "Create account";
+  }
+
+  return (
+    <section class="card">
+      <h1>BellaClaw</h1>
+      {intro}
+      <form class="stack" ref={form} onSubmit={submit}>
+        {fields}
+        {error !== undefined && (
+          <p class="alert" role="alert">
+            {error}
+          </p>
+        )}
+        <button class="button" type="submit" disabled={busy}>
+          {submitLabel}
+        </button>
+      </form>
+    </section>
+  );
+}
+
+type TLinkLoginCardProps = {
+  // a link of a chat linked to the account
+  token: string;
+  username: string;
+  onAuthenticated: (me: TMeResponse) => void;
+};
+
+// logs into the account of a linked chat, optionally setting a new password
+export function LinkLoginCard({ token, username, onAuthenticated }: TLinkLoginCardProps) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<TOption<string>>(undefined);
+  const form = useRef<HTMLFormElement>(null);
+
+  async function submit(event: Event) {
+    event.preventDefault();
+    const password = new FormData(form.current ?? undefined).get("password");
+    let body: TLinkLoginRequest = { token };
+
+    if (typeof password === "string" && password.length > 0) {
+      body = { token, password };
+    }
+
+    setBusy(true);
+    setError(undefined);
+    const result = await api<TMeResponse>("POST", "/api/link/login", body);
+
+    if ("error" in result) {
+      setBusy(false);
+      setError(result.error);
+      return;
+    }
+
+    onAuthenticated(result.data);
+  }
+
+  return (
+    <section class="card">
+      <h1>BellaClaw</h1>
+      <p class="muted">
+        This chat belongs to <strong>{username}</strong>. The link logs you in once.
+      </p>
+      <form class="stack" ref={form} onSubmit={submit}>
+        <label class="field">
+          <span>New password (optional)</span>
+          <input
+            name="password"
+            type="password"
+            autocomplete="new-password"
+            minlength={10}
+            maxlength={256}
+          />
+          <small>Leave empty to keep the current one</small>
+        </label>
+        {error !== undefined && (
+          <p class="alert" role="alert">
+            {error}
+          </p>
+        )}
+        <button class="button" type="submit" disabled={busy}>
+          Log in as {username}
+        </button>
+      </form>
+    </section>
+  );
+}
+
+type TAppLinkCardProps = {
+  // a link of the chat that sent !app
+  token: string;
+};
+
+// the Android app's package
+const APP_PACKAGE = "one.scary.bellaclaw";
+
+// NOTE: the page of !app. The app's deep link carries the server URL and the link. "Open in app"
+// is an Android intent link that names the app's package, so no other app that claims the scheme
+// receives the link. The code to copy is the plain deep link, for a phone where the button does
+// not open the app.
+export function AppLinkCard({ token }: TAppLinkCardProps) {
+  const [copied, setCopied] = useState(false);
+  const query = `server=${encodeURIComponent(location.origin)}&token=${encodeURIComponent(token)}`;
+  const code = `bellaclaw://login?${query}`;
+  const openLink = `intent://login?${query}#Intent;scheme=bellaclaw;package=${APP_PACKAGE};end`;
+
+  async function copy() {
+    await navigator.clipboard.writeText(code);
+    setCopied(true);
+  }
+
+  let copyLabel = "Copy code";
+
+  if (copied) {
+    copyLabel = "Copied";
+  }
+
+  return (
+    <section class="card">
+      <h1>BellaClaw app</h1>
+      <p class="muted">Sign in to the app with this chat. The link works once, for 10 minutes.</p>
+      <a class="button" href={openLink}>
+        Open in app
+      </a>
+      <p class="muted">Or copy this code and paste it on the app's sign-in screen.</p>
+      <label class="field">
+        <span>Code</span>
+        <input value={code} readonly />
+      </label>
+      <button class="button outline" type="button" onClick={copy}>
+        {copyLabel}
+      </button>
+    </section>
+  );
+}

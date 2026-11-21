@@ -9,6 +9,7 @@ import { EmbeddingClient } from "../embedding";
 import { CommandRejectedError, EventBus } from "../events";
 import { ERejectionCode } from "../events/catalog";
 import { withEventContext } from "../events/test-utils";
+import { EMessagePlatform } from "../messaging/types";
 import { EMBEDDING_UNAVAILABLE, MEMORY_REQUEST_TIMEOUT_MS } from "./index";
 
 const { Memory } = await import("./index");
@@ -67,21 +68,28 @@ describe("Memory", () => {
         await ConversationStore.instance.saveUserMessage(
           DatabaseConnector.instance.database,
           "chat-a",
+          EMessagePlatform.Signal,
           ERole.User,
           `Fact source ${index}`,
           new Date(),
+          undefined,
+          [],
         );
       }
       await ConversationStore.instance.saveUserMessage(
         DatabaseConnector.instance.database,
         "chat-b",
+        EMessagePlatform.Signal,
         ERole.User,
         "Another chat fact source",
         new Date(),
+        undefined,
+        [],
       );
 
       const result = await memory.commitLiveFactWindow({
         chatId: "chat-a",
+        ownerKey: "chat-a",
         expectedLastProcessedMessageId: 0,
         lastProcessedMessageId: 3,
         facts: [
@@ -123,6 +131,7 @@ describe("Memory", () => {
 
       const other = await memory.commitLiveFactWindow({
         chatId: "chat-b",
+        ownerKey: "chat-b",
         expectedLastProcessedMessageId: 0,
         lastProcessedMessageId: 4,
         facts: [
@@ -174,13 +183,17 @@ describe("Memory", () => {
       await ConversationStore.instance.saveUserMessage(
         DatabaseConnector.instance.database,
         "chat-a",
+        EMessagePlatform.Signal,
         ERole.User,
         "The bicycle is named Comet again.",
         new Date(),
+        undefined,
+        [],
       );
       await DatabaseConnector.instance.database.transaction((tx) =>
         memory.rememberFact(
           tx,
+          "chat-a",
           "chat-a",
           "The bicycle is named Comet again.",
           "The bicycle is named Comet again.",
@@ -191,6 +204,7 @@ describe("Memory", () => {
       await DatabaseConnector.instance.database.transaction((tx) =>
         memory.rememberFact(
           tx,
+          "chat-a",
           "chat-a",
           "The bicycle is named Comet again.",
           "The bicycle is named Comet again.",
@@ -214,17 +228,23 @@ describe("Memory", () => {
         await ConversationStore.instance.saveUserMessage(
           DatabaseConnector.instance.database,
           "chat-window",
+          EMessagePlatform.Signal,
           author,
           `Window message ${index}`,
           new Date(),
+          undefined,
+          [],
         );
       }
       await ConversationStore.instance.saveUserMessage(
         DatabaseConnector.instance.database,
         "chat-other",
+        EMessagePlatform.Signal,
         ERole.User,
         "Other chat message",
         new Date(),
+        undefined,
+        [],
       );
 
       expect(await ConversationStore.instance.findChatIds()).toEqual(["chat-other", "chat-window"]);
@@ -244,6 +264,7 @@ describe("Memory", () => {
 
       const commit = await memory.commitLiveFactWindow({
         chatId: "chat-window",
+        ownerKey: "chat-window",
         expectedLastProcessedMessageId: 0,
         lastProcessedMessageId: 6,
         facts: [],
@@ -261,12 +282,16 @@ describe("Memory", () => {
       await ConversationStore.instance.saveUserMessage(
         DatabaseConnector.instance.database,
         "chat-atomic",
+        EMessagePlatform.Signal,
         ERole.User,
         "The bicycle used to be called Spark.",
         new Date(),
+        undefined,
+        [],
       );
       const initial = await memory.commitLiveFactWindow({
         chatId: "chat-atomic",
+        ownerKey: "chat-atomic",
         expectedLastProcessedMessageId: 0,
         lastProcessedMessageId: 1,
         facts: [
@@ -290,12 +315,16 @@ describe("Memory", () => {
       await ConversationStore.instance.saveUserMessage(
         DatabaseConnector.instance.database,
         "chat-atomic",
+        EMessagePlatform.Signal,
         ERole.User,
         "The bicycle is now called Comet.",
         new Date(),
+        undefined,
+        [],
       );
       const replacement = await memory.commitLiveFactWindow({
         chatId: "chat-atomic",
+        ownerKey: "chat-atomic",
         expectedLastProcessedMessageId: 1,
         lastProcessedMessageId: 2,
         facts: [
@@ -315,13 +344,17 @@ describe("Memory", () => {
       await ConversationStore.instance.saveUserMessage(
         DatabaseConnector.instance.database,
         "chat-atomic",
+        EMessagePlatform.Signal,
         ERole.User,
         "This transaction must roll back.",
         new Date(),
+        undefined,
+        [],
       );
       await expect(
         memory.commitLiveFactWindow({
           chatId: "chat-atomic",
+          ownerKey: "chat-atomic",
           expectedLastProcessedMessageId: 2,
           lastProcessedMessageId: 3,
           facts: [
@@ -345,13 +378,17 @@ describe("Memory", () => {
         await ConversationStore.instance.saveUserMessage(
           DatabaseConnector.instance.database,
           "chat-stale",
+          EMessagePlatform.Signal,
           ERole.User,
           `Stale source ${index}`,
           new Date(),
+          undefined,
+          [],
         );
       }
       await memory.commitLiveFactWindow({
         chatId: "chat-stale",
+        ownerKey: "chat-stale",
         expectedLastProcessedMessageId: 0,
         lastProcessedMessageId: 4,
         facts: [],
@@ -359,6 +396,7 @@ describe("Memory", () => {
 
       const result = await memory.commitLiveFactWindow({
         chatId: "chat-stale",
+        ownerKey: "chat-stale",
         expectedLastProcessedMessageId: 0,
         lastProcessedMessageId: 5,
         facts: [
@@ -382,6 +420,7 @@ describe("Memory", () => {
       await expect(
         memory.commitLiveFactWindow({
           chatId: "chat-no-advance",
+          ownerKey: "chat-no-advance",
           expectedLastProcessedMessageId: 4,
           lastProcessedMessageId: 4,
           facts: [],
@@ -394,14 +433,18 @@ describe("Memory", () => {
       await ConversationStore.instance.saveUserMessage(
         DatabaseConnector.instance.database,
         "chat-provenance",
+        EMessagePlatform.Signal,
         ERole.Assistant,
         "Assistant context only",
         new Date(),
+        undefined,
+        [],
       );
 
       await expect(
         memory.commitLiveFactWindow({
           chatId: "chat-provenance",
+          ownerKey: "chat-provenance",
           expectedLastProcessedMessageId: 0,
           lastProcessedMessageId: 1,
           facts: [
@@ -443,7 +486,7 @@ describe("Memory", () => {
       return withEventContext((ctx) =>
         ctx.request(
           EEventType.MemoryFactRememberRequested,
-          { chatId, text, sourceMessage, supersedesFactIds: [] },
+          { chatId, conversationKey: chatId, text, sourceMessage, supersedesFactIds: [] },
           {
             outcome: EEventType.MemoryFactRemembered,
             step: undefined,
@@ -480,9 +523,12 @@ describe("Memory", () => {
       await ConversationStore.instance.saveUserMessage(
         DatabaseConnector.instance.database,
         "chat-cmd",
+        EMessagePlatform.Signal,
         ERole.User,
         "My bike is red.",
         new Date(),
+        undefined,
+        [],
       );
 
       const remembered = await remember("chat-cmd", "The user's bike is red.", "My bike is red.");
@@ -525,9 +571,12 @@ describe("Memory", () => {
       await ConversationStore.instance.saveUserMessage(
         DatabaseConnector.instance.database,
         "chat-cmd",
+        EMessagePlatform.Signal,
         ERole.User,
         "My bike is red.",
         new Date(),
+        undefined,
+        [],
       );
       const remembered = await remember("chat-cmd", "The user's bike is red.", "My bike is red.");
       const factId = remembered.payload.factId;

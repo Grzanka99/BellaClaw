@@ -1,9 +1,11 @@
 import { EEventType } from "@bellaclaw/database";
 import type { TOption } from "@bellaclaw/shared";
 import { z } from "zod";
+import { AppChannel } from "../app";
 import { AuthorizationService } from "../authorization";
 import { ESubscriptionMode, EventBus, type TEventContext } from "../events";
 import { EEventKind, EVENT_KINDS } from "../events/catalog";
+import { IdentityService } from "../identity";
 
 const DEAD_LETTER_NOTICE = "Something I was doing failed and was dropped. Try again.";
 // a notice for these would loop
@@ -11,8 +13,13 @@ const NO_DEAD_LETTER_NOTICE: ReadonlySet<string> = new Set([
   EEventType.ReplyReady,
   EEventType.DeliveryReady,
   EEventType.NoticeReady,
+  EEventType.MessageSent,
   EEventType.EventDeadLettered,
+  // a push, which gives up without a dead letter unless the process dies on its last attempt
+  EEventType.ConversationChanged,
 ]);
+// the user's request succeeded before these consumers ran, so their failure has nothing to retry
+const NO_DEAD_LETTER_NOTICE_CONSUMERS: ReadonlySet<string> = new Set(["conversation-title"]);
 const SEventType = z.enum(EEventType);
 const SSupervisorNotice = z.object({ type: z.literal("notice"), text: z.string() });
 
@@ -92,22 +99,23 @@ export class Notices {
           return;
         }
 
-        if (NO_DEAD_LETTER_NOTICE.has(event.payload.eventType)) {
+        if (
+          NO_DEAD_LETTER_NOTICE.has(event.payload.eventType) ||
+          NO_DEAD_LETTER_NOTICE_CONSUMERS.has(event.payload.consumer)
+        ) {
           return;
         }
 
         const chatId = event.trace.chatId;
 
-        // an event of no chat, such as a global one, goes to every authorized chat
+        // an event of no chat, such as a global one, goes to every recipient of a global notice
         if (chatId === undefined) {
           await this.notifyAll(ctx, DEAD_LETTER_NOTICE);
           return;
         }
 
-        // on the chat's lane, not on the dead event's scope or job lane
-        await ctx.complete(async (_tx, emit) => {
-          emit(EEventType.NoticeReady, { chatId, text: DEAD_LETTER_NOTICE }, undefined, chatId);
-        });
+        // on the conversation's lane, not on the dead event's scope or job lane
+        await this.notify(ctx, chatId, DEAD_LETTER_NOTICE);
       },
     });
   }
@@ -120,7 +128,7 @@ export class Notices {
       return;
     }
 
-    const chatIds = await AuthorizationService.instance.listAuthorizedChatIds();
+    const chatIds = await this.listGlobalRecipients();
 
     await EventBus.instance.transact(async (_tx, emit) => {
       for (const chatId of chatIds) {
@@ -138,7 +146,7 @@ export class Notices {
   }
 
   private async notifyAll(ctx: TEventContext, text: string): Promise<void> {
-    const chatIds = await AuthorizationService.instance.listAuthorizedChatIds();
+    const chatIds = await this.listGlobalRecipients();
 
     await ctx.complete(async (_tx, emit) => {
       for (const chatId of chatIds) {
@@ -147,9 +155,31 @@ export class Notices {
     });
   }
 
-  private async notify(ctx: TEventContext, chatId: string, text: string): Promise<void> {
+  // Identity's recipients of a global notice, and the Bella conversation of every account with a
+  // registered device, once
+  private async listGlobalRecipients(): Promise<string[]> {
+    const chatIds = await IdentityService.instance.listNoticeRecipients(
+      await AuthorizationService.instance.listAuthorizedChatIds(),
+    );
+
+    for (const accountId of await AppChannel.instance.listDeviceAccounts()) {
+      const { conversationKey } = await IdentityService.instance.account(accountId);
+
+      if (!chatIds.includes(conversationKey)) {
+        chatIds.push(conversationKey);
+      }
+    }
+
+    return chatIds;
+  }
+
+  // recipient: an owner, conversation or address key; the notice goes to its conversation, on
+  // that conversation's lane
+  private async notify(ctx: TEventContext, recipient: string, text: string): Promise<void> {
+    const chatId = await IdentityService.instance.conversationKeyOf(recipient);
+
     await ctx.complete(async (_tx, emit) => {
-      emit(EEventType.NoticeReady, { chatId, text }, undefined, undefined);
+      emit(EEventType.NoticeReady, { chatId, text }, undefined, chatId);
     });
   }
 }

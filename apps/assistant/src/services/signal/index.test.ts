@@ -2,9 +2,11 @@ import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { EEventType, eventsTable } from "@bellaclaw/database";
 import { asc, eq } from "drizzle-orm";
 import { DatabaseConnector } from "../database";
-import { resetEventTables } from "../database/test-utils";
+import { linkTestAddress, resetEventTables, resetIdentityLinksTable } from "../database/test-utils";
 import { EventBus } from "../events";
 import type { TEventPayloads } from "../events/catalog";
+import { testMessageOrigin } from "../events/test-utils";
+import { IdentityService } from "../identity";
 import { MessagingAdapter } from "../messaging";
 import { EMessagePlatform } from "../messaging/types";
 import { SignalClient } from "./client";
@@ -163,12 +165,46 @@ describe("SignalSingleton", () => {
     expect(rows[0]?.platform).toBe(EMessagePlatform.Signal);
     expect(rows[0]?.turnId).toStartWith("msg:");
     expect(rows[0]?.payload).toEqual({
-      chatId: "signal:+200",
+      conversationKey: "signal:+200",
+      ownerKey: "signal:+200",
+      channel: EMessagePlatform.Signal,
+      replyAddress: "+200",
       content: "hello",
       attachments: [],
       receivedAt: expect.any(Number),
-      platform: EMessagePlatform.Signal,
     });
+  });
+
+  test("an inbound message is traced under its conversation: the account's of a linked address", async () => {
+    Bun.env.SIGNAL_PHONE_NUMBER = "+100";
+    await resetEventTables();
+    await resetIdentityLinksTable();
+    await linkTestAddress("+300", "acct-1");
+    Object.assign(IdentityService, { _instance: undefined });
+    const signal = SignalSingleton.instance as unknown as TSignalSingletonInternals;
+    signal.client = {
+      sendReadReceipt: mock(async () => {}),
+      showTyping: mock(async () => {}),
+      hideTyping: mock(async () => {}),
+    };
+
+    await signal.handleInboundMessage({
+      sourceNumber: "+300",
+      message: "linked",
+      attachments: [],
+      timestamp: 1,
+    });
+    await signal.handleInboundMessage({
+      sourceNumber: "+400",
+      message: "unlinked",
+      attachments: [],
+      timestamp: 2,
+    });
+
+    const rows = await receivedRows();
+    expect(rows.map((row) => row.chatId)).toEqual(["bella:acct-1", "signal:+400"]);
+    await resetIdentityLinksTable();
+    Object.assign(IdentityService, { _instance: undefined });
   });
 
   test("a re-delivered message is one row and distinct ones are kept", async () => {
@@ -249,29 +285,27 @@ describe("SignalSingleton", () => {
 
     try {
       await publish(EEventType.TurnRequested, "signal:+200", {
-        chatId: "signal:+200",
+        ...testMessageOrigin("signal:+200", EMessagePlatform.Signal),
         content: "hello",
         attachments: [],
         receivedAt: 1,
-        platform: EMessagePlatform.Signal,
       });
       await publish(EEventType.TurnRequested, "discord:+200", {
-        chatId: "discord:+200",
+        ...testMessageOrigin("discord:+200", EMessagePlatform.Discord),
         content: "hello",
         attachments: [],
         receivedAt: 1,
-        platform: EMessagePlatform.Discord,
       });
       await bus.idle();
       expect(showTyping.mock.calls).toEqual([["+200"]]);
       expect(hideTyping).not.toHaveBeenCalled();
 
       await publish(EEventType.TurnCompleted, "signal:+200", {
-        chatId: "signal:+200",
+        ...testMessageOrigin("signal:+200", EMessagePlatform.Signal),
         userMessageId: 1,
       });
       await publish(EEventType.TurnFailed, "signal:+200", {
-        chatId: "signal:+200",
+        ...testMessageOrigin("signal:+200", EMessagePlatform.Signal),
         reason: "error",
       });
       await publish(EEventType.EventDeadLettered, "signal:+200", {

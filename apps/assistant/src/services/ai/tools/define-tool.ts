@@ -10,7 +10,10 @@ import type { AgentHarness } from "../agent-harness";
 import type { EModelPurpose } from "../types";
 
 export type TToolExecutionContext = {
-  chatId: TOption<string>;
+  // the transcript and the memory lane the tool uses
+  conversationKey: TOption<string>;
+  // whose settings, calendars, jobs, automations and facts the tool uses
+  ownerKey: TOption<string>;
   settings: TConfigRecord;
   trace: TBehaviorTraceContext;
   verifySettings: (settings: TConfigRecord, purposes: EModelPurpose[]) => Promise<TOption<string>>;

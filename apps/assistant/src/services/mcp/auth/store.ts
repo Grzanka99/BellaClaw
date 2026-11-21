@@ -70,6 +70,32 @@ export class McpAuthCredentialStore {
     });
   }
 
+  // Moves every credential whose key starts with from to the same key under to, or drops them
+  // when a key under to exists already. Returns the moved or dropped keys
+  public moveAll(from: string, to: string): Promise<string[]> {
+    return this.queue.enqueue(async () => {
+      const credentials = await this.readAll();
+      const moving = Object.entries(credentials).filter(([key]) => key.startsWith(from));
+
+      if (moving.length === 0) {
+        return [];
+      }
+
+      const kept = Object.keys(credentials).some((key) => key.startsWith(to));
+
+      for (const [key, value] of moving) {
+        if (!kept) {
+          credentials[`${to}${key.slice(from.length)}`] = value;
+        }
+
+        delete credentials[key];
+      }
+
+      await writeJsonAtomically(this.path(), credentials);
+      return moving.map(([key]) => key);
+    });
+  }
+
   public clear(key: string, scope: "all" | "client" | "tokens" | "verifier" | "discovery") {
     if (scope === "all") {
       return this.delete(key).then(() => undefined);

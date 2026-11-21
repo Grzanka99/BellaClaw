@@ -6,8 +6,10 @@ import { LlmClient, LlmResponseError } from "../ai/llm";
 import { EModelPurpose, ERole } from "../ai/types";
 import { ConversationStore } from "../conversation";
 import { DatabaseConnector } from "../database";
-import { resetEventTables } from "../database/test-utils";
+import { linkTestAddress, resetEventTables, resetIdentityLinksTable } from "../database/test-utils";
 import { EventBus, type TEventContext } from "../events";
+import { IdentityService } from "../identity";
+import { EMessagePlatform } from "../messaging/types";
 import { SettingsService } from "../settings";
 import { DefaultConfigRecord } from "../settings/schema";
 import { Memory } from ".";
@@ -43,11 +45,14 @@ function makeMemory(id: number, author: ERole, message: string): TSelectMemory {
   return {
     id,
     chatId: "chat-comet",
+    channel: EMessagePlatform.Signal,
     author,
     message,
     modelMessage: null,
     kind: "message",
     createdAt: new Date("2026-01-01T00:00:00.000Z"),
+    clientMessageId: null,
+    attachments: null,
   };
 }
 
@@ -199,12 +204,14 @@ describe("FactDistiller", () => {
     await expect(
       distiller.processWindow({
         window,
+        ownerKey: "chat-comet",
         settings: DefaultConfigRecord,
         trace: TEST_TRACE,
       }),
     ).resolves.toBeUndefined();
     expect(internals.memory.commitLiveFactWindow).toHaveBeenCalledWith({
       chatId: "chat-comet",
+      ownerKey: "chat-comet",
       expectedLastProcessedMessageId: 10,
       lastProcessedMessageId: 11,
       facts: [
@@ -216,6 +223,27 @@ describe("FactDistiller", () => {
         },
       ],
     });
+  });
+
+  test("checkpoints the conversation's window and looks up and writes the owner's facts", async () => {
+    const { distiller, internals } = setupDistiller();
+    internals.ai.completeText = mock(
+      async () => '{"facts":[{"text":"The user attends on Tuesdays.","sourceMessageId":11}]}',
+    );
+    const vector = makeEmbedding(0.25);
+    internals.embedding.embedMany = mock(async () => [vector]);
+
+    await distiller.processWindow({
+      window: makeWindow(),
+      ownerKey: "owner-comet",
+      settings: DefaultConfigRecord,
+      trace: TEST_TRACE,
+    });
+
+    expect(internals.memory.findLiveFactCandidates).toHaveBeenCalledWith("owner-comet", vector);
+    expect(internals.memory.commitLiveFactWindow).toHaveBeenCalledWith(
+      expect.objectContaining({ chatId: "chat-comet", ownerKey: "owner-comet" }),
+    );
   });
 
   test.each([
@@ -254,6 +282,7 @@ describe("FactDistiller", () => {
     await expect(
       distiller.processWindow({
         window: makeWindow(),
+        ownerKey: "chat-comet",
         settings: DefaultConfigRecord,
         trace: TEST_TRACE,
       }),
@@ -262,6 +291,7 @@ describe("FactDistiller", () => {
     expect(internals.memory.findLiveFactCandidates).not.toHaveBeenCalled();
     expect(commit).toHaveBeenCalledWith({
       chatId: "chat-comet",
+      ownerKey: "chat-comet",
       expectedLastProcessedMessageId: 10,
       lastProcessedMessageId: 12,
       facts: [],
@@ -286,6 +316,7 @@ describe("FactDistiller", () => {
     await expect(
       distiller.processWindow({
         window: makeWindow(),
+        ownerKey: "chat-comet",
         settings: DefaultConfigRecord,
         trace: TEST_TRACE,
       }),
@@ -307,12 +338,14 @@ describe("FactDistiller", () => {
     await expect(
       distiller.processWindow({
         window: makeWindow(),
+        ownerKey: "chat-comet",
         settings: DefaultConfigRecord,
         trace: TEST_TRACE,
       }),
     ).resolves.toBeUndefined();
     expect(commit).toHaveBeenCalledWith({
       chatId: "chat-comet",
+      ownerKey: "chat-comet",
       expectedLastProcessedMessageId: 10,
       lastProcessedMessageId: 12,
       facts: [],
@@ -328,6 +361,7 @@ describe("FactDistiller", () => {
     await expect(
       distiller.processWindow({
         window: makeWindow(),
+        ownerKey: "chat-comet",
         settings: DefaultConfigRecord,
         trace: TEST_TRACE,
       }),
@@ -347,6 +381,7 @@ describe("FactDistiller", () => {
     await expect(
       distiller.processWindow({
         window: makeWindow(),
+        ownerKey: "chat-comet",
         settings: DefaultConfigRecord,
         trace: TEST_TRACE,
       }),
@@ -369,6 +404,7 @@ describe("FactDistiller", () => {
     await expect(
       distiller.processWindow({
         window: makeWindow(),
+        ownerKey: "chat-comet",
         settings: DefaultConfigRecord,
         trace: TEST_TRACE,
       }),
@@ -377,6 +413,7 @@ describe("FactDistiller", () => {
     expect(internals.memory.findLiveFactCandidates).toHaveBeenCalledWith("chat-comet", vector);
     expect(commit).toHaveBeenCalledWith({
       chatId: "chat-comet",
+      ownerKey: "chat-comet",
       expectedLastProcessedMessageId: 10,
       lastProcessedMessageId: 12,
       facts: [
@@ -417,16 +454,22 @@ describe("FactDistiller", () => {
     const first = await ConversationStore.instance.saveUserMessage(
       DatabaseConnector.instance.database,
       chatId,
+      EMessagePlatform.Signal,
       ERole.User,
       firstText,
       new Date(),
+      undefined,
+      [],
     );
     const second = await ConversationStore.instance.saveUserMessage(
       DatabaseConnector.instance.database,
       chatId,
+      EMessagePlatform.Signal,
       ERole.User,
       secondText,
       new Date(),
+      undefined,
+      [],
     );
     const sources = [first, second];
     const facts = [
@@ -443,6 +486,7 @@ describe("FactDistiller", () => {
     await expect(
       distiller.processWindow({
         window: await memory.loadLiveFactWindow(chatId),
+        ownerKey: chatId,
         settings: DefaultConfigRecord,
         trace: TEST_TRACE,
       }),
@@ -486,6 +530,7 @@ describe("FactDistiller", () => {
     await expect(
       distiller.processWindow({
         window: makeWindow(),
+        ownerKey: "chat-comet",
         settings: DefaultConfigRecord,
         trace: TEST_TRACE,
       }),
@@ -527,6 +572,7 @@ describe("FactDistiller", () => {
     await expect(
       distiller.processWindow({
         window: makeWindow(),
+        ownerKey: "chat-comet",
         settings: DefaultConfigRecord,
         trace: TEST_TRACE,
       }),
@@ -558,6 +604,7 @@ describe("FactDistiller", () => {
     await expect(
       distiller.processWindow({
         window: makeWindow(),
+        ownerKey: "chat-comet",
         settings: DefaultConfigRecord,
         trace: TEST_TRACE,
       }),
@@ -593,6 +640,7 @@ describe("FactDistiller", () => {
     await expect(
       distiller.processWindow({
         window: makeWindow(),
+        ownerKey: "chat-comet",
         settings: DefaultConfigRecord,
         trace: TEST_TRACE,
       }),
@@ -623,6 +671,7 @@ describe("FactDistiller", () => {
     await expect(
       distiller.processWindow({
         window: makeWindow(),
+        ownerKey: "chat-comet",
         settings: DefaultConfigRecord,
         trace: TEST_TRACE,
       }),
@@ -668,6 +717,38 @@ describe("FactDistiller", () => {
     } finally {
       await bus.stop();
     }
+  });
+
+  test("a boot fact drain of an account's Bella conversation drains it for the account", async () => {
+    await resetIdentityLinksTable();
+    Object.assign(IdentityService, { _instance: undefined });
+    await linkTestAddress("+900", "acct-boot");
+    const { distiller, internals } = setupDistiller();
+    internals.conversations.findChatIds = mock(async () => ["bella:acct-boot", "signal:+901"]);
+    const emitted: unknown[] = [];
+    const ctx = {
+      transact: async (work: (tx: unknown, emit: (...args: unknown[]) => void) => Promise<void>) =>
+        work(undefined, (...args) => emitted.push(args)),
+    } as unknown as TEventContext;
+
+    await distiller.scheduleFactDrainForAllChats(ctx);
+
+    expect(emitted).toEqual([
+      [
+        EEventType.MemoryFactsRefreshRequested,
+        { ownerKey: "account:acct-boot" },
+        "bella:acct-boot",
+        "bella:acct-boot",
+      ],
+      [
+        EEventType.MemoryFactsRefreshRequested,
+        { ownerKey: "signal:+901" },
+        "signal:+901",
+        "signal:+901",
+      ],
+    ]);
+    await resetIdentityLinksTable();
+    Object.assign(IdentityService, { _instance: undefined });
   });
 
   test("a boot fact drain sweep never rejects when chat discovery fails", async () => {

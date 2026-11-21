@@ -77,7 +77,7 @@ export const updateCalendarEvent = defineTool({
   mode: "sequential",
   logSafe: [],
   execute: async (context, args) => {
-    const chatId = requireChatId(context.chatId);
+    const chatId = requireChatId(context.ownerKey);
     const patch = validateUpdateCalendarEventArgs(args);
 
     const updated = await context.events.request(

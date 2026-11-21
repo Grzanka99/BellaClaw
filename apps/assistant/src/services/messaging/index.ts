@@ -2,16 +2,23 @@ import { EBehaviorLogLevel, type TBehaviorTraceContext } from "@bellaclaw/behavi
 import { EEventType } from "@bellaclaw/database";
 import type { TOption } from "@bellaclaw/shared";
 import { createLogger, type TLogger } from "@bellaclaw/shared";
+import { AppChannel } from "../app";
 import { startSpan } from "../app-logger/span";
 import { ESubscriptionMode, EventBus, type TEventContext } from "../events";
-import type { TDeliveryTranscript, TEvent } from "../events/catalog";
-import { parseCanonicalChatKey } from "./chat-key";
-import type { EMessagePlatform, TAttachmentRef, TMessageTransport } from "./types";
+import type { TDeliveryTranscript, TDisplay, TEvent } from "../events/catalog";
+import { IdentityService, type TChatAddress } from "../identity";
+import {
+  EMessagePlatform,
+  type TAttachmentRef,
+  type TAttachmentStore,
+  type TMessageTransport,
+} from "./types";
 
 export class MessagingAdapter {
   private static _instance: TOption<MessagingAdapter>;
   private logger: TLogger = createLogger("MESSAGING");
   private transports = new Map<EMessagePlatform, TMessageTransport>();
+  private attachmentStores = new Map<EMessagePlatform, TAttachmentStore>();
   private outboundBackoffMs = [5_000, 30_000, 120_000, 600_000, 1_800_000, 3_600_000, 10_800_000];
 
   private constructor() {}
@@ -26,34 +33,29 @@ export class MessagingAdapter {
 
   public registerTransport(transport: TMessageTransport) {
     this.transports.set(transport.platform, transport);
+    this.attachmentStores.set(transport.platform, transport);
   }
 
-  public fetchAttachment(
-    chatId: string,
-    ref: TAttachmentRef,
-    maxBytes: number,
-  ): Promise<TOption<Uint8Array>> {
-    const owner = this.resolve(chatId);
-    return owner.transport.fetchAttachment(owner.chatId, ref, maxBytes);
+  // NOTE: the app sends nothing (see send), so it registers only where its files are kept
+  public registerAttachmentStore(store: TAttachmentStore) {
+    this.attachmentStores.set(store.platform, store);
   }
 
-  public deleteAttachment(chatId: string, ref: TAttachmentRef): Promise<void> {
-    const owner = this.resolve(chatId);
-    return owner.transport.deleteAttachment(owner.chatId, ref);
+  public fetchAttachment(ref: TAttachmentRef, maxBytes: number): Promise<TOption<Uint8Array>> {
+    return this.registered(this.attachmentStores, ref.channel).fetchAttachment(ref, maxBytes);
   }
 
-  private resolve(chatId: string): { transport: TMessageTransport; chatId: string } {
-    const owner = parseCanonicalChatKey(chatId);
-    if (owner === undefined) {
-      throw new Error("Unknown chat platform");
+  public deleteAttachment(ref: TAttachmentRef): Promise<void> {
+    return this.registered(this.attachmentStores, ref.channel).deleteAttachment(ref);
+  }
+
+  private registered<T>(registry: Map<EMessagePlatform, T>, channel: EMessagePlatform): T {
+    const found = registry.get(channel);
+    if (found === undefined) {
+      throw new Error(`Nothing registered for ${channel}`);
     }
 
-    const transport = this.transports.get(owner.platform);
-    if (transport === undefined) {
-      throw new Error(`No ${owner.platform} transport`);
-    }
-
-    return { transport, chatId: owner.chatId };
+    return found;
   }
 
   public setup(): void {
@@ -65,7 +67,15 @@ export class MessagingAdapter {
       mode: ESubscriptionMode.Durable,
       backoffMs: this.outboundBackoffMs,
       handler: (event, ctx) =>
-        this.send(event.payload.chatId, event.payload.text, event.payload.transcript, event, ctx),
+        this.send(
+          event.payload.conversationKey,
+          { channel: event.payload.channel, address: event.payload.replyAddress },
+          event.payload.text,
+          event.payload.transcript,
+          event.payload.display,
+          event,
+          ctx,
+        ),
     });
     bus.subscribe({
       consumer: "outbound",
@@ -73,47 +83,90 @@ export class MessagingAdapter {
       mode: ESubscriptionMode.Durable,
       backoffMs: this.outboundBackoffMs,
       handler: (event, ctx) =>
-        this.send(event.payload.chatId, event.payload.text, event.payload.transcript, event, ctx),
+        this.send(
+          event.payload.chatId,
+          undefined,
+          event.payload.text,
+          event.payload.transcript,
+          undefined,
+          event,
+          ctx,
+        ),
     });
+    // a notice is shown in history and never replayed to the model
     bus.subscribe({
       consumer: "outbound",
       type: EEventType.NoticeReady,
       mode: ESubscriptionMode.Durable,
       backoffMs: this.outboundBackoffMs,
       handler: (event, ctx) =>
-        this.send(event.payload.chatId, event.payload.text, undefined, event, ctx),
+        this.send(
+          event.payload.chatId,
+          undefined,
+          event.payload.text,
+          undefined,
+          { text: event.payload.text },
+          event,
+          ctx,
+        ),
     });
   }
 
+  // key: the conversation the message belongs to, possibly the old key of a linked address;
+  // origin: where a reply goes. A message without one, a delivery or a notice, goes to the main
+  // channel, decided at each attempt: the app while the account has a registered device, else
+  // where Identity resolves the key
   private async send(
-    chatId: string,
+    key: string,
+    origin: TOption<TChatAddress>,
     text: string,
     transcript: TOption<TDeliveryTranscript>,
+    display: TOption<TDisplay>,
     event: TEvent,
     ctx: TEventContext,
   ): Promise<void> {
-    const owner = parseCanonicalChatKey(chatId);
-    if (owner === undefined) {
+    const resolved = await IdentityService.instance.resolve(key);
+    const chatId = resolved?.conversationKey ?? key;
+    let destination = origin ?? resolved?.destination;
+
+    if (origin === undefined && resolved !== undefined) {
+      const accountId = IdentityService.instance.accountIdOf(resolved.ownerKey);
+
+      if (accountId !== undefined && (await AppChannel.instance.hasDevice(accountId))) {
+        destination = { channel: EMessagePlatform.App, address: accountId };
+      }
+    }
+
+    if (destination === undefined) {
       throw new Error("Unknown chat platform");
     }
 
-    const transport = this.transports.get(owner.platform);
-    if (transport === undefined) {
-      // retried with the outbound backoff until the transport registers
-      throw new Error(`No ${owner.platform} transport`);
-    }
-
-    const failure = await this.sendText(transport, owner.chatId, text, event.trace);
-    if (failure !== undefined) {
-      throw new Error(failure);
+    // NOTE: the app has nothing to send: the transcript row that message.sent writes is the
+    // delivery. Any other channel is retried with the outbound backoff until its transport
+    // registers
+    if (destination.channel !== EMessagePlatform.App) {
+      const transport = this.registered(this.transports, destination.channel);
+      const failure = await this.sendText(transport, destination.address, text, event.trace);
+      if (failure !== undefined) {
+        throw new Error(failure);
+      }
     }
 
     await ctx.complete(async (_tx, emit) => {
       emit(
         EEventType.MessageSent,
-        { chatId, sourceType: event.type, chars: text.length, sentAt: Date.now(), transcript },
+        {
+          chatId,
+          channel: destination.channel,
+          sourceType: event.type,
+          chars: text.length,
+          sentAt: Date.now(),
+          transcript,
+          display,
+        },
         undefined,
-        undefined,
+        // the conversation's lane, so the transcript append orders with its turns
+        chatId,
       );
     });
   }

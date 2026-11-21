@@ -4,12 +4,14 @@ import { fauxAssistantMessage, fauxToolCall, type Message } from "@earendil-work
 import { and, asc, eq, isNull } from "drizzle-orm";
 import { ERole } from "../ai/types";
 import { DatabaseConnector } from "../database";
-import { resetEventTables } from "../database/test-utils";
+import { linkTestAddress, resetEventTables, resetIdentityLinksTable } from "../database/test-utils";
 import { CommandRejectedError, EventBus } from "../events";
 import { ERejectionCode } from "../events/catalog";
 import { withEventContext } from "../events/test-utils";
+import { IdentityService } from "../identity";
 import { Memory } from "../memory";
 import { MessageHandler } from "../message-handler";
+import { EMessagePlatform } from "../messaging/types";
 import { ConversationStore } from ".";
 import type { TConversation } from "./types";
 
@@ -52,12 +54,22 @@ async function saveTurn(
 ) {
   const db = DatabaseConnector.instance.database;
   const store = ConversationStore.instance;
-  const source = await store.saveUserMessage(db, chatId, ERole.User, text, new Date());
+  const source = await store.saveUserMessage(
+    db,
+    chatId,
+    EMessagePlatform.Signal,
+    ERole.User,
+    text,
+    new Date(),
+    undefined,
+    [],
+  );
   const history = previous?.entries.map((entry) => entry.message) ?? [];
 
   return store.saveTurn(
     db,
     chatId,
+    EMessagePlatform.Signal,
     [
       ...history,
       { role: "user", content: text, timestamp: source.createdAt.getTime() },
@@ -99,7 +111,6 @@ async function liveFacts(chatId: string) {
 
 test("deleting an assistant reply removes it with its tool rows and forgets the facts they sourced", async () => {
   const chatId = "delete-reply";
-  const otherChatId = "delete-reply-other";
   const first = await saveTurn(chatId, "first", [], undefined);
   const second = await saveTurn(
     chatId,
@@ -124,7 +135,6 @@ test("deleting an assistant reply removes it with its tool rows and forgets the 
   await insertFact(chatId, "from the reply", replyId);
   await insertFact(chatId, "from the tool result", resultId);
   await insertFact(chatId, "from the user message", secondId);
-  await insertFact(otherChatId, "another chat, same source id", replyId);
 
   const deleted = await requestDelete(chatId, replyId);
   await EventBus.instance.idle();
@@ -136,7 +146,38 @@ test("deleting an assistant reply removes it with its tool rows and forgets the 
     kept,
   );
   expect(await liveFacts(chatId)).toEqual(["from the user message"]);
-  expect(await liveFacts(otherChatId)).toEqual(["another chat, same source id"]);
+});
+
+test("deleting a delivered message removes it with its notice row and keeps the display rows before it", async () => {
+  const chatId = "delete-delivered";
+  const db = DatabaseConnector.instance.database;
+  const store = ConversationStore.instance;
+  await saveTurn(chatId, "first", [], undefined);
+  await store.saveDisplayMessage(
+    db,
+    chatId,
+    EMessagePlatform.Signal,
+    { text: "Updated.", request: { text: "!update", receivedAt: 1 } },
+    2,
+  );
+  await store.saveDeliveredMessage(
+    db,
+    chatId,
+    EMessagePlatform.Signal,
+    "Tea time",
+    "Tea time",
+    "a reminder",
+    3,
+  );
+  const ids = await rowIds(chatId);
+  // [first, reply, command, command reply, reminder notice, reminder]
+  const [, , , , noticeId = 0, reminderId = 0] = ids;
+
+  const deleted = await requestDelete(chatId, reminderId);
+  await EventBus.instance.idle();
+
+  expect(deleted.payload).toEqual({ chatId, messageIds: [noticeId, reminderId] });
+  expect(await rowIds(chatId)).toEqual(ids.slice(0, 4));
 });
 
 test("a message id of another chat is rejected and nothing is deleted", async () => {
@@ -154,4 +195,21 @@ test("a message id of another chat is rejected and nothing is deleted", async ()
   }
 
   expect([await rowIds(chatId), await rowIds(otherChatId)]).toEqual(before);
+});
+
+test("deleting a message of an account's Bella conversation forgets the facts stored under the account", async () => {
+  await resetIdentityLinksTable();
+  Object.assign(IdentityService, { _instance: undefined });
+  await linkTestAddress("+800", "acct-delete");
+  const chatId = "bella:acct-delete";
+  const turn = await saveTurn(chatId, "first", [], undefined);
+  const replyId = turn.entries[1]?.id ?? 0;
+  await insertFact("account:acct-delete", "from the reply", replyId);
+
+  await requestDelete(chatId, replyId);
+  await EventBus.instance.idle();
+
+  expect(await liveFacts("account:acct-delete")).toEqual([]);
+  await resetIdentityLinksTable();
+  Object.assign(IdentityService, { _instance: undefined });
 });

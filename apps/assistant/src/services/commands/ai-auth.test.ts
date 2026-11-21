@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, type Mock, spyOn, test } from "bun:test";
-import { EEventType, eventsTable } from "@bellaclaw/database";
+import { EConversationKind, EEventType, eventsTable } from "@bellaclaw/database";
 import type { TOption } from "@bellaclaw/shared";
 import { createProvider, type Provider } from "@earendil-works/pi-ai";
 import { openAICodexResponsesApi } from "@earendil-works/pi-ai/api/openai-codex-responses.lazy";
@@ -10,12 +10,13 @@ import { EAiProvider } from "../ai/types";
 import { AuthorizationService } from "../authorization";
 import { DatabaseConnector } from "../database";
 import { resetEventTables, resetUserConfigsTable } from "../database/test-utils";
-import { ESubscriptionMode, EventBus } from "../events";
+import { ESubscriptionMode, EventBus, type TEventContext } from "../events";
 import type { TEvent } from "../events/catalog";
+import { testMessageOrigin, withEventContext } from "../events/test-utils";
 import { EMessagePlatform } from "../messaging/types";
 import { SettingsService } from "../settings";
 import { EConfigKey } from "../settings/schema";
-import { Commands } from ".";
+import { Commands, runCommand } from ".";
 
 let previousProvider: TOption<Provider>;
 let bus: EventBus;
@@ -39,19 +40,18 @@ async function send(chatId: string, content: string) {
     key: chatId,
     trace: { turnId: "test:ai-auth", chatId, platform: EMessagePlatform.Discord },
     payload: {
-      chatId,
+      ...testMessageOrigin(chatId, EMessagePlatform.Discord),
       content,
       attachments: [],
       receivedAt: Date.now(),
-      platform: EMessagePlatform.Discord,
     },
     causationId: undefined,
     dedupeKey: undefined,
   });
   await bus.idle();
   return (await rowsOf(EEventType.ReplyReady))
-    .map((row) => row.payload as { chatId: string; text: string })
-    .filter((payload) => payload.chatId === chatId)
+    .map((row) => row.payload as { conversationKey: string; text: string })
+    .filter((payload) => payload.conversationKey === chatId)
     .map((payload) => payload.text);
 }
 
@@ -138,6 +138,10 @@ test("logs in with a device code through ai.auth.login.requested and confirms in
   expect(await send("discord:1", "!ai-auth login openai-codex")).toEqual([
     "Open https://example.test/device and enter code ABCD-EFGH to connect openai-codex.",
   ]);
+  // the device code is confidential: not carried for the history
+  expect(JSON.stringify((await rowsOf(EEventType.ReplyReady))[0]?.payload)).not.toContain(
+    "display",
+  );
   expect((await rowsOf(EEventType.AiAuthLoginRequested))[0]?.key).toBe("global");
 
   approve();
@@ -193,4 +197,68 @@ test("refuses chats that are not activated", async () => {
   ]);
   expect(await rowsOf(EEventType.AiAuthLoginRequested)).toEqual([]);
   expect(await rowsOf(EEventType.AiAuthLogoutRequested)).toEqual([]);
+});
+
+test("a linked address logs in for its account, checked by the address's activation", async () => {
+  await bus.publish({
+    type: EEventType.MessageAuthorized,
+    source: "test",
+    key: "bella:acct-1",
+    trace: { turnId: "test:ai-auth", chatId: "discord:1", platform: EMessagePlatform.Discord },
+    payload: {
+      conversationKey: "bella:acct-1",
+      ownerKey: "account:acct-1",
+      channel: EMessagePlatform.Discord,
+      replyAddress: "1",
+      kind: EConversationKind.Bella,
+      content: "!ai-auth login openai-codex",
+      attachments: [],
+      receivedAt: Date.now(),
+    },
+    causationId: undefined,
+    dedupeKey: undefined,
+  });
+  await bus.idle();
+
+  expect((await rowsOf(EEventType.ReplyReady)).map((row) => row.payload)).toEqual([
+    expect.objectContaining({
+      conversationKey: "bella:acct-1",
+      text: "Open https://example.test/device and enter code ABCD-EFGH to connect openai-codex.",
+    }),
+  ]);
+
+  approve();
+  const event = await completed;
+  await bus.idle();
+
+  expect(event.payload).toEqual({
+    chatId: "account:acct-1",
+    providerId: "openai-codex",
+    selected: true,
+  });
+  expect((await SettingsService.instance.getAll("account:acct-1"))[EConfigKey.AiProvider]).toBe(
+    EAiProvider.OpenaiCodex,
+  );
+});
+
+test("an app message passes the activation check exactly when an activation token is configured", async () => {
+  const originalToken = Bun.env.BELLACLAW_ACTIVATION_TOKEN;
+  const app = { channel: EMessagePlatform.App, address: "acct-1" };
+  const status = (ctx: TEventContext) =>
+    runCommand("account:acct-1", app, "!ai-auth status openai-codex", ctx);
+
+  try {
+    Bun.env.BELLACLAW_ACTIVATION_TOKEN = "";
+    Object.assign(AuthorizationService, { _instance: undefined });
+    expect(await withEventContext(status)).toBe(
+      "AI authentication requires BELLACLAW_ACTIVATION_TOKEN and an activated chat.",
+    );
+
+    Bun.env.BELLACLAW_ACTIVATION_TOKEN = "open-sesame";
+    Object.assign(AuthorizationService, { _instance: undefined });
+    expect(await withEventContext(status)).toBe("openai-codex: not connected.");
+  } finally {
+    Bun.env.BELLACLAW_ACTIVATION_TOKEN = originalToken;
+    Object.assign(AuthorizationService, { _instance: undefined });
+  }
 });

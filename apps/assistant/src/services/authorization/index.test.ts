@@ -4,8 +4,15 @@ import type { TOption } from "@bellaclaw/shared";
 import { asc, eq } from "drizzle-orm";
 import { Commands } from "../commands";
 import { DatabaseConnector } from "../database";
-import { resetEventTables, resetMessageAuthorizationsTable } from "../database/test-utils";
+import {
+  linkTestAddress,
+  resetEventTables,
+  resetIdentityLinksTable,
+  resetMessageAuthorizationsTable,
+} from "../database/test-utils";
 import { EventBus } from "../events";
+import { publishTestMessage, testMessageOrigin } from "../events/test-utils";
+import { IdentityService } from "../identity";
 import { EMessagePlatform } from "../messaging/types";
 import { AuthorizationService } from ".";
 import { EAuthorizationDecision, EAuthorizationStatus } from "./schema";
@@ -107,25 +114,6 @@ describe("AuthorizationService.authorize", () => {
 describe("authorization consumer", () => {
   let bus: EventBus;
 
-  async function receive(chatId: string, content: string, dedupeKey: TOption<string>) {
-    await bus.publish({
-      type: EEventType.MessageReceived,
-      source: "test",
-      key: chatId,
-      trace: { turnId: "test:auth", chatId, platform: EMessagePlatform.Signal },
-      payload: {
-        chatId,
-        content,
-        attachments: [],
-        receivedAt: 1,
-        platform: EMessagePlatform.Signal,
-      },
-      causationId: undefined,
-      dedupeKey,
-    });
-    await bus.idle();
-  }
-
   async function payloadsOf(type: EEventType) {
     const rows = await DatabaseConnector.instance.database
       .select()
@@ -148,28 +136,53 @@ describe("authorization consumer", () => {
   });
 
   test("rejects silently, replies to activation and authorizes later messages", async () => {
-    await receive("signal:+200", "wrong", undefined);
+    await publishTestMessage("signal:+200", "wrong");
     expect(await payloadsOf(EEventType.MessageRejected)).toEqual([
       { chatId: "signal:+200", decision: EAuthorizationDecision.FailedAttempt, failedAttempts: 1 },
     ]);
     expect(await payloadsOf(EEventType.ReplyReady)).toEqual([]);
 
-    await receive("signal:+200", "open-sesame", undefined);
-    await receive("signal:+200", "open-sesame", undefined);
+    await publishTestMessage("signal:+200", "open-sesame");
+    await publishTestMessage("signal:+200", "open-sesame");
     expect(await payloadsOf(EEventType.ReplyReady)).toEqual([
-      { chatId: "signal:+200", text: "Activated." },
-      { chatId: "signal:+200", text: "Already activated." },
+      { ...testMessageOrigin("signal:+200", EMessagePlatform.Signal), text: "Activated." },
+      { ...testMessageOrigin("signal:+200", EMessagePlatform.Signal), text: "Already activated." },
     ]);
     expect(await AuthorizationService.instance.listAuthorizedChatIds()).toContain("signal:+200");
     expect(await payloadsOf(EEventType.MessageAuthorized)).toEqual([]);
 
-    await receive("signal:+200", "hello", undefined);
+    await publishTestMessage("signal:+200", "hello");
     expect(await payloadsOf(EEventType.TurnRequested)).toEqual([
-      expect.objectContaining({ chatId: "signal:+200", content: "hello" }),
+      expect.objectContaining({ conversationKey: "signal:+200", content: "hello" }),
     ]);
     expect(await payloadsOf(EEventType.AuthorizationChanged)).toEqual([
       { chatId: "signal:+200", status: EAuthorizationStatus.Pending, failedAttempts: 1 },
       { chatId: "signal:+200", status: EAuthorizationStatus.Authorized, failedAttempts: 0 },
     ]);
+  });
+
+  test("the activation replies of a linked address run on its Bella conversation's lane", async () => {
+    await resetIdentityLinksTable();
+    await linkTestAddress("+300", "acct-1");
+    Object.assign(IdentityService, { _instance: undefined });
+
+    try {
+      await publishTestMessage("signal:+300", "open-sesame");
+      await publishTestMessage("signal:+300", "open-sesame");
+    } finally {
+      await resetIdentityLinksTable();
+      Object.assign(IdentityService, { _instance: undefined });
+    }
+
+    const replies = await DatabaseConnector.instance.database
+      .select()
+      .from(eventsTable)
+      .where(eq(eventsTable.type, EEventType.ReplyReady))
+      .orderBy(asc(eventsTable.seq));
+    const reply = {
+      key: "bella:acct-1",
+      payload: expect.objectContaining({ conversationKey: "bella:acct-1" }),
+    };
+    expect(replies.map((row) => ({ key: row.key, payload: row.payload }))).toEqual([reply, reply]);
   });
 });

@@ -20,6 +20,13 @@ export enum ECronFinishedReason {
   Overwritten = "overwritten",
 }
 
+// bella: an account's Bella conversation, or the chat of an unlinked address; plain: a plain chat
+// of the app, with no memory
+export enum EConversationKind {
+  Bella = "bella",
+  Plain = "plain",
+}
+
 export enum EEventType {
   MessageReceived = "message.received",
   MessageAuthorized = "message.authorized",
@@ -87,6 +94,22 @@ export enum EEventType {
   CalendarEventDeleted = "calendar.event.deleted",
   ConversationMessageDeleteRequested = "conversation.message.delete.requested",
   ConversationMessageDeleted = "conversation.message.deleted",
+  ConversationSummariesFused = "conversation.summaries.fused",
+  ConversationChanged = "conversation.changed",
+  ConversationCreateRequested = "conversation.create.requested",
+  ConversationCreated = "conversation.created",
+  ConversationDeleteRequested = "conversation.delete.requested",
+  ConversationDeleted = "conversation.deleted",
+  IdentityLinkRequested = "identity.link.requested",
+  IdentityLinkStarted = "identity.link.started",
+  IdentityLinkSettled = "identity.link.settled",
+  IdentityLinkQuiet = "identity.link.quiet",
+  IdentityLinkMoved = "identity.link.moved",
+  IdentityLinked = "identity.linked",
+  AppDeviceRegisterRequested = "app.device.register.requested",
+  AppDeviceRegistered = "app.device.registered",
+  AppDeviceUnregisterRequested = "app.device.unregister.requested",
+  AppDeviceUnregistered = "app.device.unregistered",
   CommandRejected = "command.rejected",
   EventDeadLettered = "event.dead_lettered",
   AppStarted = "app.started",

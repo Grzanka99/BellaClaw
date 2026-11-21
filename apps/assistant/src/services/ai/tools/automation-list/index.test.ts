@@ -10,7 +10,8 @@ const trace = { turnId: "test", chatId: undefined, platform: undefined };
 
 function createTool(chatId: string) {
   return automationList.createAgentTool({
-    chatId,
+    conversationKey: chatId,
+    ownerKey: chatId,
     settings: DefaultConfigRecord,
     trace,
     events: testEventRequester,

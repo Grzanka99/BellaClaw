@@ -21,7 +21,7 @@ export type { TMcpOpenArgs, TMcpSession } from "./types";
 export class McpService {
   private static _instance: McpService;
   private logger = createLogger("MCP");
-  private sessions = new Map<TMcpSession, { chatId: string; profileId: string }>();
+  private sessions = new Map<TMcpSession, { ownerKey: string; profileId: string }>();
 
   public static get instance() {
     if (McpService._instance === undefined) {
@@ -86,13 +86,13 @@ export class McpService {
       });
     } else {
       const headers = new Headers(profile.transport.headers);
-      const token = await getMcpAuthToken(args.chatId, profile);
+      const token = await getMcpAuthToken(args.ownerKey, profile);
       if (token !== undefined) {
         headers.set("Authorization", `Bearer ${token}`);
       }
       transport = new StreamableHTTPClientTransport(new URL(profile.transport.url), {
-        authProvider: await getMcpAuthProvider(args.chatId, profile),
-        fetch: createMcpAuthFetch(args.chatId, profile.id),
+        authProvider: await getMcpAuthProvider(args.ownerKey, profile),
+        fetch: createMcpAuthFetch(args.ownerKey, profile.id),
         requestInit: { headers },
       });
     }
@@ -166,7 +166,7 @@ export class McpService {
           .catch(() => this.logger.warning(`MCP tool refresh failed for profile ${profile.id}`));
       });
       signal.throwIfAborted();
-      this.sessions.set(session, { chatId: args.chatId, profileId: profile.id });
+      this.sessions.set(session, { ownerKey: args.ownerKey, profileId: profile.id });
       return session;
     } catch (error) {
       await session.close();
@@ -177,7 +177,7 @@ export class McpService {
   public async disconnect(chatId: string, profileId: string): Promise<void> {
     const closing: Promise<void>[] = [];
     for (const [session, owner] of this.sessions) {
-      if (owner.chatId === chatId && owner.profileId === profileId) {
+      if (owner.ownerKey === chatId && owner.profileId === profileId) {
         closing.push(session.close());
       }
     }

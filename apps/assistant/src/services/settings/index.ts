@@ -1,12 +1,14 @@
 import { EEventType, type TSelectUserConfig, userConfigsTable } from "@bellaclaw/database";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
+import { injectConfig } from "../ai/instructions/inject-config";
 import { DatabaseConnector, type TDatabaseTransaction } from "../database";
 import { ESubscriptionMode, EventBus } from "../events";
 import { ERejectionCode } from "../events/catalog";
+import { EIdentityLinkOwner } from "../identity/schema";
 import {
   ConfigValidators,
   DefaultConfigRecord,
-  type EConfigKey,
+  EConfigKey,
   isConfigKey,
   type TConfigRecord,
 } from "./schema";
@@ -48,7 +50,11 @@ export class SettingsService {
         const { ownerKey, updates } = event.payload;
 
         await ctx.complete(async (tx, emit) => {
-          const validation = this.validate(updates);
+          const rows = await tx
+            .select()
+            .from(userConfigsTable)
+            .where(eq(userConfigsTable.ownerKey, ownerKey));
+          const validation = this.validate(updates, this.createRecord(rows));
 
           if (!validation.valid) {
             emit(
@@ -66,6 +72,73 @@ export class SettingsService {
 
           const record = await this.writeMany(tx, ownerKey, validation.updates);
           emit(EEventType.SettingsChanged, { ownerKey, record }, undefined, undefined);
+        });
+      },
+    });
+    // NOTE: the account keeps every setting it has; the address's other settings move to it.
+    // They move after Conversation's move, which follows Memory's, so the fact drain of the
+    // address still reads the address's settings
+    bus.subscribe({
+      consumer: "settings",
+      type: EEventType.IdentityLinkMoved,
+      mode: ESubscriptionMode.Durable,
+      backoffMs: [1_000, 5_000],
+      handler: async (event, ctx) => {
+        const { chatKey, ownerKey } = event.payload;
+
+        if (event.payload.owner !== EIdentityLinkOwner.Conversation) {
+          return;
+        }
+
+        await ctx.complete(async (tx, emit) => {
+          const moving = await tx
+            .select()
+            .from(userConfigsTable)
+            .where(eq(userConfigsTable.ownerKey, chatKey));
+
+          if (moving.length > 0) {
+            const kept = await tx
+              .select({ key: userConfigsTable.key })
+              .from(userConfigsTable)
+              .where(eq(userConfigsTable.ownerKey, ownerKey));
+            await tx.delete(userConfigsTable).where(
+              and(
+                eq(userConfigsTable.ownerKey, chatKey),
+                inArray(
+                  userConfigsTable.key,
+                  kept.map((row) => row.key),
+                ),
+              ),
+            );
+            await tx
+              .update(userConfigsTable)
+              .set({ ownerKey })
+              .where(eq(userConfigsTable.ownerKey, chatKey));
+
+            const rows = await tx
+              .select()
+              .from(userConfigsTable)
+              .where(eq(userConfigsTable.ownerKey, ownerKey));
+            emit(
+              EEventType.SettingsChanged,
+              { ownerKey, record: this.createRecord(rows) },
+              ownerKey,
+              undefined,
+            );
+            emit(
+              EEventType.SettingsChanged,
+              { ownerKey: chatKey, record: { ...DefaultConfigRecord } },
+              chatKey,
+              undefined,
+            );
+          }
+
+          emit(
+            EEventType.IdentityLinkMoved,
+            { ...event.payload, owner: EIdentityLinkOwner.Settings },
+            undefined,
+            undefined,
+          );
         });
       },
     });
@@ -105,12 +178,14 @@ export class SettingsService {
     return record[key];
   }
 
-  private validate(updates: TConfigUpdate[]): TValidation {
+  // current: the owner's record before the updates
+  private validate(updates: TConfigUpdate[], current: TConfigRecord): TValidation {
     if (updates.length === 0) {
       return { valid: false, problem: "Provide at least one config update" };
     }
 
     const validated: TConfigUpdate[] = [];
+    const effective: TConfigRecord = { ...current };
 
     for (const update of updates) {
       const parsed = ConfigValidators[update.key].safeParse(update.value);
@@ -123,6 +198,18 @@ export class SettingsService {
       }
 
       validated.push({ key: update.key, value: parsed.data });
+      effective[update.key] = parsed.data;
+    }
+
+    // Bella's persona is a template of the prompt builder and its placeholders resolve through the
+    // other settings: a placeholder it cannot resolve would fail every prompt that holds the persona
+    try {
+      injectConfig(effective[EConfigKey.AiInstructionsPersona], effective);
+    } catch (error) {
+      return {
+        valid: false,
+        problem: `Invalid value for config key "${EConfigKey.AiInstructionsPersona}": ${String(error)}`,
+      };
     }
 
     return { valid: true, updates: validated };

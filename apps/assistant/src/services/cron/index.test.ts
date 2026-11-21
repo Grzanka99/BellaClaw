@@ -8,9 +8,15 @@ import {
 } from "@bellaclaw/database";
 import { and, asc, eq } from "drizzle-orm";
 import { DatabaseConnector } from "../database";
-import { resetCronEngineJobsTable, resetEventTables } from "../database/test-utils";
+import {
+  linkTestAddress,
+  resetCronEngineJobsTable,
+  resetEventTables,
+  resetIdentityLinksTable,
+} from "../database/test-utils";
 import { ESubscriptionMode, EventBus } from "../events";
 import type { TCronFiredPayload, TEvent } from "../events/catalog";
+import { IdentityService } from "../identity";
 import { DefaultConfigRecord, EConfigKey } from "../settings/schema";
 import { CronScheduler } from "./index";
 import { cancelJob, createOnce, createRecurring } from "./test-utils";
@@ -300,6 +306,20 @@ describe("CronScheduler", () => {
 
     expect(internals.timers.has(created.id)).toBe(false);
     expect(await scheduler.get("race-once", "scope-a")).toBeUndefined();
+  });
+
+  test("a fire of a linked account's job is traced under its Bella conversation", async () => {
+    await resetIdentityLinksTable();
+    await linkTestAddress("+300", "acct-1");
+    Object.assign(IdentityService, { _instance: undefined });
+    const id = await insertOneTimeJob("linked-job", "account:acct-1", new Date(Date.now() - 1_000));
+
+    await fireJob(scheduler, id);
+    await EventBus.instance.idle();
+
+    expect(fired.map((event) => event.trace.chatId)).toEqual(["bella:acct-1"]);
+    await resetIdentityLinksTable();
+    Object.assign(IdentityService, { _instance: undefined });
   });
 
   test("one-time fire completes job once and keeps history", async () => {

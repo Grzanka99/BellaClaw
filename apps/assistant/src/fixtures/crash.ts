@@ -6,6 +6,7 @@ import { appendFileSync } from "node:fs";
 import { join } from "node:path";
 import { AppLogger } from "@bellaclaw/behavior-logs";
 import {
+  EConversationKind,
   EEventType,
   eventDeliveriesTable,
   eventsTable,
@@ -123,8 +124,8 @@ Object.assign(AgentHarness.instance, {
     return undefined;
   },
 });
-// the fact drain is a model call
-Object.assign(FactDistiller.instance, { drainLiveFactWindows: async () => true });
+// the fact distillation is a model call
+Object.assign(FactDistiller.instance, { distill: async () => [] });
 
 // biome-ignore lint/complexity/useLiteralKeys: a private method, reached for the crash point
 const afterCommit = bus["afterCommit"].bind(bus);
@@ -182,11 +183,14 @@ for (const content of messages) {
     key: CRASH_CHAT_ID,
     trace,
     payload: {
-      chatId: CRASH_CHAT_ID,
+      conversationKey: CRASH_CHAT_ID,
+      ownerKey: CRASH_CHAT_ID,
+      channel: EMessagePlatform.Signal,
+      replyAddress: "+100",
+      kind: EConversationKind.Bella,
       content,
       attachments: [],
       receivedAt: Date.now(),
-      platform: EMessagePlatform.Signal,
     },
     causationId: undefined,
     dedupeKey: undefined,

@@ -6,7 +6,7 @@ import { dryRunSavedAutomation } from "../../../automation/runner";
 import { CronScheduler } from "../../../cron";
 import type { TCronJob, TJobContent } from "../../../cron/types";
 import type { TCronFiredPayload } from "../../../events/catalog";
-import { parseCanonicalChatKey } from "../../../messaging/chat-key";
+import { IdentityService } from "../../../identity";
 import { runCronJobAutomations } from "../../../scheduling/cron-automations";
 import { EConfigKey } from "../../../settings/schema";
 import { runAutomationOperation } from "../automation-errors";
@@ -41,7 +41,7 @@ export const previewCronJob = defineTool({
   logSafe: [],
   privateErrors: true,
   execute: async (context, args, signal) => {
-    const chatId = requireChatId(context.chatId);
+    const chatId = requireChatId(context.ownerKey);
     const timezone = context.settings[EConfigKey.AiInstructionsTimezone];
     const name = absentIfBlank(args.name);
     const taskPrompt = absentIfBlank(args.taskPrompt);
@@ -118,9 +118,12 @@ export const previewCronJob = defineTool({
       };
     }
 
+    // the conversation the job would run in and the channel it would be delivered on
+    const resolved = await IdentityService.instance.resolve(chatId);
     const result = await runCronJobAutomations(
       ctx,
-      parseCanonicalChatKey(chatId)?.platform,
+      resolved?.conversationKey ?? chatId,
+      resolved?.destination.channel,
       // Dry runs must not reach MCP servers, whose tools can have side effects.
       {
         runScheduledTask: (runArgs) => {

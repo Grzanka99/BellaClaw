@@ -77,7 +77,7 @@ export const updateSettings = defineTool({
   mode: "sequential",
   logSafe: [["settings", "settingKeys"]],
   execute: async (context, parsedArgs) => {
-    const chatId = requireChatId(context.chatId);
+    const chatId = requireChatId(context.ownerKey);
     const hasModelOperation = validateAiSettingsArgs(parsedArgs);
 
     const updates: TConfigUpdate[] = [];

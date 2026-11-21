@@ -1,5 +1,5 @@
 import { AppLogger, EBehaviorLogLevel, type TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
-import { createLogger, type TOption } from "@bellaclaw/shared";
+import { createLogger, MAX_IMAGE_BYTES, type TOption } from "@bellaclaw/shared";
 import type { AgentMessage, AgentTool } from "@earendil-works/pi-agent-core";
 import { Agent } from "@earendil-works/pi-agent-core";
 import {
@@ -49,19 +49,19 @@ import { loadMcpProfiles } from "../../mcp/config";
 import { McpRunRegistry, type TMcpRunStatus } from "../../mcp/runs";
 import { createMcpSamplingRequest, createMcpSamplingResult } from "../../mcp/sampling";
 import type { TAttachmentRef } from "../../messaging/types";
-import type { TConfigRecord } from "../../settings/schema";
+import { EConfigKey, type TConfigRecord } from "../../settings/schema";
 import { AGENTS, EAgentName } from "../agents";
 import baseInstructions from "../instructions/base-system.xml" with { type: "text" };
+import { injectConfig } from "../instructions/inject-config";
 import { createPlatformInstructions } from "../instructions/platform";
 import { readXmlAndInjectConfig } from "../instructions/read-xml-and-inject-config";
-import { emptyUsage, LlmClient } from "../llm";
+import { emptyUsage, LlmClient, type TLlmModelConfig } from "../llm";
 import { aiModels } from "../providers/registry";
 import { type TToolExecutionContext, validateToolArguments } from "../tools/define-tool";
 import { EModelPurpose } from "../types";
 import type { TAgentRunArgs, TAgentRunResult, TMainAgentRunResult } from "./types";
 
 const SEQUENTIAL: "sequential" = "sequential";
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const NO_VISION_NOTE = "[User sent an image; the current model cannot view images]";
 const TOO_LARGE_NOTE = "[User sent an image; it is larger than 5 MB and was not loaded]";
 const FETCH_FAILED_NOTE = "[User sent an image; it could not be loaded from the chat platform]";
@@ -98,6 +98,26 @@ export class AgentHarness {
     });
   }
 
+  // a plain chat's turn: the plain agent, with Main's root delegation limit
+  public async runPlain(
+    args: Omit<TAgentRunArgs, "name" | "parentToolCallId">,
+  ): Promise<TMainAgentRunResult> {
+    let delegationCount = 0;
+
+    return this.run({
+      ...args,
+      name: EAgentName.Plain,
+      parentToolCallId: undefined,
+      delegationCount: () => {
+        delegationCount += 1;
+
+        if (delegationCount > 30) {
+          throw new Error("Root delegation limit reached");
+        }
+      },
+    });
+  }
+
   public async runScheduledTask(
     args: Omit<TAgentRunArgs, "name" | "parentToolCallId">,
   ): Promise<TAgentRunResult> {
@@ -112,16 +132,32 @@ export class AgentHarness {
   public async compactConversation(
     state: TConversation,
     settings: TConfigRecord,
-    chatId: string,
+    conversationKey: string,
+    ownerKey: string,
     platform: TAgentRunArgs["platform"],
     trace: TBehaviorTraceContext,
     events: TAgentRunArgs["events"],
+    force: boolean,
+    // the model the summary runs on instead of the one the settings resolve to
+    selected: TOption<TLlmModelConfig>,
   ) {
-    const config = await this.llm.resolveModel(settings, AGENTS[EAgentName.Main].purpose);
+    let config = selected;
+    if (config === undefined) {
+      config = await this.llm.resolveModel(settings, AGENTS[EAgentName.Main].purpose);
+    }
+    let fallbackConfig = config;
+    // a forced compaction that fails on the selected model runs on the provider's default one
+    if (force) {
+      fallbackConfig = await this.llm.resolveModel(
+        { ...settings, [EConfigKey.AiModelPreferences]: "{}" },
+        AGENTS[EAgentName.Main].purpose,
+      );
+    }
     const args = {
       name: EAgentName.Main,
       settings,
-      chatId,
+      conversationKey,
+      ownerKey,
       platform,
       prompt: "",
       currentTimeContext: undefined,
@@ -140,26 +176,28 @@ export class AgentHarness {
         ).length) /
         4,
     );
-    const sessionId = this.llm.createSessionId(config.model.provider, chatId, platform);
-    const model = {
-      ...config.model,
-      headers: {
-        ...config.model.headers,
-        ...this.llm.sessionHeaders(config.model.provider, sessionId),
-      },
+    const sessionId = this.llm.createSessionId(config.model.provider, conversationKey);
+    const headers = this.llm.sessionHeaders(config.model.provider, sessionId);
+    const model = { ...config.model, headers: { ...config.model.headers, ...headers } };
+    const fallback = {
+      ...fallbackConfig.model,
+      headers: { ...fallbackConfig.model.headers, ...headers },
     };
-    return compactConversation(state, aiModels, model, fixedTokens, trace);
+    return compactConversation(state, aiModels, model, fixedTokens, trace, force, fallback);
   }
 
   private async run(
     args: TAgentRunArgs & { delegationCount: TOption<() => void> },
   ): Promise<TMainAgentRunResult> {
     const agentDefinition = AGENTS[args.name];
-    const modelConfig = await this.llm.resolveModel(
-      args.settings,
-      agentDefinition.purpose,
-      args.signal,
-    );
+    let modelConfig = args.model;
+    if (modelConfig === undefined) {
+      modelConfig = await this.llm.resolveModel(
+        args.settings,
+        agentDefinition.purpose,
+        args.signal,
+      );
+    }
     const tools = await this.createTools(args);
     const systemPrompt = await this.createSystemPrompt(args);
     let iterations = 0;
@@ -175,11 +213,7 @@ export class AgentHarness {
       purpose: agentDefinition.purpose,
     });
     let requestSpan: TOption<TBehaviorSpan>;
-    const sessionId = this.llm.createSessionId(
-      modelConfig.model.provider,
-      args.chatId,
-      args.platform,
-    );
+    const sessionId = this.llm.createSessionId(modelConfig.model.provider, args.conversationKey);
 
     const toolSpans = new Map<string, TBehaviorSpan>();
     const toolLogPolicies = new Map<string, TToolLogPolicy>(
@@ -392,8 +426,11 @@ export class AgentHarness {
         if (args.currentTimeContext !== undefined) {
           prompt = `${args.currentTimeContext}\n\n${prompt}`;
         }
-        if (args.name === EAgentName.Main && args.chatId !== undefined) {
-          const pendingRuns = McpRunRegistry.instance.list(args.chatId);
+        if (
+          (args.name === EAgentName.Main || args.name === EAgentName.Plain) &&
+          args.conversationKey !== undefined
+        ) {
+          const pendingRuns = McpRunRegistry.instance.list(args.conversationKey);
           if (pendingRuns.length > 0) {
             prompt += `\n\nPending MCP runs awaiting this user's response:\n${JSON.stringify(pendingRuns)}`;
           }
@@ -587,11 +624,35 @@ export class AgentHarness {
 
   private async createSystemPrompt(args: TAgentRunArgs): Promise<string> {
     const agentDefinition = AGENTS[args.name];
-    const parts = [
-      baseInstructions,
+    const instructions = [
       agentDefinition.instructions,
       ...agentDefinition.tools.map((tool) => tool.instructions),
-    ].map((instructions) => readXmlAndInjectConfig(instructions, args.settings));
+    ];
+
+    if (agentDefinition.base) {
+      instructions.unshift(baseInstructions);
+    }
+
+    const parts = instructions.map((xml) => readXmlAndInjectConfig(xml, args.settings));
+
+    // NOTE: Bella's persona gets its config placeholders resolved and nothing else, as in the Bella
+    // prompt. The plain chats' own text is taken as written: it is no template, so a brace in it
+    // cannot break the prompt. With neither persona the prompt has no persona element
+    if (args.name === EAgentName.Plain) {
+      const personas: string[] = [];
+
+      if (args.settings[EConfigKey.AiPlainChatsUseBellaPersona] === "true") {
+        personas.push(injectConfig(args.settings[EConfigKey.AiInstructionsPersona], args.settings));
+      }
+
+      if (args.settings[EConfigKey.AiPlainChatsPersona].length > 0) {
+        personas.push(args.settings[EConfigKey.AiPlainChatsPersona]);
+      }
+
+      if (personas.length > 0) {
+        parts.unshift(`<persona>\n${personas.join("\n\n")}\n</persona>`);
+      }
+    }
 
     if (args.mcp !== undefined) {
       parts.push(
@@ -625,7 +686,8 @@ export class AgentHarness {
 
   private async createTools(args: TAgentRunArgs & { delegationCount: TOption<() => void> }) {
     const context: TToolExecutionContext = {
-      chatId: args.chatId,
+      conversationKey: args.conversationKey,
+      ownerKey: args.ownerKey,
       settings: args.settings,
       trace: args.trace,
       verifySettings: (settings, purposes) => {
@@ -699,6 +761,7 @@ export class AgentHarness {
             parentToolCallId: toolCallId,
             delegationCount: undefined,
             signal: delegationSignal,
+            model: undefined,
           });
 
           if (result.text === undefined || result.text.trim().length === 0) {
@@ -727,6 +790,9 @@ export class AgentHarness {
       profiles = await loadMcpProfiles();
     } catch (error) {
       this.logger.warning(`MCP delegation disabled: ${String(error)}`);
+    }
+    if (args.name === EAgentName.Plain) {
+      profiles = profiles.filter((profile) => profile.plainChats);
     }
     const profileSummary = profiles
       .map((profile) => `${profile.id}: ${profile.description}`)
@@ -764,14 +830,16 @@ export class AgentHarness {
         executionMode: SEQUENTIAL,
         execute: async (toolCallId, parameters, signal) => {
           const parsed = validateToolArguments(delegateSchema, parameters);
-          if (args.name === EAgentName.Main) {
+          if (args.name === EAgentName.Main || args.name === EAgentName.Plain) {
             args.delegationCount?.();
           }
           const profile = profiles.find((candidate) => candidate.id === parsed.profileId);
           if (profile === undefined) {
             throw new Error(`Unknown MCP profile: ${parsed.profileId}`);
           }
-          const chatId = this.requireMcpChatId(args.chatId);
+          // credentials belong to the owner, pending runs to the conversation
+          const ownerKey = this.requireMcpChatId(args.ownerKey);
+          const conversationKey = this.requireMcpChatId(args.conversationKey);
           const controller = new AbortController();
           const abort = () => controller.abort();
           signal?.addEventListener("abort", abort, { once: true });
@@ -785,7 +853,8 @@ export class AgentHarness {
           };
           try {
             const session = await McpService.instance.open({
-              chatId,
+              ownerKey,
+              conversationKey,
               profileId: profile.id,
               turnId: args.trace.turnId,
               signal: controller.signal,
@@ -797,8 +866,7 @@ export class AgentHarness {
                 return this.sampleMcp(
                   params,
                   args.settings,
-                  args.chatId,
-                  args.platform,
+                  args.conversationKey,
                   args.trace,
                   toolCallId,
                   sampleCount,
@@ -808,7 +876,7 @@ export class AgentHarness {
               elicit: (params, requestSignal) => forwardElicitation(params, requestSignal),
             });
             const status = await McpRunRegistry.instance.start({
-              chatId,
+              chatId: conversationKey,
               profileId: profile.id,
               inputTimeoutMs: profile.inputTimeoutMs,
               controller,
@@ -824,6 +892,7 @@ export class AgentHarness {
                   signal: AbortSignal.any([runSignal, session.signal]),
                   delegationCount: undefined,
                   mcp: { profile: session.profile, tools: session.tools },
+                  model: undefined,
                 });
                 // Main gets the answer, not the specialist transcript.
                 return {
@@ -850,7 +919,7 @@ export class AgentHarness {
         execute: async (_toolCallId, parameters, signal) => {
           const parsed = validateToolArguments(resumeSchema, parameters);
           const status = await McpRunRegistry.instance.resume(
-            this.requireMcpChatId(args.chatId),
+            this.requireMcpChatId(args.conversationKey),
             parsed.runId,
             { action: parsed.action, content: parsed.content },
             signal,
@@ -866,7 +935,10 @@ export class AgentHarness {
         executionMode: SEQUENTIAL,
         execute: async (_toolCallId, parameters) => {
           const parsed = validateToolArguments(cancelSchema, parameters);
-          await McpRunRegistry.instance.cancel(this.requireMcpChatId(args.chatId), parsed.runId);
+          await McpRunRegistry.instance.cancel(
+            this.requireMcpChatId(args.conversationKey),
+            parsed.runId,
+          );
           return {
             content: [{ type: "text", text: "MCP run cancelled" }],
             details: { status: "cancelled", runId: parsed.runId },
@@ -875,7 +947,10 @@ export class AgentHarness {
       },
     ];
     if (profiles.length === 0) {
-      if (args.chatId === undefined || McpRunRegistry.instance.list(args.chatId).length === 0) {
+      if (
+        args.conversationKey === undefined ||
+        McpRunRegistry.instance.list(args.conversationKey).length === 0
+      ) {
         return [];
       }
       return tools.slice(1);
@@ -907,8 +982,7 @@ export class AgentHarness {
   private async sampleMcp(
     params: CreateMessageRequest["params"],
     settings: TConfigRecord,
-    chatId: TAgentRunArgs["chatId"],
-    platform: TAgentRunArgs["platform"],
+    conversationKey: TAgentRunArgs["conversationKey"],
     trace: TBehaviorTraceContext,
     parentToolCallId: string,
     iteration: number,
@@ -924,7 +998,7 @@ export class AgentHarness {
     );
     const request = createMcpSamplingRequest(params, modelConfig.model);
     const span = startSpan(trace, "model.request.completed", "agent-harness");
-    const sessionId = this.llm.createSessionId(modelConfig.model.provider, chatId, platform);
+    const sessionId = this.llm.createSessionId(modelConfig.model.provider, conversationKey);
     const result = await this.llm.complete(
       modelConfig,
       request.context,

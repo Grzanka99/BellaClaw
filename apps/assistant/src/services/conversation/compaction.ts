@@ -10,6 +10,7 @@ import {
   calculateContextTokens,
   estimateMessageTokens,
 } from "@earendil-works/pi-ai/utils/estimate";
+import { isContextOverflow } from "@earendil-works/pi-ai/utils/overflow";
 import compactionInstructions from "../ai/instructions/compaction.xml" with { type: "text" };
 import { conversationMessages, SAttachmentBlock, type TConversation } from "./types";
 
@@ -28,13 +29,20 @@ function estimateTokens(message: Message): number {
   return estimateMessageTokens(message) + images * IMAGE_TOKENS;
 }
 
-/** Summarize older complete turns without mutating the stored conversation. */
+/**
+ * Summarize older complete turns without mutating the stored conversation.
+ * force: summarize the previous summary and every entry now, whatever their size, as when two
+ * summaries are fused. A forced request that fails on `model` runs once more on `fallback`, since
+ * its input is not bounded by the size trigger and can exceed `model`'s context window.
+ */
 export async function compactConversation(
   state: TConversation,
   models: Models,
   model: Model<Api>,
   fixedTokens: number,
   trace: TBehaviorTraceContext,
+  force: boolean,
+  fallback: Model<Api>,
 ) {
   const messages = conversationMessages(state);
   const estimates = messages.map(estimateTokens);
@@ -49,7 +57,7 @@ export async function compactConversation(
     COMPACTION_TRIGGER,
     model.contextWindow - Math.min(model.maxTokens, SUMMARY_RESERVE) - fixedTokens,
   );
-  if (tokensBefore < trigger) {
+  if (!force && tokensBefore < trigger) {
     return undefined;
   }
   if (tokensBefore >= CONTEXT_SOFT_LIMIT) {
@@ -77,7 +85,7 @@ export async function compactConversation(
   let cut = state.entries.length;
   let tokens = 0;
   // Retain whole user turns, so a tool result never loses its matching call.
-  for (let i = state.entries.length - 1; i >= 0; i -= 1) {
+  for (let i = state.entries.length - 1; i >= 0 && !force; i -= 1) {
     const entry = state.entries[i];
     if (entry === undefined) {
       continue;
@@ -126,28 +134,39 @@ export async function compactConversation(
     }
     return { role: message.role, timestamp: message.timestamp, content };
   });
-  const options = {
-    maxTokens: Math.min(Math.floor(0.8 * SUMMARY_RESERVE), model.maxTokens),
-    signal: AbortSignal.timeout(120_000),
-    // Thinking shares the maxTokens cap and can leave no room for the summary text.
-    reasoning: undefined,
-    cacheRetention: "none",
-    sessionId: crypto.randomUUID(),
-  } satisfies Parameters<Models["completeSimple"]>[2];
-  const result = await models.completeSimple(
-    model,
-    {
-      systemPrompt: compactionInstructions,
-      messages: [
-        {
-          role: "user",
-          content: `Previous summary:\n${state.summary}\n\nConversation:\n${JSON.stringify(conversation)}`,
-          timestamp: Date.now(),
-        },
-      ],
-    },
-    options,
-  );
+  const request = (target: Model<Api>) =>
+    models.completeSimple(
+      target,
+      {
+        systemPrompt: compactionInstructions,
+        messages: [
+          {
+            role: "user",
+            content: `Previous summary:\n${state.summary}\n\nConversation:\n${JSON.stringify(conversation)}`,
+            timestamp: Date.now(),
+          },
+        ],
+      },
+      {
+        maxTokens: Math.min(Math.floor(0.8 * SUMMARY_RESERVE), target.maxTokens),
+        signal: AbortSignal.timeout(120_000),
+        // Thinking shares the maxTokens cap and can leave no room for the summary text.
+        reasoning: undefined,
+        cacheRetention: "none",
+        sessionId: crypto.randomUUID(),
+      },
+    );
+  let result = await request(model);
+  if (
+    force &&
+    fallback.id !== model.id &&
+    (result.stopReason === "error" ||
+      result.stopReason === "aborted" ||
+      // a provider that reports an input above the window as a normal or length stop
+      isContextOverflow(result, model.contextWindow))
+  ) {
+    result = await request(fallback);
+  }
   if (result.stopReason === "error" || result.stopReason === "aborted") {
     throw new Error(result.errorMessage ?? "Conversation summarization failed");
   }
@@ -170,7 +189,7 @@ export async function compactConversation(
   const tokensAfter =
     fixedTokens +
     conversationMessages(compacted).reduce((sum, message) => sum + estimateTokens(message), 0);
-  if (tokensAfter >= tokensBefore) {
+  if (!force && tokensAfter >= tokensBefore) {
     throw new Error("Compaction did not reduce context");
   }
   return { state: compacted, usage: result.usage, tokensBefore, tokensAfter };

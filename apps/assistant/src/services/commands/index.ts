@@ -1,10 +1,12 @@
-import { EEventType } from "@bellaclaw/database";
-import type { TOption } from "@bellaclaw/shared";
+import { EConversationKind, EEventType } from "@bellaclaw/database";
+import { createLogger, type TLogger, type TOption } from "@bellaclaw/shared";
 import { ESubscriptionMode, EventBus, type TEventContext } from "../events";
 import type { TEvent } from "../events/catalog";
+import type { TChatAddress } from "../identity";
+import { MessagingAdapter } from "../messaging";
 import { aiAuthCommand } from "./ai-auth";
 import { calendarAddReadCommand, calendarAddWriteCommand } from "./calendar-add";
-import { dashboardCommand } from "./dashboard";
+import { appCommand, dashboardCommand } from "./dashboard";
 import { mcpAuthCommand } from "./mcp-auth";
 import { mcpPromptCommand, mcpPromptsCommand } from "./mcp-prompts";
 import { COMMAND_PREFIX, type TCommand, type TCommandResult } from "./types";
@@ -19,6 +21,7 @@ const REGISTERED_COMMANDS: TCommand[] = [
   aiAuthCommand,
   updateCommand,
   dashboardCommand,
+  appCommand,
 ];
 
 export function formatCommandList(): string {
@@ -29,6 +32,7 @@ export function formatCommandList(): string {
 
 export async function runCommand(
   chatId: string,
+  address: TChatAddress,
   content: string,
   ctx: TEventContext,
 ): Promise<TOption<TCommandResult>> {
@@ -56,11 +60,12 @@ export async function runCommand(
     return undefined;
   }
 
-  return command.handler(chatId, args, ctx);
+  return command.handler(chatId, args, ctx, address);
 }
 
 export class Commands {
   private static _instance: TOption<Commands>;
+  private logger: TLogger = createLogger("COMMANDS");
 
   private constructor() {}
 
@@ -86,12 +91,42 @@ export class Commands {
     event: TEvent<EEventType.MessageAuthorized>,
     ctx: TEventContext,
   ): Promise<void> {
-    const { chatId, content, attachments, receivedAt, platform } = event.payload;
-    const result = await runCommand(chatId, content, ctx);
+    const { content, attachments, receivedAt, clientMessageId, model, ...origin } = event.payload;
+    let result: TOption<TCommandResult>;
+
+    // NOTE: commands act for the owner: its calendars, credentials and logins; activation is
+    // per address. A plain chat has none: its "!" messages are text for the model
+    if (origin.kind === EConversationKind.Bella) {
+      result = await runCommand(
+        origin.ownerKey,
+        { channel: origin.channel, address: origin.replyAddress },
+        content,
+        ctx,
+      );
+    }
 
     await ctx.complete(async (_tx, emit) => {
       if (typeof result === "string") {
-        emit(EEventType.ReplyReady, { chatId, text: result }, undefined, undefined);
+        emit(
+          EEventType.ReplyReady,
+          {
+            ...origin,
+            text: result,
+            display: { text: result, request: { text: content, receivedAt, clientMessageId } },
+          },
+          undefined,
+          undefined,
+        );
+        return;
+      }
+
+      if (result !== undefined && "confidential" in result) {
+        emit(
+          EEventType.ReplyReady,
+          { ...origin, text: result.confidential, confidential: true },
+          undefined,
+          undefined,
+        );
         return;
       }
 
@@ -104,10 +139,21 @@ export class Commands {
 
       emit(
         EEventType.TurnRequested,
-        { chatId, content: prompt, attachments: images, receivedAt, platform },
+        { ...origin, content: prompt, attachments: images, receivedAt, clientMessageId, model },
         undefined,
         undefined,
       );
     });
+
+    // a command takes no image: nothing references the files its message came with
+    if (result !== undefined) {
+      for (const ref of attachments) {
+        try {
+          await MessagingAdapter.instance.deleteAttachment(ref);
+        } catch (error) {
+          this.logger.warning(`Attachment delete failed: ${String(error)}`);
+        }
+      }
+    }
   }
 }

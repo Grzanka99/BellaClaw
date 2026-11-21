@@ -1,8 +1,7 @@
+import { IMAGE_MARKER } from "@bellaclaw/database";
 import type { Message, TextContent } from "@earendil-works/pi-ai";
 import { z } from "zod";
 import { SAttachmentRef, type TAttachmentRef } from "../messaging/types";
-
-export const IMAGE_MARKER = "[Image]";
 
 // NOTE: a stored user message keeps this block where the image was; each turn fetches the image
 // again, and anything that does not know the block reads it as the marker text

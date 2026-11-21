@@ -2,6 +2,8 @@ import { AppLogger, EBehaviorLogLevel } from "@bellaclaw/behavior-logs";
 import { EEventType } from "@bellaclaw/database";
 import { setupAiAuth } from "./services/ai/auth";
 import { startAiOAuthKeepAlive } from "./services/ai/auth/oauth-keep-alive";
+import { AppChannel } from "./services/app";
+import { AppStream } from "./services/app-stream";
 import { AuthorizationService } from "./services/authorization";
 import { AutomationService } from "./services/automation";
 import { CalendarService } from "./services/calendar";
@@ -9,6 +11,7 @@ import { Commands } from "./services/commands";
 import { CronScheduler } from "./services/cron";
 import { DiscordSingleton } from "./services/discord";
 import { EventBus } from "./services/events";
+import { IdentityService } from "./services/identity";
 import {
   setupInternalApi,
   startInternalApiServer,
@@ -63,9 +66,12 @@ async function init(): Promise<void> {
     setupMcpAuth();
     McpService.instance.setup();
     setupInternalApi();
+    AppStream.instance.setup();
+    await AppChannel.instance.setup();
     if (Bun.env.BELLACLAW_MCP_PUBLIC_URL?.trim()) {
       startMcpAuthServer();
     }
+    await IdentityService.instance.setup();
     await AuthorizationService.instance.setup();
     await Promise.all([
       CalendarService.instance.setup(),

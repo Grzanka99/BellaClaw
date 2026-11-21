@@ -30,7 +30,8 @@ Each profile contains:
 | `transport` | `{ "type": "http", "url": "…", "headers": {} }` or `{ "type": "stdio", "command": "…", "args": [], "env": {} }` |
 | `tools` | Optional explicit list of server tool names; omitted means all discovered tools |
 | `resources`, `prompts`, `sampling` | Capability switches, each enabled by default |
-| `contextArguments` | Map server tool argument names to `chatId` or `turnId`; supplied by the runtime and hidden from the model's argument schema |
+| `plainChats` | Whether the app's plain chats may use the profile; closed by default. Set it to true to let the app's plain chats use the profile. `vault` (personal notes) and `logs` (owner diagnostics) stay closed, so a plain chat has MCP tools only once a profile sets it to true |
+| `contextArguments` | Map server tool argument names to `ownerKey` (the owner of settings, facts and credentials), `conversationKey` (the conversation the specialist serves) or `turnId`; supplied by the runtime and hidden from the model's argument schema |
 | `requestTimeoutMs` | Request timeout allowance, default 120000 |
 | `inputTimeoutMs` | User-input wait allowance, default 900000 |
 

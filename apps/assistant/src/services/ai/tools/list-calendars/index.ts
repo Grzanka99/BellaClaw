@@ -13,6 +13,6 @@ export const listCalendars = defineTool({
   mode: "parallel",
   logSafe: [],
   execute: async (context, _args, signal) => {
-    return CalendarService.instance.listCalendars(requireChatId(context.chatId), signal);
+    return CalendarService.instance.listCalendars(requireChatId(context.ownerKey), signal);
   },
 });

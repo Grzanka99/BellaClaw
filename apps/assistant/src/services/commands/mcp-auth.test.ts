@@ -8,6 +8,7 @@ import { asc, eq } from "drizzle-orm";
 import { DatabaseConnector } from "../database";
 import { resetEventTables } from "../database/test-utils";
 import { EventBus } from "../events";
+import { testMessageOrigin } from "../events/test-utils";
 import { setupMcpAuth } from "../mcp/auth";
 import { EMessagePlatform } from "../messaging/types";
 import { Commands } from ".";
@@ -34,11 +35,10 @@ async function send(content: string) {
     key: chatId,
     trace: { turnId: "test:mcp-auth", chatId, platform: EMessagePlatform.Signal },
     payload: {
-      chatId,
+      ...testMessageOrigin(chatId, EMessagePlatform.Signal),
       content,
       attachments: [],
       receivedAt: Date.now(),
-      platform: EMessagePlatform.Signal,
     },
     causationId: undefined,
     dedupeKey: undefined,
@@ -103,6 +103,34 @@ test("the token command saves through mcp-auth and loses its payload once handle
     { chatId, profileId: "vault" },
   ]);
   expect(await send("!mcp-auth status vault")).toBe("MCP profile vault is connected.");
+  // the token command is confidential: neither it nor its answer is carried for the history
+  expect((await rowsOf(EEventType.ReplyReady)).map((row) => JSON.stringify(row.payload))).toEqual([
+    expect.not.stringContaining("display"),
+    expect.stringContaining('"display"'),
+  ]);
+});
+
+test("a malformed command, a token in it or not, carries nothing for the history", async () => {
+  for (const content of [
+    "!mcp-auth TOKEN vault secret-1",
+    "!mcp-auth Token vault secret-2 extra",
+    "!mcp-auth token vault",
+    "!MCP-AUTH token vault secret-3 extra",
+    "!mcp-auth connect vault secret-4",
+  ]) {
+    expect(await send(content)).toBe(
+      "Usage: !mcp-auth connect|disconnect|status PROFILE or !mcp-auth token PROFILE TOKEN",
+    );
+  }
+
+  const replies = (await rowsOf(EEventType.ReplyReady)).map((row) => JSON.stringify(row.payload));
+  expect(replies).toHaveLength(5);
+  for (const reply of replies) {
+    expect(reply).not.toContain("display");
+    expect(reply).not.toContain("secret-");
+  }
+  expect(await rowsOf(EEventType.McpAuthTokenSaveRequested)).toEqual([]);
+  expect(await rowsOf(EEventType.McpAuthConnectRequested)).toEqual([]);
 });
 
 test("disconnect replies from the outcome and announces the credential change", async () => {

@@ -14,7 +14,8 @@ const args = { fact: " The user likes tea. ", sourceMessage: "I like tea.", supe
 function execute(request: ReturnType<typeof mock>) {
   return rememberMemory
     .createAgentTool({
-      chatId: "discord:1",
+      conversationKey: "discord:1",
+      ownerKey: "discord:2",
       settings: DefaultConfigRecord,
       trace: { turnId: "test", chatId: undefined, platform: undefined },
       events: { ...testEventRequester, request: request as unknown as TEventRequester["request"] },
@@ -39,15 +40,16 @@ describe("SRememberMemoryArgs", () => {
 });
 
 describe("remember-memory", () => {
-  test("requests the trimmed fact on the chat's memory lane", async () => {
-    const request = mock(async () => ({ payload: { chatId: "discord:1", factId: 7 } }));
+  test("requests the trimmed fact for the owner on the conversation's memory lane", async () => {
+    const request = mock(async () => ({ payload: { chatId: "discord:2", factId: 7 } }));
 
     const result = await execute(request);
 
     expect(request).toHaveBeenCalledWith(
       EEventType.MemoryFactRememberRequested,
       {
-        chatId: "discord:1",
+        chatId: "discord:2",
+        conversationKey: "discord:1",
         text: "The user likes tea.",
         sourceMessage: "I like tea.",
         supersedesFactIds: [],

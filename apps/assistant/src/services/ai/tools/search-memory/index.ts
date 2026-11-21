@@ -34,14 +34,15 @@ export const searchMemory = defineTool({
   mode: "parallel",
   logSafe: ["limit"],
   execute: async (context, args) => {
-    const chatId = requireChatId(context.chatId);
+    const conversationKey = requireChatId(context.conversationKey);
+    const ownerKey = requireChatId(context.ownerKey);
     await context.events.request(
       EEventType.MemoryFactsRefreshRequested,
-      {},
+      { ownerKey },
       {
         outcome: EEventType.MemoryFactsRefreshed,
         step: undefined,
-        key: chatId,
+        key: conversationKey,
         timeoutMs: MEMORY_REQUEST_TIMEOUT_MS,
       },
     );
@@ -53,7 +54,7 @@ export const searchMemory = defineTool({
 
     let facts: TFactSearchResult[];
     try {
-      facts = await Memory.instance.searchFacts(chatId, embedding, args.limit ?? DEFAULT_LIMIT);
+      facts = await Memory.instance.searchFacts(ownerKey, embedding, args.limit ?? DEFAULT_LIMIT);
     } catch (error) {
       throw new Error(`Memory search failed: ${String(error)}`);
     }

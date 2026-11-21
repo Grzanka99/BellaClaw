@@ -34,6 +34,7 @@ import calendarInstructions from "./calendar.xml" with { type: "text" };
 import mainInstructions from "./main.xml" with { type: "text" };
 import mcpInstructions from "./mcp.xml" with { type: "text" };
 import memoryInstructions from "./memory.xml" with { type: "text" };
+import plainInstructions from "./plain.xml" with { type: "text" };
 import scheduledTaskInstructions from "./scheduled-task.xml" with { type: "text" };
 import schedulingInstructions from "./scheduling.xml" with { type: "text" };
 import settingsInstructions from "./settings.xml" with { type: "text" };
@@ -44,6 +45,7 @@ export enum EAgentName {
   Main = "main",
   Mcp = "mcp",
   Memory = "memory",
+  Plain = "plain",
   Settings = "settings",
   Scheduling = "scheduling",
   ScheduledTask = "scheduled-task",
@@ -52,6 +54,9 @@ export enum EAgentName {
 type TAgentDefinition = {
   purpose: EModelPurpose;
   maxIterations: number;
+  // false: the agent's instructions stand alone, without the base instructions of Bella's chat
+  // (its persona, commands and scheduled deliveries)
+  base: boolean;
   instructions: string;
   tools: TTool[];
   delegates: EAgentName[];
@@ -67,6 +72,7 @@ export const AGENTS: Record<EAgentName, TAgentDefinition> = {
   [EAgentName.Automations]: {
     purpose: EModelPurpose.SpecialistAccurate,
     maxIterations: 20,
+    base: true,
     instructions: automationsInstructions,
     tools: [
       automationList,
@@ -88,6 +94,7 @@ export const AGENTS: Record<EAgentName, TAgentDefinition> = {
   [EAgentName.Calendar]: {
     purpose: EModelPurpose.SpecialistAccurate,
     maxIterations: 12,
+    base: true,
     instructions: calendarInstructions,
     tools: [
       listCalendars,
@@ -109,6 +116,7 @@ export const AGENTS: Record<EAgentName, TAgentDefinition> = {
   [EAgentName.Main]: {
     purpose: EModelPurpose.Main,
     maxIterations: 30,
+    base: true,
     instructions: mainInstructions,
     tools: WEB_TOOLS,
     delegates: [
@@ -124,6 +132,7 @@ export const AGENTS: Record<EAgentName, TAgentDefinition> = {
   [EAgentName.Mcp]: {
     purpose: EModelPurpose.SpecialistAccurate,
     maxIterations: 12,
+    base: true,
     instructions: mcpInstructions,
     tools: [],
     delegates: [],
@@ -133,6 +142,7 @@ export const AGENTS: Record<EAgentName, TAgentDefinition> = {
   [EAgentName.Memory]: {
     purpose: EModelPurpose.Specialist,
     maxIterations: 12,
+    base: true,
     instructions: memoryInstructions,
     tools: [searchMemory, rememberMemory, forgetMemory],
     delegates: [],
@@ -143,9 +153,23 @@ export const AGENTS: Record<EAgentName, TAgentDefinition> = {
       mode: "parallel",
     },
   },
+  // NOTE: a plain chat of the app: web tools and MCP, no delegates, so no memory, calendar,
+  // scheduling, settings or automations. Only MCP profiles with plainChats true are offered. Its
+  // persona is the account's persona for plain chats, which AgentHarness adds
+  [EAgentName.Plain]: {
+    purpose: EModelPurpose.Main,
+    maxIterations: 30,
+    base: false,
+    instructions: plainInstructions,
+    tools: WEB_TOOLS,
+    delegates: [],
+    mcp: true,
+    delegation: undefined,
+  },
   [EAgentName.Settings]: {
     purpose: EModelPurpose.Specialist,
     maxIterations: 12,
+    base: true,
     instructions: settingsInstructions,
     tools: [getSettings, updateSettings],
     delegates: [],
@@ -158,6 +182,7 @@ export const AGENTS: Record<EAgentName, TAgentDefinition> = {
   [EAgentName.Scheduling]: {
     purpose: EModelPurpose.SpecialistAccurate,
     maxIterations: 12,
+    base: true,
     instructions: schedulingInstructions,
     tools: [
       listCronJobs,
@@ -178,6 +203,7 @@ export const AGENTS: Record<EAgentName, TAgentDefinition> = {
   [EAgentName.ScheduledTask]: {
     purpose: EModelPurpose.ScheduledTask,
     maxIterations: 30,
+    base: true,
     instructions: scheduledTaskInstructions,
     tools: [searchMemory, ...WEB_TOOLS, listCalendarEvents, findCalendarAvailability, listCronJobs],
     delegates: [],

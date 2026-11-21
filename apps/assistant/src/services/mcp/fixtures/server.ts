@@ -57,6 +57,7 @@ export function createFixtureServer() {
             properties: {
               query: { type: "string" },
               chatId: { type: "string" },
+              ownerKey: { type: "string" },
               excludeTurnId: { type: "string" },
               options: {
                 type: "object",

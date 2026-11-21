@@ -8,8 +8,10 @@ import type {
 } from "@modelcontextprotocol/sdk/types.js";
 import type { TMcpProfile } from "./config";
 
+// ownerKey: the owner of the credentials; conversationKey: the conversation the session serves
 export type TMcpOpenArgs = {
-  chatId: string;
+  ownerKey: string;
+  conversationKey?: string;
   profileId: string;
   turnId?: string;
   signal?: AbortSignal;

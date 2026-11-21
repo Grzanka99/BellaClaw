@@ -6,7 +6,8 @@ import { DefaultConfigRecord } from "../../../settings/schema";
 import { unscheduleCronJob } from ".";
 
 const context = {
-  chatId: "discord:1",
+  conversationKey: "discord:1",
+  ownerKey: "discord:1",
   settings: DefaultConfigRecord,
   trace: { turnId: "test", chatId: undefined, platform: undefined },
   events: testEventRequester,

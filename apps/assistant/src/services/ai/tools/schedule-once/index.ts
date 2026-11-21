@@ -71,7 +71,7 @@ export const scheduleOnce = defineTool({
   execute: async (context, args) => {
     const ownerTimezone = context.settings[EConfigKey.AiInstructionsTimezone];
     const { automations, ...validatedArgs } = validateScheduleOnceArgs(args, ownerTimezone);
-    const scope = requireChatId(context.chatId);
+    const scope = requireChatId(context.ownerKey);
     const automationIds = await runAutomationOperation(() =>
       AutomationService.instance.resolveNames(scope, automations),
     );

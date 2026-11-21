@@ -105,7 +105,8 @@ describe("AgentHarness", () => {
     ]);
     const args = {
       prompt: "hello",
-      chatId: "discord:1",
+      conversationKey: "discord:1",
+      ownerKey: "discord:1",
       settings: { ...DefaultConfigRecord, [EConfigKey.AiProvider]: EAiProvider.Openrouter },
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
@@ -165,7 +166,8 @@ describe("AgentHarness", () => {
     const harness = AgentHarness.instance;
     const first = await harness.runMain({
       prompt: "first prompt",
-      chatId: "discord:1",
+      conversationKey: "discord:1",
+      ownerKey: "discord:1",
       settings,
       currentTimeContext: "time one",
       platform: EMessagePlatform.Discord,
@@ -181,7 +183,8 @@ describe("AgentHarness", () => {
     });
     const second = await harness.runMain({
       prompt: "second prompt",
-      chatId: "discord:1",
+      conversationKey: "discord:1",
+      ownerKey: "discord:1",
       settings,
       currentTimeContext: "time two",
       platform: EMessagePlatform.Discord,
@@ -203,6 +206,91 @@ describe("AgentHarness", () => {
     expect(contexts[1]?.messages.filter((message) => message.role === "user")).toMatchObject([
       { role: "user", content: [{ type: "text", text: "time two\n\nsecond prompt" }] },
     ]);
+  });
+
+  test.each([
+    ["Bella", "true", "", "<persona>\nYou are Bella, assistant Bellatrix.\n</persona>"],
+    [
+      "Bella plus text",
+      "true",
+      "Keep it short {{braces}}.",
+      "<persona>\nYou are Bella, assistant Bellatrix.\n\nKeep it short {{braces}}.\n</persona>",
+    ],
+    ["custom", "false", "Keep it short.", "<persona>\nKeep it short.\n</persona>"],
+    ["none", "false", "", undefined],
+  ])("the plain agent's persona in mode %s, and the Bella prompt the same in every mode", async (_mode, useBella, text, persona) => {
+    const harness = AgentHarness.instance as unknown as {
+      createSystemPrompt(args: TAgentRunArgs): Promise<string>;
+    };
+    const settings = {
+      ...DefaultConfigRecord,
+      [EConfigKey.AiInstructionsPersona]:
+        "You are Bella, assistant {{config.ai.instructions.assistantName}}.",
+    };
+    const prompt = (name: EAgentName, plainSettings: typeof settings) =>
+      harness.createSystemPrompt({
+        name,
+        prompt: "Hello",
+        conversationKey: "plain:acct:1",
+        ownerKey: "account:acct",
+        settings: plainSettings,
+        currentTimeContext: undefined,
+        platform: undefined,
+        trace: TEST_TRACE,
+        events: testEventRequester,
+        parentToolCallId: undefined,
+        signal: undefined,
+      });
+    const modeSettings = {
+      ...settings,
+      [EConfigKey.AiPlainChatsUseBellaPersona]: useBella,
+      [EConfigKey.AiPlainChatsPersona]: text,
+    };
+
+    const plain = await prompt(EAgentName.Plain, modeSettings);
+
+    if (persona === undefined) {
+      expect(plain).not.toContain("<persona>");
+      expect(plain).not.toContain("You are Bella");
+    } else {
+      expect(plain.startsWith(`${persona}\n\n<instructions>`)).toBe(true);
+      expect(plain.match(/<persona>/g)).toHaveLength(1);
+    }
+    const bella = await prompt(EAgentName.Main, modeSettings);
+    expect(bella).toBe(await prompt(EAgentName.Main, settings));
+    expect(bella).toContain("You are Bella, assistant Bellatrix.");
+  });
+
+  test("the plain prompt's persona holds the Bella prompt's persona text", async () => {
+    const harness = AgentHarness.instance as unknown as {
+      createSystemPrompt(args: TAgentRunArgs): Promise<string>;
+    };
+    const settings = {
+      ...DefaultConfigRecord,
+      [EConfigKey.AiInstructionsPersona]:
+        "You are {{config.ai.instructions.assistantName}}. Keep {{commands}} literal.",
+    };
+    const prompt = (name: EAgentName) =>
+      harness.createSystemPrompt({
+        name,
+        prompt: "Hello",
+        conversationKey: "plain:acct:1",
+        ownerKey: "account:acct",
+        settings,
+        currentTimeContext: undefined,
+        platform: undefined,
+        trace: TEST_TRACE,
+        events: testEventRequester,
+        parentToolCallId: undefined,
+        signal: undefined,
+      });
+    const persona = (text: string) => text.match(/<persona>\s*([\s\S]*?)\s*<\/persona>/)?.[1];
+
+    const plain = persona(await prompt(EAgentName.Plain));
+    const bella = persona(await prompt(EAgentName.Main));
+
+    expect(plain).toBe("You are Bellatrix. Keep {{commands}} literal.");
+    expect(plain).toBe(bella);
   });
 
   test.each([
@@ -259,7 +347,8 @@ describe("AgentHarness", () => {
 
       const result = await AgentHarness.instance.runMain({
         prompt: "Use docs",
-        chatId,
+        conversationKey: chatId,
+        ownerKey: chatId,
         settings: { ...DefaultConfigRecord, [EConfigKey.AiProvider]: EAiProvider.Openrouter },
         currentTimeContext: undefined,
         platform: EMessagePlatform.Discord,
@@ -322,7 +411,8 @@ describe("AgentHarness", () => {
     const result = await harness.run({
       name: EAgentName.Mcp,
       prompt: "Use the MCP tools",
-      chatId: "discord:1",
+      conversationKey: "discord:1",
+      ownerKey: "discord:1",
       settings: { ...DefaultConfigRecord, [EConfigKey.AiProvider]: EAiProvider.Openrouter },
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
@@ -341,6 +431,7 @@ describe("AgentHarness", () => {
           resources: true,
           prompts: true,
           sampling: true,
+          plainChats: true,
           requestTimeoutMs: 1_000,
           inputTimeoutMs: 1_000,
         },
@@ -366,8 +457,7 @@ describe("AgentHarness", () => {
       sampleMcp(
         request: CreateMessageRequest["params"],
         settings: typeof DefaultConfigRecord,
-        chatId: TOption<string>,
-        platform: TOption<EMessagePlatform>,
+        conversationKey: TOption<string>,
         trace: TBehaviorTraceContext,
         parentToolCallId: string,
         iteration: number,
@@ -385,7 +475,6 @@ describe("AgentHarness", () => {
         },
         { ...DefaultConfigRecord, [EConfigKey.AiProvider]: EAiProvider.Openrouter },
         "discord:1",
-        EMessagePlatform.Discord,
         TEST_TRACE,
         "delegate-call",
         1,
@@ -461,8 +550,7 @@ describe("AgentHarness", () => {
       sampleMcp(
         request: CreateMessageRequest["params"],
         settings: typeof DefaultConfigRecord,
-        chatId: TOption<string>,
-        platform: TOption<EMessagePlatform>,
+        conversationKey: TOption<string>,
         trace: TBehaviorTraceContext,
         parentToolCallId: string,
         iteration: number,
@@ -474,7 +562,6 @@ describe("AgentHarness", () => {
       params,
       { ...DefaultConfigRecord, [EConfigKey.AiProvider]: EAiProvider.Openrouter },
       "discord:1",
-      EMessagePlatform.Discord,
       TEST_TRACE,
       "delegate-call",
       2,
@@ -534,8 +621,7 @@ describe("AgentHarness", () => {
       sampleMcp(
         request: CreateMessageRequest["params"],
         settings: typeof DefaultConfigRecord,
-        chatId: TOption<string>,
-        platform: TOption<EMessagePlatform>,
+        conversationKey: TOption<string>,
         trace: TBehaviorTraceContext,
         parentToolCallId: string,
         iteration: number,
@@ -560,7 +646,6 @@ describe("AgentHarness", () => {
           }),
         },
         "discord:1",
-        EMessagePlatform.Discord,
         TEST_TRACE,
         "delegate-call",
         1,
@@ -604,8 +689,7 @@ describe("AgentHarness", () => {
       sampleMcp(
         request: CreateMessageRequest["params"],
         settings: typeof DefaultConfigRecord,
-        chatId: TOption<string>,
-        platform: TOption<EMessagePlatform>,
+        conversationKey: TOption<string>,
         trace: TBehaviorTraceContext,
         parentToolCallId: string,
         iteration: number,
@@ -633,7 +717,6 @@ describe("AgentHarness", () => {
           }),
         },
         "discord:1",
-        EMessagePlatform.Discord,
         TEST_TRACE,
         "delegate-call",
         1,
@@ -657,9 +740,7 @@ describe("AgentHarness", () => {
       models: [{ id: "grok-4.7", reasoning: true }],
     });
     aiModels.setProvider(opencode.provider);
-    const expectedSessionId = new Bun.CryptoHasher("sha256")
-      .update("discord:discord:1")
-      .digest("hex");
+    const expectedSessionId = new Bun.CryptoHasher("sha256").update("discord:1").digest("hex");
     opencode.setResponses([
       (_context, options) => {
         expect(options?.sessionId).toBe(expectedSessionId);
@@ -671,8 +752,7 @@ describe("AgentHarness", () => {
       sampleMcp(
         request: CreateMessageRequest["params"],
         settings: typeof DefaultConfigRecord,
-        chatId: TOption<string>,
-        platform: TOption<EMessagePlatform>,
+        conversationKey: TOption<string>,
         trace: TBehaviorTraceContext,
         parentToolCallId: string,
         iteration: number,
@@ -687,7 +767,6 @@ describe("AgentHarness", () => {
       },
       { ...DefaultConfigRecord, [EConfigKey.AiProvider]: EAiProvider.OpencodeGo },
       "discord:1",
-      EMessagePlatform.Discord,
       TEST_TRACE,
       "delegate-call",
       1,
@@ -718,7 +797,8 @@ describe("AgentHarness", () => {
     ]);
     const args = {
       prompt: `What do I prefer? ${"background ".repeat(41_000)}`,
-      chatId: "replay-tools",
+      conversationKey: "replay-tools",
+      ownerKey: "replay-tools",
       settings: { ...DefaultConfigRecord, [EConfigKey.AiProvider]: EAiProvider.Openrouter },
       platform: EMessagePlatform.Discord,
       currentTimeContext: "Message received at: 2026-09-10",
@@ -813,7 +893,8 @@ describe("AgentHarness", () => {
 
     const conversation = await AgentHarness.instance.runMain({
       prompt: "hello",
-      chatId: "discord:1",
+      conversationKey: "discord:1",
+      ownerKey: "discord:1",
       settings,
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
@@ -823,7 +904,8 @@ describe("AgentHarness", () => {
     });
     const sameConversation = await AgentHarness.instance.runMain({
       prompt: "hello again",
-      chatId: "discord:1",
+      conversationKey: "discord:1",
+      ownerKey: "discord:1",
       settings,
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
@@ -833,7 +915,8 @@ describe("AgentHarness", () => {
     });
     const otherConversation = await AgentHarness.instance.runMain({
       prompt: "hello elsewhere",
-      chatId: "discord:2",
+      conversationKey: "discord:2",
+      ownerKey: "discord:2",
       settings,
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
@@ -853,9 +936,7 @@ describe("AgentHarness", () => {
     expect(sameConversation.text).toBe("same conversation final");
     expect(otherConversation.text).toBe("other conversation final");
     expect(direct).toBe("direct final");
-    const expectedConversationId = new Bun.CryptoHasher("sha256")
-      .update("discord:discord:1")
-      .digest("hex");
+    const expectedConversationId = new Bun.CryptoHasher("sha256").update("discord:1").digest("hex");
 
     expect(sessionIds[0]).toBe(expectedConversationId);
     expect(sessionIds[0]).toBe(sessionIds[1]);
@@ -873,9 +954,7 @@ describe("AgentHarness", () => {
       models: [{ id: "grok-4.7", reasoning: true }],
     });
     aiModels.setProvider(opencode.provider);
-    const expectedSessionId = new Bun.CryptoHasher("sha256")
-      .update("discord:discord:1")
-      .digest("hex");
+    const expectedSessionId = new Bun.CryptoHasher("sha256").update("discord:1").digest("hex");
     opencode.setResponses([
       (_context, options) => {
         expect(options?.headers?.["x-opencode-session"]).toBe(expectedSessionId);
@@ -898,9 +977,12 @@ describe("AgentHarness", () => {
       state,
       { ...DefaultConfigRecord, [EConfigKey.AiProvider]: EAiProvider.OpencodeGo },
       "discord:1",
+      "discord:1",
       EMessagePlatform.Discord,
       TEST_TRACE,
       testEventRequester,
+      false,
+      undefined,
     );
 
     expect(result?.state.summary).toBe("Earlier context summarized.");
@@ -939,7 +1021,8 @@ describe("AgentHarness", () => {
     const settings = { ...DefaultConfigRecord, [EConfigKey.AiProvider]: provider };
     const args = {
       prompt: "Hello",
-      chatId: "chat-1",
+      conversationKey: "chat-1",
+      ownerKey: "chat-1",
       settings,
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
@@ -950,7 +1033,7 @@ describe("AgentHarness", () => {
     try {
       await AgentHarness.instance.runMain(args);
       await AgentHarness.instance.runMain(args);
-      await AgentHarness.instance.runMain({ ...args, chatId: "chat-2" });
+      await AgentHarness.instance.runMain({ ...args, conversationKey: "chat-2" });
       await AgentHarness.instance.runMain({ ...args, platform: EMessagePlatform.Signal });
       await LlmClient.instance.completeText({
         prompt: "Utility work",
@@ -972,7 +1055,8 @@ describe("AgentHarness", () => {
       expect(sessions[1]).toBe(sessions[0]);
       expect(sessions[2]).toBe(sessions[0]);
       expect(sessions[3]).not.toBe(sessions[0]);
-      expect(sessions[4]).not.toBe(sessions[0]);
+      // the conversation alone names the session, not the channel
+      expect(sessions[4]).toBe(sessions[0]);
       expect(sessions[5]).toBe(sessions[0]);
       expect(sessions[6]).toMatch(/^[0-9a-f-]{36}$/);
       if (provider === EAiProvider.Openrouter) {
@@ -1028,7 +1112,8 @@ describe("AgentHarness", () => {
     try {
       await AgentHarness.instance.runMain({
         prompt: "Check my notes",
-        chatId: "discord:1",
+        conversationKey: "discord:1",
+        ownerKey: "discord:1",
         settings: { ...DefaultConfigRecord, [EConfigKey.AiProvider]: EAiProvider.Openrouter },
         currentTimeContext: undefined,
         platform: EMessagePlatform.Discord,
@@ -1075,7 +1160,8 @@ describe("AgentHarness", () => {
     try {
       await AgentHarness.instance.runMain({
         prompt: "Append to my note every minute",
-        chatId: "discord:1",
+        conversationKey: "discord:1",
+        ownerKey: "discord:1",
         settings: { ...DefaultConfigRecord, [EConfigKey.AiProvider]: EAiProvider.Openrouter },
         currentTimeContext: undefined,
         platform: EMessagePlatform.Discord,
@@ -1109,7 +1195,8 @@ describe("AgentHarness", () => {
     ]);
     const args = {
       prompt: "Remind me tomorrow",
-      chatId: "discord:1",
+      conversationKey: "discord:1",
+      ownerKey: "discord:1",
       settings: { ...DefaultConfigRecord, [EConfigKey.AiProvider]: EAiProvider.Openrouter },
       currentTimeContext: "Message received at:\nUTC: 2026-09-10T10:00:00.000Z",
       platform: EMessagePlatform.Discord,
@@ -1159,7 +1246,8 @@ describe("AgentHarness", () => {
     ]);
     const args = {
       prompt: "hello",
-      chatId: "discord:1",
+      conversationKey: "discord:1",
+      ownerKey: "discord:1",
       settings: {
         ...DefaultConfigRecord,
         [EConfigKey.AiProvider]: EAiProvider.Openrouter,
@@ -1187,7 +1275,8 @@ describe("AgentHarness", () => {
 
     const result = await AgentHarness.instance.runMain({
       prompt: "cancelled",
-      chatId: "discord:1",
+      conversationKey: "discord:1",
+      ownerKey: "discord:1",
       settings: {
         ...DefaultConfigRecord,
         [EConfigKey.AiProvider]: EAiProvider.Openrouter,
@@ -1212,7 +1301,8 @@ describe("AgentHarness", () => {
 
     const root = await AgentHarness.instance.runMain({
       prompt: "loop",
-      chatId: "discord:1",
+      conversationKey: "discord:1",
+      ownerKey: "discord:1",
       settings: {
         ...DefaultConfigRecord,
         [EConfigKey.AiProvider]: EAiProvider.Openrouter,
@@ -1236,7 +1326,8 @@ describe("AgentHarness", () => {
       run(args: {
         name: EAgentName;
         prompt: string;
-        chatId: string;
+        conversationKey: string;
+        ownerKey: string;
         settings: typeof DefaultConfigRecord;
         currentTimeContext: undefined;
         platform: EMessagePlatform;
@@ -1250,7 +1341,8 @@ describe("AgentHarness", () => {
     const specialist = await run.run({
       name: EAgentName.Memory,
       prompt: "loop",
-      chatId: "discord:1",
+      conversationKey: "discord:1",
+      ownerKey: "discord:1",
       settings: {
         ...DefaultConfigRecord,
         [EConfigKey.AiProvider]: EAiProvider.Openrouter,
@@ -1277,7 +1369,8 @@ describe("AgentHarness", () => {
 
     const result = await AgentHarness.instance.runMain({
       prompt: "refuse final",
-      chatId: "discord:1",
+      conversationKey: "discord:1",
+      ownerKey: "discord:1",
       settings: {
         ...DefaultConfigRecord,
         [EConfigKey.AiProvider]: EAiProvider.Openrouter,
@@ -1306,7 +1399,8 @@ describe("AgentHarness", () => {
 
     const result = await AgentHarness.instance.runMain({
       prompt: "fail after tool",
-      chatId: "discord:1",
+      conversationKey: "discord:1",
+      ownerKey: "discord:1",
       settings: {
         ...DefaultConfigRecord,
         [EConfigKey.AiProvider]: EAiProvider.Openrouter,
@@ -1340,7 +1434,8 @@ describe("AgentHarness", () => {
 
     const pending = AgentHarness.instance.runMain({
       prompt: "cancel active",
-      chatId: "discord:1",
+      conversationKey: "discord:1",
+      ownerKey: "discord:1",
       settings: {
         ...DefaultConfigRecord,
         [EConfigKey.AiProvider]: EAiProvider.Openrouter,
@@ -1374,7 +1469,8 @@ describe("AgentHarness", () => {
 
     const result = await AgentHarness.instance.runMain({
       prompt: "repeat",
-      chatId: "discord:1",
+      conversationKey: "discord:1",
+      ownerKey: "discord:1",
       settings: {
         ...DefaultConfigRecord,
         [EConfigKey.AiProvider]: EAiProvider.Openrouter,
@@ -1411,7 +1507,8 @@ describe("AgentHarness", () => {
 
     const result = await AgentHarness.instance.runMain({
       prompt: "repeat nested",
-      chatId: "discord:1",
+      conversationKey: "discord:1",
+      ownerKey: "discord:1",
       settings: {
         ...DefaultConfigRecord,
         [EConfigKey.AiProvider]: EAiProvider.Openrouter,
@@ -1458,7 +1555,8 @@ describe("AgentHarness", () => {
 
     const result = await AgentHarness.instance.runMain({
       prompt: "Use memory and settings",
-      chatId: "discord:1",
+      conversationKey: "discord:1",
+      ownerKey: "discord:1",
       settings: {
         ...DefaultConfigRecord,
         [EConfigKey.AiProvider]: EAiProvider.Openrouter,
@@ -1498,7 +1596,8 @@ describe("AgentHarness", () => {
 
     const result = await AgentHarness.instance.runMain({
       prompt: "Recall the date, then schedule it",
-      chatId: "discord:1",
+      conversationKey: "discord:1",
+      ownerKey: "discord:1",
       settings: {
         ...DefaultConfigRecord,
         [EConfigKey.AiProvider]: EAiProvider.Openrouter,
@@ -1534,7 +1633,8 @@ describe("AgentHarness", () => {
     const base = {
       name: EAgentName.Main,
       prompt: "original",
-      chatId: "discord:1",
+      conversationKey: "discord:1",
+      ownerKey: "discord:1",
       settings: DefaultConfigRecord,
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
@@ -1643,7 +1743,8 @@ describe("AgentHarness", () => {
     try {
       await AgentHarness.instance.runMain({
         prompt: "Recall alpha",
-        chatId: "discord:1",
+        conversationKey: "discord:1",
+        ownerKey: "discord:1",
         settings,
         currentTimeContext: undefined,
         platform: EMessagePlatform.Discord,
@@ -1744,7 +1845,8 @@ describe("AgentHarness", () => {
 
     await AgentHarness.instance.runMain({
       prompt: "What did project alpha use?",
-      chatId: "discord:1",
+      conversationKey: "discord:1",
+      ownerKey: "discord:1",
       settings,
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,
@@ -1828,7 +1930,8 @@ describe("AgentHarness", () => {
 
     await AgentHarness.instance.runMain({
       prompt: "Test tool failure",
-      chatId: "discord:1",
+      conversationKey: "discord:1",
+      ownerKey: "discord:1",
       settings,
       currentTimeContext: undefined,
       platform: EMessagePlatform.Discord,

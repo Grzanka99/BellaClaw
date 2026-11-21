@@ -14,6 +14,7 @@ import { DatabaseConnector, type TDatabaseTransaction } from "../database";
 import { EmbeddingClient } from "../embedding";
 import { commandFailed, ESubscriptionMode, EventBus, type TEventContext } from "../events";
 import type { TEvent } from "../events/catalog";
+import { EIdentityLinkOwner } from "../identity/schema";
 import {
   SPreparedFact,
   type TFact,
@@ -135,30 +136,92 @@ export class Memory {
       mode: ESubscriptionMode.Durable,
       backoffMs: [1_000, 5_000, 30_000],
       handler: async (event, ctx) => {
-        const { chatId, messageIds } = event.payload;
+        const { messageIds } = event.payload;
 
+        // NOTE: found by source alone, since message ids are unique across chats, and forgotten
+        // under the owner key on each fact, which a link may have changed since the message
         await ctx.complete(async (tx, emit) => {
           const facts = await tx
-            .select({ id: factsTable.id })
+            .select({ id: factsTable.id, chatId: factsTable.chatId })
             .from(factsTable)
             .where(
               and(
-                eq(factsTable.chatId, chatId),
                 inArray(factsTable.sourceMessageId, messageIds),
                 isNull(factsTable.supersededBy),
                 isNull(factsTable.forgottenAt),
               ),
             );
+          const byOwner = Map.groupBy(facts, (fact) => fact.chatId);
 
-          if (facts.length === 0) {
-            return;
+          for (const [chatId, owned] of byOwner) {
+            const factIds = owned.map((fact) => fact.id);
+            await this.forgetFacts(tx, chatId, factIds);
+            emit(EEventType.MemoryFactsForgotten, { chatId, factIds }, chatId, undefined);
           }
-
-          const factIds = facts.map((fact) => fact.id);
-          await this.forgetFacts(tx, chatId, factIds);
-          emit(EEventType.MemoryFactsForgotten, { chatId, factIds }, undefined, undefined);
         });
       },
+    });
+  }
+
+  // NOTE: the address's facts join the account's, and the two distillation checkpoints join as the
+  // higher of them. Both transcripts must be drained to their ends first, so no row of either is
+  // skipped or distilled again; one that gained a row since its drain fails the move
+  public async moveLinkedFacts(
+    event: TEvent<EEventType.IdentityLinkSettled>,
+    ctx: TEventContext,
+  ): Promise<void> {
+    const { chatKey, conversationKey, ownerKey } = event.payload;
+
+    await ctx.complete(async (tx, emit) => {
+      await tx.update(factsTable).set({ chatId: ownerKey }).where(eq(factsTable.chatId, chatKey));
+      const states = await tx
+        .select()
+        .from(factDistillationStateTable)
+        .where(inArray(factDistillationStateTable.chatId, [chatKey, conversationKey]));
+
+      for (const chatId of [chatKey, conversationKey]) {
+        const through =
+          states.find((state) => state.chatId === chatId)?.lastProcessedMessageId ?? 0;
+        const undistilled = await tx
+          .select({ id: memoriesTable.id })
+          .from(memoriesTable)
+          .where(
+            and(
+              eq(memoriesTable.chatId, chatId),
+              eq(memoriesTable.kind, "message"),
+              gt(memoriesTable.id, through),
+            ),
+          )
+          .limit(1)
+          .get();
+
+        if (undistilled !== undefined) {
+          throw new Error(`The transcript of ${chatId} gained rows after its fact drain`);
+        }
+      }
+
+      // the account's checkpoint stays as it is when the address has none
+      if (states.some((state) => state.chatId === chatKey)) {
+        await tx
+          .delete(factDistillationStateTable)
+          .where(eq(factDistillationStateTable.chatId, chatKey));
+        const joined = {
+          lastProcessedMessageId: Math.max(...states.map((state) => state.lastProcessedMessageId)),
+          updatedAt: new Date(),
+        };
+        await tx
+          .insert(factDistillationStateTable)
+          .values({ chatId: conversationKey, ...joined })
+          .onConflictDoUpdate({ target: factDistillationStateTable.chatId, set: joined });
+      }
+
+      // on the account's lane, where Conversation's move follows
+      emit(
+        EEventType.IdentityLinkMoved,
+        { ...event.payload, owner: EIdentityLinkOwner.Memory },
+        undefined,
+        conversationKey,
+      );
     });
   }
 
@@ -218,6 +281,7 @@ export class Memory {
   public async rememberFact(
     tx: TDatabaseTransaction,
     chatId: string,
+    conversationKey: string,
     text: string,
     sourceMessage: string,
     embedding: number[],
@@ -244,7 +308,8 @@ export class Memory {
       .from(memoriesTable)
       .where(
         and(
-          eq(memoriesTable.chatId, chatId),
+          eq(memoriesTable.chatId, conversationKey),
+          eq(memoriesTable.kind, "message"),
           eq(memoriesTable.author, ERole.User),
           eq(memoriesTable.message, sourceMessage),
         ),
@@ -274,7 +339,7 @@ export class Memory {
     event: TEvent<EEventType.MemoryFactRememberRequested>,
     ctx: TEventContext,
   ): Promise<void> {
-    const { chatId, text, sourceMessage, supersedesFactIds } = event.payload;
+    const { chatId, conversationKey, text, sourceMessage, supersedesFactIds } = event.payload;
     const embedding = await EmbeddingClient.instance.embed(text);
 
     if (embedding === undefined) {
@@ -292,6 +357,7 @@ export class Memory {
         const fact = await this.rememberFact(
           tx,
           chatId,
+          conversationKey,
           text,
           sourceMessage,
           embedding,
@@ -510,7 +576,7 @@ export class Memory {
 
         const insertedFacts: TFact[] = [];
         for (const preparedFact of parsedFacts.data) {
-          insertedFacts.push(await insertFact(tx, args.chatId, preparedFact, now));
+          insertedFacts.push(await insertFact(tx, args.ownerKey, preparedFact, now));
         }
 
         return {

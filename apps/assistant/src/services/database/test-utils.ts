@@ -1,4 +1,7 @@
+import { identityLinksTable } from "@bellaclaw/database";
 import { sql } from "drizzle-orm";
+import { EIdentityLinkState } from "../identity/schema";
+import { EMessagePlatform } from "../messaging/types";
 import { DatabaseConnector } from "./index";
 
 export async function resetCronEngineJobsTable() {
@@ -54,4 +57,27 @@ export async function resetEventTables() {
   await db.run(sql`DELETE FROM event_deliveries`);
   await db.run(sql`DELETE FROM events`);
   await db.run(sql`DELETE FROM sqlite_sequence WHERE name = 'events'`);
+}
+
+export async function resetIdentityLinksTable() {
+  if (Bun.env.BELLACLAW_DATABASE_MODE !== "test" && Bun.env.NODE_ENV !== "test") {
+    throw new Error("resetIdentityLinksTable can only run in test database mode");
+  }
+
+  const db = DatabaseConnector.instance.database;
+
+  await db.run(sql`DELETE FROM identity_links`);
+}
+
+// an address linked to an account, active since a fixed time
+export async function linkTestAddress(
+  address: string,
+  accountId: string,
+  channel = EMessagePlatform.Signal,
+  state = EIdentityLinkState.Active,
+  linkedAt = 1_000,
+) {
+  await DatabaseConnector.instance.database
+    .insert(identityLinksTable)
+    .values({ channel, address, accountId, state, linkedAt: new Date(linkedAt) });
 }

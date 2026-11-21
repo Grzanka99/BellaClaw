@@ -105,8 +105,10 @@ export async function generateReminderText(
   }
 }
 
+// conversationKey: the conversation the task's message is delivered to; the job's scope is its owner
 export async function generateScheduledTaskText(
   ctx: TCronFiredPayload,
+  conversationKey: string,
   platform: TOption<EMessagePlatform>,
   ai: TScheduledTaskAi,
   events: TEventRequester,
@@ -144,7 +146,8 @@ export async function generateScheduledTaskText(
     const result = await ai.runScheduledTask({
       prompt,
       currentTimeContext: `Scheduled firing context JSON:\n${JSON.stringify(createFiringContext(new Date(ctx.nextRunAt), timezone))}`,
-      chatId: ctx.scope,
+      conversationKey,
+      ownerKey: ctx.scope,
       settings,
       platform,
       trace,

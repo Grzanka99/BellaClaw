@@ -7,6 +7,7 @@ import {
   memoriesTable,
   type TSelectMemory,
 } from "@bellaclaw/database";
+import type { TOption } from "@bellaclaw/shared";
 import type { Message } from "@earendil-works/pi-ai";
 import {
   fauxAssistantMessage,
@@ -29,11 +30,11 @@ import { DatabaseConnector, type TDatabaseHandle } from "../database";
 import { resetEventTables } from "../database/test-utils";
 import { EmbeddingClient } from "../embedding";
 import { EventBus } from "../events";
-import { testEventRequester } from "../events/test-utils";
+import { testEventRequester, testMessageOrigin } from "../events/test-utils";
 import { Memory } from "../memory";
 import { FactDistiller } from "../memory/distill";
 import { MessagingAdapter } from "../messaging";
-import { EMessagePlatform } from "../messaging/types";
+import { EMessagePlatform, type TAttachmentRef } from "../messaging/types";
 import { SettingsService } from "../settings";
 import { DefaultConfigRecord, EConfigKey } from "../settings/schema";
 import { MessageHandler } from ".";
@@ -121,23 +122,31 @@ function mockConversationStore() {
       async (
         _db: TDatabaseHandle,
         chatId: string,
+        channel: EMessagePlatform,
         author: ERole,
         message: string,
         createdAt: Date,
+        clientMessageId: TOption<string>,
+        _attachments: TAttachmentRef[],
       ): Promise<TSelectMemory> => ({
         id: 100,
         chatId,
+        channel,
         author,
         message,
         modelMessage: null,
         kind: "message",
         createdAt,
+        clientMessageId: clientMessageId ?? null,
+        attachments: null,
       }),
     ),
+    raiseRevision: mock(async () => 1),
     saveTurn: mock(
       async (
         _db: TDatabaseHandle,
         _chatId: string,
+        _channel: EMessagePlatform,
         messages: Message[],
         _userId?: number,
         previous?: TConversation,
@@ -200,7 +209,12 @@ function requestTurn(chatId: string, content: string, receivedAt = Date.now()) {
     source: "test",
     key: chatId,
     trace: { ...TEST_TRACE, chatId },
-    payload: { chatId, content, attachments: [], receivedAt, platform: EMessagePlatform.Discord },
+    payload: {
+      ...testMessageOrigin(chatId, EMessagePlatform.Discord),
+      content,
+      attachments: [],
+      receivedAt,
+    },
     causationId: undefined,
     dedupeKey: undefined,
   });
@@ -270,7 +284,12 @@ describe("MessageHandler", () => {
     internals.conversations.saveUserMessage = mock(
       (...args: Parameters<typeof store.saveUserMessage>) => store.saveUserMessage(...args),
     );
-    await internals.conversations.saveTurn(DatabaseConnector.instance.database, chatId, []);
+    await internals.conversations.saveTurn(
+      DatabaseConnector.instance.database,
+      chatId,
+      EMessagePlatform.Discord,
+      [],
+    );
     const firstArrival = new Date("2026-07-24T21:59:50.000Z");
     const secondArrival = new Date("2026-07-24T21:59:55.000Z");
     const processingTime = new Date("2026-07-24T22:00:10.000Z");
@@ -356,15 +375,24 @@ describe("MessageHandler", () => {
     const saved: TSelectMemory[] = [];
     let savedAt = new Date("2026-09-10T10:00:00.123Z");
     internals.conversations.saveUserMessage = mock(
-      async (_db: TDatabaseHandle, chatId: string, author: ERole, message: string) => {
+      async (
+        _db: TDatabaseHandle,
+        chatId: string,
+        channel: EMessagePlatform,
+        author: ERole,
+        message: string,
+      ) => {
         const row: TSelectMemory = {
           id: saved.length + 1,
           chatId,
+          channel,
           author,
           message,
           modelMessage: null,
           kind: "message",
           createdAt: savedAt,
+          clientMessageId: null,
+          attachments: null,
         };
         saved.push(row);
         return row;
@@ -440,7 +468,12 @@ describe("MessageHandler", () => {
     });
     internals.conversations = ConversationStore.instance as never;
     internals.ai.runMain = mock((args) => AgentHarness.instance.runMain(args));
-    const ref = { id: "message-1:attachment-1", mimeType: "image/png" };
+    const ref = {
+      id: "message-1:attachment-1",
+      mimeType: "image/png",
+      channel: EMessagePlatform.Discord,
+      sourceAddress: "image-turn",
+    };
     const image = { type: "image", data: "AQID", mimeType: "image/png" };
 
     try {
@@ -450,11 +483,10 @@ describe("MessageHandler", () => {
         key: chatId,
         trace: { ...TEST_TRACE, chatId },
         payload: {
-          chatId,
+          ...testMessageOrigin(chatId, EMessagePlatform.Discord),
           content: "What is this?",
           attachments: [ref],
           receivedAt: Date.now(),
-          platform: EMessagePlatform.Discord,
         },
         causationId: undefined,
         dedupeKey: undefined,
@@ -466,7 +498,7 @@ describe("MessageHandler", () => {
       // the next turn fetches the image in the history again
       expect(JSON.stringify(requests[1]?.messages)).toContain(JSON.stringify(image));
       expect(fetchAttachment).toHaveBeenCalledTimes(2);
-      expect(fetchAttachment).toHaveBeenCalledWith("image-turn", ref, 5 * 1024 * 1024);
+      expect(fetchAttachment).toHaveBeenCalledWith(ref, 5 * 1024 * 1024);
 
       const rows = await DatabaseConnector.instance.database
         .select()
@@ -511,7 +543,9 @@ describe("MessageHandler", () => {
 
     await requestTurn(chatId, "first");
     await waitForCall(internals.ai.compactConversation, 1);
-    expect(await payloadsOf(EEventType.ReplyReady)).toEqual([{ chatId, text: "Final answer" }]);
+    expect(await payloadsOf(EEventType.ReplyReady)).toEqual([
+      { ...testMessageOrigin(chatId, EMessagePlatform.Discord), text: "Final answer" },
+    ]);
     expect(await deliveryStatus(EEventType.TurnRequested, "conversation")).toEqual(["done"]);
 
     await requestTurn(chatId, "second");
@@ -575,9 +609,15 @@ describe("MessageHandler", () => {
     expect(internals.ai.runMain).not.toHaveBeenCalled();
     expect(internals.conversations.saveUserMessage).toHaveBeenCalledTimes(1);
     expect(await payloadsOf(EEventType.ReplyReady)).toEqual([
-      { chatId, text: "Something went wrong." },
+      {
+        ...testMessageOrigin(chatId, EMessagePlatform.Discord),
+        text: "Something went wrong.",
+        display: { text: "Something went wrong." },
+      },
     ]);
-    expect(await payloadsOf(EEventType.TurnFailed)).toEqual([{ chatId, reason: "error" }]);
+    expect(await payloadsOf(EEventType.TurnFailed)).toEqual([
+      { ...testMessageOrigin(chatId, EMessagePlatform.Discord), reason: "error" },
+    ]);
     expect(await payloadsOf(EEventType.TurnStarted)).toEqual([]);
     expect(await payloadsOf(EEventType.TurnCompleted)).toEqual([]);
     expect(memory.loadLiveFactWindow).not.toHaveBeenCalled();
@@ -593,9 +633,15 @@ describe("MessageHandler", () => {
     await turn(chatId, "hello");
 
     expect(await payloadsOf(EEventType.ReplyReady)).toEqual([
-      { chatId, text: "Something went wrong." },
+      {
+        ...testMessageOrigin(chatId, EMessagePlatform.Discord),
+        text: "Something went wrong.",
+        display: { text: "Something went wrong." },
+      },
     ]);
-    expect(await payloadsOf(EEventType.TurnFailed)).toEqual([{ chatId, reason: "error" }]);
+    expect(await payloadsOf(EEventType.TurnFailed)).toEqual([
+      { ...testMessageOrigin(chatId, EMessagePlatform.Discord), reason: "error" },
+    ]);
     expect(await payloadsOf(EEventType.TurnCompleted)).toEqual([]);
     expect(await deliveryStatus(EEventType.TurnRequested, "conversation")).toEqual(["done"]);
     expect(memory.loadLiveFactWindow).not.toHaveBeenCalled();
@@ -647,7 +693,8 @@ describe("MessageHandler", () => {
       await waitForCall(memory.loadLiveFactWindow, 1);
       const search = searchMemory
         .createAgentTool({
-          chatId,
+          conversationKey: chatId,
+          ownerKey: chatId,
           settings: DefaultConfigRecord,
           trace: TEST_TRACE,
           events: testEventRequester,
@@ -766,10 +813,14 @@ describe("MessageHandler", () => {
     await turn(chatId, "hello");
 
     expect(await payloadsOf(EEventType.ReplyReady)).toEqual([
-      { chatId, text: "Something went wrong." },
+      {
+        ...testMessageOrigin(chatId, EMessagePlatform.Discord),
+        text: "Something went wrong.",
+        display: { text: "Something went wrong." },
+      },
     ]);
     expect(await payloadsOf(EEventType.TurnFailed)).toEqual([
-      { chatId, reason: "no_final_response" },
+      { ...testMessageOrigin(chatId, EMessagePlatform.Discord), reason: "no_final_response" },
     ]);
     expect(internals.conversations.saveUserMessage).toHaveBeenCalledTimes(1);
     expect(internals.conversations.saveTurn).not.toHaveBeenCalled();
@@ -794,7 +845,11 @@ describe("MessageHandler", () => {
     await turn(chatId, "hello");
 
     expect(await payloadsOf(EEventType.ReplyReady)).toEqual([
-      { chatId, text: "opencode-go is not connected. Run !ai-auth login opencode-go." },
+      {
+        ...testMessageOrigin(chatId, EMessagePlatform.Discord),
+        text: "opencode-go is not connected. Run !ai-auth login opencode-go.",
+        display: { text: "opencode-go is not connected. Run !ai-auth login opencode-go." },
+      },
     ]);
   });
 
@@ -840,7 +895,9 @@ describe("MessageHandler", () => {
       "I was restarted while answering, so that reply is lost. Some actions may already be done. Check before asking again.";
     expect(runMain).not.toHaveBeenCalled();
     expect(sendText.mock.calls).toEqual([[chatId.slice("discord:".length), interrupted]]);
-    expect(await payloadsOf(EEventType.TurnFailed)).toEqual([{ chatId, reason: "interrupted" }]);
+    expect(await payloadsOf(EEventType.TurnFailed)).toEqual([
+      { ...testMessageOrigin(chatId, EMessagePlatform.Discord), reason: "interrupted" },
+    ]);
     const memories = await DatabaseConnector.instance.database
       .select()
       .from(memoriesTable)

@@ -6,6 +6,7 @@ import type { TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
 import type { TOption } from "@bellaclaw/shared";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { testEventRequester } from "../../events/test-utils";
+import { loadMcpProfiles } from "../../mcp/config";
 import { DefaultConfigRecord } from "../../settings/schema";
 import { AgentHarness } from "../agent-harness";
 import type { TAgentRunArgs } from "../agent-harness/types";
@@ -51,6 +52,7 @@ const EXPECTED_TOOL_NAMES: Record<EAgentName, readonly string[]> = {
   ],
   [EAgentName.Mcp]: [],
   [EAgentName.Memory]: ["search-memory", "remember-memory", "forget-memory"],
+  [EAgentName.Plain]: ["web-search", "web-fetch"],
   [EAgentName.Settings]: ["get-settings", "update-settings"],
   [EAgentName.Scheduling]: [
     "list-cron-jobs",
@@ -95,7 +97,8 @@ describe("agent permissions", () => {
         const tools = await harness.createTools({
           name,
           prompt: "test",
-          chatId: "discord:1",
+          conversationKey: "discord:1",
+          ownerKey: "discord:1",
           settings: DefaultConfigRecord,
           currentTimeContext: undefined,
           platform: undefined,
@@ -154,7 +157,8 @@ describe("agent permissions", () => {
       const configuredTools = await harness.createTools({
         name: EAgentName.Main,
         prompt: "test",
-        chatId: "discord:1",
+        conversationKey: "discord:1",
+        ownerKey: "discord:1",
         settings: DefaultConfigRecord,
         currentTimeContext: undefined,
         platform: undefined,
@@ -174,6 +178,90 @@ describe("agent permissions", () => {
         expect(configuredTools.find((tool) => tool.name === name)?.executionMode).toBe(
           "sequential",
         );
+      }
+    } finally {
+      if (previousConfigPath === undefined) {
+        delete Bun.env.BELLACLAW_MCP_CONFIG;
+      } else {
+        Bun.env.BELLACLAW_MCP_CONFIG = previousConfigPath;
+      }
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("the plain agent has web tools and MCP, with no memory, calendar, scheduling, settings or automation tool and no profile closed to plain chats", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "bellaclaw-permissions-"));
+    const configPath = join(directory, "mcp.json");
+    const previousConfigPath = Bun.env.BELLACLAW_MCP_CONFIG;
+    const harness = AgentHarness.instance as unknown as {
+      createTools(
+        args: TAgentRunArgs & { delegationCount: TOption<() => void> },
+      ): Promise<AgentTool[]>;
+    };
+
+    try {
+      // the repository's profiles leave plainChats out, so vault and logs are closed to plain chats
+      delete Bun.env.BELLACLAW_MCP_CONFIG;
+      const production = await loadMcpProfiles();
+      expect(production.map((profile) => [profile.id, profile.plainChats]).sort()).toEqual([
+        ["logs", false],
+        ["vault", false],
+      ]);
+
+      Bun.env.BELLACLAW_MCP_CONFIG = configPath;
+      await Bun.write(
+        configPath,
+        JSON.stringify({
+          profiles: [
+            ...production,
+            {
+              id: "notes",
+              description: "Personal notes",
+              instructions: "Use the server for notes",
+              transport: { type: "stdio", command: "fixture" },
+            },
+            {
+              id: "files",
+              description: "File operations",
+              instructions: "Use the server for file operations",
+              transport: { type: "stdio", command: "fixture" },
+              plainChats: true,
+            },
+          ],
+        }),
+      );
+      const tools = await harness.createTools({
+        name: EAgentName.Plain,
+        prompt: "test",
+        conversationKey: "plain:acct-1:chat-1",
+        ownerKey: "account:acct-1",
+        settings: DefaultConfigRecord,
+        currentTimeContext: undefined,
+        platform: undefined,
+        trace: TEST_TRACE,
+        events: testEventRequester,
+        parentToolCallId: undefined,
+        signal: undefined,
+        delegationCount: () => undefined,
+      });
+
+      expect(tools.map((tool) => tool.name)).toEqual([
+        "web-search",
+        "web-fetch",
+        "delegate-mcp",
+        "resume-mcp",
+        "cancel-mcp",
+      ]);
+      const delegate = tools.find((tool) => tool.name === "delegate-mcp");
+      expect(delegate?.description).toContain("files: File operations");
+      expect(delegate?.description).not.toContain("vault");
+      expect(delegate?.description).not.toContain("logs");
+      expect(delegate?.description).not.toContain("notes");
+
+      for (const profileId of ["vault", "logs", "notes"]) {
+        await expect(
+          delegate?.execute("call-1", { profileId, task: "read", context: "none" }),
+        ).rejects.toThrow(`Unknown MCP profile: ${profileId}`);
       }
     } finally {
       if (previousConfigPath === undefined) {

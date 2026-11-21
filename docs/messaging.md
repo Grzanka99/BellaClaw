@@ -14,6 +14,11 @@ Three failures lock the sender.
 State is stored in `message_authorizations` and cached in memory. Manual database changes require
 a restart. A blank token disables the gate and logs a startup warning.
 
+The gate covers chats. An account signs in with its own password: one made while the token was
+blank keeps working after a token is set, and a `!dashboard` or `!app` link asked in that time
+still registers an account for its ten minutes. A message from the app counts as activated
+whenever a token is configured. Set the token before the first start.
+
 ## Discord
 
 Discord is the easiest option and the default quick-start transport.

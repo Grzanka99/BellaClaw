@@ -42,7 +42,8 @@ The default provider is `opencode-go`. You can ask BellaClaw in chat to switch b
 - `ollama`
 
 `opencode-go` and `openai-codex` use subscription OAuth instead of API keys. Log in from any
-activated chat. `!ai-auth` needs `BELLACLAW_ACTIVATION_TOKEN`, because the login is shared:
+activated chat or from the app. `!ai-auth` needs `BELLACLAW_ACTIVATION_TOKEN`, because the login
+is shared:
 
 ```text
 !ai-auth login opencode-go
@@ -94,7 +95,7 @@ bun run embeddings:rebuild
 | `SIGNAL_ENABLED` | `false` | Enables Signal when set to `true`. |
 | `SIGNAL_PHONE_NUMBER` | — | Signal account phone number. Required when Signal is enabled. |
 | `SIGNAL_CLI_RPC_URL` | — | `signal-cli-rest-api` URL. Required when Signal is enabled. |
-| `BELLACLAW_ACTIVATION_TOKEN` | — | Shared activation token. Blank disables the gate. |
+| `BELLACLAW_ACTIVATION_TOKEN` | — | Shared activation token. Blank disables the gate and closes registration by code in the app. |
 | `BELLACLAW_AUTO_UPDATE` | `false` | `true` checks `main` daily and updates the Compose deployment. See [Deployment](deployment.md#self-update). |
 
 See [Messaging](messaging.md) for setup steps.
@@ -124,20 +125,34 @@ Compose also sets internal paths and safety boundaries. You normally should not 
 
 See [Behavior Logs](behavior-logs.md).
 
-## Dashboard
+## Gateway
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `BELLACLAW_DASHBOARD_PUBLIC_URL` | — | Public HTTPS origin of the dashboard. Builds the `!dashboard` link and is checked against `Origin`. |
-| `BELLACLAW_DASHBOARD_SECRET` | — | Shared secret. Signs link tokens and authenticates the dashboard to the assistant's internal listener. |
-| `BELLACLAW_DASHBOARD_HOSTNAME` | `127.0.0.1` | Dashboard bind address. Compose sets `0.0.0.0` inside the container. |
-| `BELLACLAW_DASHBOARD_PORT` | `8988` | Dashboard listen port. |
-| `BELLACLAW_DASHBOARD_DB_PATH` | `.data/dashboard.db` in the repository | Dashboard SQLite file for accounts, sessions and chat links. |
+| `BELLACLAW_GATEWAY_PUBLIC_URL` | — | Public HTTPS origin of the gateway. Builds the `!dashboard` and `!app` links and is checked against the browser's `Origin`. |
+| `BELLACLAW_GATEWAY_SECRET` | — | Shared secret. Signs link tokens and authenticates the gateway to the assistant's internal listener. |
+| `BELLACLAW_GATEWAY_HOSTNAME` | `127.0.0.1` | Gateway bind address. Compose sets `0.0.0.0` inside the container. |
+| `BELLACLAW_GATEWAY_PORT` | `8988` | Gateway listen port. |
+| `BELLACLAW_GATEWAY_DB_PATH` | `.data/dashboard.db` in the repository | Gateway SQLite file for accounts, sessions and chat links. |
 | `BELLACLAW_INTERNAL_API_HOSTNAME` | `127.0.0.1` | Assistant's internal listener bind address. Compose sets `0.0.0.0` inside the container. |
 | `BELLACLAW_INTERNAL_API_PORT` | `3081` | Assistant's internal listener port. Never expose it. |
-| `BELLACLAW_INTERNAL_API_URL` | `http://127.0.0.1:3081` | Where the dashboard reaches the internal listener. |
+| `BELLACLAW_INTERNAL_API_URL` | `http://127.0.0.1:3081` | Where the gateway reaches the internal listener. |
+| `BELLACLAW_APP_MEDIA_DIR` | `.data/app-media` in the repository | Where the assistant keeps images uploaded from the app. |
 
-The assistant and the dashboard both read the public URL and the secret. Leave either blank to
-disable the dashboard. Compose sets `BELLACLAW_INTERNAL_API_URL` and `BELLACLAW_DASHBOARD_DB_PATH`.
+The assistant and the gateway both read the public URL and the secret. Leave either blank to
+disable the gateway. Compose sets `BELLACLAW_INTERNAL_API_URL` and `BELLACLAW_GATEWAY_DB_PATH`,
+and `BELLACLAW_APP_MEDIA_DIR` to `/app-data/app-media` on the assistant's data volume.
 
-See [Dashboard](dashboard.md).
+See [Gateway](gateway.md).
+
+## Push
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `BELLACLAW_FCM_CREDENTIALS_PATH` | — | Firebase service-account JSON key for FCM. Blank, or no file at the path, turns push off. |
+| `BELLACLAW_FCM_URL` | `https://fcm.googleapis.com` | Where the assistant sends FCM messages. Change it only for a test endpoint. |
+
+Only the assistant reads them. Compose sets the path to
+`/app/.secrets/fcm-service-account.json`, so the key goes to `.secrets/fcm-service-account.json`;
+the gateway and log-viewer containers get neither the variable nor the `.secrets` mount. The
+assistant logs at boot whether push is on. See [Gateway](gateway.md#the-app).

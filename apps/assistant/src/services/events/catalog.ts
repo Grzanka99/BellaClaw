@@ -1,6 +1,7 @@
 import type { TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
 import {
   EAutomationStatus,
+  EConversationKind,
   ECronFinishedReason,
   ECronJobStatus,
   ECronJobType,
@@ -8,9 +9,11 @@ import {
 } from "@bellaclaw/database";
 import type { TOption } from "@bellaclaw/shared";
 import { z } from "zod";
+import { SThinkingLevel } from "../ai/model-preferences";
 import { EAiProvider } from "../ai/types";
 import { EAuthorizationDecision, SAuthorizationState } from "../authorization/schema";
 import { EAutomationRunMode, EAutomationRunOutcome } from "../automation/runner";
+import { EIdentityLinkOwner } from "../identity/schema";
 import { EMessagePlatform, SAttachmentRef } from "../messaging/types";
 import { EConfigKey } from "../settings/schema";
 
@@ -24,19 +27,69 @@ export enum ERejectionCode {
   Failed = "failed",
 }
 
-const STranscript = z.object({ text: z.string(), notice: z.string() }).strict();
+// text: shown to people, as it was sent; modelText: what the model replays
+const STranscript = z
+  .object({ text: z.string(), modelText: z.string(), notice: z.string() })
+  .strict();
 
 export type TDeliveryTranscript = z.infer<typeof STranscript>;
 
-const SInboundMessage = z
+// a message shown in history and never replayed to the model; request: the command it answers,
+// stored before it
+const SDisplay = z
   .object({
-    chatId: z.string(),
-    content: z.string(),
-    attachments: z.array(SAttachmentRef),
-    receivedAt: z.number().int(),
-    platform: z.enum(EMessagePlatform),
+    text: z.string(),
+    request: z
+      .object({
+        text: z.string(),
+        receivedAt: z.number().int(),
+        clientMessageId: z.string().optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
+
+export type TDisplay = z.infer<typeof SDisplay>;
+
+// a message's conversation, its owner, and the channel and address it came from and its reply
+// goes to. Only channel drivers and Outbound read the address
+const SMessageAddress = {
+  conversationKey: z.string(),
+  ownerKey: z.string(),
+  channel: z.enum(EMessagePlatform),
+  replyAddress: z.string(),
+};
+
+// kind: the conversation's kind, set by Authorization; a plain chat runs the plain agent and has
+// no memory
+const SMessageOrigin = {
+  ...SMessageAddress,
+  kind: z.enum(EConversationKind),
+};
+
+export type TMessageOrigin = z.infer<z.ZodObject<typeof SMessageOrigin>>;
+
+// what the app chose for this turn of a plain chat; it applies to this turn only
+const SModelChoice = z
+  .object({ provider: z.enum(EAiProvider), model: z.string().min(1), effort: SThinkingLevel })
+  .strict();
+
+export type TModelChoice = z.infer<typeof SModelChoice>;
+
+const SInboundContent = {
+  content: z.string(),
+  attachments: z.array(SAttachmentRef),
+  receivedAt: z.number().int(),
+  // the id the sending client gave the message, stored on its transcript row
+  clientMessageId: z.string().optional(),
+  // a plain chat's message only: the model its turn runs on instead of the owner's settings
+  model: SModelChoice.optional(),
+};
+
+const SMessageReceived = z.object({ ...SMessageAddress, ...SInboundContent }).strict();
+
+const SInboundMessage = z.object({ ...SMessageOrigin, ...SInboundContent }).strict();
 
 const SMessageRejected = z
   .object({
@@ -46,26 +99,25 @@ const SMessageRejected = z
   })
   .strict();
 
-const STurnRequested = z
-  .object({
-    chatId: z.string(),
-    content: z.string(),
-    attachments: z.array(SAttachmentRef),
-    receivedAt: z.number().int(),
-    platform: z.enum(EMessagePlatform),
-  })
-  .strict();
+const STurnStarted = z.object({ ...SMessageOrigin, userMessageId: z.number().int() }).strict();
 
-const STurnStarted = z.object({ chatId: z.string(), userMessageId: z.number().int() }).strict();
-
-const STurnCompleted = z.object({ chatId: z.string(), userMessageId: z.number().int() }).strict();
+const STurnCompleted = z.object({ ...SMessageOrigin, userMessageId: z.number().int() }).strict();
 
 const STurnFailed = z
-  .object({ chatId: z.string(), reason: z.enum(["interrupted", "no_final_response", "error"]) })
+  .object({ ...SMessageOrigin, reason: z.enum(["interrupted", "no_final_response", "error"]) })
   .strict();
 
+// transcript and display: what Conversation stores once the reply is sent. A reply with neither
+// is stored already, as a turn's, or is confidential: it carries a secret or a one-time link, is
+// marked confidential and is never stored
 const SReplyReady = z
-  .object({ chatId: z.string(), text: z.string(), transcript: STranscript.optional() })
+  .object({
+    ...SMessageOrigin,
+    text: z.string(),
+    transcript: STranscript.optional(),
+    display: SDisplay.optional(),
+    confidential: z.literal(true).optional(),
+  })
   .strict();
 
 const SNoticeReady = z.object({ chatId: z.string(), text: z.string() }).strict();
@@ -74,13 +126,16 @@ const SDeliveryReady = z
   .object({ chatId: z.string(), text: z.string(), transcript: STranscript })
   .strict();
 
+// channel: where the message went, stored on its transcript rows
 const SMessageSent = z
   .object({
     chatId: z.string(),
+    channel: z.enum(EMessagePlatform),
     sourceType: z.string(),
     chars: z.number().int(),
     sentAt: z.number().int(),
     transcript: STranscript.optional(),
+    display: SDisplay.optional(),
   })
   .strict();
 
@@ -290,12 +345,16 @@ const SAiAuthDiagnoseRequested = z.object({ chatId: z.string(), providerId: z.st
 // problem: the reply for the failed turn, when the provider needs a new login
 const SAiAuthDiagnosed = z.object({ problem: z.string().optional() }).strict();
 
-// the chat is the event key
-const SMemoryFactsRefresh = z.object({}).strict();
+// the conversation is the event key; ownerKey: whose settings and facts the drain uses
+const SMemoryFactsRefreshRequested = z.object({ ownerKey: z.string() }).strict();
 
+const SMemoryFactsRefreshed = z.object({}).strict();
+
+// chatId: the owner the fact is stored under; conversationKey: the transcript holding its source
 const SMemoryFactRememberRequested = z
   .object({
     chatId: z.string(),
+    conversationKey: z.string(),
     text: z.string(),
     sourceMessage: z.string(),
     supersedesFactIds: z.array(z.number().int()),
@@ -390,6 +449,108 @@ const SConversationMessageDeleted = z
   .object({ chatId: z.string(), messageIds: z.array(z.number().int()) })
   .strict();
 
+const SIdentityLinkRequested = z
+  .object({
+    accountId: z.string().min(1),
+    channel: z.enum(EMessagePlatform),
+    address: z.string().min(1),
+  })
+  .strict();
+
+// an address linked to an account. chatKey: the address's own chat, its conversation and owner
+// key before the link; conversationKey and ownerKey: the account's Bella conversation and owner
+const SIdentityLinkKeys = {
+  accountId: z.string(),
+  channel: z.enum(EMessagePlatform),
+  address: z.string(),
+  chatKey: z.string(),
+  conversationKey: z.string(),
+  ownerKey: z.string(),
+};
+
+const SIdentityLinkStarted = z.object(SIdentityLinkKeys).strict();
+
+// owner: the service that settled, or moved its rows
+const SIdentityLinkProgress = z
+  .object({ ...SIdentityLinkKeys, owner: z.enum(EIdentityLinkOwner) })
+  .strict();
+
+const SIdentityLinked = z.object({ ...SIdentityLinkKeys, linkedAt: z.number().int() }).strict();
+
+export type TIdentityLinkKeys = z.infer<typeof SIdentityLinkStarted>;
+
+// the summary of a linked address's chat fused with its account's Bella conversation's, before
+// the chat's rows move there; summarizedThroughId: the fused summary's mark, summaryTimestamp:
+// epoch ms
+const SConversationSummariesFused = z
+  .object({
+    chatKey: z.string(),
+    conversationKey: z.string(),
+    summary: z.string().min(1),
+    summarizedThroughId: z.number().int(),
+    summaryTimestamp: z.number().int(),
+  })
+  .strict();
+
+export type TFusedSummary = z.infer<typeof SConversationSummariesFused>;
+
+// a conversation's transcript changed: rows appended, deleted or merged in; ownerKey: the
+// conversation's owner in the registry; revision: the conversation's new revision, committed with
+// the change; rewriteRevision: the revision of its latest change that was not an append, so a
+// client synced at or above it fetches by cursor and one below it reloads; messageId: the
+// assistant row a reply, delivery or notice appended, the one the app is notified of
+const SConversationChanged = z
+  .object({
+    conversationKey: z.string(),
+    ownerKey: z.string(),
+    revision: z.number().int(),
+    rewriteRevision: z.number().int(),
+    messageId: z.number().int().optional(),
+  })
+  .strict();
+
+// a plain chat for the owner, an account's owner key; Conversation builds its key
+const SConversationCreateRequested = z.object({ ownerKey: z.string() }).strict();
+
+// createdAt: epoch ms
+const SConversationCreated = z
+  .object({
+    conversationKey: z.string(),
+    ownerKey: z.string(),
+    kind: z.enum(EConversationKind),
+    createdAt: z.number().int(),
+  })
+  .strict();
+
+// a plain chat of the owner, with its transcript, summary and registry entry
+const SConversationDeleteRequested = z
+  .object({ conversationKey: z.string(), ownerKey: z.string() })
+  .strict();
+
+const SConversationDeleted = z
+  .object({ conversationKey: z.string(), ownerKey: z.string() })
+  .strict();
+
+// the device of an app session of the account, by the id the edge made for the session; the token
+// and keys replace any it had. publicKey and authSecret: base64url (RFC 8291)
+const SAppDeviceRegisterRequested = z
+  .object({
+    deviceId: z.string(),
+    accountId: z.string(),
+    fcmToken: z.string(),
+    publicKey: z.string(),
+    authSecret: z.string(),
+  })
+  .strict();
+
+// registeredAt: epoch ms
+const SAppDeviceRegistered = z
+  .object({ deviceId: z.string(), accountId: z.string(), registeredAt: z.number().int() })
+  .strict();
+
+// a device the account holds; another account's device is left alone
+const SAppDevice = z.object({ deviceId: z.string(), accountId: z.string() }).strict();
+
 // errorCode: the handler's stable code for an expected failure, such as job-not-found
 const SCommandRejected = z
   .object({
@@ -417,11 +578,11 @@ const STestSecret = z.object({ secret: z.string() }).strict();
 const STestRequested = z.object({ text: z.string() }).strict();
 
 export type TEventPayloads = {
-  [EEventType.MessageReceived]: z.infer<typeof SInboundMessage>;
+  [EEventType.MessageReceived]: z.infer<typeof SMessageReceived>;
   [EEventType.MessageAuthorized]: z.infer<typeof SInboundMessage>;
   [EEventType.MessageRejected]: z.infer<typeof SMessageRejected>;
   [EEventType.AuthorizationChanged]: z.infer<typeof SAuthorizationState>;
-  [EEventType.TurnRequested]: z.infer<typeof STurnRequested>;
+  [EEventType.TurnRequested]: z.infer<typeof SInboundMessage>;
   [EEventType.TurnStarted]: z.infer<typeof STurnStarted>;
   [EEventType.TurnCompleted]: z.infer<typeof STurnCompleted>;
   [EEventType.TurnFailed]: z.infer<typeof STurnFailed>;
@@ -463,8 +624,8 @@ export type TEventPayloads = {
   [EEventType.AiAuthLoggedOut]: z.infer<typeof SAiAuthLogoutRequested>;
   [EEventType.AiAuthDiagnoseRequested]: z.infer<typeof SAiAuthDiagnoseRequested>;
   [EEventType.AiAuthDiagnosed]: z.infer<typeof SAiAuthDiagnosed>;
-  [EEventType.MemoryFactsRefreshRequested]: z.infer<typeof SMemoryFactsRefresh>;
-  [EEventType.MemoryFactsRefreshed]: z.infer<typeof SMemoryFactsRefresh>;
+  [EEventType.MemoryFactsRefreshRequested]: z.infer<typeof SMemoryFactsRefreshRequested>;
+  [EEventType.MemoryFactsRefreshed]: z.infer<typeof SMemoryFactsRefreshed>;
   [EEventType.MemoryFactRememberRequested]: z.infer<typeof SMemoryFactRememberRequested>;
   [EEventType.MemoryFactRemembered]: z.infer<typeof SMemoryFactRemembered>;
   [EEventType.MemoryFactsForgetRequested]: z.infer<typeof SMemoryFacts>;
@@ -485,6 +646,22 @@ export type TEventPayloads = {
     typeof SConversationMessageDeleteRequested
   >;
   [EEventType.ConversationMessageDeleted]: z.infer<typeof SConversationMessageDeleted>;
+  [EEventType.IdentityLinkRequested]: z.infer<typeof SIdentityLinkRequested>;
+  [EEventType.IdentityLinkStarted]: TIdentityLinkKeys;
+  [EEventType.IdentityLinkSettled]: z.infer<typeof SIdentityLinkProgress>;
+  [EEventType.IdentityLinkQuiet]: TIdentityLinkKeys;
+  [EEventType.IdentityLinkMoved]: z.infer<typeof SIdentityLinkProgress>;
+  [EEventType.IdentityLinked]: z.infer<typeof SIdentityLinked>;
+  [EEventType.AppDeviceRegisterRequested]: z.infer<typeof SAppDeviceRegisterRequested>;
+  [EEventType.AppDeviceRegistered]: z.infer<typeof SAppDeviceRegistered>;
+  [EEventType.AppDeviceUnregisterRequested]: z.infer<typeof SAppDevice>;
+  [EEventType.AppDeviceUnregistered]: z.infer<typeof SAppDevice>;
+  [EEventType.ConversationSummariesFused]: TFusedSummary;
+  [EEventType.ConversationChanged]: z.infer<typeof SConversationChanged>;
+  [EEventType.ConversationCreateRequested]: z.infer<typeof SConversationCreateRequested>;
+  [EEventType.ConversationCreated]: z.infer<typeof SConversationCreated>;
+  [EEventType.ConversationDeleteRequested]: z.infer<typeof SConversationDeleteRequested>;
+  [EEventType.ConversationDeleted]: z.infer<typeof SConversationDeleted>;
   [EEventType.CommandRejected]: z.infer<typeof SCommandRejected>;
   [EEventType.EventDeadLettered]: z.infer<typeof SEventDeadLettered>;
   [EEventType.AppStarted]: z.infer<typeof SAppStarted>;
@@ -496,11 +673,11 @@ export type TEventPayloads = {
 // The mapped type ties each schema to its payload type, so a handler gets a typed payload
 // without a cast.
 export const EVENT_SCHEMAS: { [K in EEventType]: z.ZodType<TEventPayloads[K]> } = {
-  [EEventType.MessageReceived]: SInboundMessage,
+  [EEventType.MessageReceived]: SMessageReceived,
   [EEventType.MessageAuthorized]: SInboundMessage,
   [EEventType.MessageRejected]: SMessageRejected,
   [EEventType.AuthorizationChanged]: SAuthorizationState,
-  [EEventType.TurnRequested]: STurnRequested,
+  [EEventType.TurnRequested]: SInboundMessage,
   [EEventType.TurnStarted]: STurnStarted,
   [EEventType.TurnCompleted]: STurnCompleted,
   [EEventType.TurnFailed]: STurnFailed,
@@ -542,8 +719,8 @@ export const EVENT_SCHEMAS: { [K in EEventType]: z.ZodType<TEventPayloads[K]> } 
   [EEventType.AiAuthLoggedOut]: SAiAuthLogoutRequested,
   [EEventType.AiAuthDiagnoseRequested]: SAiAuthDiagnoseRequested,
   [EEventType.AiAuthDiagnosed]: SAiAuthDiagnosed,
-  [EEventType.MemoryFactsRefreshRequested]: SMemoryFactsRefresh,
-  [EEventType.MemoryFactsRefreshed]: SMemoryFactsRefresh,
+  [EEventType.MemoryFactsRefreshRequested]: SMemoryFactsRefreshRequested,
+  [EEventType.MemoryFactsRefreshed]: SMemoryFactsRefreshed,
   [EEventType.MemoryFactRememberRequested]: SMemoryFactRememberRequested,
   [EEventType.MemoryFactRemembered]: SMemoryFactRemembered,
   [EEventType.MemoryFactsForgetRequested]: SMemoryFacts,
@@ -562,6 +739,22 @@ export const EVENT_SCHEMAS: { [K in EEventType]: z.ZodType<TEventPayloads[K]> } 
   [EEventType.CalendarEventDeleted]: SCalendarEventTarget,
   [EEventType.ConversationMessageDeleteRequested]: SConversationMessageDeleteRequested,
   [EEventType.ConversationMessageDeleted]: SConversationMessageDeleted,
+  [EEventType.IdentityLinkRequested]: SIdentityLinkRequested,
+  [EEventType.IdentityLinkStarted]: SIdentityLinkStarted,
+  [EEventType.IdentityLinkSettled]: SIdentityLinkProgress,
+  [EEventType.IdentityLinkQuiet]: SIdentityLinkStarted,
+  [EEventType.IdentityLinkMoved]: SIdentityLinkProgress,
+  [EEventType.IdentityLinked]: SIdentityLinked,
+  [EEventType.AppDeviceRegisterRequested]: SAppDeviceRegisterRequested,
+  [EEventType.AppDeviceRegistered]: SAppDeviceRegistered,
+  [EEventType.AppDeviceUnregisterRequested]: SAppDevice,
+  [EEventType.AppDeviceUnregistered]: SAppDevice,
+  [EEventType.ConversationSummariesFused]: SConversationSummariesFused,
+  [EEventType.ConversationChanged]: SConversationChanged,
+  [EEventType.ConversationCreateRequested]: SConversationCreateRequested,
+  [EEventType.ConversationCreated]: SConversationCreated,
+  [EEventType.ConversationDeleteRequested]: SConversationDeleteRequested,
+  [EEventType.ConversationDeleted]: SConversationDeleted,
   [EEventType.CommandRejected]: SCommandRejected,
   [EEventType.EventDeadLettered]: SEventDeadLettered,
   [EEventType.AppStarted]: SAppStarted,
@@ -637,6 +830,22 @@ export const EVENT_KINDS: Record<EEventType, EEventKind> = {
   [EEventType.CalendarEventDeleted]: EEventKind.Event,
   [EEventType.ConversationMessageDeleteRequested]: EEventKind.Command,
   [EEventType.ConversationMessageDeleted]: EEventKind.Event,
+  [EEventType.IdentityLinkRequested]: EEventKind.Command,
+  [EEventType.IdentityLinkStarted]: EEventKind.Event,
+  [EEventType.IdentityLinkSettled]: EEventKind.Event,
+  [EEventType.IdentityLinkQuiet]: EEventKind.Event,
+  [EEventType.IdentityLinkMoved]: EEventKind.Event,
+  [EEventType.IdentityLinked]: EEventKind.Event,
+  [EEventType.AppDeviceRegisterRequested]: EEventKind.Command,
+  [EEventType.AppDeviceRegistered]: EEventKind.Event,
+  [EEventType.AppDeviceUnregisterRequested]: EEventKind.Command,
+  [EEventType.AppDeviceUnregistered]: EEventKind.Event,
+  [EEventType.ConversationSummariesFused]: EEventKind.Event,
+  [EEventType.ConversationChanged]: EEventKind.Event,
+  [EEventType.ConversationCreateRequested]: EEventKind.Command,
+  [EEventType.ConversationCreated]: EEventKind.Event,
+  [EEventType.ConversationDeleteRequested]: EEventKind.Command,
+  [EEventType.ConversationDeleted]: EEventKind.Event,
   [EEventType.CommandRejected]: EEventKind.Event,
   [EEventType.EventDeadLettered]: EEventKind.Event,
   [EEventType.AppStarted]: EEventKind.Event,
@@ -650,6 +859,7 @@ export const EVENT_SCRUBBED: ReadonlySet<EEventType> = new Set([
   EEventType.MessageReceived,
   EEventType.MessageAuthorized,
   EEventType.McpAuthTokenSaveRequested,
+  EEventType.AppDeviceRegisterRequested,
   EEventType.TestSecret,
 ]);
 

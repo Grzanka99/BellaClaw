@@ -23,7 +23,8 @@ let runScheduledTask = createAi("unused");
 
 function createContext() {
   return {
-    chatId: scope,
+    conversationKey: scope,
+    ownerKey: scope,
     settings: DefaultConfigRecord,
     trace: { turnId: "test", chatId: undefined, platform: undefined },
     events: testEventRequester,

@@ -39,6 +39,7 @@ const logger = createLogger("CRON_AUTOMATIONS");
  */
 export async function runCronJobAutomations(
   ctx: TCronFiredPayload,
+  conversationKey: string,
   platform: TOption<EMessagePlatform>,
   ai: TScheduledTaskAi,
   events: TEventRequester,
@@ -80,6 +81,7 @@ export async function runCronJobAutomations(
 
     const taskResult = await generateScheduledTaskText(
       ctx,
+      conversationKey,
       platform,
       ai,
       events,

@@ -127,6 +127,7 @@ describe("runCronJobAutomations", () => {
 
     const result = await runCronJobAutomations(
       context({ automationIds: [weather.id, quiet.id, metrics.id, departures.id] }),
+      scope,
       EMessagePlatform.Signal,
       ai,
       testEventRequester,
@@ -146,6 +147,7 @@ describe("runCronJobAutomations", () => {
 
     const result = await runCronJobAutomations(
       context({ automationIds: [quiet.id, 999] }),
+      scope,
       EMessagePlatform.Signal,
       scheduledTaskAi().ai,
       testEventRequester,
@@ -183,6 +185,7 @@ describe("runCronJobAutomations", () => {
         },
         automationIds: [weather.id, quiet.id, broken.id, 999],
       }),
+      scope,
       EMessagePlatform.Signal,
       ai,
       testEventRequester,
@@ -218,6 +221,7 @@ describe("runCronJobAutomations", () => {
         content: { kind: "task", prompt: "Summarize.", fallback: "Briefing unavailable." },
         automationIds: [quiet.id],
       }),
+      scope,
       EMessagePlatform.Signal,
       scheduledTaskAi(" ").ai,
       testEventRequester,

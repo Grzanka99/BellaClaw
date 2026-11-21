@@ -183,6 +183,33 @@ export function supportsAiServiceTier(model: Model<Api>): boolean {
   return model.api === "openai-responses" || model.api === "openai-codex-responses";
 }
 
+export enum EAiModelChoiceProblem {
+  ModelUnavailable = "model_unavailable",
+  EffortUnsupported = "effort_unsupported",
+}
+
+// a model choice as given, without fallbacks: the provider's catalog lists the model, after one
+// forced refresh when it is missing, and the model supports the effort. Answers the problem, else
+// the model config the choice runs on, as Main resolves it for that preference
+export async function checkAiModelChoice(
+  provider: EAiProvider,
+  modelId: string,
+  effort: ModelThinkingLevel,
+): Promise<EAiModelChoiceProblem | ReturnType<typeof getAiModelConfig>> {
+  await refreshAiModels(provider, aiModels.getModel(provider, modelId) === undefined);
+  const model = aiModels.getModel(provider, modelId);
+
+  if (model === undefined) {
+    return EAiModelChoiceProblem.ModelUnavailable;
+  }
+
+  if (!getSupportedThinkingLevels(model).includes(effort)) {
+    return EAiModelChoiceProblem.EffortUnsupported;
+  }
+
+  return getAiModelConfig(provider, EModelPurpose.Main, { model: modelId, effort });
+}
+
 export function getAiModelConfig(
   provider: EAiProvider,
   purpose: EModelPurpose,

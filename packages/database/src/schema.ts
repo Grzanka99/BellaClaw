@@ -11,6 +11,7 @@ import {
 } from "drizzle-orm/sqlite-core";
 import type {
   EAutomationStatus,
+  EConversationKind,
   ECronFinishedReason,
   ECronJobStatus,
   ECronJobType,
@@ -61,15 +62,70 @@ export const memoriesTable = sqliteTable(
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
     chatId: text("chatId").notNull(),
+    // the channel the message came in or went out on
+    channel: text("channel", { enum: ["signal", "discord", "app"] }).notNull(),
     author: text("author", { enum: ["system", "user", "assistant", "toolResult"] }).notNull(),
     message: text("message").notNull(),
     modelMessage: text("modelMessage"),
-    kind: text("kind", { enum: ["message", "tool"] })
+    // display: a command, its reply, a notice or a failure reply, shown in history and never
+    // replayed to the model
+    kind: text("kind", { enum: ["message", "tool", "display"] })
       .notNull()
       .default("message"),
     createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull(),
+    // the id the sending client gave the inbound message the row holds
+    clientMessageId: text("clientMessageId"),
+    // a user message's attachment references as a JSON array, stored with the row at the turn's
+    // start, so a turn that never completes keeps them too
+    attachments: text("attachments"),
   },
   (table) => [index("memories_chat_id_idx").on(table.chatId, table.id)],
+);
+
+// the conversations with their owner; revision: raised on every change of the transcript;
+// rewriteRevision: the revision of the latest change that was not an append (a delete, or rows
+// moved in by a merge); kind: an account's Bella conversation or an unlinked chat (bella), or a
+// plain chat, listed from its creation; title: a plain chat's title, none until one is written;
+// createdAt: when a plain chat was created, none for the others
+export const conversationsTable = sqliteTable("conversations", {
+  conversationKey: text("conversationKey").primaryKey(),
+  ownerKey: text("ownerKey").notNull(),
+  revision: integer("revision").notNull().default(0),
+  rewriteRevision: integer("rewriteRevision").notNull().default(0),
+  kind: text("kind").$type<EConversationKind>().notNull().default(sql`'bella'`),
+  title: text("title"),
+  createdAt: integer("createdAt", { mode: "timestamp_ms" }),
+});
+
+// the images the app uploaded, whose bytes the App channel keeps on its data volume under the id;
+// accountId: the uploading account; conversationKey: the conversation it was uploaded to. A row
+// goes with its file
+export const appMediaTable = sqliteTable(
+  "app_media",
+  {
+    id: text("id").primaryKey(),
+    accountId: text("accountId").notNull(),
+    conversationKey: text("conversationKey").notNull(),
+    mimeType: text("mimeType").notNull(),
+    createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [index("app_media_conversation_idx").on(table.conversationKey)],
+);
+
+// the app's devices, one per app session, by the id the edge made for the session; accountId: the
+// session's account. fcmToken: its FCM registration token; publicKey and authSecret: its RFC 8291
+// key material, the P-256 public key and the auth secret, base64url
+export const appDevicesTable = sqliteTable(
+  "app_devices",
+  {
+    id: text("id").primaryKey(),
+    accountId: text("accountId").notNull(),
+    fcmToken: text("fcmToken").notNull(),
+    publicKey: text("publicKey").notNull(),
+    authSecret: text("authSecret").notNull(),
+    registeredAt: integer("registeredAt", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [index("app_devices_account_idx").on(table.accountId)],
 );
 
 export const conversationSummariesTable = sqliteTable("conversation_summaries", {
@@ -215,6 +271,27 @@ export const messageAuthorizationsTable = sqliteTable(
       "message_authorizations_failed_attempts_check",
       sql`${table.failedAttempts} between 0 and 3`,
     ),
+  ],
+);
+
+// an address (channel and address) linked to an account; the account id is opaque
+export const identityLinksTable = sqliteTable(
+  "identity_links",
+  {
+    channel: text("channel").notNull(),
+    address: text("address").notNull(),
+    accountId: text("accountId").notNull(),
+    state: text("state").notNull(),
+    linkedAt: integer("linkedAt", { mode: "timestamp_ms" }).notNull(),
+    // the owners that have moved the address's rows to the account
+    movedOwners: text("movedOwners", { mode: "json" })
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'[]'`),
+  },
+  (table) => [
+    primaryKey({ columns: [table.channel, table.address] }),
+    check("identity_links_state_check", sql`${table.state} in ('migrating', 'active')`),
   ],
 );
 

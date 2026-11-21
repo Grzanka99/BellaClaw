@@ -11,17 +11,15 @@ export const mcpAuthCommand: TCommand = {
   usage: "!mcp-auth connect|disconnect|status PROFILE | !mcp-auth token PROFILE TOKEN",
   handler: async (chatId, args, ctx) => {
     const [action, profileId, token, extra] = args.trim().split(/\s+/);
-    if (action === "token") {
-      if (profileId === undefined || token === undefined || extra !== undefined) {
-        return USAGE;
-      }
-    } else if (
-      action === undefined ||
-      profileId === undefined ||
-      token !== undefined ||
-      !["connect", "disconnect", "status"].includes(action)
-    ) {
-      return USAGE;
+    const valid =
+      action !== undefined &&
+      profileId !== undefined &&
+      ((action === "token" && token !== undefined && extra === undefined) ||
+        (["connect", "disconnect", "status"].includes(action) && token === undefined));
+    // a malformed command may carry a token in any of its words, so the usage answer is
+    // confidential and keeps the command out of the history
+    if (!valid) {
+      return { confidential: USAGE };
     }
 
     try {
@@ -36,7 +34,7 @@ export const mcpAuthCommand: TCommand = {
             timeoutMs: undefined,
           },
         );
-        return `Saved the token for MCP profile ${profileId} in this chat.`;
+        return { confidential: `Saved the token for MCP profile ${profileId} in this chat.` };
       }
       if (action === "connect") {
         const created = await ctx.request(
@@ -49,7 +47,7 @@ export const mcpAuthCommand: TCommand = {
             timeoutMs: undefined,
           },
         );
-        return `Open this link to connect ${profileId}:\n${created.payload.url}`;
+        return { confidential: `Open this link to connect ${profileId}:\n${created.payload.url}` };
       }
       if (action === "disconnect") {
         const outcome = await ctx.request(
@@ -74,6 +72,9 @@ export const mcpAuthCommand: TCommand = {
       }
       return `MCP profile ${profileId} is not connected.`;
     } catch (error) {
+      if (action === "token") {
+        return { confidential: `MCP authentication failed: ${String(error)}` };
+      }
       return `MCP authentication failed: ${String(error)}`;
     }
   },

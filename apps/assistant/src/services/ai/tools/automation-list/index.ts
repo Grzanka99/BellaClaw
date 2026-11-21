@@ -13,7 +13,7 @@ export const automationList = defineTool({
   mode: "parallel",
   logSafe: [],
   execute: async (context) => {
-    const scope = requireChatId(context.chatId);
+    const scope = requireChatId(context.ownerKey);
     const automations = await AutomationService.instance.list(scope);
 
     return automations.map((automation) => summarizeAutomation(automation));

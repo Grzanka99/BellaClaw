@@ -3,9 +3,9 @@ import { EEventType } from "@bellaclaw/database";
 import type { TOption } from "@bellaclaw/shared";
 import { createLogger, type TLogger } from "@bellaclaw/shared";
 import { ESubscriptionMode, EventBus } from "../events";
-import type { TEvent } from "../events/catalog";
+import { IdentityService, type TChatAddress } from "../identity";
 import { MessagingAdapter } from "../messaging";
-import { createCanonicalChatKey, parseCanonicalChatKey } from "../messaging/chat-key";
+import { createCanonicalChatKey } from "../messaging/chat-key";
 import { EMessagePlatform, type TAttachmentRef, type TMessageTransport } from "../messaging/types";
 import { SignalClient, type TSignalInboundMessage } from "./client";
 
@@ -43,22 +43,44 @@ export class SignalSingleton implements TMessageTransport {
     }
 
     const bus = EventBus.instance;
-    const typingEvents: [EEventType, boolean][] = [
+    const turnTypingEvents: [
+      EEventType.TurnRequested | EEventType.TurnCompleted | EEventType.TurnFailed,
+      boolean,
+    ][] = [
       [EEventType.TurnRequested, true],
       [EEventType.TurnCompleted, false],
       [EEventType.TurnFailed, false],
-      [EEventType.EventDeadLettered, false],
     ];
 
-    for (const [type, typing] of typingEvents) {
+    // typing follows the turn's origin channel and reply address
+    for (const [type, typing] of turnTypingEvents) {
       bus.subscribe({
         consumer: "signal-typing",
         type,
         mode: ESubscriptionMode.Live,
         backoffMs: [],
-        handler: (event) => this.setTyping(event, typing),
+        handler: (event) =>
+          this.setTyping(
+            { channel: event.payload.channel, address: event.payload.replyAddress },
+            typing,
+          ),
       });
     }
+    // a dead letter names only its chat
+    bus.subscribe({
+      consumer: "signal-typing",
+      type: EEventType.EventDeadLettered,
+      mode: ESubscriptionMode.Live,
+      backoffMs: [],
+      handler: async (event) => {
+        if (event.trace.chatId === undefined) {
+          return;
+        }
+
+        const resolved = await IdentityService.instance.resolve(event.trace.chatId);
+        await this.setTyping(resolved?.destination, false);
+      },
+    });
 
     this.setupPromise = this.setupWithRetries().catch((error) => {
       this.logger.error(`Signal setup failed: ${String(error)}`);
@@ -130,16 +152,15 @@ export class SignalSingleton implements TMessageTransport {
     }
   }
 
-  public async sendText(chatId: string, text: string): Promise<void> {
+  public async sendText(address: string, text: string): Promise<void> {
     if (this.client === undefined) {
       throw new Error("Signal client is not initialized");
     }
 
-    await this.client.sendText(chatId, text);
+    await this.client.sendText(address, text);
   }
 
   public async fetchAttachment(
-    _chatId: string,
     ref: TAttachmentRef,
     maxBytes: number,
   ): Promise<TOption<Uint8Array>> {
@@ -150,7 +171,7 @@ export class SignalSingleton implements TMessageTransport {
     return this.client.fetchAttachment(ref.id, maxBytes);
   }
 
-  public async deleteAttachment(_chatId: string, ref: TAttachmentRef): Promise<void> {
+  public async deleteAttachment(ref: TAttachmentRef): Promise<void> {
     if (this.client === undefined) {
       throw new Error("Signal client is not initialized");
     }
@@ -188,42 +209,48 @@ export class SignalSingleton implements TMessageTransport {
     }
 
     const chatId = createCanonicalChatKey(EMessagePlatform.Signal, message.sourceNumber);
+    // the trace names the conversation: an address with an active link means its account's
+    const conversationKey = await IdentityService.instance.conversationKeyOf(chatId);
     await EventBus.instance.publish({
       type: EEventType.MessageReceived,
       source: "signal",
       key: chatId,
-      trace: { turnId: createMessageTurnId(), chatId, platform: EMessagePlatform.Signal },
+      trace: {
+        turnId: createMessageTurnId(),
+        chatId: conversationKey,
+        platform: EMessagePlatform.Signal,
+      },
+      // the chat key is the conversation and the owner
       payload: {
-        chatId,
+        conversationKey: chatId,
+        ownerKey: chatId,
+        channel: EMessagePlatform.Signal,
+        replyAddress: message.sourceNumber,
         content: message.message,
         attachments: message.attachments,
         receivedAt,
-        platform: EMessagePlatform.Signal,
       },
       causationId: undefined,
       dedupeKey,
     });
   }
 
-  private async setTyping(event: TEvent, typing: boolean): Promise<void> {
+  private async setTyping(destination: TOption<TChatAddress>, typing: boolean): Promise<void> {
     const client = this.client;
-    const chatId = event.trace.chatId;
 
-    if (client === undefined || chatId === undefined) {
-      return;
-    }
-
-    const owner = parseCanonicalChatKey(chatId);
-
-    if (owner === undefined || owner.platform !== EMessagePlatform.Signal) {
+    if (
+      client === undefined ||
+      destination === undefined ||
+      destination.channel !== EMessagePlatform.Signal
+    ) {
       return;
     }
 
     try {
       if (typing) {
-        await client.showTyping(owner.chatId);
+        await client.showTyping(destination.address);
       } else {
-        await client.hideTyping(owner.chatId);
+        await client.hideTyping(destination.address);
       }
     } catch (error) {
       this.logger.error(`setTyping(${typing}) failed: ${String(error)}`);

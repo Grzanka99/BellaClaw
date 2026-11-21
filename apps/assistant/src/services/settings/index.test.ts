@@ -214,6 +214,65 @@ describe("SettingsService", () => {
       );
     });
 
+    test("rejects a persona with a placeholder the prompt builder cannot resolve and keeps the stored one", async () => {
+      const ownerKey = "owner-persona";
+      const persona = "Reply as {{config.ai.instructions.assistantName}}, {{commands}} {user}.";
+
+      const accepted = await update(ownerKey, EConfigKey.AiInstructionsPersona, persona);
+      expect(accepted[EConfigKey.AiInstructionsPersona]).toBe(persona);
+
+      const rejected = update(
+        ownerKey,
+        EConfigKey.AiInstructionsPersona,
+        "Reply as {{config.ai.instructions.assistantNmae}}",
+      );
+
+      await expect(rejected).rejects.toThrow("{{config.ai.instructions.assistantNmae}}");
+      await expect(rejected).rejects.toMatchObject({ code: ERejectionCode.Invalid });
+      expect(await SettingsService.instance.get(ownerKey, EConfigKey.AiInstructionsPersona)).toBe(
+        persona,
+      );
+      const rows = await getOwnerRows(ownerKey);
+      expect(rows.find((row) => row.key === EConfigKey.AiInstructionsPersona)?.value).toBe(persona);
+    });
+
+    test("rejects a change to another setting that leaves the persona unresolvable and keeps both stored values", async () => {
+      const ownerKey = "owner-persona-effective";
+      const persona = "Be helpful. {{config.ai.plainChats.persona}}";
+      const chatsPersona = "Be brief.";
+
+      await update(ownerKey, EConfigKey.AiPlainChatsPersona, chatsPersona);
+      await update(ownerKey, EConfigKey.AiInstructionsPersona, persona);
+
+      const rejected = update(
+        ownerKey,
+        EConfigKey.AiPlainChatsPersona,
+        "Keep {{config.example.user}} literal.",
+      );
+
+      await expect(rejected).rejects.toThrow("{{config.example.user}}");
+      await expect(rejected).rejects.toMatchObject({ code: ERejectionCode.Invalid });
+      const rows = await getOwnerRows(ownerKey);
+      expect(rows.find((row) => row.key === EConfigKey.AiInstructionsPersona)?.value).toBe(persona);
+      expect(rows.find((row) => row.key === EConfigKey.AiPlainChatsPersona)?.value).toBe(
+        chatsPersona,
+      );
+    });
+
+    test("accepts a persona whose placeholder resolves through the owner's stored settings", async () => {
+      const ownerKey = "owner-persona-stored";
+      const persona = "Be helpful. {{config.ai.plainChats.persona}}";
+
+      await update(
+        ownerKey,
+        EConfigKey.AiPlainChatsPersona,
+        "Speak as {{config.ai.instructions.assistantName}}.",
+      );
+      const accepted = await update(ownerKey, EConfigKey.AiInstructionsPersona, persona);
+
+      expect(accepted[EConfigKey.AiInstructionsPersona]).toBe(persona);
+    });
+
     test("upserts valid value, reads back, and updates cache after settings.changed", async () => {
       const settings = SettingsService.instance;
       const ownerKey = "owner-set-valid";

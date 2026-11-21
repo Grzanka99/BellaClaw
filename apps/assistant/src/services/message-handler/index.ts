@@ -1,25 +1,44 @@
 import type { TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
-import { EEventType, type TSelectMemory } from "@bellaclaw/database";
+import {
+  EConversationKind,
+  EEventType,
+  IMAGE_MARKER,
+  type TSelectMemory,
+} from "@bellaclaw/database";
 import type { TOption } from "@bellaclaw/shared";
-import { createLogger } from "@bellaclaw/shared";
+import { CONVERSATION_NOT_FOUND, createLogger } from "@bellaclaw/shared";
 import { AgentHarness } from "../ai/agent-harness";
+import type { TMainAgentRunResult } from "../ai/agent-harness/types";
+import { LlmClient, type TLlmModelConfig } from "../ai/llm";
+import { checkAiModelChoice, EAiModelChoiceProblem } from "../ai/providers/registry";
 import { ERole } from "../ai/types";
 import { logHandlerStarted, startHandlerSpan, startMemorySaveSpan } from "../app-logger/operations";
 import { startSpan } from "../app-logger/span";
 import { ConversationStore } from "../conversation";
-import { IMAGE_MARKER, type TConversation } from "../conversation/types";
-import { ESubscriptionMode, EventBus, type TEventContext, type TEventRequester } from "../events";
-import { ERejectionCode, type TEvent } from "../events/catalog";
+import type { TConversation } from "../conversation/types";
+import type { TDatabaseHandle } from "../database";
+import {
+  ESubscriptionMode,
+  EventBus,
+  type TDerivedEmit,
+  type TEventContext,
+  type TEventRequester,
+} from "../events";
+import { ERejectionCode, type TEvent, type TMessageOrigin } from "../events/catalog";
+import { IdentityService } from "../identity";
+import { EIdentityLinkOwner } from "../identity/schema";
 import { MessagingAdapter } from "../messaging";
-import type { EMessagePlatform } from "../messaging/types";
 import { SettingsService } from "../settings";
 import { EConfigKey, type TConfigRecord } from "../settings/schema";
+import { setupTitles } from "./title";
 
 const FAILED_REPLY = "Something went wrong.";
 const INTERRUPTED_REPLY =
   "I was restarted while answering, so that reply is lost. Some actions may already be done. Check before asking again.";
 const INTERRUPTED_NOTICE =
   "System notice, not from the user: the previous turn was interrupted by a restart. Its tool calls may be partly applied. The next assistant message says so.";
+// the lane prefix of an address's turns held while its account is being linked
+const LINK_HOLD_PREFIX = "link-hold|";
 // one auth check per OAuth provider, each up to 30 s, then the provider switch
 const DIAGNOSE_TIMEOUT_MS = 120_000;
 
@@ -27,6 +46,7 @@ export class MessageHandler {
   private static _instance: TOption<MessageHandler>;
   private logger = createLogger("MESSAGE_HANDLER");
   private ai = AgentHarness.instance;
+  private llm = LlmClient.instance;
   private conversations = ConversationStore.instance;
 
   private constructor() {}
@@ -39,8 +59,9 @@ export class MessageHandler {
     return MessageHandler._instance;
   }
 
-  // NOTE: the subscriptions share the consumer, so one lane per chat orders turns, their
-  // compaction, transcript appends and message deletes
+  // NOTE: the subscriptions of the conversation consumer share its lanes, so one lane per chat
+  // orders turns, their compaction, transcript appends and message deletes. Titles run on their
+  // own consumer (title.ts)
   public setup(): void {
     const bus = EventBus.instance;
 
@@ -58,6 +79,112 @@ export class MessageHandler {
       backoffMs: [1_000, 5_000, 30_000],
       handler: (event, ctx) => this.saveDeliveredMessage(event, ctx),
     });
+    // NOTE: the barrier of a link. It passes the address's lane, behind the address's running or
+    // queued turn, then the account's Bella conversation's lane, behind that side's running turn,
+    // and only then lets the owners move, on the address's lanes
+    bus.subscribe({
+      consumer: "conversation",
+      type: EEventType.IdentityLinkStarted,
+      mode: ESubscriptionMode.Durable,
+      backoffMs: [1_000, 5_000],
+      handler: async (event, ctx) => {
+        await ctx.complete(async (_tx, emit) => {
+          emit(
+            EEventType.IdentityLinkSettled,
+            { ...event.payload, owner: EIdentityLinkOwner.Conversation },
+            undefined,
+            event.payload.conversationKey,
+          );
+        });
+      },
+    });
+    bus.subscribe({
+      consumer: "conversation",
+      type: EEventType.IdentityLinkSettled,
+      mode: ESubscriptionMode.Durable,
+      backoffMs: [1_000, 5_000],
+      handler: async (event, ctx) => {
+        const { owner, ...keys } = event.payload;
+
+        if (owner !== EIdentityLinkOwner.Conversation) {
+          return;
+        }
+
+        await ctx.complete(async (_tx, emit) => {
+          emit(EEventType.IdentityLinkQuiet, keys, undefined, keys.chatKey);
+        });
+      },
+    });
+    // NOTE: Conversation's move follows Memory's, on the Bella conversation's lane, so a message of
+    // the address forwarded there is stored before or after the move, never across it. A failed
+    // fusion fails the handler, so the move waits for its retry
+    bus.subscribe({
+      consumer: "conversation",
+      type: EEventType.IdentityLinkMoved,
+      mode: ESubscriptionMode.Durable,
+      backoffMs: [1_000, 5_000, 30_000],
+      handler: async (event, ctx) => {
+        if (event.payload.owner === EIdentityLinkOwner.Memory) {
+          await this.moveToBella(event, ctx);
+        }
+      },
+    });
+    // NOTE: on the requester's lane; the new chat has no turn yet
+    bus.subscribe({
+      consumer: "conversation",
+      type: EEventType.ConversationCreateRequested,
+      mode: ESubscriptionMode.Durable,
+      backoffMs: [],
+      handler: async (event, ctx) => {
+        const { ownerKey } = event.payload;
+        const newKey = IdentityService.instance.plainConversationKey(ownerKey);
+
+        await ctx.complete(async (tx, emit) => {
+          const { conversationKey, createdAt } = await this.conversations.createPlain(
+            tx,
+            newKey,
+            ownerKey,
+            Date.now(),
+          );
+          emit(
+            EEventType.ConversationCreated,
+            { conversationKey, ownerKey, kind: EConversationKind.Plain, createdAt },
+            undefined,
+            undefined,
+          );
+        });
+      },
+    });
+    // NOTE: on the chat's lane, behind its queued turns; a turn or a reply that reaches the lane
+    // after the delete finds the chat unlisted and stores nothing
+    bus.subscribe({
+      consumer: "conversation",
+      type: EEventType.ConversationDeleteRequested,
+      mode: ESubscriptionMode.Durable,
+      backoffMs: [],
+      handler: async (event, ctx) => {
+        const { conversationKey, ownerKey } = event.payload;
+
+        await ctx.complete(async (tx, emit) => {
+          if (!(await this.conversations.deletePlain(tx, conversationKey, ownerKey))) {
+            emit(
+              EEventType.CommandRejected,
+              {
+                commandType: event.type,
+                code: ERejectionCode.Invalid,
+                message: "No such plain chat",
+                errorCode: CONVERSATION_NOT_FOUND,
+              },
+              undefined,
+              undefined,
+            );
+            return;
+          }
+
+          emit(EEventType.ConversationDeleted, { conversationKey, ownerKey }, undefined, undefined);
+        });
+      },
+    });
     bus.subscribe({
       consumer: "conversation",
       type: EEventType.ConversationMessageDeleteRequested,
@@ -65,11 +192,12 @@ export class MessageHandler {
       backoffMs: [],
       handler: async (event, ctx) => {
         const { chatId, messageId } = event.payload;
+        const ownerKey = await IdentityService.instance.ownerKeyOf(chatId);
 
-        await ctx.complete(async (tx, emit) => {
-          const messageIds = await this.conversations.deleteMessage(tx, chatId, messageId);
+        const attachments = await ctx.complete(async (tx, emit) => {
+          const deleted = await this.conversations.deleteMessage(tx, chatId, messageId);
 
-          if (messageIds === undefined) {
+          if (deleted === undefined) {
             emit(
               EEventType.CommandRejected,
               {
@@ -80,12 +208,101 @@ export class MessageHandler {
               undefined,
               undefined,
             );
-            return;
+            return [];
           }
 
-          emit(EEventType.ConversationMessageDeleted, { chatId, messageIds }, undefined, undefined);
+          emit(
+            EEventType.ConversationMessageDeleted,
+            { chatId, messageIds: deleted.messageIds },
+            undefined,
+            undefined,
+          );
+          await this.changed(tx, emit, chatId, ownerKey, true, undefined, undefined);
+          return deleted.attachments;
         });
+
+        // the deleted rows were the only references to these files
+        for (const ref of attachments) {
+          try {
+            await MessagingAdapter.instance.deleteAttachment(ref);
+          } catch (error) {
+            this.logger.warning(`Attachment delete failed: ${String(error)}`);
+          }
+        }
       },
+    });
+    setupTitles(this.llm, this.conversations, (tx, emit, conversationKey, ownerKey) =>
+      this.changed(tx, emit, conversationKey, ownerKey, false, undefined, undefined),
+    );
+  }
+
+  // NOTE: the two summaries are fused into one before the rows mix, when both chats have a
+  // summary or a row of either chat would otherwise be skipped or replayed. The fusion is a model
+  // call, so its result is saved as a checkpoint fact before it is applied, and a redelivery
+  // applies that instead of calling the model again
+  // NOTE: accepted risk: the fusion is one request to the account's main model and, when that
+  // fails, one to the provider's default main model, so an input above both context windows
+  // fails on every retry
+  private async moveToBella(
+    event: TEvent<EEventType.IdentityLinkMoved>,
+    ctx: TEventContext,
+  ): Promise<void> {
+    const { chatKey, conversationKey, ownerKey, channel } = event.payload;
+    let fused = (await ctx.findCaused(EEventType.ConversationSummariesFused, undefined))?.payload;
+
+    if (fused === undefined) {
+      const fusion = await this.conversations.loadFusion(chatKey, conversationKey);
+
+      if (fusion.summaries > 1 || fusion.state.entries.length > 0) {
+        const settings = await SettingsService.instance.getAll(ownerKey);
+        const result = await this.ai.compactConversation(
+          fusion.state,
+          settings,
+          conversationKey,
+          ownerKey,
+          channel,
+          event.trace,
+          ctx,
+          true,
+          undefined,
+        );
+
+        if (result === undefined) {
+          throw new Error("The fusion of the two summaries returned no summary");
+        }
+
+        const summary = {
+          chatKey,
+          conversationKey,
+          summary: result.state.summary,
+          summarizedThroughId: fusion.state.summarizedThroughId,
+          summaryTimestamp: result.state.summaryTimestamp,
+        };
+        await ctx.transact(async (_tx, emit) => {
+          emit(EEventType.ConversationSummariesFused, summary, undefined, undefined);
+        });
+        fused = summary;
+      }
+    }
+
+    await ctx.complete(async (tx, emit) => {
+      const moved = await this.conversations.moveToBella(
+        tx,
+        chatKey,
+        conversationKey,
+        ownerKey,
+        fused,
+      );
+
+      if (moved) {
+        await this.changed(tx, emit, conversationKey, ownerKey, true, undefined, undefined);
+      }
+      emit(
+        EEventType.IdentityLinkMoved,
+        { ...event.payload, owner: EIdentityLinkOwner.Conversation },
+        undefined,
+        chatKey,
+      );
     });
   }
 
@@ -93,24 +310,80 @@ export class MessageHandler {
     event: TEvent<EEventType.MessageSent>,
     ctx: TEventContext,
   ): Promise<void> {
-    const transcript = event.payload.transcript;
+    const { transcript, display } = event.payload;
 
-    if (transcript === undefined) {
+    if (transcript === undefined && display === undefined) {
       return;
     }
 
-    const span = startMemorySaveSpan(event.trace, ERole.Assistant, transcript.text.length);
+    // NOTE: a message for an address that is linked or being linked belongs to the account's Bella
+    // conversation. It is stored on that conversation's lane, which also moves the address's rows:
+    // under the address while its rows wait there to be moved, in the conversation after
+    const account = await IdentityService.instance.linkedAccount(event.payload.chatId);
+    let lane = event.payload.chatId;
+    let chatId = lane;
+
+    if (account !== undefined) {
+      lane = account.conversationKey;
+      chatId = account.conversationKey;
+
+      if (event.key === lane && (await this.conversations.holds(event.payload.chatId))) {
+        chatId = event.payload.chatId;
+      }
+    }
+
+    // written on its conversation's lane only, so the row orders with that conversation's turns;
+    // the forward and the ack commit together, and the emit's dedupe key keeps a redelivery
+    // from forwarding twice
+    if (lane !== event.key) {
+      await ctx.complete(async (_tx, emit) => {
+        emit(EEventType.MessageSent, event.payload, undefined, lane);
+      });
+      return;
+    }
+
+    // a deleted plain chat keeps no row
+    if (
+      IdentityService.instance.isPlainConversation(chatId) &&
+      !(await this.conversations.listed(chatId))
+    ) {
+      this.logger.warning("A message for a deleted plain chat is not stored");
+      return;
+    }
+
+    // an address whose rows still wait to be moved is not linked yet, so it resolves to itself
+    const ownerKey = await IdentityService.instance.ownerKeyOf(chatId);
+
+    const span = startMemorySaveSpan(event.trace, ERole.Assistant, event.payload.chars);
     let failure: TOption<string>;
     try {
-      await ctx.complete((tx) =>
-        this.conversations.saveDeliveredMessage(
-          tx,
-          event.payload.chatId,
-          transcript.text,
-          transcript.notice,
-          event.payload.sentAt,
-        ),
-      );
+      await ctx.complete(async (tx, emit) => {
+        let messageId: TOption<number>;
+
+        if (transcript !== undefined) {
+          messageId = await this.conversations.saveDeliveredMessage(
+            tx,
+            chatId,
+            event.payload.channel,
+            transcript.text,
+            transcript.modelText,
+            transcript.notice,
+            event.payload.sentAt,
+          );
+        }
+
+        if (display !== undefined) {
+          messageId = await this.conversations.saveDisplayMessage(
+            tx,
+            chatId,
+            event.payload.channel,
+            display,
+            event.payload.sentAt,
+          );
+        }
+
+        await this.changed(tx, emit, chatId, ownerKey, false, undefined, messageId);
+      });
     } catch (error) {
       failure = String(error);
       throw error;
@@ -123,12 +396,24 @@ export class MessageHandler {
     event: TEvent<EEventType.TurnRequested>,
     ctx: TEventContext,
   ): Promise<void> {
-    const { chatId, content, attachments, receivedAt, platform } = event.payload;
+    const { content, attachments, receivedAt, clientMessageId, model, ...requested } =
+      event.payload;
+    let origin: TMessageOrigin = requested;
     const trace = event.trace;
     const handleMessageStart = performance.now();
     this.logger.info("handleTurn: start");
     logHandlerStarted(trace, "message-handler");
     const span = startHandlerSpan(trace, "message-handler");
+
+    // NOTE: a turn of an address that is linked or being linked waits on a hold lane of its own
+    // until no link of the address's account is being made, then runs on the account's lane, in
+    // the account's Bella conversation, with the account's keys. The address's and the account's
+    // lanes stay free for the link's barrier and moves; the bound counts from the hold
+    const account = await IdentityService.instance.linkedAccount(requested.conversationKey);
+
+    if (account !== undefined && event.key === account.conversationKey) {
+      origin = { ...requested, ...account };
+    }
 
     // an earlier attempt died mid-run; the model must not answer twice
     if ((await ctx.findCaused(EEventType.TurnStarted, undefined)) !== undefined) {
@@ -137,26 +422,90 @@ export class MessageHandler {
         emit(
           EEventType.ReplyReady,
           {
-            chatId,
+            ...origin,
             text: INTERRUPTED_REPLY,
-            transcript: { text: INTERRUPTED_REPLY, notice: INTERRUPTED_NOTICE },
+            transcript: {
+              text: INTERRUPTED_REPLY,
+              modelText: INTERRUPTED_REPLY,
+              notice: INTERRUPTED_NOTICE,
+            },
           },
           undefined,
           undefined,
         );
-        emit(EEventType.TurnFailed, { chatId, reason: "interrupted" }, undefined, undefined);
+        emit(EEventType.TurnFailed, { ...origin, reason: "interrupted" }, undefined, undefined);
       });
       span.fail("interrupted", INTERRUPTED_REPLY.length);
       return;
     }
 
-    const settings = await SettingsService.instance.getAll(chatId);
+    if (account !== undefined && event.key !== account.conversationKey) {
+      const holdKey = `${LINK_HOLD_PREFIX}${requested.conversationKey}`;
+      let lane = holdKey;
+
+      if (event.key === holdKey) {
+        try {
+          await IdentityService.instance.holdWhileLinking(
+            requested.conversationKey,
+            event.occurredAt,
+          );
+        } catch (error) {
+          span.fail("link hold expired", 0);
+          throw error;
+        }
+
+        lane = account.conversationKey;
+      }
+
+      await ctx.complete(async (_tx, emit) => {
+        emit(EEventType.TurnRequested, event.payload, undefined, lane);
+      });
+      span.ok("forwarded", 0);
+      return;
+    }
+
+    const { conversationKey, ownerKey, channel, kind } = origin;
+
+    // a turn that reaches the lane after its plain chat was deleted
+    if (kind === EConversationKind.Plain && !(await this.conversations.listed(conversationKey))) {
+      this.logger.warning("handleTurn: the plain chat is deleted, the turn does not run");
+      span.fail("conversation deleted", 0);
+      return;
+    }
+
+    let settings = await SettingsService.instance.getAll(ownerKey);
+
+    // NOTE: a plain chat's turn runs on the provider its message carried, for this turn only. The
+    // turn may start long after the send was checked, so the choice is checked again: when the
+    // catalog no longer lists the model or the model no longer supports the effort, the turn
+    // stores the user's message and fails with a reply saying so, without compaction or a model
+    // run on another model. Otherwise the config the check answers is the one the plain agent runs
+    // on and the compaction summary uses, without resolving the choice again; every other purpose,
+    // such as the MCP specialist's, uses that provider's saved preference for its purpose, else
+    // the provider's default
+    let unavailable: TOption<string>;
+    let chosen: TOption<TLlmModelConfig>;
+
+    if (model !== undefined) {
+      const checked = await checkAiModelChoice(model.provider, model.model, model.effort);
+
+      if (checked === EAiModelChoiceProblem.ModelUnavailable) {
+        unavailable = `The model ${model.model} is no longer available from ${model.provider}. Choose another model and send again.`;
+      } else if (checked === EAiModelChoiceProblem.EffortUnsupported) {
+        unavailable = `The model ${model.model} no longer supports the effort ${model.effort}. Choose another effort and send again.`;
+      } else {
+        chosen = checked;
+      }
+
+      settings = { ...settings, [EConfigKey.AiProvider]: model.provider };
+    }
+
     let persisted: TOption<TConversation>;
 
     try {
-      let conversation = await this.conversations.load(chatId);
-      if (conversation !== undefined) {
-        conversation = await this.compact(chatId, conversation, settings, platform, trace, ctx);
+      let conversation = await this.conversations.load(conversationKey);
+      if (conversation !== undefined && unavailable === undefined) {
+        conversation = await this.compact(origin, conversation, settings, chosen, trace, ctx);
       }
 
       const storedText = [content, ...attachments.map(() => IMAGE_MARKER)]
@@ -169,12 +518,16 @@ export class MessageHandler {
         savedMessage = await ctx.transact(async (tx, emit) => {
           const row = await this.conversations.saveUserMessage(
             tx,
-            chatId,
+            conversationKey,
+            channel,
             ERole.User,
             storedText,
             new Date(receivedAt),
+            clientMessageId,
+            attachments,
           );
-          emit(EEventType.TurnStarted, { chatId, userMessageId: row.id }, undefined, undefined);
+          emit(EEventType.TurnStarted, { ...origin, userMessageId: row.id }, undefined, undefined);
+          await this.changed(tx, emit, conversationKey, ownerKey, false, "started", undefined);
           return row;
         });
       } catch (error) {
@@ -185,51 +538,73 @@ export class MessageHandler {
       }
 
       const chatStart = performance.now();
-      const aiRes = await this.ai.runMain({
+      const run: Parameters<AgentHarness["runMain"]>[0] = {
         prompt: content,
         conversation,
         images: {
           refs: attachments,
-          fetch: (ref, maxBytes) =>
-            MessagingAdapter.instance.fetchAttachment(chatId, ref, maxBytes),
+          fetch: (ref, maxBytes) => MessagingAdapter.instance.fetchAttachment(ref, maxBytes),
         },
         currentTimeContext: createCurrentTimeContext(settings, savedMessage.createdAt),
-        chatId,
+        conversationKey,
+        ownerKey,
         settings,
-        platform,
+        platform: channel,
         trace,
         events: ctx,
         signal: undefined,
-      });
+        model: chosen,
+      };
+      let aiRes: TOption<TMainAgentRunResult>;
+
+      if (unavailable !== undefined) {
+        this.logger.warning(`handleTurn: the chosen model cannot run: ${unavailable}`);
+      } else if (kind === EConversationKind.Plain) {
+        aiRes = await this.ai.runPlain(run);
+      } else {
+        aiRes = await this.ai.runMain(run);
+      }
+
       this.logger.info(
         `handleTurn: AI chat completed (${(performance.now() - chatStart).toFixed(0)}ms)`,
       );
 
-      const text = aiRes.text;
-
-      if (text === undefined) {
+      if (aiRes === undefined || aiRes.text === undefined) {
         this.logger.warning("handleTurn: AI returned no final response");
         let fallback = FAILED_REPLY;
-        const diagnosed = await ctx.request(
-          EEventType.AiAuthDiagnoseRequested,
-          { chatId, providerId: settings[EConfigKey.AiProvider] },
-          {
-            outcome: EEventType.AiAuthDiagnosed,
-            step: undefined,
-            key: undefined,
-            timeoutMs: DIAGNOSE_TIMEOUT_MS,
-          },
-        );
 
-        if (diagnosed.payload.problem !== undefined) {
-          fallback = diagnosed.payload.problem;
+        // NOTE: a plain chat's provider comes from its message, so the diagnosis, which switches
+        // the owner's provider, is not requested; the app learns at send time that a provider
+        // cannot be used
+        if (unavailable !== undefined) {
+          fallback = unavailable;
+        } else if (kind !== EConversationKind.Plain) {
+          const diagnosed = await ctx.request(
+            EEventType.AiAuthDiagnoseRequested,
+            { chatId: ownerKey, providerId: settings[EConfigKey.AiProvider] },
+            {
+              outcome: EEventType.AiAuthDiagnosed,
+              step: undefined,
+              key: undefined,
+              timeoutMs: DIAGNOSE_TIMEOUT_MS,
+            },
+          );
+
+          if (diagnosed.payload.problem !== undefined) {
+            fallback = diagnosed.payload.problem;
+          }
         }
 
         await ctx.complete(async (_tx, emit) => {
-          emit(EEventType.ReplyReady, { chatId, text: fallback }, undefined, undefined);
+          emit(
+            EEventType.ReplyReady,
+            { ...origin, text: fallback, display: { text: fallback } },
+            undefined,
+            undefined,
+          );
           emit(
             EEventType.TurnFailed,
-            { chatId, reason: "no_final_response" },
+            { ...origin, reason: "no_final_response" },
             undefined,
             undefined,
           );
@@ -238,28 +613,36 @@ export class MessageHandler {
         return;
       }
 
+      const text = aiRes.text;
+
       const turnSpan = startMemorySaveSpan(trace, ERole.Assistant, text.length);
       let turnFailure: TOption<string>;
       try {
         persisted = await ctx.complete(async (tx, emit) => {
           const state = await this.conversations.saveTurn(
             tx,
-            chatId,
+            conversationKey,
+            channel,
             aiRes.messages,
             savedMessage.id,
             conversation,
           );
 
+          let replyId: TOption<number>;
+
           if (text.trim().length > 0) {
-            emit(EEventType.ReplyReady, { chatId, text }, undefined, undefined);
+            emit(EEventType.ReplyReady, { ...origin, text }, undefined, undefined);
+            // the turn's last row: its final assistant message
+            replyId = state.entries.at(-1)?.id;
           }
 
           emit(
             EEventType.TurnCompleted,
-            { chatId, userMessageId: savedMessage.id },
+            { ...origin, userMessageId: savedMessage.id },
             undefined,
             undefined,
           );
+          await this.changed(tx, emit, conversationKey, ownerKey, false, "completed", replyId);
           return state;
         });
       } catch (error) {
@@ -276,8 +659,13 @@ export class MessageHandler {
     } catch (error) {
       this.logger.error(`handleTurn: failed: ${String(error)}`);
       await ctx.complete(async (_tx, emit) => {
-        emit(EEventType.ReplyReady, { chatId, text: FAILED_REPLY }, "failed", undefined);
-        emit(EEventType.TurnFailed, { chatId, reason: "error" }, undefined, undefined);
+        emit(
+          EEventType.ReplyReady,
+          { ...origin, text: FAILED_REPLY, display: { text: FAILED_REPLY } },
+          "failed",
+          undefined,
+        );
+        emit(EEventType.TurnFailed, { ...origin, reason: "error" }, undefined, undefined);
       });
       span.fail("failed", 0, String(error));
       return;
@@ -289,14 +677,40 @@ export class MessageHandler {
 
     // acked; the chat lane is still held, so the next turn waits for compaction.
     // compact() reports its own failures
-    await this.compact(chatId, persisted, settings, platform, trace, ctx);
+    await this.compact(origin, persisted, settings, chosen, trace, ctx);
+  }
+
+  // the revision and the fact commit with the transcript change they report; rewrite: the change
+  // is not an append (a delete, or rows moved in by a merge); messageId: the assistant row a
+  // reply, delivery or notice appended
+  private async changed(
+    tx: TDatabaseHandle,
+    emit: TDerivedEmit,
+    conversationKey: string,
+    ownerKey: string,
+    rewrite: boolean,
+    step: TOption<string>,
+    messageId: TOption<number>,
+  ): Promise<void> {
+    const { revision, rewriteRevision } = await this.conversations.raiseRevision(
+      tx,
+      conversationKey,
+      ownerKey,
+      rewrite,
+    );
+    emit(
+      EEventType.ConversationChanged,
+      { conversationKey, ownerKey, revision, rewriteRevision, messageId },
+      step,
+      undefined,
+    );
   }
 
   private async compact(
-    chatId: string,
+    origin: TMessageOrigin,
     state: TConversation,
     settings: TConfigRecord,
-    platform: TOption<EMessagePlatform>,
+    model: TOption<TLlmModelConfig>,
     trace: TBehaviorTraceContext,
     events: TEventRequester,
   ): Promise<TConversation> {
@@ -305,18 +719,21 @@ export class MessageHandler {
       const result = await this.ai.compactConversation(
         state,
         settings,
-        chatId,
-        platform,
+        origin.conversationKey,
+        origin.ownerKey,
+        origin.channel,
         trace,
         events,
+        false,
+        model,
       );
       if (result === undefined) {
         return state;
       }
-      const unused = await this.conversations.saveSummary(chatId, result.state);
+      const unused = await this.conversations.saveSummary(origin.conversationKey, result.state);
       for (const ref of unused) {
         try {
-          await MessagingAdapter.instance.deleteAttachment(chatId, ref);
+          await MessagingAdapter.instance.deleteAttachment(ref);
         } catch (error) {
           this.logger.warning(`Attachment delete failed: ${String(error)}`);
         }

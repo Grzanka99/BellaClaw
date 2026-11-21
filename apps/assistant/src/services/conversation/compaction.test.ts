@@ -8,6 +8,7 @@ import {
   fauxToolCall,
   type Message,
 } from "@earendil-works/pi-ai";
+import { EMessagePlatform } from "../messaging/types";
 import { compactConversation } from "./compaction";
 import { attachmentBlock, type TConversation } from "./types";
 
@@ -19,7 +20,10 @@ const TEST_TRACE: TBehaviorTraceContext = {
 
 function fixture() {
   const faux = fauxProvider({
-    models: [{ id: "summary", contextWindow: 200_000, maxTokens: 8192 }],
+    models: [
+      { id: "summary", contextWindow: 200_000, maxTokens: 8192 },
+      { id: "small", contextWindow: 8_000, maxTokens: 2_048 },
+    ],
   });
   const models = createModels();
   models.setProvider(faux.provider);
@@ -52,20 +56,85 @@ describe("conversation compaction", () => {
   test("does not summarize below 65k", async () => {
     const { state, models, model, faux } = fixture();
     state.entries = state.entries.slice(2);
-    expect(await compactConversation(state, models, model, 3000, TEST_TRACE)).toBeUndefined();
+    expect(
+      await compactConversation(state, models, model, 3000, TEST_TRACE, false, model),
+    ).toBeUndefined();
     expect(faux.state.callCount).toBe(0);
+  });
+
+  test("forced: summarizes the previous summary and every entry below 65k, even into a longer summary", async () => {
+    const { state, models, model, faux } = fixture();
+    state.entries = state.entries.slice(2);
+    faux.setResponses([
+      fauxAssistantMessage("Chose the train, then checked the calendar. ".repeat(20)),
+    ]);
+
+    const result = await compactConversation(state, models, model, 3000, TEST_TRACE, true, model);
+
+    expect(faux.state.callCount).toBe(1);
+    expect(result?.state.entries).toEqual([]);
+    expect(result?.state.summarizedThroughId).toBe(6);
+  });
+
+  test.each([
+    ["forced, failing on the selected model, runs once more on the fallback", true, true, 2],
+    ["forced, succeeding on the selected model, stays on it", true, false, 1],
+    ["non-forced, failing on the selected model, fails without the fallback", false, true, 1],
+  ])("%s", async (_name, force, selectedFails, calls) => {
+    const { state, models, model, faux } = fixture();
+    state.entries = state.entries.slice(2);
+    const small = faux.getModel("small");
+    if (small === undefined) {
+      throw new Error("Expected small model");
+    }
+    const used: string[] = [];
+    const respond: Parameters<typeof faux.setResponses>[0][number] = (
+      _context,
+      _options,
+      _state,
+      requestModel,
+    ) => {
+      used.push(requestModel.id);
+      if (selectedFails && requestModel.id === "small") {
+        return fauxAssistantMessage("", { stopReason: "error", errorMessage: "context overflow" });
+      }
+      return fauxAssistantMessage("Chose the train.");
+    };
+    faux.setResponses([respond, respond]);
+
+    const result = await compactConversation(
+      state,
+      models,
+      small,
+      7_000,
+      TEST_TRACE,
+      force,
+      model,
+    ).catch((error) => String(error));
+
+    expect(used).toEqual(["small", "summary"].slice(0, calls));
+    if (!force) {
+      expect(result).toContain("context overflow");
+    } else {
+      expect(result).toMatchObject({ state: { summary: "Chose the train." } });
+    }
   });
 
   test("counts stored images toward the trigger", async () => {
     const { state, models, model, faux } = fixture();
-    const image = attachmentBlock({ id: "photo", mimeType: "image/png" });
+    const image = attachmentBlock({
+      id: "photo",
+      mimeType: "image/png",
+      channel: EMessagePlatform.Signal,
+      sourceAddress: "+100",
+    });
     state.entries = Array.from({ length: 50 }, (_, index) => ({
       id: index + 1,
       message: { role: "user", content: [image], timestamp: index + 2 },
     }));
     faux.setResponses([fauxAssistantMessage("The user sent many pictures.")]);
 
-    const result = await compactConversation(state, models, model, 3000, TEST_TRACE);
+    const result = await compactConversation(state, models, model, 3000, TEST_TRACE, false, model);
 
     expect(result?.state.entries.length).toBeLessThan(50);
   });
@@ -89,7 +158,7 @@ describe("conversation compaction", () => {
         return fauxAssistantMessage("Chose train option B. Calendar still needs confirmation.");
       },
     ]);
-    const result = await compactConversation(state, models, model, 3000, TEST_TRACE);
+    const result = await compactConversation(state, models, model, 3000, TEST_TRACE, false, model);
     expect(result?.state.entries).toEqual(state.entries.slice(2));
     expect(result?.state.summarizedThroughId).toBe(2);
     expect(result?.tokensAfter).toBeLessThan(25_000);
@@ -98,7 +167,7 @@ describe("conversation compaction", () => {
       throw new Error("Expected compaction");
     }
     expect(
-      await compactConversation(result.state, models, model, 3000, TEST_TRACE),
+      await compactConversation(result.state, models, model, 3000, TEST_TRACE, false, model),
     ).toBeUndefined();
     result.state.entries.unshift(...state.entries.slice(0, 2));
     faux.setResponses([
@@ -108,7 +177,8 @@ describe("conversation compaction", () => {
       },
     ]);
     expect(
-      (await compactConversation(result.state, models, model, 3000, TEST_TRACE))?.state.summary,
+      (await compactConversation(result.state, models, model, 3000, TEST_TRACE, false, model))
+        ?.state.summary,
     ).toContain("Updated");
   });
 
@@ -150,7 +220,7 @@ describe("conversation compaction", () => {
         return fauxAssistantMessage("Calendar result recorded; results are historical.");
       },
     ]);
-    const result = await compactConversation(state, models, model, 3000, TEST_TRACE);
+    const result = await compactConversation(state, models, model, 3000, TEST_TRACE, false, model);
     expect(result?.state.entries).toEqual([]);
     expect(result?.tokensAfter).toBeLessThan(25_000);
   });
@@ -159,9 +229,9 @@ describe("conversation compaction", () => {
     const { state, models, model, faux } = fixture();
     const original = structuredClone(state);
     faux.setResponses([fauxAssistantMessage(" ")]);
-    await expect(compactConversation(state, models, model, 3000, TEST_TRACE)).rejects.toThrow(
-      "empty summary",
-    );
+    await expect(
+      compactConversation(state, models, model, 3000, TEST_TRACE, false, model),
+    ).rejects.toThrow("empty summary");
     expect(state).toEqual(original);
   });
 
@@ -175,9 +245,9 @@ describe("conversation compaction", () => {
     const { state, models, model, faux } = fixture();
     const original = structuredClone(state);
     faux.setResponses([response]);
-    await expect(compactConversation(state, models, model, 3000, TEST_TRACE)).rejects.toThrow(
-      "stopReason=length",
-    );
+    await expect(
+      compactConversation(state, models, model, 3000, TEST_TRACE, false, model),
+    ).rejects.toThrow("stopReason=length");
     expect(state).toEqual(original);
   });
 });

@@ -7,6 +7,7 @@ import { sanitizeErrorMessage } from "../../app-logger/sanitizers";
 import { AuthorizationService } from "../../authorization";
 import { commandFailed, ESubscriptionMode, EventBus, type TEventContext } from "../../events";
 import type { TEvent, TEventPayloads } from "../../events/catalog";
+import { IdentityService } from "../../identity";
 import { SettingsService } from "../../settings";
 import { EConfigKey } from "../../settings/schema";
 import { aiCredentials, aiModels } from "../providers/registry";
@@ -78,11 +79,9 @@ export async function getAiAuthState(
   }
 }
 
-// Returns the reply for a failed chat turn when the provider needs a new login.
-// Switches the chat to another connected OAuth provider when one exists.
-export async function describeAiAuthProblem(
-  ctx: Pick<TEventContext, "request">,
-  chatId: string,
+// Names why an OAuth provider needs a new login: its login expired or it is not connected.
+// Undefined for a connected provider, one whose check failed, or a provider without OAuth.
+export async function findAiLoginProblem(
   provider: string,
   models: Models = aiModels,
 ): Promise<TOption<string>> {
@@ -93,13 +92,30 @@ export async function describeAiAuthProblem(
   }
 
   const state = await getAiAuthState(providerId, models);
-  let problem: string;
 
   if (state === EAiAuthState.LoginExpired) {
-    problem = `The ${providerId} login has expired.`;
-  } else if (state === EAiAuthState.NotConnected) {
-    problem = `${providerId} is not connected.`;
-  } else {
+    return `The ${providerId} login has expired.`;
+  }
+
+  if (state === EAiAuthState.NotConnected) {
+    return `${providerId} is not connected.`;
+  }
+
+  return undefined;
+}
+
+// Returns the reply for a failed chat turn when the provider needs a new login.
+// Switches the chat to another connected OAuth provider when one exists.
+export async function describeAiAuthProblem(
+  ctx: Pick<TEventContext, "request">,
+  chatId: string,
+  provider: string,
+  models: Models = aiModels,
+): Promise<TOption<string>> {
+  const providerId = findAiOAuthProvider(provider);
+  const problem = await findAiLoginProblem(provider, models);
+
+  if (providerId === undefined || problem === undefined) {
     return undefined;
   }
 
@@ -116,11 +132,19 @@ export async function describeAiAuthProblem(
 // Refreshes every OAuth credential and sends one alert to all chats when logins break.
 // Stays silent while any provider is connected: a chat on a broken one is switched to it.
 export async function checkAiOAuth(models: Models = aiModels): Promise<void> {
-  const chatIds = await AuthorizationService.instance.listAuthorizedChatIds();
+  // the recipients of the alert
+  const chatIds = await IdentityService.instance.listNoticeRecipients(
+    await AuthorizationService.instance.listAuthorizedChatIds(),
+  );
   const selectedProviders = new Set<string>();
 
   for (const chatId of chatIds) {
-    const settings = await SettingsService.instance.getAll(chatId);
+    const resolved = await IdentityService.instance.resolve(chatId);
+    if (resolved === undefined) {
+      throw new Error(`Unknown chat key ${chatId}`);
+    }
+
+    const settings = await SettingsService.instance.getAll(resolved.ownerKey);
     selectedProviders.add(settings[EConfigKey.AiProvider]);
   }
 

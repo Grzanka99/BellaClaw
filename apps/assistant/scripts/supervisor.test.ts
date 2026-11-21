@@ -142,6 +142,26 @@ describe("supervisor", () => {
     expect(await Bun.file(join(releases, "current")).exists()).toBe(false);
   });
 
+  test("applies the image's migrations when it starts from a rebuilt image, and not again", async () => {
+    await Bun.write(
+      join(image, "apps/assistant/scripts/migrate.ts"),
+      'import { appendFileSync } from "node:fs";\nappendFileSync(Bun.env.FIXTURE_OUT + "/migrated", "x");\n',
+    );
+    start();
+
+    expect(await outcome()).toContain("Already on");
+    expect(await Bun.file(join(directory, "migrated")).text()).toBe("x");
+
+    supervisor.kill("SIGTERM");
+    await supervisor.exited;
+    await rm(join(directory, "asked"));
+    await rm(join(directory, "notices"));
+    start();
+
+    expect(await outcome()).toContain("Already on");
+    expect(await Bun.file(join(directory, "migrated")).text()).toBe("x");
+  });
+
   test("holds a commit that needs a new image", async () => {
     const sha = await commit({ Containerfile: "FROM scratch\nRUN true\n" });
 

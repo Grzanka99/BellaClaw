@@ -3,15 +3,18 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { EEventType, eventsTable } from "@bellaclaw/database";
+import { verifyGatewayLinkToken } from "@bellaclaw/shared";
 import { asc, eq } from "drizzle-orm";
 import { AuthorizationService } from "../authorization";
 import { DatabaseConnector } from "../database";
 import { resetEventTables } from "../database/test-utils";
 import { EventBus } from "../events";
-import { EMessagePlatform } from "../messaging/types";
-import { Commands } from ".";
+import { testMessageOrigin, withEventContext } from "../events/test-utils";
+import { EMessagePlatform, type TAttachmentRef } from "../messaging/types";
+import { Commands, runCommand } from ".";
 
 const originalMcpConfig = Bun.env.BELLACLAW_MCP_CONFIG;
+const signal = { channel: EMessagePlatform.Signal, address: "+100" };
 
 async function rowsOf(type: EEventType) {
   return DatabaseConnector.instance.database
@@ -33,14 +36,19 @@ describe("commands consumer", () => {
     chatId: string,
     content: string,
     receivedAt: number,
-    attachments: { id: string; mimeType: string }[] = [],
+    attachments: TAttachmentRef[] = [],
   ) {
     await bus.publish({
       type: EEventType.MessageAuthorized,
       source: "test",
       key: chatId,
       trace: { turnId: "test:commands", chatId, platform: EMessagePlatform.Discord },
-      payload: { chatId, content, attachments, receivedAt, platform: EMessagePlatform.Discord },
+      payload: {
+        ...testMessageOrigin(chatId, EMessagePlatform.Discord),
+        content,
+        attachments,
+        receivedAt,
+      },
       causationId: undefined,
       dedupeKey: undefined,
     });
@@ -69,15 +77,14 @@ describe("commands consumer", () => {
   });
 
   test("a plain message becomes turn.requested with the transport's arrival time", async () => {
-    await authorized("signal:+100", "What is on my calendar tomorrow?", 1_234);
+    await authorized("discord:100", "What is on my calendar tomorrow?", 1_234);
 
     expect(await payloadsOf(EEventType.TurnRequested)).toEqual([
       {
-        chatId: "signal:+100",
+        ...testMessageOrigin("discord:100", EMessagePlatform.Discord),
         content: "What is on my calendar tomorrow?",
         attachments: [],
         receivedAt: 1_234,
-        platform: EMessagePlatform.Discord,
       },
     ]);
   });
@@ -87,13 +94,13 @@ describe("commands consumer", () => {
     const activated = spyOn(
       AuthorizationService.instance,
       "listAuthorizedChatIds",
-    ).mockResolvedValue(["signal:+100"]);
+    ).mockResolvedValue(["discord:100"]);
 
-    await authorized("signal:+100", "!update", 1);
+    await authorized("discord:100", "!update", 1);
     process.send = send;
     try {
-      await authorized("signal:+100", "!update", 2);
-      await authorized("signal:+999", "!update", 3);
+      await authorized("discord:100", "!update", 2);
+      await authorized("discord:999", "!update", 3);
     } finally {
       process.send = undefined;
       activated.mockRestore();
@@ -102,15 +109,114 @@ describe("commands consumer", () => {
     expect(send.mock.calls).toEqual([[{ type: "update" }]]);
     expect(await payloadsOf(EEventType.ReplyReady)).toEqual([
       {
-        chatId: "signal:+100",
+        ...testMessageOrigin("discord:100", EMessagePlatform.Discord),
         text: "Self-update is unavailable: the bot is not running under its supervisor.",
+        display: {
+          text: "Self-update is unavailable: the bot is not running under its supervisor.",
+          request: { text: "!update", receivedAt: 1 },
+        },
       },
-      { chatId: "signal:+100", text: "Checking for an update." },
       {
-        chatId: "signal:+999",
+        ...testMessageOrigin("discord:100", EMessagePlatform.Discord),
+        text: "Checking for an update.",
+        display: { text: "Checking for an update.", request: { text: "!update", receivedAt: 2 } },
+      },
+      {
+        ...testMessageOrigin("discord:999", EMessagePlatform.Discord),
         text: "Updating requires BELLACLAW_ACTIVATION_TOKEN and an activated chat.",
+        display: {
+          text: "Updating requires BELLACLAW_ACTIVATION_TOKEN and an activated chat.",
+          request: { text: "!update", receivedAt: 3 },
+        },
       },
     ]);
+  });
+
+  test("!update checks the activation of the conversation, not of the owner", async () => {
+    const activated = spyOn(
+      AuthorizationService.instance,
+      "listAuthorizedChatIds",
+    ).mockResolvedValue(["discord:100"]);
+
+    try {
+      expect(
+        await withEventContext((ctx) =>
+          runCommand(
+            "discord:owner",
+            { channel: EMessagePlatform.Discord, address: "100" },
+            "!update",
+            ctx,
+          ),
+        ),
+      ).toBe("Self-update is unavailable: the bot is not running under its supervisor.");
+      expect(
+        await withEventContext((ctx) =>
+          runCommand(
+            "discord:100",
+            { channel: EMessagePlatform.Discord, address: "999" },
+            "!update",
+            ctx,
+          ),
+        ),
+      ).toBe("Updating requires BELLACLAW_ACTIVATION_TOKEN and an activated chat.");
+    } finally {
+      activated.mockRestore();
+    }
+  });
+
+  test("!dashboard signs the address the command came from, not the owner", async () => {
+    const originalUrl = Bun.env.BELLACLAW_GATEWAY_PUBLIC_URL;
+    const originalSecret = Bun.env.BELLACLAW_GATEWAY_SECRET;
+    Bun.env.BELLACLAW_GATEWAY_PUBLIC_URL = "https://dashboard.test";
+    Bun.env.BELLACLAW_GATEWAY_SECRET = "gateway-secret";
+
+    try {
+      const reply = await withEventContext((ctx) =>
+        runCommand("account:acct-1", signal, "!dashboard", ctx),
+      );
+      let text = "";
+      if (typeof reply === "object" && "confidential" in reply) {
+        text = reply.confidential;
+      }
+      const token = text.match(/token=([^\s]+)/)?.[1] ?? "";
+
+      expect(verifyGatewayLinkToken("gateway-secret", token, Date.now())?.chatId).toBe(
+        "signal:+100",
+      );
+    } finally {
+      Bun.env.BELLACLAW_GATEWAY_PUBLIC_URL = originalUrl;
+      Bun.env.BELLACLAW_GATEWAY_SECRET = originalSecret;
+    }
+  });
+
+  test("!app answers confidentially with the dashboard's app page, signed for the address", async () => {
+    const originalUrl = Bun.env.BELLACLAW_GATEWAY_PUBLIC_URL;
+    const originalSecret = Bun.env.BELLACLAW_GATEWAY_SECRET;
+    Bun.env.BELLACLAW_GATEWAY_PUBLIC_URL = "https://dashboard.test/";
+    Bun.env.BELLACLAW_GATEWAY_SECRET = "gateway-secret";
+
+    try {
+      const reply = await withEventContext((ctx) =>
+        runCommand("account:acct-1", signal, "!app", ctx),
+      );
+      let text = "";
+      if (typeof reply === "object" && "confidential" in reply) {
+        text = reply.confidential;
+      }
+      const token = text.match(/^https:\/\/dashboard\.test\/app\?token=([^\s]+)\n/)?.[1] ?? "";
+
+      expect(verifyGatewayLinkToken("gateway-secret", token, Date.now())?.chatId).toBe(
+        "signal:+100",
+      );
+
+      Bun.env.BELLACLAW_GATEWAY_SECRET = "";
+      expect(
+        await withEventContext((ctx) => runCommand("account:acct-1", signal, "!app", ctx)),
+      ).toBe("The dashboard is not configured.");
+    } finally {
+      Bun.env.BELLACLAW_GATEWAY_PUBLIC_URL = originalUrl;
+      Bun.env.BELLACLAW_GATEWAY_SECRET = originalSecret;
+    }
   });
 
   test("an MCP prompt command becomes turn.requested keyed by the chat with its trace", async () => {
@@ -132,7 +238,12 @@ describe("commands consumer", () => {
     Bun.env.BELLACLAW_MCP_CONFIG = configPath;
 
     await authorized("discord:channel-1", '!mcp-prompt documents summarize {"style":"brief"}', 5, [
-      { id: "m:a", mimeType: "image/png" },
+      {
+        id: "m:a",
+        mimeType: "image/png",
+        channel: EMessagePlatform.Discord,
+        sourceAddress: "channel-1",
+      },
     ]);
 
     const rows = await rowsOf(EEventType.TurnRequested);
@@ -140,12 +251,11 @@ describe("commands consumer", () => {
     expect(rows[0]?.platform).toBe(EMessagePlatform.Discord);
     expect(rows[0]?.turnId).toBe("test:commands");
     expect(rows[0]?.payload).toEqual({
-      chatId: "discord:channel-1",
+      ...testMessageOrigin("discord:channel-1", EMessagePlatform.Discord),
       content:
         'Use MCP profile documents to run the explicitly requested prompt template summarize with arguments {"style":"brief"}.',
       attachments: [],
       receivedAt: 5,
-      platform: EMessagePlatform.Discord,
     });
   });
 
@@ -160,14 +270,24 @@ describe("commands consumer", () => {
 
     expect(await payloadsOf(EEventType.ReplyReady)).toEqual([
       {
-        chatId: "discord:channel-1",
+        ...testMessageOrigin("discord:channel-1", EMessagePlatform.Discord),
         text: "MCP prompt request failed: Error: Unknown MCP profile: missing",
+        display: {
+          text: "MCP prompt request failed: Error: Unknown MCP profile: missing",
+          request: { text: "!mcp-prompt missing summarize", receivedAt: 1 },
+        },
       },
       {
-        chatId: "discord:channel-1",
+        ...testMessageOrigin("discord:channel-1", EMessagePlatform.Discord),
         text: expect.stringContaining(
           "MCP prompt listing failed: Error: Invalid MCP configuration:",
         ),
+        display: {
+          text: expect.stringContaining(
+            "MCP prompt listing failed: Error: Invalid MCP configuration:",
+          ),
+          request: { text: "!mcp-prompts", receivedAt: 2 },
+        },
       },
     ]);
     expect(await payloadsOf(EEventType.TurnRequested)).toEqual([]);

@@ -16,7 +16,7 @@ export const listCronJobs = defineTool({
   logSafe: [],
   privateErrors: true,
   execute: async (context) => {
-    const chatId = requireChatId(context.chatId);
+    const chatId = requireChatId(context.ownerKey);
     const jobs = await CronScheduler.instance.list(chatId);
     const automationIds = new Set(jobs.flatMap((job) => job.automationIds));
     const automations = await AutomationService.instance.getByIds(chatId, [...automationIds]);

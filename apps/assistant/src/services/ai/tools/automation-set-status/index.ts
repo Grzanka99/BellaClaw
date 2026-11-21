@@ -19,7 +19,7 @@ export const automationSetStatus = defineTool({
   privateErrors: true,
   logSafe: ["status", "failureCount", "outputCapBytes"],
   execute: async (context, args) => {
-    const scope = requireChatId(context.chatId);
+    const scope = requireChatId(context.ownerKey);
     const changed = await runAutomationOperation(() =>
       context.events.request(
         EEventType.AutomationStatusSetRequested,

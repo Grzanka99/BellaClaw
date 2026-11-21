@@ -194,7 +194,7 @@ describe("behavior log MCP server", () => {
             description: "Behavior logs",
             instructions: "Inspect behavior logs",
             transport: { type: "http", url: `http://127.0.0.1:${httpServer.port}/mcp` },
-            contextArguments: { chatId: "chatId", excludeTurnId: "turnId" },
+            contextArguments: { chatId: "conversationKey", excludeTurnId: "turnId" },
           },
         ],
       }),
@@ -203,7 +203,8 @@ describe("behavior log MCP server", () => {
     Bun.env.BELLACLAW_MCP_CONFIG = configPath;
     mcpService = new McpService();
     const session = await mcpService.open({
-      chatId,
+      ownerKey: chatId,
+      conversationKey: chatId,
       profileId: "logs",
       turnId: "diagnostic",
     });

@@ -18,7 +18,7 @@ export const deleteCalendarEvent = defineTool({
   mode: "sequential",
   logSafe: [],
   execute: async (context, args) => {
-    const chatId = requireChatId(context.chatId);
+    const chatId = requireChatId(context.ownerKey);
     await context.events.request(
       EEventType.CalendarEventDeleteRequested,
       { chatId, eventId: args.eventId, scope: args.scope },

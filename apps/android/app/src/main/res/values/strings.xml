@@ -1,0 +1,136 @@
+<resources>
+    <string name="app_name">BellaClaw</string>
+    <string name="bellaclaw_name">BellaClaw</string>
+
+    <string name="action_back">Back</string>
+    <string name="action_new_chat">New chat</string>
+    <string name="action_send">Send</string>
+    <string name="action_attach_image">Attach image</string>
+    <string name="action_remove_image">Remove image</string>
+    <string name="action_choose_model">Model for this chat</string>
+    <string name="action_done">Done</string>
+    <string name="action_save">Save</string>
+    <string name="action_reset_default">Reset to default</string>
+    <string name="action_retry">Retry</string>
+
+    <string name="home_title">Home</string>
+    <string name="home_chats">Chats</string>
+    <string name="new_chat_title">New chat</string>
+
+    <string name="composer_hint_bellaclaw">Message BellaClaw</string>
+    <string name="composer_hint_chat">Ask anything</string>
+    <string name="attached_image">Attached image</string>
+    <string name="error_image_too_large">Images can be up to 5 MB.</string>
+    <string name="error_image_type">Only JPEG, PNG, WebP and GIF images can be sent.</string>
+    <string name="typing">Typing</string>
+    <string name="day_today">Today</string>
+    <string name="day_yesterday">Yesterday</string>
+
+    <string name="picker_title">Model for this chat</string>
+    <string name="picker_no_provider">No provider is connected.</string>
+    <string name="label_provider">Provider</string>
+    <string name="label_model">Model</string>
+    <string name="label_effort">Effort</string>
+    <string name="effort_low">Low</string>
+    <string name="effort_medium">Medium</string>
+    <string name="effort_high">High</string>
+    <string name="effort_off">Off</string>
+    <string name="effort_minimal">Minimal</string>
+    <string name="effort_xhigh">Extra high</string>
+    <string name="effort_max">Max</string>
+    <string name="effort_default">Model default</string>
+
+    <string name="settings_title">Settings</string>
+    <string name="settings_app">App</string>
+    <string name="settings_loading">Loading…</string>
+    <string name="settings_load_failed">Couldn\'t load the settings</string>
+    <string name="models_title">Models</string>
+    <string name="models_summary">%1$s · %2$s</string>
+    <string name="models_roles">Roles</string>
+    <string name="models_verifying">Checking the change with the provider. This can take a few minutes.</string>
+    <string name="model_and_effort">%1$s · %2$s</string>
+    <string name="role_utility">Utility</string>
+    <string name="role_main">Main</string>
+    <string name="role_specialist">Specialist</string>
+    <string name="role_specialist_accurate">Specialist Accurate</string>
+    <string name="role_scheduled_task">Scheduled Task</string>
+
+    <string name="personality_title">Personality</string>
+    <string name="personality_summary_shared">BellaClaw\'s personality is used in chats too</string>
+    <string name="personality_summary_separate">Chats use their own personality</string>
+    <string name="personality_bellaclaw_label">BellaClaw\'s personality</string>
+    <string name="personality_use_in_chats">Use BellaClaw\'s personality in chats</string>
+    <string name="personality_use_in_chats_on">Quick chats start from BellaClaw\'s personality</string>
+    <string name="personality_use_in_chats_off">Off: chats use only the text below</string>
+    <string name="personality_chats_label">Chats personality</string>
+    <string name="personality_chats_placeholder">Empty = plain assistant, no personality</string>
+    <string name="personality_chats_help_on">Added after BellaClaw\'s personality. Optional.</string>
+    <string name="personality_chats_help_off">Replaces BellaClaw\'s personality in chats. Optional.</string>
+
+    <string name="theme_title">Theme</string>
+    <string name="theme_mode">Mode</string>
+    <string name="theme_system">System</string>
+    <string name="theme_light">Light</string>
+    <string name="theme_dark">Dark</string>
+    <string name="theme_summary_dynamic">%1$s · Dynamic color</string>
+    <string name="theme_dynamic_color">Dynamic color</string>
+    <string name="theme_dynamic_color_summary">Colors from your wallpaper</string>
+
+    <string name="notifications_title">Notifications</string>
+    <string name="notifications_summary">Open Android notification settings</string>
+    <string name="channel_bellaclaw">BellaClaw</string>
+    <string name="channel_chats">Chats</string>
+
+    <string name="account_title">Account</string>
+    <string name="sign_out">Sign out</string>
+    <string name="sign_out_summary">End this session on the server</string>
+
+    <string name="sign_in_title">Sign in</string>
+    <string name="sign_in_intro">Sign in to your BellaClaw server.</string>
+    <string name="label_server_url">Server address</string>
+    <string name="hint_server_url">https://bellaclaw.example.com</string>
+    <string name="label_username">Username</string>
+    <string name="label_password">Password</string>
+    <string name="label_activation_code">Activation code</string>
+    <string name="action_sign_in">Sign in</string>
+    <string name="action_create_account">Create account</string>
+    <string name="action_go_to_create_account">New here? Create an account</string>
+    <string name="sign_in_with_chat">Signed in from a chat?</string>
+    <string name="sign_in_with_chat_help">Send !app in Signal or Discord, then open the link or paste its code here.</string>
+    <string name="label_login_code">Login code</string>
+    <string name="action_use_code">Use code</string>
+    <string name="register_title">Create account</string>
+    <string name="register_intro">Create an account with the activation code of your server.</string>
+
+    <string name="link_title">Sign in from a chat</string>
+    <string name="link_confirm">This link is for the server:</string>
+    <string name="link_confirm_help">Continue only if you asked for this link in your own chat and you trust this server.</string>
+    <string name="action_continue">Continue</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="action_close">Close</string>
+    <string name="link_unusable">This link can\'t be used.</string>
+    <string name="link_invalid">This link has expired or was used already. Send !app in your chat for a new one.</string>
+    <string name="link_linked">The chat %1$s belongs to the account %2$s.</string>
+    <string name="link_unlinked">The chat %1$s has no account yet. Create an account, or sign in to one you have: the chat will be connected to it for good, and can then sign in to that account and set its password.</string>
+    <string name="action_i_have_account">I have an account</string>
+    <string name="link_connect">Connect the chat %1$s to %2$s for good? The chat can then sign in to this account and set its password.</string>
+    <string name="action_connect">Connect</string>
+    <string name="link_connected">The chat %1$s is connected to %2$s.</string>
+    <string name="link_already_connected">The chat %1$s is connected to %2$s already.</string>
+    <string name="link_other_account">The chat %1$s belongs to another account, not to %2$s.</string>
+    <string name="link_other_server">This link is for another server. This app is signed in as %1$s on %2$s.</string>
+
+    <string name="error_server_status">The server refused the request (%1$d).</string>
+    <string name="error_network">Can\'t reach the server. Check the address and your connection.</string>
+    <string name="error_server_url_empty">Enter the server address.</string>
+    <string name="error_server_url_invalid">Enter the full address, starting with https://</string>
+    <string name="error_server_url_cleartext">The address must start with https://</string>
+    <string name="error_link_not_login">This is not a BellaClaw login code.</string>
+    <string name="error_link_incomplete">The login code is incomplete. Copy all of it.</string>
+    <string name="error_link_cleartext">The link names a server without https://, which this app does not accept.</string>
+    <string name="error_link_server_invalid">The link names an invalid server address.</string>
+    <string name="unread">Unread</string>
+    <string name="message_sending">Sending…</string>
+    <string name="message_not_sent">Not sent. Tap to try again.</string>
+    <string name="image">Image</string>
+</resources>

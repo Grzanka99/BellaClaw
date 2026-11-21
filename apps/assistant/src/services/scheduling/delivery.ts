@@ -13,7 +13,7 @@ import type {
   TDeliveryTranscript,
   TEvent,
 } from "../events/catalog";
-import { parseCanonicalChatKey } from "../messaging/chat-key";
+import { IdentityService } from "../identity";
 import type { EMessagePlatform } from "../messaging/types";
 import {
   createAutomationFailedNotices,
@@ -58,24 +58,40 @@ export class ScheduledDelivery {
   }
 
   private async handleCronFire(event: TEvent<EEventType.CronFired>, ctx: TEventContext) {
-    const job = event.payload;
-    const canonicalChatId = job.scope;
-    const parsedScope = parseCanonicalChatKey(canonicalChatId);
-    const trace: TBehaviorTraceContext = { ...event.trace, platform: parsedScope?.platform };
+    // NOTE: a fire for a scope that is being linked waits for the link on its own lane, bounded
+    // from the fire as an inbound message is, so it runs once, for the account
+    await IdentityService.instance.holdWhileLinking(event.payload.scope, event.occurredAt);
+
+    // the scope is the job's owner; the delivery goes to the owner's conversation, and its text is
+    // formatted for the channel that conversation is reached on
+    const resolved = await IdentityService.instance.resolve(event.payload.scope);
+    const trace: TBehaviorTraceContext = {
+      ...event.trace,
+      platform: resolved?.destination.channel,
+    };
     logHandlerStarted(trace, "cron-fire");
     const span = startHandlerSpan(trace, "cron-fire");
 
-    if (parsedScope === undefined) {
+    if (resolved === undefined) {
       this.logger.warning(
-        `handleCronFire: job "${job.name}" has invalid scope "${canonicalChatId}", skipping delivery`,
+        `handleCronFire: job "${event.payload.name}" has invalid scope "${event.payload.scope}", skipping delivery`,
       );
       span.fail("invalid scope", 0);
       return;
     }
 
+    // a fire queued under an address that is linked since runs, like the job's row, for the
+    // account: its automations, settings and tools are the account's
+    const job = { ...event.payload, scope: resolved.ownerKey };
+
+    const conversationKey = resolved.conversationKey;
+    const destination = resolved.destination;
+
     let messages: TCronMessage[];
 
     if (job.content.kind === "task" || job.automationIds.length > 0) {
+      // NOTE: accepted risk: keyed by scope|name, so a run that outlasts its interval can overlap
+      // the next fire once when a link re-keys the job mid-run
       const previousEnd = this.lastRunEndedAt.get(event.key);
 
       // fired while the previous run of this job was still going
@@ -102,7 +118,8 @@ export class ScheduledDelivery {
       try {
         messages = await this.createCronMessages(
           job,
-          parsedScope.platform,
+          conversationKey,
+          destination.channel,
           trace,
           span,
           interrupted,
@@ -112,7 +129,15 @@ export class ScheduledDelivery {
         this.lastRunEndedAt.set(event.key, Date.now());
       }
     } else {
-      messages = await this.createCronMessages(job, parsedScope.platform, trace, span, false, ctx);
+      messages = await this.createCronMessages(
+        job,
+        conversationKey,
+        destination.channel,
+        trace,
+        span,
+        false,
+        ctx,
+      );
     }
 
     if (messages.length === 0) {
@@ -123,10 +148,10 @@ export class ScheduledDelivery {
       for (const [index, message] of messages.entries()) {
         emit(
           EEventType.DeliveryReady,
-          { chatId: canonicalChatId, text: message.text, transcript: message.transcript },
+          { chatId: conversationKey, text: message.text, transcript: message.transcript },
           String(index),
           // the chat lane, so the transcript append orders with the chat's turns
-          canonicalChatId,
+          conversationKey,
         );
       }
     });
@@ -134,6 +159,7 @@ export class ScheduledDelivery {
 
   private async createCronMessages(
     job: TCronFiredPayload,
+    conversationKey: string,
     platform: EMessagePlatform,
     trace: TBehaviorTraceContext,
     span: THandlerSpan,
@@ -160,6 +186,7 @@ export class ScheduledDelivery {
       try {
         result = await runCronJobAutomations(
           job,
+          conversationKey,
           platform,
           this.ai,
           ctx,
@@ -234,7 +261,14 @@ export class ScheduledDelivery {
         return messages;
       }
     } else if (job.content.kind === "task") {
-      const taskResult = await generateScheduledTaskText(job, platform, this.ai, ctx, trace);
+      const taskResult = await generateScheduledTaskText(
+        job,
+        conversationKey,
+        platform,
+        this.ai,
+        ctx,
+        trace,
+      );
       text = taskResult.text;
       memoryPrefix = "CRON TASK";
       toolCallCount = taskResult.toolCallCount;
@@ -285,7 +319,8 @@ function createCronMessage(
   return {
     text,
     transcript: {
-      text: `[${memoryPrefix} ${job.name}]: ${text}`,
+      text,
+      modelText: `[${memoryPrefix} ${job.name}]: ${text}`,
       notice: `Scheduler notice, not from the user: ${notice}`,
     },
   };

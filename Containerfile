@@ -10,7 +10,7 @@ WORKDIR /app
 
 COPY package.json bun.lock turbo.json ./
 COPY apps/assistant/package.json apps/assistant/package.json
-COPY apps/dashboard/package.json apps/dashboard/package.json
+COPY apps/gateway/package.json apps/gateway/package.json
 COPY apps/log-viewer/package.json apps/log-viewer/package.json
 COPY apps/signal-sim/package.json apps/signal-sim/package.json
 COPY packages/behavior-logs/package.json packages/behavior-logs/package.json

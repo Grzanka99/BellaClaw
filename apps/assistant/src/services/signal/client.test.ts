@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
+import { EMessagePlatform } from "../messaging/types";
 import { parseSignalReceiveMessage, SignalClient } from "./client";
 
 const originalFetch = globalThis.fetch;
@@ -110,8 +111,18 @@ describe("parseSignalReceiveMessage", () => {
       sourceNumber: "+111",
       message: "",
       attachments: [
-        { id: "file-0", mimeType: "image/jpeg" },
-        { id: "file-2", mimeType: "image/png" },
+        {
+          id: "file-0",
+          mimeType: "image/jpeg",
+          channel: EMessagePlatform.Signal,
+          sourceAddress: "+111",
+        },
+        {
+          id: "file-2",
+          mimeType: "image/png",
+          channel: EMessagePlatform.Signal,
+          sourceAddress: "+111",
+        },
       ],
       timestamp: 123,
     });

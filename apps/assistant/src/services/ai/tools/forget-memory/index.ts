@@ -21,7 +21,7 @@ export const forgetMemory = defineTool({
   mode: "sequential",
   logSafe: [],
   execute: async (context, args) => {
-    const chatId = requireChatId(context.chatId);
+    const chatId = requireChatId(context.ownerKey);
     try {
       const forgotten = await context.events.request(
         EEventType.MemoryFactsForgetRequested,

@@ -141,6 +141,7 @@ describe("generateScheduledTaskText", () => {
       context({
         content: { kind: "task", prompt: "Prepare a briefing.", fallback: "Briefing unavailable." },
       }),
+      "signal:+100",
       EMessagePlatform.Signal,
       { runScheduledTask },
       testEventRequester,
@@ -156,7 +157,8 @@ describe("generateScheduledTaskText", () => {
         toolCallCount: 2,
       }),
     );
-    expect(args?.chatId).toBe("signal:+100");
+    expect(args?.conversationKey).toBe("signal:+100");
+    expect(args?.ownerKey).toBe("signal:+100");
     expect(args?.platform).toBe(EMessagePlatform.Signal);
     expect(args?.settings).toBe(ownerSettings);
     expect(args?.events).toBe(testEventRequester);
@@ -173,6 +175,7 @@ describe("generateScheduledTaskText", () => {
       (
         await generateScheduledTaskText(
           task,
+          "signal:+100",
           EMessagePlatform.Signal,
           {
             runScheduledTask: mock(async () => ({
@@ -191,6 +194,7 @@ describe("generateScheduledTaskText", () => {
       (
         await generateScheduledTaskText(
           task,
+          "signal:+100",
           EMessagePlatform.Signal,
           {
             runScheduledTask: mock(async () => {

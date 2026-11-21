@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import type { TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
 import { ECronJobType, EEventType, eventsTable, memoriesTable } from "@bellaclaw/database";
-import { fauxAssistantMessage, type Message, normalizeContext } from "@earendil-works/pi-ai";
+import { normalizeContext } from "@earendil-works/pi-ai";
 import { convertResponsesMessages } from "@earendil-works/pi-ai/api/openai-responses-shared";
 import { transformMessages } from "@earendil-works/pi-ai/api/transform-messages";
 import { eq } from "drizzle-orm";
@@ -15,8 +15,10 @@ import { DatabaseConnector } from "../database";
 import { resetEventTables } from "../database/test-utils";
 import { EventBus } from "../events";
 import type { TCronFiredPayload } from "../events/catalog";
+import { testMessageOrigin } from "../events/test-utils";
 import { Memory } from "../memory";
 import { MessageHandler } from "../message-handler";
+import { scriptedReply } from "../message-handler/test-utils";
 import { MessagingAdapter } from "../messaging";
 import { EMessagePlatform } from "../messaging/types";
 import { SettingsService } from "../settings";
@@ -101,20 +103,9 @@ function setupConversationHandler(chatId: string) {
     getAll: mock(async () => DefaultConfigRecord),
   };
   const handler = MessageHandler.instance;
-  const runMain = mock(async (args: Parameters<AgentHarness["runMain"]>[0]) => {
-    const messages: Message[] = [
-      ...(args.conversation?.entries.map((entry) => entry.message) ?? []),
-      { role: "user", content: args.prompt, timestamp: Date.now() },
-      fauxAssistantMessage("Main reply"),
-    ];
-    return {
-      text: "Main reply",
-      iterations: 1,
-      toolCallCount: 0,
-      stopReason: "completed",
-      messages,
-    };
-  });
+  const runMain = mock(async (args: Parameters<AgentHarness["runMain"]>[0]) =>
+    scriptedReply(args, "Main reply"),
+  );
   const compactConversation = mock(async (_state: TConversation): Promise<unknown> => undefined);
   Object.assign(handler, { ai: { runMain, compactConversation } });
   const requestTurn = () =>
@@ -124,11 +115,10 @@ function setupConversationHandler(chatId: string) {
       key: chatId,
       trace: { ...TEST_TRACE, chatId },
       payload: {
-        chatId,
+        ...testMessageOrigin(chatId, EMessagePlatform.Signal),
         content: "Hello",
         attachments: [],
         receivedAt: Date.now(),
-        platform: EMessagePlatform.Signal,
       },
       causationId: undefined,
       dedupeKey: undefined,
@@ -158,7 +148,7 @@ function setupAutomationDelivery() {
   };
   const save = mock(async () => undefined);
   Object.assign(MessageHandler.instance, {
-    conversations: { saveDeliveredMessage: save },
+    conversations: { saveDeliveredMessage: save, raiseRevision: mock(async () => 1) },
   });
   const sendText = mock(async () => undefined);
   MessagingAdapter.instance.registerTransport({
@@ -229,12 +219,14 @@ describe("ScheduledDelivery", () => {
     };
     let context = cron({ scope: chatId });
     let transcript = "[CRON REMINDER daily]: Take a break.";
+    let sent = "Take a break.";
     if (kind === "task") {
       context = cron({
         scope: chatId,
         content: { kind: "task", prompt: "Prepare briefing", fallback: "Failed" },
       });
       transcript = "[CRON TASK daily]: Your briefing is ready.";
+      sent = "Your briefing is ready.";
     }
 
     await fire(context);
@@ -264,7 +256,7 @@ describe("ScheduledDelivery", () => {
       .select()
       .from(memoriesTable)
       .where(eq(memoriesTable.chatId, chatId));
-    expect(memories.filter((row) => row.message === transcript)).toHaveLength(1);
+    expect(memories.filter((row) => row.message === sent)).toHaveLength(1);
   });
 
   test.each([
@@ -344,7 +336,7 @@ describe("ScheduledDelivery", () => {
           .select()
           .from(memoriesTable)
           .where(eq(memoriesTable.chatId, chatId))
-      ).find((row) => row.message.includes("CRON REMINDER"));
+      ).find((row) => row.message === "Take a break.");
       expect(saved?.createdAt.getTime()).toBe(deliveredAt);
     } finally {
       finish.resolve();
@@ -355,7 +347,7 @@ describe("ScheduledDelivery", () => {
   test("conversation appends on message.sent only", async () => {
     const save = mock(async () => undefined);
     Object.assign(MessageHandler.instance, {
-      conversations: { saveDeliveredMessage: save },
+      conversations: { saveDeliveredMessage: save, raiseRevision: mock(async () => 1) },
     });
     const sendText = mock(async () => undefined);
     const adapter = MessagingAdapter.instance;
@@ -372,6 +364,8 @@ describe("ScheduledDelivery", () => {
     expect(save).toHaveBeenCalledWith(
       expect.anything(),
       "signal:+100",
+      EMessagePlatform.Signal,
+      "Take a break.",
       "[CRON REMINDER daily]: Take a break.",
       expect.stringContaining('reminder "daily" fired at'),
       expect.any(Number),
@@ -394,7 +388,7 @@ describe("ScheduledDelivery", () => {
     };
     const save = mock(async () => undefined);
     Object.assign(MessageHandler.instance, {
-      conversations: { saveDeliveredMessage: save },
+      conversations: { saveDeliveredMessage: save, raiseRevision: mock(async () => 1) },
     });
     const sendText = mock(async () => undefined);
     const release = Promise.withResolvers<void>();
@@ -434,6 +428,8 @@ describe("ScheduledDelivery", () => {
     expect(save).toHaveBeenCalledWith(
       expect.anything(),
       "signal:+100",
+      EMessagePlatform.Signal,
+      "Briefing unavailable.",
       "[CRON TASK daily]: Briefing unavailable.",
       expect.stringContaining('scheduled task "daily" ran at'),
       expect.any(Number),
@@ -488,9 +484,7 @@ describe("ScheduledDelivery", () => {
       .select()
       .from(memoriesTable)
       .where(eq(memoriesTable.chatId, chatId));
-    expect(memories.map((row) => row.message)).toContain(
-      "[CRON TASK daily]: Briefing unavailable.",
-    );
+    expect(memories.map((row) => row.message)).toContain("Briefing unavailable.");
   });
 
   describe("cron jobs with automations", () => {
@@ -535,6 +529,8 @@ describe("ScheduledDelivery", () => {
       expect(save).toHaveBeenCalledWith(
         expect.anything(),
         scope,
+        EMessagePlatform.Signal,
+        "Tram at 7:10\n\nBus at 7:05",
         "[CRON TASK daily]: Tram at 7:10\n\nBus at 7:05",
         expect.stringContaining("text output of its automations, sent as written"),
         expect.any(Number),
@@ -683,6 +679,8 @@ describe("ScheduledDelivery", () => {
       expect(save).toHaveBeenCalledWith(
         expect.anything(),
         scope,
+        EMessagePlatform.Signal,
+        "Your briefing.",
         "[CRON TASK daily]: Your briefing.",
         expect.stringContaining("It also used the outputs of the job's automations."),
         expect.any(Number),
@@ -708,6 +706,8 @@ describe("ScheduledDelivery", () => {
       expect(save).toHaveBeenCalledWith(
         expect.anything(),
         scope,
+        EMessagePlatform.Signal,
+        expect.stringMatching(/^Automation "broken" failed/),
         expect.stringMatching(/^\[CRON TASK daily\]: Automation "broken" failed/),
         expect.stringContaining("had an automation fail"),
         expect.any(Number),
@@ -770,6 +770,8 @@ describe("ScheduledDelivery", () => {
       expect(save).toHaveBeenCalledWith(
         expect.anything(),
         scope,
+        EMessagePlatform.Signal,
+        expect.stringMatching(/^Automation "broken" was paused/),
         expect.stringMatching(/^\[CRON TASK daily\]: Automation "broken" was paused/),
         expect.stringContaining("paused a failing automation"),
         expect.any(Number),

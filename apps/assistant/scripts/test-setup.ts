@@ -9,6 +9,10 @@ Bun.env.BELLACLAW_AI_CREDENTIALS_PATH = join(
   `bellaclaw-test-pi-auth-${crypto.randomUUID()}.json`,
 );
 
+// tests that push start their own fake FCM
+delete Bun.env.BELLACLAW_FCM_CREDENTIALS_PATH;
+delete Bun.env.BELLACLAW_FCM_URL;
+
 await rm("./test.db", { force: true });
 
 const schemaPush = Bun.spawn(
