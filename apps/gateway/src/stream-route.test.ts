@@ -163,6 +163,77 @@ test("a reply turn's tool call reaches the phone's stream as it starts and as it
   }
 });
 
+test("a phone that comes back mid-turn sees typing and the steps so far right after its check; once typing ends, only the check", async () => {
+  const { sendApp, assistant, store, startFollowing } = createTestApp();
+  const alice = await registerApp(sendApp, store, "alice");
+  const bob = await registerApp(sendApp, store, "bob");
+  const stopFollowing = await startFollowing();
+
+  try {
+    const accountId = alice.publicId;
+    const conversationKey = `bella:${accountId}`;
+    const step = {
+      type: "step" as const,
+      accountId,
+      conversationKey,
+      tool: "web-search",
+      label: "Web search",
+      detail: "OVH invoice terms",
+      startedAt: 1_700_000_000_000,
+    };
+    const bobStream = await openAppStream(sendApp, bob.token);
+    expect(await bobStream.next(1)).toEqual([{ type: "check" }]);
+    assistant.push({ type: "typing", accountId, conversationKey, typing: true });
+    assistant.push({ ...step, stepId: "call-1", state: "started" });
+    assistant.push({ ...step, stepId: "call-2", state: "started" });
+    assistant.push({ ...step, stepId: "call-1", state: "completed", durationMs: 1_400 });
+    // bob's own turn: the marker his stream reads up to, after alice's events
+    const bobKey = `bella:${bob.publicId}`;
+    assistant.push({
+      type: "typing",
+      accountId: bob.publicId,
+      conversationKey: bobKey,
+      typing: true,
+    });
+    expect(await bobStream.next(1)).toEqual([
+      { type: "typing", conversationKey: bobKey, typing: true },
+    ]);
+
+    // the phone left the app and comes back
+    const back = await openAppStream(sendApp, alice.token);
+    const { accountId: _accountId, ...shown } = step;
+    expect(await back.next(4)).toEqual([
+      { type: "check" },
+      { type: "typing", conversationKey, typing: true },
+      { ...shown, stepId: "call-1", state: "completed", durationMs: 1_400 },
+      { ...shown, stepId: "call-2", state: "started" },
+    ]);
+
+    assistant.push({ type: "typing", accountId, conversationKey, typing: false });
+    expect(await back.next(1)).toEqual([{ type: "typing", conversationKey, typing: false }]);
+    await back.close();
+
+    const after = await openAppStream(sendApp, alice.token);
+    expect(await after.next(1)).toEqual([{ type: "check" }]);
+    // the next event is the live nudge, nothing replayed before it
+    assistant.push({
+      type: "changed",
+      accountId,
+      conversationKey,
+      revision: 1,
+      rewriteRevision: 0,
+    });
+    expect(await after.next(1)).toEqual([
+      { type: "changed", conversationKey, revision: 1, rewriteRevision: 0 },
+    ]);
+
+    await after.close();
+    await bobStream.close();
+  } finally {
+    await stopFollowing();
+  }
+});
+
 test("a confidential reply reaches the account's app streams only", async () => {
   const { send, sendApp, register, assistant, store, startFollowing } = createTestApp();
   const alice = await register("alice", "signal:+100");

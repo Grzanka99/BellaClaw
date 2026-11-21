@@ -207,23 +207,23 @@ fun sessionAnswer(username: String, token: String) = """{"username":"$username",
 fun errorAnswer(text: String) = """{"error":"$text"}"""
 
 /**
- * GET and PUT /api/model: provider opencode-go of two, its models Kimi K3.1 Pro (low to high) and
- * GLM 5 (low, high), Main on [mainModel] at the model's default, Utility on GLM 5 at low and every
- * other role on Kimi at the model's default.
+ * GET and PUT /api/model: provider opencode-go of two, its models Kimi K3.1 Pro (low to high, takes a
+ * service tier) and GLM 5 (low, high, no tier), Main on [mainModel] at the model's default and
+ * [mainServiceTier], Utility on GLM 5 at low and every other role on Kimi at the model's default.
  */
-fun modelAnswer(mainModel: String = "kimi-k3.1-pro"): String {
-    fun purpose(name: String, model: String, effort: String) =
-        """{"purpose":"$name","model":"$model","effort":"$effort","serviceTier":"default"}"""
+fun modelAnswer(mainModel: String = "kimi-k3.1-pro", mainServiceTier: String = "default"): String {
+    fun purpose(name: String, model: String, effort: String, serviceTier: String = "default") =
+        """{"purpose":"$name","model":"$model","effort":"$effort","serviceTier":"$serviceTier"}"""
     val purposes = listOf(
         purpose("Utility", "glm-5", "low"),
-        purpose("Main", mainModel, "default"),
+        purpose("Main", mainModel, "default", mainServiceTier),
         purpose("Specialist", "kimi-k3.1-pro", "default"),
         purpose("SpecialistAccurate", "kimi-k3.1-pro", "default"),
         purpose("ScheduledTask", "kimi-k3.1-pro", "default"),
     ).joinToString(",")
     return """{"provider":"opencode-go","providers":["opencode-go","openai-codex"],"purposes":[$purposes],""" +
         """"availableModels":[""" +
-        """{"id":"kimi-k3.1-pro","name":"Kimi K3.1 Pro","supportedEfforts":["low","medium","high"],"supportsServiceTier":false},""" +
+        """{"id":"kimi-k3.1-pro","name":"Kimi K3.1 Pro","supportedEfforts":["low","medium","high"],"supportsServiceTier":true},""" +
         """{"id":"glm-5","name":"GLM 5","supportedEfforts":["low","high"],"supportsServiceTier":false}]}"""
 }
 

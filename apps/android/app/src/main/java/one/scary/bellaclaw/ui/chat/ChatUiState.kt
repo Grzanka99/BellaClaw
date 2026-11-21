@@ -15,11 +15,11 @@ data class ChatUiState(
     val kind: ChatKind = ChatKind.PLAIN,
     /** Null for BellaClaw and for a new plain chat. */
     val title: String? = null,
-    /** The conversation newest first, as the bottom-up list lays it out, with a day row above each day's messages. */
+    /**
+     * The conversation newest first, as the bottom-up list lays it out, with a day row above each day's
+     * messages, and first the live activity card while a reply is in progress.
+     */
     val rows: List<ChatRow> = emptyList(),
-    val isTyping: Boolean = false,
-    /** The reply in progress: its steps so far, oldest first; empty while there are none. */
-    val liveActivity: List<ActivityRow> = emptyList(),
     val isStreamOpen: Boolean = false,
     val draft: String = "",
     val attachmentUri: String? = null,
@@ -40,7 +40,7 @@ data class ChatUiState(
         get() = isReadyToSend && !isCheckingAttachment && (draft.isNotBlank() || attachmentUri != null)
 }
 
-/** One row of the conversation: a day label or a message. */
+/** One row of the conversation: a day label, a message or a reply's activity. */
 sealed interface ChatRow {
     val key: String
 
@@ -49,14 +49,21 @@ sealed interface ChatRow {
         override val key: String = "day-$firstMessageId"
     }
 
-    /** A reply that took steps has them as [activity], which ran [activitySeconds] from the first start to the last end. */
-    data class Item(
-        val message: Message,
-        val activity: List<ActivityRow> = emptyList(),
-        val activitySeconds: Long = 0,
-    ) : ChatRow {
+    data class Item(val message: Message) : ChatRow {
         override val key: String = "message-${message.id}"
     }
+
+    /**
+     * A reply's activity card: above a reply that took steps, which ran [seconds] from the first start to the
+     * last end, or [isLive] below the newest row while the reply is in progress ([rows] empty before its
+     * first step). The reply keeps its live card's [key], so the card stays one list item.
+     */
+    data class Activity(
+        override val key: String,
+        val rows: List<ActivityRow>,
+        val seconds: Long = 0,
+        val isLive: Boolean = false,
+    ) : ChatRow
 }
 
 /** One row of a reply's activity. */

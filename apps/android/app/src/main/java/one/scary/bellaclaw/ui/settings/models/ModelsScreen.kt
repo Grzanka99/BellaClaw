@@ -17,6 +17,7 @@ import androidx.compose.ui.unit.dp
 import one.scary.bellaclaw.R
 import one.scary.bellaclaw.model.Effort
 import one.scary.bellaclaw.model.ModelRole
+import one.scary.bellaclaw.model.ServiceTier
 import one.scary.bellaclaw.ui.components.BackTopBar
 import one.scary.bellaclaw.ui.components.LoadFailedContent
 import one.scary.bellaclaw.ui.components.LoadingContent
@@ -62,9 +63,15 @@ fun ModelsScreen(
                 )
                 SectionHeader(stringResource(R.string.models_roles))
                 state.roles.forEach { row ->
+                    val effort = stringResource(effortLabel(row.effort))
+                    // The default tier is left out, as most models take none.
+                    var subtitle = stringResource(R.string.model_and_effort, row.model, effort)
+                    if (row.serviceTier != ServiceTier.DEFAULT) {
+                        subtitle = stringResource(R.string.model_effort_and_tier, row.model, effort, stringResource(row.serviceTier.label))
+                    }
                     SettingsRow(
                         title = { Text(stringResource(row.role.label)) },
-                        subtitle = stringResource(R.string.model_and_effort, row.model, stringResource(effortLabel(row.effort))),
+                        subtitle = subtitle,
                         onClick = { onOpenRole(row.role) },
                     )
                 }
@@ -108,8 +115,8 @@ private fun ModelsScreenPreview() {
                 providers = listOf("opencode-go", "openai-codex"),
                 providerId = "opencode-go",
                 roles = listOf(
-                    RoleRow(ModelRole.UTILITY, "Claude Haiku 5.5", null),
-                    RoleRow(ModelRole.SPECIALIST_ACCURATE, "Kimi K3.1 Pro", Effort.HIGH),
+                    RoleRow(ModelRole.UTILITY, "Claude Haiku 5.5", null, ServiceTier.DEFAULT),
+                    RoleRow(ModelRole.SPECIALIST_ACCURATE, "GPT 5.5", Effort.HIGH, ServiceTier.FLEX),
                 ),
                 isChanging = true,
             ),
@@ -117,7 +124,7 @@ private fun ModelsScreenPreview() {
             onRetry = {},
             onSelectProvider = {},
             onOpenRole = {},
-            editorEvents = RoleEditorEvents({}, {}, {}, {}, {}),
+            editorEvents = RoleEditorEvents({}, {}, {}, {}, {}, {}),
         )
     }
 }

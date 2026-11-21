@@ -11,6 +11,13 @@ enum class Effort {
     MAX,
 }
 
+/** A service tier; the server names each in lower case. [DEFAULT] is no tier. */
+enum class ServiceTier {
+    DEFAULT,
+    FLEX,
+    PRIORITY,
+}
+
 /** A provider a plain chat may use, with its [models]; a send can use it now only when it [isUsable]. */
 data class ChatProvider(
     val id: String,
@@ -33,17 +40,19 @@ enum class ModelRole {
     SCHEDULED_TASK,
 }
 
-/** One model of a provider, with the efforts it supports. */
+/** One model of a provider, with the efforts it supports and whether it takes a service tier (a plain chat's list does not say). */
 data class AiModel(
     val id: String,
     val name: String,
     val efforts: List<Effort>,
+    val supportsServiceTier: Boolean = false,
 )
 
-/** A role's model id and its effort (null: the model's own default). */
+/** A role's model id, its effort (null: the model's own default) and its service tier. */
 data class RoleModel(
     val model: String,
     val effort: Effort?,
+    val serviceTier: ServiceTier,
 )
 
 /**
