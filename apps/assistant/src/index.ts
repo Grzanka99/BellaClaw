@@ -17,6 +17,7 @@ import {
   startInternalApiServer,
   stopInternalApiServer,
 } from "./services/internal-api";
+import { ListsService } from "./services/lists";
 import { McpService } from "./services/mcp";
 import { setupMcpAuth, startMcpAuthServer, stopMcpAuthServer } from "./services/mcp/auth";
 import { Memory } from "./services/memory";
@@ -62,6 +63,7 @@ async function init(): Promise<void> {
     Memory.instance.setup();
     FactDistiller.instance.setup();
     SettingsService.instance.setup();
+    ListsService.instance.setup();
     setupAiAuth();
     setupMcpAuth();
     McpService.instance.setup();

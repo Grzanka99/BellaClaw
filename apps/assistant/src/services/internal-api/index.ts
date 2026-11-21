@@ -12,6 +12,7 @@ import {
   gatewayAccountConversationsPath,
   gatewayAccountDevicePath,
   gatewayAccountDevicesPath,
+  gatewayAccountListsPath,
   gatewayAccountMessagePath,
   gatewayAccountModelPath,
   gatewayAccountModelsPath,
@@ -39,6 +40,7 @@ import {
   handleConversationCreate,
   handleConversationDelete,
   handleDevice,
+  handleListsUpdate,
   handleMediaDownload,
   handleMediaUpload,
   handleMessageDelete,
@@ -80,7 +82,8 @@ export async function handleInternalApiRequest(
   // ["", "internal", "accounts", accountId, "conversations", conversationKey, "media"] or
   // ["", "internal", "accounts", accountId, "conversations", conversationKey, "media", mediaId] or
   // ["", "internal", "accounts", accountId, "devices"] or
-  // ["", "internal", "accounts", accountId, "devices", deviceId], ["", "internal", "presence"]
+  // ["", "internal", "accounts", accountId, "devices", deviceId],
+  // ["", "internal", "accounts", accountId, "lists"], ["", "internal", "presence"]
   const segments = pathname.split("/");
   const messageId = Number(segments[5]);
   let key = "";
@@ -152,6 +155,8 @@ export async function handleInternalApiRequest(
     pathname === gatewayAccountDevicePath(key, itemKey);
   const accountDevicesRoute =
     request.method === "DELETE" && key.length > 0 && pathname === gatewayAccountDevicesPath(key);
+  const listsRoute =
+    request.method === "POST" && key.length > 0 && pathname === gatewayAccountListsPath(key);
 
   if (
     !activationRoute &&
@@ -170,7 +175,8 @@ export async function handleInternalApiRequest(
     !mediaUploadRoute &&
     !mediaDownloadRoute &&
     !deviceRoute &&
-    !accountDevicesRoute
+    !accountDevicesRoute &&
+    !listsRoute
   ) {
     return errorResponse("Not found", 404, undefined);
   }
@@ -238,6 +244,10 @@ export async function handleInternalApiRequest(
 
     if (accountDevicesRoute) {
       return await handleAccountDevices(key, account);
+    }
+
+    if (listsRoute) {
+      return await handleListsUpdate(request, account);
     }
 
     if (conversationCreateRoute) {

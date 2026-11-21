@@ -1,0 +1,62 @@
+<instructions>
+
+  <purpose>
+    Change the user's named to-do lists: create, rename, delete, or set the end time of a list;
+    add, edit, tick, untick, move, or delete items. All operations of one call apply in order, all
+    or none.
+  </purpose>
+
+  <tool>
+    <name>update-lists</name>
+    <description>
+      Takes operations, each with an op:
+      create_list (name, optional items, optional endsAt);
+      set_expiry (listId, endsAt, or null to remove the end time);
+      rename_list (listId, name);
+      delete_list (listId);
+      add_items (listId, items, optional index to insert at, appended without one);
+      update_item (itemId, text and/or done);
+      move_item (itemId, toIndex);
+      delete_item (itemId).
+      Returns timezone, the changed lists in the shape list-lists returns (new lists and items
+      with their new ids), and deletedListIds.
+    </description>
+  </tool>
+
+  <datetime_rules>
+    <rule>Give endsAt as local wall-clock time in the configured timezone, formatted YYYY-MM-DDTHH:mm:ss, with no Z or offset: {{config.ai.instructions.timezone}}</rule>
+    <rule>Resolve relative times like "do dziś 20:00" or "na jutro" from the current time context of the conversation</rule>
+    <rule>Set an end time only when the user gives one or the list is clearly for a bounded time ("na dziś" ends today at 23:59:59); otherwise leave it out</rule>
+  </datetime_rules>
+
+  <usage_rules>
+    <rule>Call list-lists first to get the ids; never guess or reuse ids from memory</rule>
+    <rule>Batch all changes of one request into one call</rule>
+    <rule>When the user says they bought or did something ("kupiłem mleko"), tick the matching item with update_item done: true; do not delete it</rule>
+    <rule>Match items loosely by meaning, in the user's language; if a match is unclear, change nothing and report the ambiguity</rule>
+    <rule>Keep item texts and list names short and in the user's own words and language; one thing per item</rule>
+    <rule>Add to an existing list that fits rather than creating a new one; create a list only when none fits or the user asks</rule>
+    <rule>Pick among lists that are not expired; change an expired list only when the user names it explicitly</rule>
+    <rule>Never delete a list unless the user asks for it</rule>
+    <rule>If the tool reports a missing list or item, nothing was changed: call list-lists again and retry with the current ids</rule>
+    <rule>After a change, confirm it briefly; do not repeat the whole list unless asked</rule>
+  </usage_rules>
+
+  <examples>
+    <example>
+      <context>User says: "zrób listę zakupów na dziś: mleko, chleb, jajka"</context>
+      <toolCall>{ "operations": [{ "op": "create_list", "name": "Zakupy", "items": ["mleko", "chleb", "jajka"], "endsAt": "2026-11-21T23:59:59" }] }</toolCall>
+    </example>
+
+    <example>
+      <context>User says: "kupiłem mleko i chleb" (list-lists returned items i1 "mleko" and i2 "chleb")</context>
+      <toolCall>{ "operations": [{ "op": "update_item", "itemId": "i1", "done": true }, { "op": "update_item", "itemId": "i2", "done": true }] }</toolCall>
+    </example>
+
+    <example>
+      <context>User says: "dopisz masło na górę i ustaw koniec na 20:00" (list l1)</context>
+      <toolCall>{ "operations": [{ "op": "add_items", "listId": "l1", "items": ["masło"], "index": 0 }, { "op": "set_expiry", "listId": "l1", "endsAt": "2026-11-21T20:00:00" }] }</toolCall>
+    </example>
+  </examples>
+
+</instructions>

@@ -368,8 +368,10 @@ export type TGatewayActivationCheck = z.infer<typeof SGatewayActivationCheck>;
 // conversation started (true) or ended (false); deleted: the plain chat is gone; reply: a
 // confidential reply to a message sent from the app, never stored, for app streams only; step: a
 // tool call of the reply turn started, completed or failed, stepId its tool call id, tool the
-// tool's name, startedAt epoch ms, durationMs once it ended. Nothing replays
-const SGatewayStreamEventBase = z.object({ accountId: z.string(), conversationKey: z.string() });
+// tool's name, startedAt epoch ms, durationMs once it ended; lists: the account's lists changed,
+// with no conversation. Nothing replays
+const SGatewayStreamEventAccount = z.object({ accountId: z.string() });
+const SGatewayStreamEventBase = SGatewayStreamEventAccount.extend({ conversationKey: z.string() });
 
 export const SGatewayStreamEvent = z.discriminatedUnion("type", [
   SGatewayStreamEventBase.extend({
@@ -390,6 +392,7 @@ export const SGatewayStreamEvent = z.discriminatedUnion("type", [
     startedAt: z.number().int(),
     durationMs: z.number().int().optional(),
   }).strict(),
+  SGatewayStreamEventAccount.extend({ type: z.literal("lists") }).strict(),
 ]);
 
 export type TGatewayStreamEvent = z.infer<typeof SGatewayStreamEvent>;
@@ -482,4 +485,8 @@ export function gatewayAccountDevicesPath(accountId: string): string {
 
 export function gatewayAccountDevicePath(accountId: string, deviceId: string): string {
   return `${gatewayAccountDevicesPath(accountId)}/${encodeURIComponent(deviceId)}`;
+}
+
+export function gatewayAccountListsPath(accountId: string): string {
+  return `${gatewayAccountPath(accountId)}/lists`;
 }

@@ -11,6 +11,7 @@ import {
   gatewayAccountConversationsPath,
   gatewayAccountDevicePath,
   gatewayAccountDevicesPath,
+  gatewayAccountListsPath,
   gatewayAccountMessagePath,
   gatewayAccountModelPath,
   gatewayAccountModelsPath,
@@ -27,6 +28,7 @@ import {
   SGatewayDevicesRemoved,
   SGatewayError,
   SGatewayLinkStarted,
+  SGatewayListsChanged,
   SGatewayMedia,
   SGatewayMessageDeleted,
   SGatewayModelCatalog,
@@ -46,6 +48,8 @@ import {
   type TGatewayDevicesRemoved,
   type TGatewayLinkRequest,
   type TGatewayLinkStarted,
+  type TGatewayListsChanged,
+  type TGatewayListsUpdate,
   type TGatewayMedia,
   type TGatewayMessageDeleted,
   type TGatewayModelCatalog,
@@ -67,7 +71,8 @@ const UNAVAILABLE = "The assistant is unavailable";
 const logger = createLogger("INTERNAL-API");
 
 // status 400 carries the assistant's own error, and code the stable code of a rejected
-// command; 404 is a conversation the account does not own; 410 an image this conversation does
+// command; 404 is a conversation the account does not own, or a list or an item it does not
+// hold; 410 an image this conversation does
 // not keep; 413 an image too large, 415 one of an unsupported type or content; 502 is an
 // unreachable or broken assistant
 export type TInternalApiResult<T> =
@@ -141,6 +146,11 @@ export type TInternalApi = {
   ): Promise<TInternalApiResult<TGatewayDevice>>;
   // every device of the account
   unregisterAccountDevices(accountId: string): Promise<TInternalApiResult<TGatewayDevicesRemoved>>;
+  // the account's list changes, all or none; 404 for a list or an item it does not hold
+  updateLists(
+    accountId: string,
+    update: TGatewayListsUpdate,
+  ): Promise<TInternalApiResult<TGatewayListsChanged>>;
 };
 
 // The assistant's internal API. baseUrl has no trailing slash.
@@ -157,6 +167,7 @@ export function createInternalApi(baseUrl: string, secret: string): TInternalApi
       | TGatewayAppMessage
       | TGatewayPresence
       | TGatewayDeviceRegistration
+      | TGatewayListsUpdate
     >,
   ): Promise<TInternalApiResult<T>> {
     return send(method, path, schema, "application/json", JSON.stringify(body));
@@ -312,6 +323,8 @@ export function createInternalApi(baseUrl: string, secret: string): TInternalApi
       call("DELETE", gatewayAccountDevicePath(accountId, deviceId), SGatewayDevice, undefined),
     unregisterAccountDevices: (accountId) =>
       call("DELETE", gatewayAccountDevicesPath(accountId), SGatewayDevicesRemoved, undefined),
+    updateLists: (accountId, update) =>
+      call("POST", gatewayAccountListsPath(accountId), SGatewayListsChanged, update),
     // NOTE: no timeout: the stream stays open, and the assistant's keep-alives hold it
     openStream: async (signal) => {
       try {

@@ -108,7 +108,7 @@ bus.subscribe({
 `request` and `waitFor` hold the caller's lane. The allowed waits form an acyclic graph, kept in
 `ALLOWED_WAITS` in `events/boundaries.test.ts`:
 
-- `conversation` → `cron`, `automations`, `settings`, `memory`, `calendar`, `ai-auth`, `identity`:
+- `conversation` → `cron`, `automations`, `settings`, `memory`, `calendar`, `ai-auth`, `identity`, `lists`:
   a turn of an address held while the address or its account is being linked, on a hold lane of
   its own (`link-hold|<chat key>`), bounded from the hold, then forwarded to the account's lane
 - `scheduling` → `automations`, `memory`, `identity`: a cron fire held while its address or its
@@ -117,9 +117,10 @@ bus.subscribe({
 - `ai-auth` → `settings`
 - `authorization` → `identity`: a message held while its address or its account is being linked.
   It waits on Identity's read model (`waitWhileLinking`), bounded from the message's arrival
-- `internal-api` → `settings`, `conversation`, `identity`, `app`. An HTTP request is on no lane: it publishes the
+- `internal-api` → `settings`, `conversation`, `identity`, `app`, `lists`. An HTTP request is on no lane: it publishes the
   command (a settings update, a message delete, a plain chat's create or delete, a link, a
-  device's register or unregister) and awaits the outcome through live subscriptions. An app send publishes
+  device's register or unregister, a list change on the owner's lane) and awaits the outcome
+  through live subscriptions. An app send publishes
   `message.received` (channel `app`, the client's message id as the dedupe key) and waits for
   nothing. Its stream (`/internal/stream`) forwards what `AppStream.listen` hears.
 
@@ -184,7 +185,7 @@ Table owners: `memories`, `conversation_summaries`, `conversations` → Conversa
 `fact_distillation_state` → Memory · `cron_engine_jobs` → Cron · `automations`,
 `automation_drafts` → Automations · `user_configs` → Settings · `calendars` → Calendar ·
 `message_authorizations` → Authorization · `identity_links` → Identity · `app_media`,
-`app_devices` → App channel ·
+`app_devices` → App channel · `lists`, `list_items` → Lists ·
 `events`, `event_deliveries` → EventBus.
 
 Every change of a transcript (`memories`), and a plain chat's title, raises the conversation's
@@ -201,6 +202,8 @@ confidential reply with `confidential: true`.
 The live consumer `app-stream` turns `conversation.changed`, `conversation.deleted` and
 `turn.requested`, `turn.started`, `turn.completed`, `turn.failed` and `event.dead_lettered` of an
 account's conversations into nudges, deletes and typing for the gateway's one stream, tagged with the account id.
+It turns `lists.changed` of an account's owner key into `lists`, which names no conversation: the
+app reads the account's lists again, as it does on every connect.
 It turns a `reply.ready` marked `confidential` whose channel is the app into a `reply` with its text,
 which the gateway sends to that account's app sessions only: the only copy of the reply, lost
 when no stream is open.
@@ -232,6 +235,14 @@ outside any transaction, on the conversation's lane. A token FCM reports as unre
 `app.device.unregister.requested` on `global`, emitted with `ctx.transact`, never requested. Any
 other failure is retried per its backoff; on `ctx.lastAttempt` it is logged and acked. Without
 `BELLACLAW_FCM_CREDENTIALS_PATH` (or its file) push is off and the change is acked.
+
+Lists owns an owner's named to-do lists: its durable consumer `lists` answers
+`lists.update.requested` (an owner key and up to 50 operations, applied in order, all or none) with
+`lists.changed` (the touched lists after the change, the deleted ids), or `command.rejected` with
+`list-not-found` or `item-not-found` for a list or item the owner does not hold; on
+`identity.link.quiet` it moves the address's lists, ids kept, to the account. Item positions stay
+dense from 0; deleting a list deletes its items first. A list's optional `expiresAt` (epoch ms, set
+on create or by `set_expiry`, null clears it) is kept after it passes: GET /api/lists leaves expired lists out and list-lists marks them `expired`. `listLists` in `@bellaclaw/database` is the read the assistant and the gateway share. The operation and snapshot schemas and the two codes live in `@bellaclaw/shared`, which the gateway validates the app's changes with.
 
 ## Adding a fact or command
 

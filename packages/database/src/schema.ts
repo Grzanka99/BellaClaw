@@ -131,6 +131,36 @@ export const appDevicesTable = sqliteTable(
   (table) => [index("app_devices_account_idx").on(table.accountId)],
 );
 
+// named to-do lists, such as a shopping list; ownerKey: an account's or an unlinked address's owner key;
+// expiresAt: the list's optional end time, kept after it passes
+export const listsTable = sqliteTable(
+  "lists",
+  {
+    id: text("id").primaryKey(),
+    ownerKey: text("ownerKey").notNull(),
+    name: text("name").notNull(),
+    expiresAt: integer("expiresAt", { mode: "timestamp_ms" }),
+    createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [index("lists_owner_idx").on(table.ownerKey)],
+);
+
+// the items of a list; position: the item's place in its list, dense from 0
+export const listItemsTable = sqliteTable(
+  "list_items",
+  {
+    id: text("id").primaryKey(),
+    listId: text("listId").notNull(),
+    text: text("text").notNull(),
+    done: integer("done", { mode: "boolean" }).notNull().default(false),
+    position: integer("position").notNull(),
+    createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [index("list_items_list_position_idx").on(table.listId, table.position)],
+);
+
 export const conversationSummariesTable = sqliteTable("conversation_summaries", {
   chatId: text("chatId").primaryKey(),
   summary: text("summary").notNull(),

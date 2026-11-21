@@ -1,0 +1,48 @@
+<instructions>
+
+  <purpose>
+    Read the user's named to-do lists (shopping, packing, errands) with their item ids. Every
+    change to a list needs these ids, so call this tool before update-lists.
+  </purpose>
+
+  <tool>
+    <name>list-lists</name>
+    <description>
+      Returns timezone and lists, oldest first. Each list has id, name, endsAt (its end time as
+      local date-time in timezone, or null), expired (the end time has passed), allDone (it has
+      items and all are ticked), and items in order, each with id, text, done and position.
+      Expired lists are included: the user's app hides them, but they still exist. Takes no
+      parameters.
+    </description>
+  </tool>
+
+  <usage_rules>
+    <rule>Call this tool first whenever the user mentions a list, an item on one, or something they bought or did that may be on one</rule>
+    <rule>Match the user's words to lists and items loosely by meaning, in the user's language: "kupiłem mleko" matches the item "mleko 2l"</rule>
+    <rule>Use expired and allDone as returned; do not compute them from endsAt</rule>
+    <rule>Talk about an expired or finished list only when the user brings it up; never mention one on your own</rule>
+    <rule>When showing a list, keep it short: the name, the open items, and how many are done</rule>
+    <rule>If the user has no lists, say so</rule>
+  </usage_rules>
+
+  <examples>
+    <example>
+      <context>User says: "co mam jeszcze kupić?"</context>
+      <toolCall />
+      <reasoning>Read the lists, then list the open items of the shopping list that is not expired.</reasoning>
+    </example>
+
+    <example>
+      <context>User says: "kupiłem chleb i masło"</context>
+      <toolCall />
+      <reasoning>Read the lists to find the ids of the matching items, then tick them with update-lists.</reasoning>
+    </example>
+
+    <example>
+      <context>User says: "did I finish yesterday's packing list?"</context>
+      <toolCall />
+      <reasoning>The user brought up an expired list; read it and answer from allDone and the open items.</reasoning>
+    </example>
+  </examples>
+
+</instructions>

@@ -7,9 +7,10 @@ import { EMessagePlatform } from "../messaging/types";
 
 type TAppStreamListener = (event: TGatewayStreamEvent) => void;
 
-// NOTE: the app's live stream: nudges, typing, steps and confidential replies for the edge, which
-// fans them out per account. Live only: a stream that was not open misses nothing it can get back,
-// because the app compares revisions on every connect and a confidential reply is never stored.
+// NOTE: the app's live stream: nudges, typing, steps, list changes and confidential replies for the
+// edge, which fans them out per account. Live only: a stream that was not open misses nothing it
+// can get back, because the app compares revisions and reads its lists on every connect, and a
+// confidential reply is never stored.
 // Only account conversations reach it
 export class AppStream {
   private static _instance: TOption<AppStream>;
@@ -58,6 +59,17 @@ export class AppStream {
       handler: async (event) => {
         const { conversationKey, ownerKey } = event.payload;
         this.send(ownerKey, (accountId) => ({ type: "deleted", accountId, conversationKey }));
+      },
+    });
+
+    // the account's lists changed, by the app or the model: open clients read them again
+    bus.subscribe({
+      consumer: "app-stream",
+      type: EEventType.ListsChanged,
+      mode: ESubscriptionMode.Live,
+      backoffMs: [],
+      handler: async (event) => {
+        this.send(event.payload.ownerKey, (accountId) => ({ type: "lists", accountId }));
       },
     });
 

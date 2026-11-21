@@ -16,7 +16,8 @@ type TOutcomeType =
   | EEventType.ConversationCreated
   | EEventType.ConversationDeleted
   | EEventType.AppDeviceRegistered
-  | EEventType.AppDeviceUnregistered;
+  | EEventType.AppDeviceUnregistered
+  | EEventType.ListsChanged;
 
 const OUTCOME_TYPES: TOutcomeType[] = [
   EEventType.SettingsChanged,
@@ -26,6 +27,7 @@ const OUTCOME_TYPES: TOutcomeType[] = [
   EEventType.ConversationDeleted,
   EEventType.AppDeviceRegistered,
   EEventType.AppDeviceUnregistered,
+  EEventType.ListsChanged,
 ];
 
 // a command waiting for its outcome: settled by its outcome type or by command.rejected

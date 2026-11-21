@@ -103,6 +103,32 @@ test("a deleted plain chat reaches the phone's stream", async () => {
   }
 });
 
+test("a change of an account's lists reaches its phone's stream only", async () => {
+  const { sendApp, assistant, store, startFollowing } = createTestApp();
+  const alice = await registerApp(sendApp, store, "alice");
+  const bob = await registerApp(sendApp, store, "bob");
+  const stopFollowing = await startFollowing();
+
+  try {
+    const aliceApp = await openAppStream(sendApp, alice.token);
+    const bobApp = await openAppStream(sendApp, bob.token);
+    expect(await aliceApp.next(1)).toEqual([{ type: "check" }]);
+    expect(await bobApp.next(1)).toEqual([{ type: "check" }]);
+
+    assistant.push({ type: "lists", accountId: alice.publicId });
+    // bob's stream reads up to this event, after alice's lists change
+    assistant.push({ type: "deleted", accountId: bob.publicId, conversationKey: "plain:bob:1" });
+
+    expect(await aliceApp.next(1)).toEqual([{ type: "lists" }]);
+    expect(await bobApp.next(1)).toEqual([{ type: "deleted", conversationKey: "plain:bob:1" }]);
+
+    await aliceApp.close();
+    await bobApp.close();
+  } finally {
+    await stopFollowing();
+  }
+});
+
 test("a reply turn's tool call reaches the phone's stream as it starts and as it ends", async () => {
   const { sendApp, assistant, store, startFollowing } = createTestApp();
   const alice = await registerApp(sendApp, store, "alice");

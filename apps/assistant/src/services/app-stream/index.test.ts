@@ -3,6 +3,7 @@ import { EEventType, eventsTable, listHistory } from "@bellaclaw/database";
 import {
   GATEWAY_STREAM_PATH,
   gatewayAccountConversationMessagesPath,
+  gatewayAccountListsPath,
   type TGatewayStreamEvent,
   type TOption,
 } from "@bellaclaw/shared";
@@ -17,6 +18,7 @@ import { publishTestMessage } from "../events/test-utils";
 import { IdentityService } from "../identity";
 import { handleInternalApiRequest, setupInternalApi } from "../internal-api";
 import { internalRequest, resetServices, TEST_SECRET } from "../internal-api/test-utils";
+import { ListsService } from "../lists";
 import { MessageHandler } from "../message-handler";
 import { scriptedReply } from "../message-handler/test-utils";
 import { MessagingAdapter } from "../messaging";
@@ -33,6 +35,7 @@ resetServices([
   AuthorizationService,
   IdentityService,
   SettingsService,
+  ListsService,
   AppStream,
 ]);
 
@@ -60,6 +63,7 @@ async function start(beforeReply = async (_prompt: string) => {}) {
   Commands.instance.setup();
   MessagingAdapter.instance.setup();
   setupInternalApi();
+  ListsService.instance.setup();
   AppStream.instance.setup();
   await IdentityService.instance.setup();
   await AuthorizationService.instance.setup();
@@ -424,6 +428,23 @@ test("a dead-lettered turn request turns typing off; a dead letter of another ev
   expect(await stream.drainToMarker()).toEqual([
     { type: "typing", accountId, conversationKey, typing: false },
   ]);
+  await stream.close();
+});
+
+test("a change of an account's lists streams a lists event for the account", async () => {
+  await start();
+  const accountId = `acct-${crypto.randomUUID()}`;
+  const stream = await openStream();
+
+  const response = await internalRequest(
+    "POST",
+    gatewayAccountListsPath(accountId),
+    JSON.stringify({ operations: [{ op: "create_list", name: "Shopping", items: ["milk"] }] }),
+  );
+  expect(response.status).toBe(200);
+  await EventBus.instance.idle();
+
+  expect(await stream.drainToMarker()).toEqual([{ type: "lists", accountId }]);
   await stream.close();
 });
 

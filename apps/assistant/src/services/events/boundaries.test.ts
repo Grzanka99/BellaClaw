@@ -12,6 +12,7 @@ import { Commands } from "../commands";
 import { CronScheduler } from "../cron";
 import { IdentityService } from "../identity";
 import { setupInternalApi } from "../internal-api";
+import { ListsService } from "../lists";
 import { McpService } from "../mcp";
 import { setupMcpAuth } from "../mcp/auth";
 import { Memory } from "../memory";
@@ -47,6 +48,7 @@ const ALLOWED: Record<string, string> = {
   "ai -> mcp/sampling": "pure request and result mappers",
   "ai -> memory": "Memory.searchFacts read; request timeout and error constants",
   "ai -> identity": "IdentityService.resolve, a cached read model",
+  "ai -> lists": "ListsService.list read",
   "ai -> scheduling/cron-automations": "preview dry runs",
   "automation -> ai/tools/automation-summary": "pure mapper",
   "commands -> ai/auth": "status reads",
@@ -128,7 +130,16 @@ const ALLOWED: Record<string, string> = {
 // until the timeout.
 const ALLOWED_WAITS: Record<string, string[]> = {
   // a turn of an address is held on its own lane while the address or its account is being linked
-  conversation: ["cron", "automations", "settings", "memory", "calendar", "ai-auth", "identity"],
+  conversation: [
+    "cron",
+    "automations",
+    "settings",
+    "memory",
+    "calendar",
+    "ai-auth",
+    "identity",
+    "lists",
+  ],
   // a scheduled task's search-memory tool refreshes the facts first; a cron fire is held while
   // its address or account is being linked
   scheduling: ["automations", "memory", "identity"],
@@ -137,7 +148,7 @@ const ALLOWED_WAITS: Record<string, string[]> = {
   // a message held while its address or account is being linked
   authorization: ["identity"],
   // an HTTP request, on no lane: it awaits the outcome through live subscriptions
-  "internal-api": ["settings", "conversation", "identity", "app"],
+  "internal-api": ["settings", "conversation", "identity", "app", "lists"],
 };
 
 const STATIC_IMPORT =
@@ -290,6 +301,7 @@ describe("boundaries", () => {
       Memory.instance.setup();
       FactDistiller.instance.setup();
       SettingsService.instance.setup();
+      ListsService.instance.setup();
       setupAiAuth();
       setupMcpAuth();
       McpService.instance.setup();
@@ -323,6 +335,7 @@ describe("boundaries", () => {
         "Memory.setup",
         "FactDistiller.setup",
         "SettingsService.setup",
+        "ListsService.setup",
         "setupAiAuth",
         "setupMcpAuth",
         "McpService.setup",

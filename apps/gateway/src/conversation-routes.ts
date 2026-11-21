@@ -1,6 +1,7 @@
 import type { THistoryCursor, TOwnedConversation } from "@bellaclaw/database";
 import {
   SGatewayAppMessage,
+  SGatewayListsUpdate,
   SGatewayModelUpdate,
   SGatewayPersonalityUpdate,
   type TOption,
@@ -12,6 +13,7 @@ import type {
   TConversationDeletedResponse,
   TConversationsResponse,
   THistoryResponse,
+  TListsResponse,
   TMediaUploadedResponse,
   TMessagesResponse,
 } from "./api-types";
@@ -35,8 +37,8 @@ const SHistoryQuery = z
     "Send after or before, not both",
   );
 
-// the routes of the signed-in account's data: its messages, facts, conversations and their media,
-// and its model and personality settings
+// the routes of the signed-in account's data: its messages, facts, lists, conversations and their
+// media, and its model and personality settings
 export function registerConversationRoutes(
   app: Hono<TEnv>,
   { store, reader, internalApi }: TGatewayDependencies,
@@ -113,6 +115,44 @@ export function registerConversationRoutes(
     }
 
     return c.json(buildFactGraph(await reader.listFacts(account.data.ownerKey)));
+  });
+
+  app.get("/api/lists", requireSession, async (c) => {
+    const account = await internalApi.getAccount(c.var.account.publicId);
+
+    if ("error" in account) {
+      return apiFailed(c, account);
+    }
+
+    return c.json<TListsResponse>({
+      lists: await reader.listLists(account.data.ownerKey, Date.now()),
+    });
+  });
+
+  // NOTE: the assistant applies the changes on the account's lane; the answer is the lists read
+  // after them, as GET answers
+  app.post("/api/lists/changes", requireSession, async (c) => {
+    const body = await parseBody(c.req.raw, SGatewayListsUpdate);
+
+    if (!body.success) {
+      return c.json(invalidBody(body.error), 400);
+    }
+
+    const account = await internalApi.getAccount(c.var.account.publicId);
+
+    if ("error" in account) {
+      return apiFailed(c, account);
+    }
+
+    const result = await internalApi.updateLists(c.var.account.publicId, body.data);
+
+    if ("error" in result) {
+      return apiFailed(c, result);
+    }
+
+    return c.json<TListsResponse>({
+      lists: await reader.listLists(account.data.ownerKey, Date.now()),
+    });
   });
 
   // NOTE: the conversations of the app. A conversation key from the client is used only after the
