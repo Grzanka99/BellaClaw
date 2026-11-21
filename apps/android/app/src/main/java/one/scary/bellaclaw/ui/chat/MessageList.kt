@@ -65,7 +65,7 @@ fun MessageList(
     val follow = remember(bottomKey) { atBottom }
     LaunchedEffect(bottomKey) {
         if (follow) {
-            listState.animateScrollToItem(0)
+            listState.scrollToItem(0)
         }
     }
     LazyColumn(
