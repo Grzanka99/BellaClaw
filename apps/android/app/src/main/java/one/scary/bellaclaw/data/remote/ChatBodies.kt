@@ -19,7 +19,10 @@ data class ConversationBody(
     val lastMessage: HistoryRowBody? = null,
 )
 
-/** A row of history: a message or a display row. [author] is `user` or `assistant`; [createdAt] epoch ms. */
+/**
+ * A row of history: a message or a display row. [author] is `user` or `assistant`; [createdAt] epoch ms.
+ * An assistant row has the [steps] of its reply, by start, when there were any.
+ */
 @Serializable
 data class HistoryRowBody(
     val id: Long,
@@ -28,6 +31,18 @@ data class HistoryRowBody(
     val createdAt: Long,
     val clientMessageId: String? = null,
     val images: List<HistoryImageBody>? = null,
+    val steps: List<StepBody>? = null,
+)
+
+/** A finished step of a reply; [startedAt] epoch ms. */
+@Serializable
+data class StepBody(
+    val tool: String,
+    val label: String,
+    val detail: String,
+    val startedAt: Long,
+    val durationMs: Long,
+    val failed: Boolean,
 )
 
 /** [mediaId] is null for an image the server does not keep. */
@@ -62,11 +77,19 @@ data class ConversationCreatedBody(val conversationKey: String)
 
 /**
  * The data of one event of GET /api/stream; which fields it has depends on the event's type. A plain
- * class: a `reply`'s [text] can hold a sign-in link.
+ * class: a `reply`'s [text] can hold a sign-in link. A `step` has [stepId], [tool], [label], [detail], [state]
+ * (`started`, then `completed` or `failed` with [durationMs]) and [startedAt], epoch ms.
  */
 @Serializable
 class StreamEventBody(
     val conversationKey: String? = null,
     val typing: Boolean = false,
     val text: String? = null,
+    val stepId: String? = null,
+    val tool: String? = null,
+    val label: String? = null,
+    val detail: String? = null,
+    val state: String? = null,
+    val startedAt: Long? = null,
+    val durationMs: Long? = null,
 )

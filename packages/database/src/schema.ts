@@ -78,6 +78,9 @@ export const memoriesTable = sqliteTable(
     // a user message's attachment references as a JSON array, stored with the row at the turn's
     // start, so a turn that never completes keeps them too
     attachments: text("attachments"),
+    // a reply's tool calls as a JSON array, stored with the turn's final assistant row; none when
+    // the turn used no tools
+    steps: text("steps"),
   },
   (table) => [index("memories_chat_id_idx").on(table.chatId, table.id)],
 );

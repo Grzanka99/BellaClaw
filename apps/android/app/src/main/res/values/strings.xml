@@ -23,6 +23,16 @@
     <string name="error_image_too_large">Images can be up to 5 MB.</string>
     <string name="error_image_type">Only JPEG, PNG, WebP and GIF images can be sent.</string>
     <string name="typing">Typing</string>
+    <plurals name="activity_summary">
+        <item quantity="one">%1$d step · %2$ds</item>
+        <item quantity="other">%1$d steps · %2$ds</item>
+    </plurals>
+    <string name="activity_show">Show steps</string>
+    <string name="activity_hide">Hide steps</string>
+    <string name="activity_thought">Thought for %1$ds</string>
+    <string name="activity_thinking">Thinking…</string>
+    <string name="activity_duration">%1$.1fs</string>
+    <string name="activity_failed">Failed</string>
     <string name="day_today">Today</string>
     <string name="day_yesterday">Yesterday</string>
 

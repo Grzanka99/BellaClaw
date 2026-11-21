@@ -33,8 +33,8 @@ import { EAgentName } from "../agents";
 import { LlmClient } from "../llm";
 import { aiModels, getAiModelConfig, getAiModelConfigs } from "../providers/registry";
 import { EAiProvider, EModelPurpose } from "../types";
-import { AgentHarness, isSerializedToolCall } from ".";
-import type { TAgentRunArgs, TAgentRunResult } from "./types";
+import { AgentHarness, isSerializedToolCall, stepDetail } from ".";
+import type { TAgentRunArgs, TAgentRunResult, TAgentStep } from "./types";
 
 const OPENROUTER_MODELS = [
   "openai/gpt-5.4-nano",
@@ -1983,6 +1983,66 @@ describe("AgentHarness", () => {
 
     await appLogger.close();
     (AppLogger as unknown as { _instance: undefined })._instance = undefined;
+  });
+
+  test("reports a delegation as one step of the reply turn, and none of the specialist's own calls", async () => {
+    faux.setResponses([
+      fauxAssistantMessage(
+        fauxToolCall("delegate-memory", { task: "Recall project alpha" }, { id: "delegate-1" }),
+      ),
+      fauxAssistantMessage(fauxToolCall("missing-tool", {}, { id: "inner-1" })),
+      fauxAssistantMessage("Project alpha used TypeBox."),
+      fauxAssistantMessage("Root final"),
+    ]);
+    const steps: TAgentStep[] = [];
+
+    const result = await AgentHarness.instance.runMain({
+      prompt: "What did project alpha use?",
+      conversationKey: "discord:1",
+      ownerKey: "discord:1",
+      settings: { ...DefaultConfigRecord, [EConfigKey.AiProvider]: EAiProvider.Openrouter },
+      currentTimeContext: undefined,
+      platform: EMessagePlatform.Discord,
+      trace: TEST_TRACE,
+      events: testEventRequester,
+      signal: undefined,
+      onStep: (step) => {
+        steps.push(step);
+      },
+    });
+
+    expect(result.text).toBe("Root final");
+    const step = {
+      stepId: "delegate-1",
+      tool: "delegate-memory",
+      label: "Delegate memory",
+      detail: "Recall project alpha",
+      startedAt: expect.any(Number),
+    };
+    expect(steps).toEqual([
+      { ...step, state: "started", durationMs: undefined },
+      { ...step, state: "completed", durationMs: expect.any(Number) },
+    ]);
+  });
+});
+
+describe("stepDetail", () => {
+  test("shows the argument a person recognises, on one line", () => {
+    const calls: [string, unknown][] = [
+      ["web-search", { query: "  OVH invoice\n terms ", maxResults: 5, topic: "news" }],
+      ["web-fetch", { url: "https://www.ovhcloud.com/en/pricing", format: "markdown" }],
+      ["web-fetch", { url: "not a url" }],
+      ["delegate-mcp", { profileId: "vault", task: "Read the trip note" }],
+      ["delegate-calendar", { task: "  Move the dentist\n to Friday " }],
+    ];
+
+    expect(calls.map(([tool, args]) => stepDetail(tool, args))).toEqual([
+      "OVH invoice terms",
+      "ovhcloud.com",
+      "",
+      "vault",
+      "Move the dentist to Friday",
+    ]);
   });
 });
 

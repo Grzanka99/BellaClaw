@@ -3,6 +3,7 @@ import {
   EConversationKind,
   EEventType,
   IMAGE_MARKER,
+  type THistoryStep,
   type TSelectMemory,
 } from "@bellaclaw/database";
 import type { TOption } from "@bellaclaw/shared";
@@ -14,6 +15,7 @@ import { checkAiModelChoice, EAiModelChoiceProblem } from "../ai/providers/regis
 import { ERole } from "../ai/types";
 import { logHandlerStarted, startHandlerSpan, startMemorySaveSpan } from "../app-logger/operations";
 import { startSpan } from "../app-logger/span";
+import { AppStream } from "../app-stream";
 import { ConversationStore } from "../conversation";
 import type { TConversation } from "../conversation/types";
 import type { TDatabaseHandle } from "../database";
@@ -538,6 +540,8 @@ export class MessageHandler {
       }
 
       const chatStart = performance.now();
+      // the turn's ended tool calls, stored with its reply
+      const steps: THistoryStep[] = [];
       const run: Parameters<AgentHarness["runMain"]>[0] = {
         prompt: content,
         conversation,
@@ -554,6 +558,20 @@ export class MessageHandler {
         events: ctx,
         signal: undefined,
         model: chosen,
+        onStep: (step) => {
+          AppStream.instance.step(ownerKey, conversationKey, step);
+
+          if (step.durationMs !== undefined) {
+            steps.push({
+              tool: step.tool,
+              label: step.label,
+              detail: step.detail,
+              startedAt: step.startedAt,
+              durationMs: step.durationMs,
+              failed: step.state === "failed",
+            });
+          }
+        },
       };
       let aiRes: TOption<TMainAgentRunResult>;
 
@@ -626,6 +644,7 @@ export class MessageHandler {
             aiRes.messages,
             savedMessage.id,
             conversation,
+            steps,
           );
 
           let replyId: TOption<number>;

@@ -4,6 +4,7 @@ import {
   EEventType,
   eventDeliveriesTable,
   eventsTable,
+  listHistory,
   memoriesTable,
   type TSelectMemory,
 } from "@bellaclaw/database";
@@ -12,6 +13,7 @@ import type { Message } from "@earendil-works/pi-ai";
 import {
   fauxAssistantMessage,
   fauxProvider,
+  fauxToolCall,
   getCurrentSystemPrompt,
   getCurrentTools,
   type Model,
@@ -139,6 +141,7 @@ function mockConversationStore() {
         createdAt,
         clientMessageId: clientMessageId ?? null,
         attachments: null,
+        steps: null,
       }),
     ),
     raiseRevision: mock(async () => 1),
@@ -393,6 +396,7 @@ describe("MessageHandler", () => {
           createdAt: savedAt,
           clientMessageId: null,
           attachments: null,
+          steps: null,
         };
         saved.push(row);
         return row;
@@ -512,6 +516,62 @@ describe("MessageHandler", () => {
         text: "[Image]",
         attachment: ref,
       });
+    } finally {
+      if (previousProvider !== undefined) {
+        aiModels.setProvider(previousProvider);
+      }
+      if (previousApiKey === undefined) {
+        delete Bun.env.OPENROUTER_API_KEY;
+      } else {
+        Bun.env.OPENROUTER_API_KEY = previousApiKey;
+      }
+    }
+  });
+
+  test("stores a turn's tool calls on its reply for history, and none for a turn without tools", async () => {
+    const chatId = "discord:reply-steps";
+    const { internals, settings } = await setupHandler(chatId);
+    settings[EConfigKey.AiProvider] = EAiProvider.Openrouter;
+    const previousApiKey = Bun.env.OPENROUTER_API_KEY;
+    const previousProvider = aiModels.getProvider(EAiProvider.Openrouter);
+    Bun.env.OPENROUTER_API_KEY = "steps-test-key";
+    const faux = fauxProvider({
+      provider: EAiProvider.Openrouter,
+      models: [
+        { id: "google/gemini-3.1-pro-preview", reasoning: true },
+        { id: "google/gemini-3-flash-preview", reasoning: true },
+      ],
+    });
+    faux.setResponses([
+      fauxAssistantMessage(
+        fauxToolCall("delegate-memory", { task: "Recall the trip" }, { id: "delegate-1" }),
+      ),
+      fauxAssistantMessage("The trip was to Oslo."),
+      fauxAssistantMessage("You went to Oslo."),
+      fauxAssistantMessage("Hello again."),
+    ]);
+    aiModels.setProvider(faux.provider);
+    internals.conversations = ConversationStore.instance as never;
+    internals.ai.runMain = mock((args) => AgentHarness.instance.runMain(args));
+
+    try {
+      await turn(chatId, "Where did I go?");
+      await turn(chatId, "Hi");
+
+      const history = await listHistory(DatabaseConnector.instance.database, chatId, undefined, 10);
+      const replies = history.filter((message) => message.author === "assistant");
+      expect(replies.map((reply) => reply.text)).toEqual(["You went to Oslo.", "Hello again."]);
+      expect(replies[0]?.steps).toEqual([
+        {
+          tool: "delegate-memory",
+          label: "Delegate memory",
+          detail: "Recall the trip",
+          startedAt: expect.any(Number),
+          durationMs: expect.any(Number),
+          failed: false,
+        },
+      ]);
+      expect(replies[1]?.steps).toBeUndefined();
     } finally {
       if (previousProvider !== undefined) {
         aiModels.setProvider(previousProvider);

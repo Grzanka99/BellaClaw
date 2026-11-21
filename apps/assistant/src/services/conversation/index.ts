@@ -4,6 +4,7 @@ import {
   EConversationKind,
   findConversationKind,
   memoriesTable,
+  type THistoryStep,
   type TSelectMemory,
 } from "@bellaclaw/database";
 import type { TOption } from "@bellaclaw/shared";
@@ -463,7 +464,8 @@ export class ConversationStore {
     });
   }
 
-  // NOTE: the caller's transaction keeps the turn together with its follow-up events
+  // NOTE: the caller's transaction keeps the turn together with its follow-up events. steps: the
+  // turn's tool calls, stored on its final assistant row
   public async saveTurn(
     db: TDatabaseHandle,
     chatId: string,
@@ -471,6 +473,7 @@ export class ConversationStore {
     messages: Message[],
     userMessageId: number,
     previous: TOption<TConversation>,
+    steps: THistoryStep[],
   ): Promise<TConversation> {
     const entries = [...(previous?.entries ?? [])];
     const pending = messages.slice(entries.length);
@@ -487,8 +490,14 @@ export class ConversationStore {
         continue;
       }
       let kind: TSelectMemory["kind"] = "tool";
+      let storedSteps: TOption<string>;
       if (index === pending.length - 1 && message.role === "assistant") {
         kind = "message";
+        if (steps.length > 0) {
+          storedSteps = JSON.stringify(
+            steps.toSorted((left, right) => left.startedAt - right.startedAt),
+          );
+        }
       }
       let text: string;
       if (typeof message.content === "string") {
@@ -506,6 +515,7 @@ export class ConversationStore {
           message: text,
           modelMessage: JSON.stringify(message),
           createdAt: new Date(message.timestamp),
+          steps: storedSteps,
         })
         .returning({ id: memoriesTable.id })
         .get();

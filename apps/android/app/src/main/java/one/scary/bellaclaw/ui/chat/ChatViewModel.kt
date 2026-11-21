@@ -83,10 +83,10 @@ class ChatViewModel(
         combine(
             chatRepository.chat(id),
             chatRepository.messages(id),
-            chatRepository.isTyping(id),
+            combine(chatRepository.isTyping(id), chatRepository.liveSteps(id), ::Pair),
             chatRepository.isStreamOpen,
             chatRepository.canSend(id),
-        ) { chat, messages, typing, streamOpen, isReadyToSend ->
+        ) { chat, messages, (typing, steps), streamOpen, isReadyToSend ->
             val (kind, title) = when (chat) {
                 null -> return@combine ChatUiState(isMissing = true)
                 is BellaClawChat -> ChatKind.BELLACLAW to null
@@ -101,6 +101,7 @@ class ChatViewModel(
                 title = title,
                 rows = chatRows(messages, zone),
                 isTyping = typing,
+                liveActivity = activityRows(steps, isThinking = typing),
                 isStreamOpen = streamOpen,
                 isReadyToSend = isReadyToSend,
             )

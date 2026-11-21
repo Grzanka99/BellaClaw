@@ -103,6 +103,40 @@ test("a deleted plain chat reaches the phone's stream", async () => {
   }
 });
 
+test("a reply turn's tool call reaches the phone's stream as it starts and as it ends", async () => {
+  const { sendApp, assistant, store, startFollowing } = createTestApp();
+  const alice = await registerApp(sendApp, store, "alice");
+  const stopFollowing = await startFollowing();
+
+  try {
+    const stream = await openAppStream(sendApp, alice.token);
+    expect(await stream.next(1)).toEqual([{ type: "check" }]);
+
+    const conversationKey = `bella:${alice.publicId}`;
+    const step = {
+      type: "step" as const,
+      accountId: alice.publicId,
+      conversationKey,
+      stepId: "call-1",
+      tool: "web-search",
+      label: "Web search",
+      detail: "OVH invoice terms",
+      startedAt: 1_700_000_000_000,
+    };
+    assistant.push({ ...step, state: "started" });
+    assistant.push({ ...step, state: "completed", durationMs: 1_400 });
+    const { accountId: _accountId, ...shown } = step;
+    expect(await stream.next(2)).toEqual([
+      { ...shown, state: "started" },
+      { ...shown, state: "completed", durationMs: 1_400 },
+    ]);
+
+    await stream.close();
+  } finally {
+    await stopFollowing();
+  }
+});
+
 test("a confidential reply reaches the account's app streams only", async () => {
   const { send, sendApp, register, assistant, store, startFollowing } = createTestApp();
   const alice = await register("alice", "signal:+100");

@@ -87,6 +87,7 @@ internal class ChatSync(
                     pending = current.pending.filterKeys { it in keys || isNewChatId(it) },
                     replies = current.replies.filterKeys { it in keys },
                     typing = current.typing.filterTo(HashSet()) { it in keys },
+                    steps = current.steps.filterKeys { it in keys },
                 )
             }
             stale

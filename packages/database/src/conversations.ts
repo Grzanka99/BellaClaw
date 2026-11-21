@@ -34,9 +34,21 @@ export type THistoryImage = {
   mimeType: string;
 };
 
+// a tool call of the turn a reply answers. tool: the tool's name; label: the tool's; detail: the
+// argument a person recognises, such as a search's query, empty when none; startedAt: epoch ms
+export type THistoryStep = {
+  tool: string;
+  label: string;
+  detail: string;
+  startedAt: number;
+  durationMs: number;
+  failed: boolean;
+};
+
 // text: of a user message with images, what the user typed, without the stored image markers;
 // createdAt: epoch ms; clientMessageId: the id the sending client gave an inbound message;
-// images: those of a user message, in order, none when it has no image
+// images: those of a user message, in order, none when it has no image; steps: the tool calls of
+// a reply's turn, by start, none when the turn used no tools
 export type THistoryMessage = {
   id: number;
   author: "user" | "assistant";
@@ -46,12 +58,25 @@ export type THistoryMessage = {
   createdAt: number;
   clientMessageId: TOption<string>;
   images: TOption<THistoryImage[]>;
+  steps: TOption<THistoryStep[]>;
 };
 
 // NOTE: a user message's attachment references as the assistant stores them, as much of them as
 // history needs
 const SStoredAttachments = z.array(
   z.object({ id: z.string(), mimeType: z.string(), channel: z.string() }),
+);
+
+// NOTE: a reply's steps as the assistant stores them
+const SStoredSteps = z.array(
+  z.object({
+    tool: z.string(),
+    label: z.string(),
+    detail: z.string(),
+    startedAt: z.number().int(),
+    durationMs: z.number().int(),
+    failed: z.boolean(),
+  }),
 );
 
 // NOTE: the one ownership rule of a conversation, for the gateway's reads and the assistant's
@@ -217,6 +242,7 @@ export async function listHistory(
       channel: memoriesTable.channel,
       message: memoriesTable.message,
       attachments: memoriesTable.attachments,
+      steps: memoriesTable.steps,
       createdAt: memoriesTable.createdAt,
       clientMessageId: memoriesTable.clientMessageId,
     })
@@ -286,6 +312,16 @@ export async function listHistory(
         });
       }
 
+      let steps: TOption<THistoryStep[]>;
+
+      if (row.steps !== null) {
+        const stored = SStoredSteps.safeParse(JSON.parse(row.steps));
+
+        if (stored.success) {
+          steps = stored.data;
+        }
+      }
+
       messages.push({
         id: row.id,
         author: row.author,
@@ -295,6 +331,7 @@ export async function listHistory(
         createdAt: row.createdAt?.getTime(),
         clientMessageId: row.clientMessageId ?? undefined,
         images,
+        steps,
       });
     }
   }

@@ -21,7 +21,7 @@ export function registerStreamRoute(app: Hono<TEnv>, { store, liveStream }: TGat
   // oldest first
   const streamEnds = new Map<string, { end: () => void; appSession: TOption<string> }[]>();
 
-  // NOTE: the app's live stream: nudges and typing of the signed-in account only, keys and
+  // NOTE: the app's live stream: nudges, typing and steps of the signed-in account only, keys and
   // revisions, and to an app session the account's confidential replies. It opens with a check,
   // so the client compares revisions for whatever changed before it connected. It belongs to the
   // session that opened it: before each event and keep-alive the session is read, without sliding

@@ -1,6 +1,7 @@
 package one.scary.bellaclaw.data
 
 import java.time.Clock
+import java.time.Instant
 import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.coroutineScope
@@ -11,6 +12,7 @@ import kotlinx.coroutines.launch
 import one.scary.bellaclaw.data.remote.ApiClient
 import one.scary.bellaclaw.data.remote.ApiResult
 import one.scary.bellaclaw.data.remote.StreamEventBody
+import one.scary.bellaclaw.model.ActivityStep
 import one.scary.bellaclaw.model.Author
 import one.scary.bellaclaw.model.Message
 
@@ -18,7 +20,7 @@ import one.scary.bellaclaw.model.Message
  * The live stream of [ChatRepository]'s [state] and its events. A dropped stream reconnects after
  * [firstRetryMillis], doubling to [maxRetryMillis]. A `check` or `changed` has [sync] read the list, and
  * [sync]'s failed reads are tried again in the stream's scope. A `deleted` event has the phone [forget]
- * the conversation; a `reply` is dated by [clock].
+ * the conversation; a `reply` is dated by [clock]. A `step` is kept until its conversation's typing ends.
  */
 internal class ChatStream(
     private val api: ApiClient,
@@ -61,7 +63,7 @@ internal class ChatStream(
                     }
                 }
             } finally {
-                state.update { it.copy(isStreamOpen = false, typing = emptySet()) }
+                state.update { it.copy(isStreamOpen = false, typing = emptySet(), steps = emptyMap()) }
             }
             if (result is ApiResult.ApiError && result.status == ApiClient.UNAUTHORIZED) {
                 return
@@ -78,12 +80,26 @@ internal class ChatStream(
         val key = event.conversationKey
         when (type) {
             "check" -> {
-                state.update { it.copy(isStreamOpen = true, typing = emptySet()) }
+                state.update { it.copy(isStreamOpen = true, typing = emptySet(), steps = emptyMap()) }
                 scope.launch { sync.refreshList() }
             }
             "changed" -> scope.launch { sync.refreshList() }
             "typing" -> if (key != null) {
-                state.update { if (event.typing) it.copy(typing = it.typing + key) else it.copy(typing = it.typing - key) }
+                state.update {
+                    if (event.typing) it.copy(typing = it.typing + key) else it.copy(typing = it.typing - key, steps = it.steps - key)
+                }
+            }
+            "step" -> if (key != null && event.stepId != null && event.tool != null && event.label != null && event.startedAt != null) {
+                val duration = if (event.state == "started") null else event.durationMs ?: 0
+                val step = ActivityStep(
+                    event.tool,
+                    event.label,
+                    event.detail.orEmpty(),
+                    Instant.ofEpochMilli(event.startedAt),
+                    duration,
+                    failed = event.state == "failed",
+                )
+                state.update { it.copy(steps = it.steps + (key to it.steps[key].orEmpty() + (event.stepId to step))) }
             }
             "deleted" -> if (key != null) {
                 state.update { it.withoutConversation(key) }

@@ -21,6 +21,7 @@ import one.scary.bellaclaw.data.TestServer
 import one.scary.bellaclaw.data.chatModelsAnswer
 import one.scary.bellaclaw.data.errorAnswer
 import one.scary.bellaclaw.data.modelAnswer
+import one.scary.bellaclaw.model.ActivityStep
 import one.scary.bellaclaw.model.Author
 import one.scary.bellaclaw.model.BELLACLAW_CHAT_ID
 import one.scary.bellaclaw.model.ChatKind
@@ -276,6 +277,62 @@ class ChatViewModelTest {
         val stored = viewModel.uiState.first { it.messages().size == 3 && !it.isTyping }
         assertEquals(listOf("Shipped.", "Ship it", "Hi"), stored.messages().map { it.text })
         assertEquals(setOf(SendState.STORED), stored.messages().map { it.sendState }.toSet())
+    }
+
+    @Test
+    fun `step events show the reply's steps as they run and end, and typing off clears them`() = runTest {
+        val viewModel = viewModel(BELLACLAW_CHAT_ID, repository())
+        viewModel.uiState.first { it.isReadyToSend && it.isStreamOpen }
+        val startedAt = FakeGateway.CREATED_AT
+
+        gateway.push("typing", """{"conversationKey":"$BELLA_KEY","typing":true}""")
+        gateway.push(
+            "step",
+            """{"conversationKey":"$BELLA_KEY","stepId":"s1","tool":"web-search","label":"Web search","detail":"OVH invoice terms","state":"started","startedAt":$startedAt}""",
+        )
+        val running = viewModel.uiState.first { it.liveActivity.isNotEmpty() }
+        assertEquals(listOf(ActivityRow.Step(ActivityStep("web-search", "Web search", "OVH invoice terms", Instant.ofEpochMilli(startedAt), null))), running.liveActivity)
+
+        gateway.push(
+            "step",
+            """{"conversationKey":"$BELLA_KEY","stepId":"s1","tool":"web-search","label":"Web search","detail":"OVH invoice terms","state":"completed","startedAt":$startedAt,"durationMs":2100}""",
+        )
+        val done = viewModel.uiState.first { it.liveActivity.size == 2 }
+        assertEquals(
+            listOf(ActivityRow.Step(ActivityStep("web-search", "Web search", "OVH invoice terms", Instant.ofEpochMilli(startedAt), 2100)), ActivityRow.Thinking),
+            done.liveActivity,
+        )
+
+        gateway.push("typing", """{"conversationKey":"$BELLA_KEY","typing":false}""")
+        viewModel.uiState.first { it.liveActivity.isEmpty() && !it.isTyping }
+    }
+
+    @Test
+    fun `a reply shows the steps history gives it, the pause between them and how long they took`() = runTest {
+        val startedAt = FakeGateway.CREATED_AT
+        gateway.addRow(
+            BELLA_KEY,
+            "assistant",
+            "Due Nov 28.",
+            steps = """[
+                {"tool":"delegate-memory","label":"Delegate memory","detail":"Find the OVH billing day","startedAt":$startedAt,"durationMs":500,"failed":false},
+                {"tool":"web-search","label":"Web search","detail":"","startedAt":${startedAt + 2500},"durationMs":300,"failed":true}
+            ]""",
+        )
+        val viewModel = viewModel(BELLACLAW_CHAT_ID, repository())
+
+        val row = viewModel.uiState.first { it.rows.isNotEmpty() }.rows.filterIsInstance<ChatRow.Item>().single()
+
+        assertEquals(
+            listOf(
+                ActivityRow.Step(ActivityStep("delegate-memory", "Delegate memory", "Find the OVH billing day", Instant.ofEpochMilli(startedAt), 500)),
+                ActivityRow.Thought(2),
+                ActivityRow.Step(ActivityStep("web-search", "Web search", "", Instant.ofEpochMilli(startedAt + 2500), 300, failed = true)),
+            ),
+            row.activity,
+        )
+        // The steps ran 2.8 s, from the first start to the last end.
+        assertEquals(3L, row.activitySeconds)
     }
 
     @Test

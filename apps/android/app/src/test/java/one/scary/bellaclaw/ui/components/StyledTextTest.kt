@@ -1,6 +1,7 @@
 package one.scary.bellaclaw.ui.components
 
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
@@ -25,6 +26,14 @@ class StyledTextTest {
             assertEquals("At 20:46.", styled.text)
             assertEquals(listOf(Triple(style, 3, 8)), spans(styled))
         }
+    }
+
+    @Test
+    fun aMarkdownLinkShowsItsLabelAndOpensItsAddress() {
+        val styled = styledText("See [bun.com/blog](https://bun.com/blog/bun-v1.4), z 20.")
+        assertEquals("See bun.com/blog, z 20.", styled.text)
+        val links = styled.getLinkAnnotations(0, styled.length).map { Triple((it.item as LinkAnnotation.Url).url, it.start, it.end) }
+        assertEquals(listOf(Triple("https://bun.com/blog/bun-v1.4", 4, 16)), links)
     }
 
     @Test

@@ -78,6 +78,7 @@ async function saveTurn(
     ],
     source.id,
     previous,
+    [],
   );
 }
 

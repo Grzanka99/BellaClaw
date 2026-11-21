@@ -73,7 +73,7 @@ fun ChatScreen(
         MessageList(
             rows = state.rows,
             isTyping = state.isTyping,
-            assistantInBubbles = isBellaClaw,
+            liveActivity = state.liveActivity,
             onRetry = onRetry,
             onLoadOlder = onLoadOlder,
             imageLoader = imageLoader,
