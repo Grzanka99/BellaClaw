@@ -4,12 +4,14 @@ import one.scary.bellaclaw.model.AccountError
 import one.scary.bellaclaw.model.AiModel
 import one.scary.bellaclaw.model.Effort
 import one.scary.bellaclaw.model.ModelRole
+import one.scary.bellaclaw.model.ServiceTier
 
 /** [model] is the model's name; [effort] null is the model's own default. */
 data class RoleRow(
     val role: ModelRole,
     val model: String,
     val effort: Effort?,
+    val serviceTier: ServiceTier,
 )
 
 /** The role sheet's unsaved choice of one of [models] by id; Save sends it, Reset restores the provider's default. */
@@ -18,6 +20,7 @@ data class RoleEditorState(
     val models: List<AiModel>,
     val model: String,
     val effort: Effort?,
+    val serviceTier: ServiceTier,
 ) {
     val selectedModel: AiModel?
         get() = models.firstOrNull { it.id == model }
@@ -25,6 +28,10 @@ data class RoleEditorState(
     /** The model's own default (null), then the efforts the model supports. */
     val efforts: List<Effort?>
         get() = listOf(null) + selectedModel?.efforts.orEmpty()
+
+    /** The service tier is offered only for a model that supports one. */
+    val showsServiceTier: Boolean
+        get() = selectedModel?.supportsServiceTier == true
 }
 
 data class ModelsUiState(

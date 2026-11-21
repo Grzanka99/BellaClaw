@@ -9,17 +9,25 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import androidx.navigation.toRoute
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.scan
+import kotlinx.coroutines.flow.shareIn
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.transformLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import one.scary.bellaclaw.data.ChatRepository
 import one.scary.bellaclaw.data.SettingsRepository
+import one.scary.bellaclaw.model.ActivityStep
+import one.scary.bellaclaw.model.Author
 import one.scary.bellaclaw.model.BELLACLAW_CHAT_ID
 import one.scary.bellaclaw.model.BellaClawChat
 import one.scary.bellaclaw.model.ChatKind
@@ -28,6 +36,7 @@ import one.scary.bellaclaw.model.Effort
 import one.scary.bellaclaw.model.ImageCheck
 import one.scary.bellaclaw.model.ImageRefusal
 import one.scary.bellaclaw.model.Loadable
+import one.scary.bellaclaw.model.Message
 import one.scary.bellaclaw.model.MessageImage
 import one.scary.bellaclaw.model.ModelChoice
 import one.scary.bellaclaw.model.PickedImage
@@ -36,7 +45,10 @@ import one.scary.bellaclaw.model.isNewChatId
 import one.scary.bellaclaw.ui.appContainer
 import one.scary.bellaclaw.ui.navigation.ChatDestination
 import java.io.File
+import java.time.Instant
 import java.time.ZoneId
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.seconds
 
 /**
  * One chat's screen. A new chat's id (`newChatId`) moves to the created chat's once its first send created
@@ -48,6 +60,8 @@ class ChatViewModel(
     private val settingsRepository: SettingsRepository,
     private val savedStateHandle: SavedStateHandle,
     private val zone: ZoneId = ZoneId.systemDefault(),
+    /** How long an ended turn waits for its reply. Tests pass [Duration.INFINITE]: their virtual clock skips ahead while they wait for the stream. */
+    private val settle: Duration = 10.seconds,
 ) : ViewModel() {
     /**
      * What only this screen knows besides the draft: the picked image or why the last pick was refused,
@@ -80,13 +94,15 @@ class ChatViewModel(
 
     @OptIn(ExperimentalCoroutinesApi::class)
     private val chatState = this.chatId.flatMapLatest { id ->
+        // One subscription: each opens the chat and reads its history.
+        val messages = chatRepository.messages(id).shareIn(viewModelScope, SharingStarted.WhileSubscribed(), replay = 1)
         combine(
             chatRepository.chat(id),
-            chatRepository.messages(id),
-            combine(chatRepository.isTyping(id), chatRepository.liveSteps(id), ::Pair),
+            messages,
+            turns(id, messages),
             chatRepository.isStreamOpen,
             chatRepository.canSend(id),
-        ) { chat, messages, (typing, steps), streamOpen, isReadyToSend ->
+        ) { chat, messages, turns, streamOpen, isReadyToSend ->
             val (kind, title) = when (chat) {
                 null -> return@combine ChatUiState(isMissing = true)
                 is BellaClawChat -> ChatKind.BELLACLAW to null
@@ -96,17 +112,45 @@ class ChatViewModel(
             if (chat.id != id) {
                 savedStateHandle[CHAT_ID_KEY] = chat.id
             }
+            val rows = chatRows(messages, zone, turns.keys)
+            val turn = turns.current
+            // Once the reply holds the turn's card, the card shows there only.
+            val live = if (turn == null || rows.any { it.key == turn.key }) {
+                emptyList()
+            } else {
+                listOf(ChatRow.Activity(turn.key, activityRows(turn.steps, isThinking = turn.isTyping), isLive = true))
+            }
             ChatUiState(
                 kind = kind,
                 title = title,
-                rows = chatRows(messages, zone),
-                isTyping = typing,
-                liveActivity = activityRows(steps, isThinking = typing),
+                rows = live + rows,
                 isStreamOpen = streamOpen,
                 isReadyToSend = isReadyToSend,
             )
         }
     }
+
+    /**
+     * The turn of [chatId]: from typing on, or a step, to its reply, which typing off comes before. An ended
+     * turn waits [settle] at most for another newest reply in [messages].
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private fun turns(chatId: String, messages: Flow<List<Message>>): Flow<Turns> = combine(
+        chatRepository.isTyping(chatId),
+        chatRepository.liveSteps(chatId),
+        messages,
+    ) { typing, steps, messages -> Triple(typing, steps, messages) }
+        .scan(Turns()) { turns, (typing, steps, messages) ->
+            turns.next(typing, steps, messages.lastOrNull { it.author == Author.ASSISTANT }?.id, messages.lastOrNull()?.id)
+        }
+        .distinctUntilChanged()
+        .transformLatest { turns ->
+            emit(turns)
+            if (turns.current?.isTyping == false) {
+                delay(settle)
+                emit(turns.copy(current = null))
+            }
+        }
 
     val uiState: StateFlow<ChatUiState> = combine(
         chatState,
@@ -264,5 +308,45 @@ class ChatViewModel(
                 )
             }
         }
+    }
+}
+
+/**
+ * A reply in progress, or one whose typing ended and whose reply has not shown yet: its card's [key] and its
+ * [steps], kept once typing ends. [newestAtEnd] is the newest reply then; another one is this turn's.
+ * [lastAtEnd] is the newest message then.
+ */
+private data class Turn(
+    val key: String,
+    val steps: List<ActivityStep>,
+    val isTyping: Boolean,
+    val newestAtEnd: String? = null,
+    val lastAtEnd: String? = null,
+)
+
+/** The [current] turn, and the card key of every turn that took steps, by its first step's start; [count] names the next. */
+private data class Turns(
+    val current: Turn? = null,
+    val keys: Map<Instant, String> = emptyMap(),
+    val count: Int = 0,
+) {
+    fun next(typing: Boolean, steps: List<ActivityStep>, newestReply: String?, newest: String?): Turns {
+        val ongoing = current?.takeIf { it.isTyping || it.newestAtEnd == newestReply }
+        // A reconnect's check ends the turn and its replay types again: with no message since, it is the
+        // same turn and keeps its card and steps until they come again. After a message it is a new turn.
+        val running = ongoing?.takeIf { it.isTyping || it.lastAtEnd == newest }
+        val turn = when {
+            typing || steps.isNotEmpty() ->
+                Turn(running?.key ?: "activity-live-$count", steps.ifEmpty { running?.steps.orEmpty() }, isTyping = true)
+            ongoing == null -> null
+            ongoing.isTyping -> ongoing.copy(isTyping = false, newestAtEnd = newestReply, lastAtEnd = newest)
+            else -> ongoing
+        }
+        val first = turn?.steps?.firstOrNull()
+        return Turns(
+            current = turn,
+            keys = if (turn != null && first != null) keys + (first.startedAt to turn.key) else keys,
+            count = if (turn?.isTyping == true && running == null) count + 1 else count,
+        )
     }
 }

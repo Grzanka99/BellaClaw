@@ -49,6 +49,10 @@
     <string name="effort_xhigh">Extra high</string>
     <string name="effort_max">Max</string>
     <string name="effort_default">Model default</string>
+    <string name="label_service_tier">Service tier</string>
+    <string name="service_tier_default">Default</string>
+    <string name="service_tier_flex">Flex</string>
+    <string name="service_tier_priority">Priority</string>
 
     <string name="settings_title">Settings</string>
     <string name="settings_app">App</string>
@@ -59,6 +63,7 @@
     <string name="models_roles">Roles</string>
     <string name="models_verifying">Checking the change with the provider. This can take a few minutes.</string>
     <string name="model_and_effort">%1$s · %2$s</string>
+    <string name="model_effort_and_tier">%1$s · %2$s · %3$s</string>
     <string name="role_utility">Utility</string>
     <string name="role_main">Main</string>
     <string name="role_specialist">Specialist</string>

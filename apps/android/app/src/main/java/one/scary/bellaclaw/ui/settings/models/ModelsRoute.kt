@@ -20,6 +20,7 @@ fun ModelsRoute(
         editorEvents = RoleEditorEvents(
             onModel = viewModel::onEditorModel,
             onEffort = viewModel::onEditorEffort,
+            onServiceTier = viewModel::onEditorServiceTier,
             onSave = viewModel::saveRole,
             onReset = viewModel::resetRole,
             onDismiss = viewModel::dismissEditor,

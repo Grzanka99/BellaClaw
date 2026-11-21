@@ -18,6 +18,7 @@ import one.scary.bellaclaw.model.Effort
 import one.scary.bellaclaw.model.Loadable
 import one.scary.bellaclaw.model.ModelRole
 import one.scary.bellaclaw.model.RoleModel
+import one.scary.bellaclaw.model.ServiceTier
 import one.scary.bellaclaw.ui.appContainer
 
 /** Reads the models again when the screen opens; shows what the server answered, never what was asked for. */
@@ -38,11 +39,11 @@ class ModelsViewModel(private val settingsRepository: SettingsRepository) : View
                     providers = models.providers,
                     providerId = models.providerId,
                     roles = ModelRole.entries.mapNotNull { role ->
-                        models.roles[role]?.let { RoleRow(role, models.modelName(it.model), it.effort) }
+                        models.roles[role]?.let { RoleRow(role, models.modelName(it.model), it.effort, it.serviceTier) }
                     },
                     isChanging = settings.isChangingModels,
                     changeError = settings.modelsChangeError,
-                    editor = editor?.let { RoleEditorState(it.role, models.models, it.model.model, it.model.effort) },
+                    editor = editor?.let { RoleEditorState(it.role, models.models, it.model.model, it.model.effort, it.model.serviceTier) },
                 )
             }
         }
@@ -100,6 +101,10 @@ class ModelsViewModel(private val settingsRepository: SettingsRepository) : View
 
     fun onEditorEffort(effort: Effort?) {
         editor.update { it?.copy(model = it.model.copy(effort = effort)) }
+    }
+
+    fun onEditorServiceTier(serviceTier: ServiceTier) {
+        editor.update { it?.copy(model = it.model.copy(serviceTier = serviceTier)) }
     }
 
     fun saveRole() {

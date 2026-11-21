@@ -20,7 +20,7 @@ import one.scary.bellaclaw.model.Message
  * The live stream of [ChatRepository]'s [state] and its events. A dropped stream reconnects after
  * [firstRetryMillis], doubling to [maxRetryMillis]. A `check` or `changed` has [sync] read the list, and
  * [sync]'s failed reads are tried again in the stream's scope. A `deleted` event has the phone [forget]
- * the conversation; a `reply` is dated by [clock]. A `step` is kept until its conversation's typing ends.
+ * the conversation; a `reply` is dated by [clock]. A `step` is kept until its conversation's typing ends or a `check`.
  */
 internal class ChatStream(
     private val api: ApiClient,
@@ -63,7 +63,8 @@ internal class ChatStream(
                     }
                 }
             } finally {
-                state.update { it.copy(isStreamOpen = false, typing = emptySet(), steps = emptyMap()) }
+                // Typing and steps stay until the next stream's check, which replays the turns still running.
+                state.update { it.copy(isStreamOpen = false) }
             }
             if (result is ApiResult.ApiError && result.status == ApiClient.UNAUTHORIZED) {
                 return

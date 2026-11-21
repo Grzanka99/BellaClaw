@@ -10,10 +10,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -25,17 +23,14 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import one.scary.bellaclaw.R
 
-/** Three pulsing dots in an assistant bubble. */
+/** Three pulsing dots: the assistant is at work. */
 @Composable
 fun TypingIndicator(modifier: Modifier = Modifier) {
     val description = stringResource(R.string.typing)
     val transition = rememberInfiniteTransition(label = "typing")
     Row(
-        modifier = modifier
-            .semantics { contentDescription = description }
-            .background(MaterialTheme.colorScheme.surfaceContainerHighest, RoundedCornerShape(20.dp))
-            .padding(horizontal = 16.dp, vertical = 14.dp),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        modifier = modifier.semantics { contentDescription = description },
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         repeat(3) { index ->
             val alpha by transition.animateFloat(
@@ -50,7 +45,7 @@ fun TypingIndicator(modifier: Modifier = Modifier) {
             )
             Box(
                 modifier = Modifier
-                    .size(8.dp)
+                    .size(6.dp)
                     .alpha(alpha)
                     .background(MaterialTheme.colorScheme.onSurfaceVariant, CircleShape),
             )

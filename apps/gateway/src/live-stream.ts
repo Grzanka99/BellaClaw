@@ -8,14 +8,21 @@ export type TLiveStream = {
   // listener: called with every event of the account while its stream is open; app: whether the
   // stream is an app session's, which counts toward presence. Returns what closes it
   subscribe(accountId: string, listener: TAppStreamListener, app: boolean): () => void;
+  // sends listener the account's running turns: for each conversation typing, if on, then its steps
+  replay(accountId: string, listener: TAppStreamListener): void;
 };
+
+// a conversation's turn as last seen: whether it is typing, and its steps by stepId in arrival order
+type TTurn = { typing: boolean; steps: Map<string, TAppStreamEvent> };
 
 const logger = createLogger("LIVE-STREAM");
 
 // NOTE: one stream from the assistant for every account, fanned out to the app streams of each
-// account; a reply goes to its account's app session streams only. Nothing replays: whenever that
-// stream opens or drops, every app stream is told to check revisions, because events of the time
-// between are lost and typing may have stopped unseen.
+// account; a reply goes to its account's app session streams only. Typing and steps of running
+// turns are kept, so a newly opened app stream is sent them right after its check; replies are
+// not. Whenever that stream opens or drops, the kept turns are forgotten and every app stream is
+// told to check revisions, because events of the time between are lost and typing may have
+// stopped unseen.
 // The assistant learns which accounts have an open app session stream here: the whole set, sent on
 // each connection and whenever an account's first such stream opens or its last one closes, one
 // report at a time; a failed report is sent again after retryMs. retryMs: the wait before
@@ -27,6 +34,8 @@ export function createLiveStream(internalApi: TInternalApi, retryMs: number, sil
   // the number of open app session streams, by account public id
   const appStreams = new Map<string, number>();
   const presence = { connected: false, reporting: false, changed: false };
+  // by account public id, then conversationKey; a turn's steps are kept until its typing ends
+  const turns = new Map<string, Map<string, TTurn>>();
 
   // NOTE: the assistant forgets the set when the connection drops, so nothing is sent without one
   async function reportPresence(): Promise<void> {
@@ -55,6 +64,8 @@ export function createLiveStream(internalApi: TInternalApi, retryMs: number, sil
   }
 
   function checkAll(): void {
+    turns.clear();
+
     for (const accountListeners of listeners.values()) {
       for (const listener of accountListeners.keys()) {
         listener({ type: "check" });
@@ -80,6 +91,27 @@ export function createLiveStream(internalApi: TInternalApi, retryMs: number, sil
     }
 
     const { accountId, ...event } = parsed.data;
+
+    if (event.type === "typing" || event.type === "deleted" || event.type === "step") {
+      const accountTurns = turns.get(accountId) ?? new Map<string, TTurn>();
+      const turn = accountTurns.get(event.conversationKey) ?? { typing: false, steps: new Map() };
+
+      if (event.type === "typing" && event.typing) {
+        turn.typing = true;
+        accountTurns.set(event.conversationKey, turn);
+      } else if (event.type === "step") {
+        turn.steps.set(event.stepId, event);
+        accountTurns.set(event.conversationKey, turn);
+      } else {
+        accountTurns.delete(event.conversationKey);
+      }
+
+      if (accountTurns.size === 0) {
+        turns.delete(accountId);
+      } else {
+        turns.set(accountId, accountTurns);
+      }
+    }
 
     for (const [listener, app] of listeners.get(accountId) ?? []) {
       if (event.type !== "reply" || app) {
@@ -172,6 +204,18 @@ export function createLiveStream(internalApi: TInternalApi, retryMs: number, sil
           }
         }
       };
+    },
+
+    replay(accountId: string, listener: TAppStreamListener): void {
+      for (const [conversationKey, turn] of turns.get(accountId) ?? []) {
+        if (turn.typing) {
+          listener({ type: "typing", conversationKey, typing: true });
+        }
+
+        for (const step of turn.steps.values()) {
+          listener(step);
+        }
+      }
     },
 
     // keeps the stream from the assistant open until signal aborts

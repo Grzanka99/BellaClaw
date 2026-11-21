@@ -188,20 +188,22 @@ else from Firebase; the manifest turns off Firebase's default data collection an
   (`reloadModels`, in the application scope); no reload starts while a model change is verified, and
   a reload's answer is dropped when a change or another reload started after it did.
 - `ModelSettings` is the server's model state: the active provider of `providers` (ids), a
-  `RoleModel` per role (model id, effort or null for the model's default) and the active provider's
-  `AiModel`s with the efforts each supports. The server's purposes and efforts map in `SettingsMapping.kt`.
+  `RoleModel` per role (model id, effort or null for the model's default, service tier) and the active provider's
+  `AiModel`s with the efforts each supports and whether it takes a service tier. The server's purposes,
+  efforts and tiers map in `SettingsMapping.kt`.
 - `chatModels`, the chat's model picker list (`GET /api/models`), is every provider a plain chat may use
   (`ChatProvider`): whether it can be used now and its `AiModel`s. It is
   read when a session starts and each time the picker opens (`reloadChatModels`, in the application
   scope). A held list stays while it is read again and when that read fails, so the picker shows it at
   once. A read's answer is dropped when another read of the list started after it did. Opening a plain chat, or its picker, also reads again the
   account's models or the list when their last read failed.
-- A model change (provider, a role's model and effort, a role's reset) runs in the application
+- A model change (provider, a role's model, effort and service tier, a role's reset) runs in the application
   scope, so leaving the screen does not drop it. While it is verified, `isChangingModels` is set and
   no second change starts; the answer replaces the models, a refusal leaves them and sets
   `modelsChangeError` to the server's text, which stays through reloads until the next change
   starts. A role change sends only what differs from the server's current selection; an effort the
-  newly picked model lacks falls back to the model's default. New models that lack the open role
+  newly picked model lacks falls back to the model's default. The sheet offers the service tier
+  (Default, Flex, Priority) only for a model that takes one, and only then is a changed tier sent. New models that lack the open role
   sheet's model, or its effort, close the sheet; the sheet labels any effort, so no value the
   catalog lacks breaks it.
 - The personality saves with `PUT /api/personality` (all three fields) from the screen's scope; a
@@ -225,16 +227,20 @@ Everything it holds is one immutable `ChatState` in a `MutableStateFlow`, change
   an open chat's history, is tried again with the same delays in the stream's scope (`ChatSync.live`),
   so the retrying ends with a success, a session change or the background; one retry loop at most per
   list or conversation, so a `check` or `changed` meanwhile reads once but starts no second loop. `isStreamOpen` is true from that
-  first event until the stream ends; typing marks end with it.
+  first event until the stream ends; typing marks and steps stay until the next `check`.
 - **Events.** `check`: typing off, read the list. `changed`: read the list. `typing`: mark or unmark the
   conversation. `deleted`: drop the plain chat; an open screen sees `isMissing`. `reply`: an assistant
   message kept in memory only (`ChatState.replies`), shown once in its conversation for as long as the
   session lasts. `step`: a step of the reply in progress (`ChatState.steps`, by step id: `started`, then
-  `completed` or `failed`), kept until that conversation's typing ends, a `check`, or the stream ends.
-- **Activity steps.** While a reply is in progress the chat shows its steps where the reply will appear
-  (`ChatUiState.liveActivity`; the typing dots while there are none). A history row's `steps` come with its
-  `Message`, and show as a chip above the reply ("4 steps · 14s", from the first step's start to the
-  reply) that a tap opens; open or closed is the list's own state. `activityRows` shapes both: a
+  `completed` or `failed`), kept until that conversation's typing ends or a `check`.
+- **Activity steps.** A reply's activity is one card, a `ChatRow.Activity` list item. While a reply is in
+  progress it is the first row (`isLive`): the typing dots, then its steps appended as they come. Typing
+  ends before the reply lands, so the ViewModel keeps the ended turn's card until another message is the
+  newest, 10 s at most; typing again with no message since (a reconnect's replay) resumes it. A history row's `steps` come with its `Message` and show as a card above the reply,
+  folded to "4 steps · 14s" (from the first step's start to the last end), which a tap unfolds; open or
+  closed is the list's own state. A turn seen live keys its card from typing on, and the reply whose
+  first step started then keeps that key, so the live card folds in place; any other reply's card is
+  keyed by its message. Items come, go and move with `animateItem`. `activityRows` shapes both: a
   "Thought for Ns" row before a step that began a second or more after every earlier one ended, and
   "Thinking…" last while typing with no step running.
 - **The list and revisions.** Reading the list (`ChatSync.refreshList`) replaces it, marks it loaded,
