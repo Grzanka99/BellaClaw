@@ -1,10 +1,5 @@
 package one.scary.bellaclaw.ui.chat
 
-import android.Manifest
-import android.content.pm.PackageManager
-import android.widget.Toast
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -45,21 +40,18 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.LifecycleEventEffect
 import one.scary.bellaclaw.R
 import one.scary.bellaclaw.model.ImageRefusal
 
 /**
  * The message box: attach button, text, the picked image or why it was refused above them, and the send
- * button. An empty box has a mic instead of send; while dictating, the box becomes [DictationBar] and
- * what was heard lands in the draft.
+ * button. An empty box has a mic ([onDictate]) instead of send; while [dictation] listens, the box
+ * becomes [DictationBar].
  */
 @Composable
 fun Composer(
@@ -73,33 +65,15 @@ fun Composer(
     onRemoveAttachment: () -> Unit,
     onSend: () -> Unit,
     thumbnailLoader: ThumbnailLoader,
+    dictation: Dictation,
+    onDictate: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val context = LocalContext.current
-    val dictation = rememberDictation { heard, failure ->
-        onDraftChange(heard)
-        val message = when (failure) {
-            DictationFailure.LANGUAGE_UNAVAILABLE -> context.getString(R.string.error_dictation_language)
-            DictationFailure.OTHER -> context.getString(R.string.error_dictation)
-            null -> return@rememberDictation
-        }
-        Toast.makeText(context, message, Toast.LENGTH_LONG).show()
-    }
     val focusRequester = remember { FocusRequester() }
     var focusAfterDictation by remember { mutableStateOf(false) }
     val finishDictation = { focus: Boolean ->
         focusAfterDictation = focus
         dictation.finish()
-    }
-    LifecycleEventEffect(Lifecycle.Event.ON_STOP) {
-        if (dictation.isListening) {
-            dictation.stop()
-        }
-    }
-    val askMicrophone = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) {
-            dictation.start()
-        }
     }
     if (dictation.isListening) {
         DictationBar(
@@ -190,13 +164,7 @@ fun Composer(
                     }
                     if (isEmpty) {
                         IconButton(
-                            onClick = {
-                                if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
-                                    dictation.start()
-                                } else {
-                                    askMicrophone.launch(Manifest.permission.RECORD_AUDIO)
-                                }
-                            },
+                            onClick = onDictate,
                             modifier = Modifier.padding(vertical = 4.dp),
                         ) {
                             Icon(Icons.Filled.Mic, contentDescription = stringResource(R.string.action_dictate))

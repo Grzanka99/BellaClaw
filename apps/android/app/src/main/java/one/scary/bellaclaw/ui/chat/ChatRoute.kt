@@ -1,8 +1,11 @@
 package one.scary.bellaclaw.ui.chat
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.ImageDecoder
 import android.util.Size
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -13,10 +16,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.net.toUri
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import one.scary.bellaclaw.R
 
 /** [onChatMissing] runs when no chat has this screen's id, e.g. a restored screen of a chat the app no longer has. */
 @Composable
@@ -36,7 +42,30 @@ fun ChatRoute(
             viewModel.onAttach(uri.toString())
         }
     }
-    val contentResolver = LocalContext.current.contentResolver
+    val context = LocalContext.current
+    val dictation = rememberDictation(onLanguagePicked = viewModel::onDictationLanguage) { heard, failure ->
+        viewModel.onDraftChange(heard)
+        val message = when (failure) {
+            DictationFailure.LANGUAGE_UNAVAILABLE -> context.getString(R.string.error_dictation_language)
+            DictationFailure.OTHER -> context.getString(R.string.error_dictation)
+            null -> return@rememberDictation
+        }
+        Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+    }
+    LaunchedEffect(state.dictationLanguage) {
+        dictation.savedLanguage = state.dictationLanguage
+    }
+    LifecycleEventEffect(Lifecycle.Event.ON_STOP) {
+        if (dictation.isListening) {
+            dictation.stop()
+        }
+    }
+    val askMicrophone = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) {
+            dictation.start()
+        }
+    }
+    val contentResolver = context.contentResolver
     val thumbnailLoader = remember(contentResolver) {
         ThumbnailLoader { uri ->
             withContext(Dispatchers.IO) {
@@ -82,6 +111,14 @@ fun ChatRoute(
         imageLoader = imageLoader,
         onOpenImage = viewModel::openImage,
         onCloseImage = viewModel::closeImage,
+        dictation = dictation,
+        onDictate = {
+            if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                dictation.start()
+            } else {
+                askMicrophone.launch(Manifest.permission.RECORD_AUDIO)
+            }
+        },
     )
 }
 

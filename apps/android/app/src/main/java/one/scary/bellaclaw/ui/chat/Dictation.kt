@@ -17,7 +17,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
-import androidx.core.content.edit
 import java.util.Locale
 
 /** Why dictation stopped on its own. */
@@ -26,22 +25,26 @@ enum class DictationFailure { LANGUAGE_UNAVAILABLE, OTHER }
 /**
  * Speech to text with the phone's speech service. It listens until [finish], [stop] or a failure: each
  * pause ends one recognition, whose text is kept, and listening starts again. When it ends, [onDone]
- * gets what was heard, with the failure if one ended it. The language starts as the phone's and then
- * stays the last one picked.
+ * gets what was heard, with the failure if one ended it. The language is [savedLanguage], or the phone's
+ * while none was picked; a pick goes to [onLanguagePicked].
  */
 @Stable
-class Dictation(private val context: Context, private val onDone: (String, DictationFailure?) -> Unit) {
-    private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+class Dictation(
+    private val context: Context,
+    private val onLanguagePicked: (String) -> Unit,
+    private val onDone: (String, DictationFailure?) -> Unit,
+) {
 
     /** The languages set in Android Settings, the phone's own first. */
     private val phoneLanguages: List<Locale> = Resources.getSystem().configuration.locales.let { list ->
         List(list.size()) { list[it] }
     }
 
-    var language: Locale by mutableStateOf(
-        prefs.getString(KEY_LANGUAGE, null)?.let(Locale::forLanguageTag) ?: phoneLanguages.first(),
-    )
-        private set
+    /** The language last picked, as a BCP 47 tag; null until one is picked. */
+    var savedLanguage: String? by mutableStateOf(null)
+
+    val language: Locale
+        get() = savedLanguage?.let(Locale::forLanguageTag) ?: phoneLanguages.first()
 
     /** What the language menu offers: the phone's languages, and the current one if it is no longer among them. */
     val languages: List<Locale>
@@ -80,8 +83,8 @@ class Dictation(private val context: Context, private val onDone: (String, Dicta
         if (isFinishing) {
             return
         }
-        language = locale
-        prefs.edit { putString(KEY_LANGUAGE, locale.toLanguageTag()) }
+        savedLanguage = locale.toLanguageTag()
+        onLanguagePicked(locale.toLanguageTag())
         keepHearing()
         listen()
     }
@@ -120,6 +123,18 @@ class Dictation(private val context: Context, private val onDone: (String, Dicta
         hearing = ""
     }
 
+    /** Keeps what the ended recognition heard, then ends if finishing, otherwise listens again. */
+    private fun nextRecognition() {
+        keepHearing()
+        if (isFinishing) {
+            end(null)
+        } else {
+            listen()
+        }
+    }
+
+    private fun Bundle.bestResult(): String = getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull() ?: hearing
+
     private fun listen() {
         val current = recognizer ?: SpeechRecognizer.createSpeechRecognizer(context).also {
             it.setRecognitionListener(listener)
@@ -136,17 +151,15 @@ class Dictation(private val context: Context, private val onDone: (String, Dicta
 
     private val listener = object : RecognitionListener {
         override fun onPartialResults(partialResults: Bundle) {
-            hearing = partialResults.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull() ?: hearing
+            hearing = partialResults.bestResult()
         }
 
         override fun onResults(results: Bundle) {
-            hearing = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull() ?: hearing
-            keepHearing()
-            if (isFinishing) {
-                end(null)
-            } else if (isListening) {
-                listen()
+            if (!isListening) {
+                return
             }
+            hearing = results.bestResult()
+            nextRecognition()
         }
 
         override fun onError(error: Int) {
@@ -154,12 +167,7 @@ class Dictation(private val context: Context, private val onDone: (String, Dicta
                 return
             }
             if (error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT) {
-                keepHearing()
-                if (isFinishing) {
-                    end(null)
-                } else {
-                    listen()
-                }
+                nextRecognition()
                 return
             }
             val failure = if (error == SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED || error == SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE) {
@@ -186,8 +194,6 @@ class Dictation(private val context: Context, private val onDone: (String, Dicta
 
     companion object {
         const val LEVEL_COUNT = 32
-        private const val PREFS = "dictation"
-        private const val KEY_LANGUAGE = "language"
 
         // The range the speech service reports loudness in, roughly.
         private const val QUIET_DB = -2f
@@ -196,10 +202,17 @@ class Dictation(private val context: Context, private val onDone: (String, Dicta
 }
 
 @Composable
-fun rememberDictation(onDone: (String, DictationFailure?) -> Unit): Dictation {
+fun rememberDictation(onLanguagePicked: (String) -> Unit, onDone: (String, DictationFailure?) -> Unit): Dictation {
     val context = LocalContext.current
+    val currentOnLanguagePicked by rememberUpdatedState(onLanguagePicked)
     val currentOnDone by rememberUpdatedState(onDone)
-    val dictation = remember(context) { Dictation(context) { heard, failure -> currentOnDone(heard, failure) } }
+    val dictation = remember(context) {
+        Dictation(
+            context,
+            onLanguagePicked = { currentOnLanguagePicked(it) },
+            onDone = { heard, failure -> currentOnDone(heard, failure) },
+        )
+    }
     DisposableEffect(dictation) {
         onDispose { dictation.release() }
     }

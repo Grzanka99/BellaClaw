@@ -34,6 +34,8 @@ fun ChatScreen(
     imageLoader: MessageImageLoader,
     onOpenImage: (MessageImage) -> Unit,
     onCloseImage: () -> Unit,
+    dictation: Dictation,
+    onDictate: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val isBellaClaw = state.kind == ChatKind.BELLACLAW
@@ -66,6 +68,8 @@ fun ChatScreen(
                 onRemoveAttachment = onRemoveAttachment,
                 onSend = onSend,
                 thumbnailLoader = thumbnailLoader,
+                dictation = dictation,
+                onDictate = onDictate,
                 modifier = Modifier.navigationBarsPadding().imePadding(),
             )
         },
@@ -125,6 +129,8 @@ private fun BellaClawChatPreview() {
             imageLoader = noImages,
             onOpenImage = {},
             onCloseImage = {},
+            dictation = rememberDictation({}, { _, _ -> }),
+            onDictate = {},
         )
     }
 }
@@ -159,6 +165,8 @@ private fun PlainChatPreview() {
             imageLoader = noImages,
             onOpenImage = {},
             onCloseImage = {},
+            dictation = rememberDictation({}, { _, _ -> }),
+            onDictate = {},
         )
     }
 }
