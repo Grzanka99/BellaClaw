@@ -176,7 +176,7 @@ class ChatViewModel(
             viewedImage = local.viewedImage,
             picker = picker,
             dictationLanguage = dictationLanguage,
-            lists = if (chat.kind == ChatKind.BELLACLAW) lists.orEmpty() else emptyList(),
+            lists = lists.orEmpty(),
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ChatUiState())
 

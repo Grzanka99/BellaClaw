@@ -147,14 +147,11 @@ private fun ProgressMark(list: TodoList) {
     }
 }
 
-/** "Until today 20:00"; once finished, "Done", with when it disappears. Null for a list that never ends and is open. */
+/** "Until today 20:00"; once finished, "Done" and when it disappears. Null for an open list that never ends. */
 @Composable
 private fun pillSubtitle(list: TodoList): String? {
     val disappearsAt = list.disappearsAt
-    if (list.isFinished) {
-        if (disappearsAt == null) {
-            return stringResource(R.string.list_done)
-        }
+    if (list.isFinished && disappearsAt != null) {
         return stringResource(R.string.list_done_disappears, formatEndTime(disappearsAt))
     }
     return list.endsAt?.let { stringResource(R.string.list_until, formatEndTime(it)) }

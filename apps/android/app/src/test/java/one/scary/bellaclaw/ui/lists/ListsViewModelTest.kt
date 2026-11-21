@@ -86,15 +86,13 @@ class ListsViewModelTest {
     fun aRefusedChangeIsUndoneAndSaysWhy() = runTest {
         val viewModel = viewModel()
         val bread = viewModel.uiState.first { it.list != null }.list!!.items[1]
-        gateway.listChangeFailures.put(404 to errorAnswer("Item not found"))
+        gateway.listChangeFailures.put(404 to errorAnswer("No item i2"))
 
         viewModel.toggle(bread)
 
         val refused = viewModel.uiState.first { it.error != null }
-        assertEquals(AccountError.Server(404, "Item not found"), refused.error)
+        assertEquals(AccountError.Server(404, "No item i2"), refused.error)
         assertEquals(false, refused.list?.items?.get(1)?.done)
-        viewModel.errorShown()
-        assertEquals(null, viewModel.uiState.first { it.error == null }.error)
     }
 
     @Test

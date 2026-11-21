@@ -169,7 +169,7 @@ private fun ScheduledCard(message: Message, modifier: Modifier) {
     }
 }
 
-/** A list whose last item was ticked: an outlined card with its name, its count and when it was finished. */
+/** A finished list: an outlined card with its name, its count and when it finished. */
 @Composable
 private fun FinishedListCard(list: FinishedList, message: Message, modifier: Modifier) {
     Surface(

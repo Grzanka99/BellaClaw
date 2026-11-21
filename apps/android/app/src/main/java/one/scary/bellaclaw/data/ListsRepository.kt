@@ -84,12 +84,8 @@ class ListsRepository(
         }?.sortedBy { it.endsAt ?: Instant.MAX }
     }.distinctUntilChanged()
 
-    /** Why the last change was not made, until the next change or [clearError]. */
+    /** Why the last change was not made, until the next change. */
     val error: Flow<AccountError?> = state.map { it.error }.distinctUntilChanged()
-
-    fun clearError() {
-        state.update { it.copy(error = null) }
-    }
 
     /** Reads the lists again. */
     fun refresh() {

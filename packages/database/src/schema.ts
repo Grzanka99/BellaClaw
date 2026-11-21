@@ -142,7 +142,7 @@ export const listsTable = sqliteTable(
     ownerKey: text("ownerKey").notNull(),
     name: text("name").notNull(),
     expiresAt: integer("expiresAt", { mode: "timestamp_ms" }),
-    // when the list first went from an open item to every item done; it is finished once only
+    // when a change first left the list with items, every one done; it is finished once only
     finishedAt: integer("finishedAt", { mode: "timestamp_ms" }),
     createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull(),
     updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull(),

@@ -183,8 +183,8 @@ Conversations:
   other row), `createdAt` when the list was finished, and a plain `text` such as
   `Zakupy · 7/7 finished` for other readers; the app draws the card from `listFinished`. A list of
   the account gets it in the Bella conversation the first time a change (Bella's or the app's)
-  takes it from an open item to every item done, never again for that list, and it is sent to no
-  other channel. Without a cursor, the newest
+  leaves it with items, every one done, never again for that list, and it is sent to no other
+  channel. Without a cursor, the newest
   50 rows; `before=<id>`
   pages older rows, `nextBefore` names the next older page; `after=<id>` returns the rows after the
   newest one the app has, `nextAfter` names the next page. A client synced at or above

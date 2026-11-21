@@ -9,7 +9,6 @@ import kotlinx.coroutines.test.runTest
 import one.scary.bellaclaw.data.FakeGateway
 import one.scary.bellaclaw.data.FakeGateway.Companion.BELLA_KEY
 import one.scary.bellaclaw.data.LISTS_NOW
-import one.scary.bellaclaw.data.ListsRepository
 import one.scary.bellaclaw.data.TestServer
 import one.scary.bellaclaw.data.listAnswer
 import one.scary.bellaclaw.data.listsAnswer
@@ -40,12 +39,12 @@ class ChatListsTest {
         gateway = testServer.gateway()
     }
 
-    private suspend fun TestScope.viewModel(chatId: String = BELLACLAW_CHAT_ID): Pair<ChatViewModel, ListsRepository> {
+    private suspend fun TestScope.viewModel(): ChatViewModel {
         val store = testServer.signedInStore()
         val lists = testServer.listsRepository(store, backgroundScope, now)
         val chats = testServer.chatRepository(store, backgroundScope, onListsChanged = lists::refresh)
         val viewModel = ChatViewModel(
-            chatId,
+            BELLACLAW_CHAT_ID,
             chats,
             testServer.settingsRepository(scope = backgroundScope),
             lists,
@@ -54,7 +53,7 @@ class ChatListsTest {
             Duration.INFINITE,
         )
         collectIn(viewModel.uiState)
-        return viewModel to lists
+        return viewModel
     }
 
     @Test
@@ -66,7 +65,7 @@ class ChatListsTest {
             listAnswer("done", "Done", listOf("i1" to ("Milk" to true)), expiresAt = at + hour),
             listAnswer("ended", "Ended", listOf("i4" to ("Tea" to false)), expiresAt = at),
         )
-        val (viewModel) = viewModel()
+        val viewModel = viewModel()
 
         val state = viewModel.uiState.first { it.lists.isNotEmpty() }
 
@@ -76,7 +75,7 @@ class ChatListsTest {
     @Test
     fun aFinishedListWithoutAnEndLeavesAnHourAfterItsLastChange() = runTest {
         gateway.lists = listsAnswer(listAnswer("l1", "Shopping", listOf("i1" to ("Milk" to true))))
-        val (viewModel) = viewModel()
+        val viewModel = viewModel()
         viewModel.uiState.first { it.lists.isNotEmpty() }
 
         now.value = Instant.ofEpochMilli(FakeGateway.CREATED_AT + hour)
@@ -87,7 +86,7 @@ class ChatListsTest {
     @Test
     fun aSwipedListStaysAwayUntilItChanges() = runTest {
         gateway.lists = listsAnswer(listAnswer("l1", "Shopping", listOf("i1" to ("Milk" to true))))
-        val (viewModel) = viewModel()
+        val viewModel = viewModel()
         val finished = viewModel.uiState.first { it.lists.isNotEmpty() }.lists.single()
 
         viewModel.dismissList(finished)
@@ -101,19 +100,9 @@ class ChatListsTest {
     }
 
     @Test
-    fun aPlainChatShowsNoLists() = runTest {
-        gateway.lists = listsAnswer(listAnswer("l1", "Shopping", listOf("i1" to ("Milk" to false))))
-        gateway.addChat("plain:ada:k1", "Kotlin")
-        val (viewModel, lists) = viewModel("plain:ada:k1")
-        lists.lists.first { !it.isNullOrEmpty() }
-
-        assertEquals(emptyList<Any>(), viewModel.uiState.first { it.title == "Kotlin" }.lists)
-    }
-
-    @Test
     fun aFinishedListRowCarriesTheList() = runTest {
         gateway.addRow(BELLA_KEY, "assistant", "Shopping · 3/3 finished", listFinished = """{"name":"Shopping","total":3}""")
-        val (viewModel) = viewModel()
+        val viewModel = viewModel()
 
         val row = viewModel.uiState.first { it.rows.any { row -> row is ChatRow.Item } }.rows.filterIsInstance<ChatRow.Item>().single()
 

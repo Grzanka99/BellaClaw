@@ -27,13 +27,10 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -71,25 +68,15 @@ class ListsEvents(
     val onOpenDelete: () -> Unit,
     val onConfirmDelete: () -> Unit,
     val onDismissDialog: () -> Unit,
-    val onErrorShown: () -> Unit,
 )
 
 /** One list on its own screen: its progress, a chip per list when there are more, its items and a row to add one. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ListsScreen(state: ListsUiState, onBack: () -> Unit, events: ListsEvents, modifier: Modifier = Modifier) {
-    val snackbar = remember { SnackbarHostState() }
-    val errorMessage = state.error?.text()
-    LaunchedEffect(errorMessage) {
-        if (errorMessage != null) {
-            snackbar.showSnackbar(errorMessage)
-            events.onErrorShown()
-        }
-    }
     val list = state.list
     Scaffold(
         modifier = modifier,
-        snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
             TopAppBar(
                 navigationIcon = { BackButton(onBack) },
@@ -107,7 +94,7 @@ fun ListsScreen(state: ListsUiState, onBack: () -> Unit, events: ListsEvents, mo
         val items = if (reorder.draggedId != null) reorder.order else list.items
         LazyColumn(state = listState, modifier = Modifier.fillMaxSize().padding(padding).imePadding()) {
             item(key = "header") {
-                ListHeader(list, state.lists, onSelect = events.onSelect)
+                ListHeader(list, state.lists, error = state.error?.text(), onSelect = events.onSelect)
             }
             items(items, key = { it.id }) { item ->
                 val isDragged = reorder.draggedId == item.id
@@ -184,9 +171,9 @@ private fun ListMenu(events: ListsEvents) {
     }
 }
 
-/** "3 of 7 · until today 20:00", the progress bar, and a chip per list when there is more than one. */
+/** "3 of 7 · until today 20:00", the progress bar, why the last change was not made, and a chip per list when there is more than one. */
 @Composable
-private fun ListHeader(list: TodoList, lists: List<TodoList>, onSelect: (String) -> Unit) {
+private fun ListHeader(list: TodoList, lists: List<TodoList>, error: String?, onSelect: (String) -> Unit) {
     val total = list.items.size
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
         val endsAt = list.endsAt
@@ -203,6 +190,14 @@ private fun ListHeader(list: TodoList, lists: List<TodoList>, onSelect: (String)
             progress = { if (total == 0) 0f else list.doneCount.toFloat() / total },
             modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
         )
+        error?.let {
+            Text(
+                text = it,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+        }
         if (lists.size > 1) {
             Row(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -224,7 +219,7 @@ private fun ListHeader(list: TodoList, lists: List<TodoList>, onSelect: (String)
     }
 }
 
-private val noEvents = ListsEvents({}, {}, {}, {}, {}, {}, { _, _ -> }, {}, {}, {}, {}, {}, {}, {}, {}, {})
+private val noEvents = ListsEvents({}, {}, {}, {}, {}, {}, { _, _ -> }, {}, {}, {}, {}, {}, {}, {}, {})
 
 @Preview
 @Composable

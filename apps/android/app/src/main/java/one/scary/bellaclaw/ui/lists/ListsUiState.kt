@@ -3,7 +3,7 @@ package one.scary.bellaclaw.ui.lists
 import one.scary.bellaclaw.model.AccountError
 import one.scary.bellaclaw.model.TodoList
 
-/** The list being edited: the item [itemId] and its text so far. */
+/** The item [itemId] being edited and its text so far. */
 data class ItemEdit(val itemId: String, val text: String)
 
 /** A dialog of the screen's menu. */
@@ -25,6 +25,6 @@ data class ListsUiState(
     val dialog: ListDialog? = null,
     /** The name typed in the rename dialog. */
     val renameDraft: String = "",
-    /** Why the last change was not made, until it is shown. */
+    /** Why the last change was not made, until the next change. */
     val error: AccountError? = null,
 )

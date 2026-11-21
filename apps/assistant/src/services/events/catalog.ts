@@ -565,8 +565,8 @@ const SListsChanged = z
   })
   .strict();
 
-// a list went from an open item to every item done, the first time; total: its items;
-// finishedAt: epoch ms
+// the first change that left a list with items, every one done; total: its items; finishedAt:
+// epoch ms
 const SListFinished = z
   .object({
     ownerKey: z.string(),

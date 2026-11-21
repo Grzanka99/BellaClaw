@@ -60,7 +60,7 @@ class ChatRepository(
     private val scope: CoroutineScope,
     private val clock: Clock = Clock.systemDefaultZone(),
     private val retryMillis: Long = FIRST_RETRY_MILLIS,
-    onListsChanged: () -> Unit = {},
+    onListsChanged: () -> Unit,
 ) {
     private val state = MutableStateFlow(ChatState())
     private val sync = ChatSync(api, state, scope, retryMillis, MAX_RETRY_MILLIS)

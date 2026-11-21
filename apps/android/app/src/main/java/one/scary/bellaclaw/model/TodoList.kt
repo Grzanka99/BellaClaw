@@ -51,5 +51,5 @@ sealed interface ListChange {
     data class DeleteList(val listId: String) : ListChange
 }
 
-/** A list's "finished" row in the chat: the list's [name] and how many items it had, all ticked. */
+/** The card of a finished list in the chat: the list's [name] and how many items it had, all done. */
 data class FinishedList(val name: String, val total: Int)

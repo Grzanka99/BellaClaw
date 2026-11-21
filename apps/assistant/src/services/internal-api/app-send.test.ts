@@ -275,7 +275,7 @@ test("a notice or a reminder of an account with no linked chat goes to the app's
   expect(await revisions(conversationKey, accountId)).toEqual({ revision: 2, rewriteRevision: 0 });
 });
 
-test("a finished list of an account whose main channel is Signal is a card in its Bella history only", async () => {
+test("a finished list of an account whose main channel is Signal adds a card to its Bella history and nothing to Signal", async () => {
   const accountId = `acct-${crypto.randomUUID()}`;
   const address = `+${Date.now()}`;
   await linkTestAddress(address, accountId);
@@ -297,12 +297,8 @@ test("a finished list of an account whose main channel is Signal is a card in it
 
   expect(sendText.mock.calls).toEqual([[address, "Reply to Tick the bread"]]);
   const rows = await history(conversationKey);
-  expect(rows.map((row) => row.listFinished)).toEqual([
-    undefined,
-    undefined,
-    { name: "Zakupy", total: 7 },
-  ]);
   expect(rows[2]).toMatchObject({
+    listFinished: { name: "Zakupy", total: 7 },
     author: "assistant",
     kind: "display",
     channel: "app",

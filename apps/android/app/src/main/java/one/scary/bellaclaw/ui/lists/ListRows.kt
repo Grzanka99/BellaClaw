@@ -32,6 +32,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -69,6 +70,9 @@ fun ItemRow(
     modifier: Modifier = Modifier,
 ) {
     val swipe = rememberSwipeToDismissBoxState()
+    val dragStart by rememberUpdatedState(onDragStart)
+    val drag by rememberUpdatedState(onDrag)
+    val dragEnd by rememberUpdatedState(onDragEnd)
     SwipeToDismissBox(
         state = swipe,
         backgroundContent = {
@@ -88,44 +92,44 @@ fun ItemRow(
     ) {
         Surface(color = MaterialTheme.colorScheme.surface) {
             Column {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(start = 4.dp, end = 4.dp),
-            ) {
-                Checkbox(checked = item.done, onCheckedChange = { events.onToggle(item) })
-                if (edit != null) {
-                    EditField(edit.text, onChange = events.onEditChange, onDone = events.onCommitEdit, modifier = Modifier.weight(1f))
-                } else {
-                    Text(
-                        text = item.text,
-                        style = MaterialTheme.typography.bodyLarge.copy(
-                            textDecoration = if (item.done) TextDecoration.LineThrough else TextDecoration.None,
-                        ),
-                        color = if (item.done) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.weight(1f).clickable { events.onStartEdit(item) }.padding(vertical = 16.dp),
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(start = 4.dp, end = 4.dp),
+                ) {
+                    Checkbox(checked = item.done, onCheckedChange = { events.onToggle(item) })
+                    if (edit != null) {
+                        EditField(edit.text, onChange = events.onEditChange, onDone = events.onCommitEdit, modifier = Modifier.weight(1f))
+                    } else {
+                        Text(
+                            text = item.text,
+                            style = MaterialTheme.typography.bodyLarge.copy(
+                                textDecoration = if (item.done) TextDecoration.LineThrough else TextDecoration.None,
+                            ),
+                            color = if (item.done) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.weight(1f).clickable { events.onStartEdit(item) }.padding(vertical = 16.dp),
+                        )
+                    }
+                    Icon(
+                        imageVector = Icons.Outlined.DragHandle,
+                        contentDescription = stringResource(R.string.list_reorder),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .size(48.dp)
+                            .pointerInput(item.id) {
+                                detectDragGestures(
+                                    onDragStart = { dragStart() },
+                                    onDragEnd = { dragEnd() },
+                                    onDragCancel = { dragEnd() },
+                                    onDrag = { change, amount ->
+                                        change.consume()
+                                        drag(amount.y)
+                                    },
+                                )
+                            }
+                            .padding(12.dp),
                     )
                 }
-                Icon(
-                    imageVector = Icons.Outlined.DragHandle,
-                    contentDescription = stringResource(R.string.list_reorder),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier
-                        .size(48.dp)
-                        .pointerInput(item.id) {
-                            detectDragGestures(
-                                onDragStart = { onDragStart() },
-                                onDragEnd = onDragEnd,
-                                onDragCancel = onDragEnd,
-                                onDrag = { change, amount ->
-                                    change.consume()
-                                    onDrag(amount.y)
-                                },
-                            )
-                        }
-                        .padding(12.dp),
-                )
-            }
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             }
         }
     }

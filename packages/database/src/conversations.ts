@@ -45,6 +45,11 @@ export type THistoryStep = {
   failed: boolean;
 };
 
+// NOTE: a finished list's card as the assistant stores it
+const SStoredListFinished = z.object({ name: z.string(), total: z.number().int() });
+
+export type THistoryListFinished = z.infer<typeof SStoredListFinished>;
+
 // text: of a user message with images, what the user typed, without the stored image markers;
 // createdAt: epoch ms; clientMessageId: the id the sending client gave an inbound message;
 // images: those of a user message, in order, none when it has no image; steps: the tool calls of
@@ -62,7 +67,7 @@ export type THistoryMessage = {
   images: TOption<THistoryImage[]>;
   steps: TOption<THistoryStep[]>;
   scheduled: boolean;
-  listFinished: TOption<{ name: string; total: number }>;
+  listFinished: TOption<THistoryListFinished>;
 };
 
 // NOTE: a user message's attachment references as the assistant stores them, as much of them as
@@ -70,9 +75,6 @@ export type THistoryMessage = {
 const SStoredAttachments = z.array(
   z.object({ id: z.string(), mimeType: z.string(), channel: z.string() }),
 );
-
-// NOTE: a finished list's card as the assistant stores it
-const SStoredListFinished = z.object({ name: z.string(), total: z.number().int() });
 
 // NOTE: a reply's steps as the assistant stores them
 const SStoredSteps = z.array(
@@ -334,7 +336,7 @@ export async function listHistory(
         }
       }
 
-      let listFinished: TOption<{ name: string; total: number }>;
+      let listFinished: TOption<THistoryListFinished>;
 
       if (row.listFinished !== null) {
         const stored = SStoredListFinished.safeParse(JSON.parse(row.listFinished));

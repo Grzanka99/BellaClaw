@@ -279,7 +279,7 @@ class FakeGateway : Dispatcher() {
     private fun Row.toJson() = buildJsonObject {
         put("id", id)
         put("author", author)
-        put("kind", "message")
+        put("kind", if (listFinished == null) "message" else "display")
         put("channel", "app")
         put("text", text)
         put("createdAt", createdAt)

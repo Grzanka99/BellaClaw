@@ -340,7 +340,7 @@ takes its `refresh` as `onListsChanged`, which `ChatStream` calls). Reads and ch
 a time, in the application scope, so changes reach the server in the order they were made. A change
 (`ListChange`, sent as one operation of `POST /api/lists/changes`) shows at once on top of the lists
 read, as the list's last change; the answer replaces the lists. A refused or failed change is dropped,
-sets `error` (the lists screen shows it once) and the lists are read again.
+sets `error` (the lists screen shows it under the progress until the next change) and the lists are read again.
 
 - **What shows** (`lists`): not ended (`endsAt`), and not swiped away; a finished list without an end
   shows for an hour after its last change (`TodoList.disappearsAt`). A swiped finished list is hidden
@@ -355,8 +355,8 @@ sets `error` (the lists screen shows it once) and the lists are read again.
   text), adding (`Add…`), a swipe to delete an item, a drag handle to reorder (`ReorderState`: the
   move is sent on release), and the menu's rename and delete (with a confirmation). Once the lists are
   read and none is left to show, the screen closes.
-- **The finished card.** History's row with `listFinished` (written by the server the first time a list's
-  last open item is ticked) is a `Message` with `finishedList`, drawn as an outlined card with the
+- **The finished card.** History's row with `listFinished` (written by the server for the first change that
+  leaves a list with items, every one done) is a `Message` with `finishedList`, drawn as an outlined card with the
   app's own strings.
 
 ## Wiring

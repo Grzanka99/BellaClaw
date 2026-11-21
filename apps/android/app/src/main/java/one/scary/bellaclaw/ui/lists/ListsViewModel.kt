@@ -25,10 +25,11 @@ class ListsViewModel(
     private val listsRepository: ListsRepository,
     private val savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
-    /** What only this screen knows besides the drafts kept in [savedStateHandle]. */
+    /** The item being edited, the open dialog and the list it was opened for, and the rename draft. */
     private data class LocalState(
         val editing: ItemEdit? = null,
         val dialog: ListDialog? = null,
+        val dialogListId: String? = null,
         val renameDraft: String = "",
     )
 
@@ -53,15 +54,16 @@ class ListsViewModel(
             isGone = list == null,
             addDraft = addDraft,
             editing = local.editing,
-            dialog = local.dialog,
+            // A dialog closes once its list is gone, so it never acts on another one.
+            dialog = local.dialog?.takeIf { lists.any { it.id == local.dialogListId } },
             renameDraft = local.renameDraft,
             error = error,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ListsUiState())
 
     fun select(listId: String) {
+        commitEdit()
         savedStateHandle[SELECTED_KEY] = listId
-        local.update { it.copy(editing = null) }
     }
 
     fun toggle(item: TodoItem) {
@@ -116,7 +118,7 @@ class ListsViewModel(
 
     fun openRename() {
         val list = uiState.value.list ?: return
-        local.update { it.copy(dialog = ListDialog.RENAME, renameDraft = list.name) }
+        local.update { it.copy(dialog = ListDialog.RENAME, dialogListId = list.id, renameDraft = list.name) }
     }
 
     fun onRenameChange(text: String) {
@@ -124,7 +126,7 @@ class ListsViewModel(
     }
 
     fun confirmRename() {
-        val list = uiState.value.list ?: return
+        val list = uiState.value.list?.takeIf { it.id == local.value.dialogListId } ?: return dismissDialog()
         val name = local.value.renameDraft.trim()
         if (name.isEmpty()) {
             return
@@ -136,20 +138,17 @@ class ListsViewModel(
     }
 
     fun openDelete() {
-        local.update { it.copy(dialog = ListDialog.DELETE) }
+        val list = uiState.value.list ?: return
+        local.update { it.copy(dialog = ListDialog.DELETE, dialogListId = list.id) }
     }
 
     fun confirmDelete() {
-        uiState.value.list?.let { listsRepository.change(ListChange.DeleteList(it.id)) }
+        local.value.dialogListId?.let { listsRepository.change(ListChange.DeleteList(it)) }
         dismissDialog()
     }
 
     fun dismissDialog() {
-        local.update { it.copy(dialog = null) }
-    }
-
-    fun errorShown() {
-        listsRepository.clearError()
+        local.update { it.copy(dialog = null, dialogListId = null) }
     }
 
     companion object {

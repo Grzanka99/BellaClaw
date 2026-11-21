@@ -38,7 +38,7 @@ data class ChatUiState(
     val isReadyToSend: Boolean = false,
     /** The language last picked for dictation, as a BCP 47 tag; null means the phone's language. */
     val dictationLanguage: String? = null,
-    /** The account's lists for the pill, the one it shows first; empty in a plain chat. */
+    /** The account's lists for BellaClaw's pill, the one it shows first. */
     val lists: List<TodoList> = emptyList(),
 ) {
     val canSend: Boolean

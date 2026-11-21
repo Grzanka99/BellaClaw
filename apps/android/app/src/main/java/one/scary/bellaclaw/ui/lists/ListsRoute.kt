@@ -38,7 +38,6 @@ fun ListsRoute(
             onOpenDelete = viewModel::openDelete,
             onConfirmDelete = viewModel::confirmDelete,
             onDismissDialog = viewModel::dismissDialog,
-            onErrorShown = viewModel::errorShown,
         ),
     )
 }

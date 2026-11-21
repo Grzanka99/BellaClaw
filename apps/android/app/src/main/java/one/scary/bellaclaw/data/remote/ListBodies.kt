@@ -37,7 +37,3 @@ class ListOperationBody(
     val items: List<String>? = null,
     val toIndex: Int? = null,
 )
-
-/** A list's "finished" row of history: the list's [name] and its item count. */
-@Serializable
-data class ListFinishedBody(val name: String, val total: Int)

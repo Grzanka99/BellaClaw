@@ -134,7 +134,7 @@ describe("ListsService", () => {
     expect(changed.lists[0]?.items[1]).toMatchObject({ text: "12 eggs", done: false });
   });
 
-  test("ticking a list's last open item finishes it once; unticking and ticking again does not", async () => {
+  test("a list finishes once: ticking its last open item emits list.finished, unticking and ticking again does not", async () => {
     const list = await createShopping();
     const [milk, eggs, bread] = list.items.map((item) => item.id);
     const finished = async () =>
