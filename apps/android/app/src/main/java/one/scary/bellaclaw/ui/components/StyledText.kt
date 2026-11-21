@@ -44,14 +44,13 @@ private fun AnnotatedString.Builder.appendStyled(text: String, codeBackground: C
     var index = 0
     while (index < text.length) {
         val link = MarkdownLink.matchAt(text, index)
-        // the model writes the address, so one java.net.URI rejects stays plain text
-        val uri = link?.let { runCatching { URI(it.groupValues[2]) }.getOrNull() }
-        if (link != null && uri != null) {
+        // the model writes the address, so one whose site java.net.URI cannot name stays plain text
+        val host = link?.let { runCatching { URI(it.groupValues[2]).host }.getOrNull() }?.removePrefix("www.")
+        if (link != null && host != null) {
             val (label, url) = link.destructured
             withLink(LinkAnnotation.Url(url, LinkStyles)) { appendStyled(label, codeBackground) }
             // a label that does not name the link's site gets the site after it, so a tap never surprises
-            val host = uri.host?.removePrefix("www.")
-            if (host != null && !label.contains(host, ignoreCase = true)) {
+            if (!label.contains(host, ignoreCase = true)) {
                 append(" ($host)")
             }
             index = link.range.last + 1

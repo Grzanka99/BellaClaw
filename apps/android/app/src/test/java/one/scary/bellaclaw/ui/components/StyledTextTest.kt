@@ -46,9 +46,11 @@ class StyledTextTest {
 
     @Test
     fun aLinkWithAnInvalidAddressStaysAsTyped() {
-        val styled = styledText("[click](https://a|b.com)")
-        assertEquals("[click](https://a|b.com)", styled.text)
-        assertEquals(emptyList<Any>(), styled.getLinkAnnotations(0, styled.length))
+        listOf("[click](https://a|b.com)", "[PayPal](https://pаypal.com/steal)").forEach {
+            val styled = styledText(it)
+            assertEquals(it, styled.text)
+            assertEquals(emptyList<Any>(), styled.getLinkAnnotations(0, styled.length))
+        }
     }
 
     @Test
