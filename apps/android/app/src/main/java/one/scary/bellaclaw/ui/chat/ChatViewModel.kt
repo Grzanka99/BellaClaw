@@ -47,6 +47,8 @@ import one.scary.bellaclaw.ui.navigation.ChatDestination
 import java.io.File
 import java.time.Instant
 import java.time.ZoneId
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.seconds
 
 /**
  * One chat's screen. A new chat's id (`newChatId`) moves to the created chat's once its first send created
@@ -58,6 +60,8 @@ class ChatViewModel(
     private val settingsRepository: SettingsRepository,
     private val savedStateHandle: SavedStateHandle,
     private val zone: ZoneId = ZoneId.systemDefault(),
+    /** How long an ended turn waits for its reply. Tests pass [Duration.INFINITE]: their virtual clock skips ahead while they wait for the stream. */
+    private val settle: Duration = 10.seconds,
 ) : ViewModel() {
     /**
      * What only this screen knows besides the draft: the picked image or why the last pick was refused,
@@ -128,7 +132,7 @@ class ChatViewModel(
 
     /**
      * The turn of [chatId]: from typing on, or a step, to its reply, which typing off comes before. An ended
-     * turn waits [SETTLE_MILLIS] at most for another newest reply in [messages].
+     * turn waits [settle] at most for another newest reply in [messages].
      */
     @OptIn(ExperimentalCoroutinesApi::class)
     private fun turns(chatId: String, messages: Flow<List<Message>>): Flow<Turns> = combine(
@@ -143,7 +147,7 @@ class ChatViewModel(
         .transformLatest { turns ->
             emit(turns)
             if (turns.current?.isTyping == false) {
-                delay(SETTLE_MILLIS)
+                delay(settle)
                 emit(turns.copy(current = null))
             }
         }
@@ -289,7 +293,6 @@ class ChatViewModel(
         chatModels.valueOrNull?.let { pickerSelection(selection, it) }
 
     companion object {
-        private const val SETTLE_MILLIS = 10_000L
         private const val DRAFT_KEY = "draft"
         private const val CHAT_ID_KEY = "currentChatId"
 

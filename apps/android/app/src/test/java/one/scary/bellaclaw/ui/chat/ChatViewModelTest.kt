@@ -2,6 +2,7 @@ package one.scary.bellaclaw.ui.chat
 
 import androidx.lifecycle.SavedStateHandle
 import java.util.concurrent.TimeUnit
+import kotlin.time.Duration
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -70,7 +71,7 @@ class ChatViewModelTest {
         chatRepository: ChatRepository,
         savedStateHandle: SavedStateHandle = SavedStateHandle(),
         settings: SettingsRepository = testServer.settingsRepository(scope = backgroundScope),
-    ) = ChatViewModel(chatId, chatRepository, settings, savedStateHandle, ZoneOffset.UTC).also { collectIn(it.uiState) }
+    ) = ChatViewModel(chatId, chatRepository, settings, savedStateHandle, ZoneOffset.UTC, Duration.INFINITE).also { collectIn(it.uiState) }
 
     /** A plain chat titled Kotlin, ready to send, on [chatRepository] and [settings]. */
     private suspend fun TestScope.kotlinChat(
