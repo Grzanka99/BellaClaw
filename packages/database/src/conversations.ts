@@ -49,7 +49,8 @@ export type THistoryStep = {
 // createdAt: epoch ms; clientMessageId: the id the sending client gave an inbound message;
 // images: those of a user message, in order, none when it has no image; steps: the tool calls of
 // a reply's turn, by start, none when the turn used no tools; scheduled: a delivery of a scheduled
-// job, such as a reminder or an automation's output
+// job, such as a reminder or an automation's output; listFinished: on a finished list's card only,
+// the list's name and its item count
 export type THistoryMessage = {
   id: number;
   author: "user" | "assistant";
@@ -61,6 +62,7 @@ export type THistoryMessage = {
   images: TOption<THistoryImage[]>;
   steps: TOption<THistoryStep[]>;
   scheduled: boolean;
+  listFinished: TOption<{ name: string; total: number }>;
 };
 
 // NOTE: a user message's attachment references as the assistant stores them, as much of them as
@@ -68,6 +70,9 @@ export type THistoryMessage = {
 const SStoredAttachments = z.array(
   z.object({ id: z.string(), mimeType: z.string(), channel: z.string() }),
 );
+
+// NOTE: a finished list's card as the assistant stores it
+const SStoredListFinished = z.object({ name: z.string(), total: z.number().int() });
 
 // NOTE: a reply's steps as the assistant stores them
 const SStoredSteps = z.array(
@@ -245,6 +250,7 @@ export async function listHistory(
       message: memoriesTable.message,
       attachments: memoriesTable.attachments,
       steps: memoriesTable.steps,
+      listFinished: memoriesTable.listFinished,
       createdAt: memoriesTable.createdAt,
       clientMessageId: memoriesTable.clientMessageId,
       // NOTE: the scheduler saves a delivery with the model scheduled-delivery and a model text
@@ -328,6 +334,16 @@ export async function listHistory(
         }
       }
 
+      let listFinished: TOption<{ name: string; total: number }>;
+
+      if (row.listFinished !== null) {
+        const stored = SStoredListFinished.safeParse(JSON.parse(row.listFinished));
+
+        if (stored.success) {
+          listFinished = stored.data;
+        }
+      }
+
       messages.push({
         id: row.id,
         author: row.author,
@@ -339,6 +355,7 @@ export async function listHistory(
         images,
         steps,
         scheduled: row.scheduled === 1,
+        listFinished,
       });
     }
   }

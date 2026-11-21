@@ -81,6 +81,8 @@ export const memoriesTable = sqliteTable(
     // a reply's tool calls as a JSON array, stored with the turn's final assistant row; none when
     // the turn used no tools
     steps: text("steps"),
+    // a list-finished card's list name and item count as JSON, on its display row only
+    listFinished: text("listFinished"),
   },
   (table) => [index("memories_chat_id_idx").on(table.chatId, table.id)],
 );
@@ -140,6 +142,8 @@ export const listsTable = sqliteTable(
     ownerKey: text("ownerKey").notNull(),
     name: text("name").notNull(),
     expiresAt: integer("expiresAt", { mode: "timestamp_ms" }),
+    // when the list first went from an open item to every item done; it is finished once only
+    finishedAt: integer("finishedAt", { mode: "timestamp_ms" }),
     createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull(),
     updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull(),
   },

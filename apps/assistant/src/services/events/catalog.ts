@@ -565,6 +565,18 @@ const SListsChanged = z
   })
   .strict();
 
+// a list went from an open item to every item done, the first time; total: its items;
+// finishedAt: epoch ms
+const SListFinished = z
+  .object({
+    ownerKey: z.string(),
+    listId: z.string(),
+    name: z.string(),
+    total: z.number().int(),
+    finishedAt: z.number().int(),
+  })
+  .strict();
+
 // errorCode: the handler's stable code for an expected failure, such as job-not-found
 const SCommandRejected = z
   .object({
@@ -678,6 +690,7 @@ export type TEventPayloads = {
   [EEventType.ConversationDeleted]: z.infer<typeof SConversationDeleted>;
   [EEventType.ListsUpdateRequested]: z.infer<typeof SListsUpdateRequested>;
   [EEventType.ListsChanged]: z.infer<typeof SListsChanged>;
+  [EEventType.ListFinished]: z.infer<typeof SListFinished>;
   [EEventType.CommandRejected]: z.infer<typeof SCommandRejected>;
   [EEventType.EventDeadLettered]: z.infer<typeof SEventDeadLettered>;
   [EEventType.AppStarted]: z.infer<typeof SAppStarted>;
@@ -773,6 +786,7 @@ export const EVENT_SCHEMAS: { [K in EEventType]: z.ZodType<TEventPayloads[K]> } 
   [EEventType.ConversationDeleted]: SConversationDeleted,
   [EEventType.ListsUpdateRequested]: SListsUpdateRequested,
   [EEventType.ListsChanged]: SListsChanged,
+  [EEventType.ListFinished]: SListFinished,
   [EEventType.CommandRejected]: SCommandRejected,
   [EEventType.EventDeadLettered]: SEventDeadLettered,
   [EEventType.AppStarted]: SAppStarted,
@@ -866,6 +880,7 @@ export const EVENT_KINDS: Record<EEventType, EEventKind> = {
   [EEventType.ConversationDeleted]: EEventKind.Event,
   [EEventType.ListsUpdateRequested]: EEventKind.Command,
   [EEventType.ListsChanged]: EEventKind.Event,
+  [EEventType.ListFinished]: EEventKind.Event,
   [EEventType.CommandRejected]: EEventKind.Event,
   [EEventType.EventDeadLettered]: EEventKind.Event,
   [EEventType.AppStarted]: EEventKind.Event,

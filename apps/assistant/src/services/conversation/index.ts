@@ -35,7 +35,7 @@ import { emptyUsage } from "../ai/llm";
 import { ERole } from "../ai/types";
 import { DatabaseConnector, type TDatabaseHandle } from "../database";
 import type { TDisplay, TFusedSummary } from "../events/catalog";
-import { type EMessagePlatform, SAttachmentRef, type TAttachmentRef } from "../messaging/types";
+import { EMessagePlatform, SAttachmentRef, type TAttachmentRef } from "../messaging/types";
 import { SConversationMessage, type TConversation } from "./types";
 
 // NOTE: platform files of the images older than this many compactions are deleted
@@ -608,6 +608,33 @@ export class ConversationStore {
         author: ERole.Assistant,
         message: display.text,
         createdAt: new Date(sentAt),
+      })
+      .returning({ id: memoriesTable.id })
+      .get();
+
+    return row.id;
+  }
+
+  // A finished list's card, of the app only: a display row whose text is the fallback for readers
+  // other than the app, which draws the card from listFinished. finishedAt: epoch ms. Returns the
+  // row id
+  public async saveListFinished(
+    db: TDatabaseHandle,
+    chatId: string,
+    name: string,
+    total: number,
+    finishedAt: number,
+  ): Promise<number> {
+    const row = await db
+      .insert(memoriesTable)
+      .values({
+        chatId,
+        channel: EMessagePlatform.App,
+        kind: "display",
+        author: ERole.Assistant,
+        message: `${name} · ${total}/${total} finished`,
+        listFinished: JSON.stringify({ name, total }),
+        createdAt: new Date(finishedAt),
       })
       .returning({ id: memoriesTable.id })
       .get();

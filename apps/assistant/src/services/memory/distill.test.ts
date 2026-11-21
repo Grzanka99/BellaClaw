@@ -54,6 +54,7 @@ function makeMemory(id: number, author: ERole, message: string): TSelectMemory {
     clientMessageId: null,
     attachments: null,
     steps: null,
+    listFinished: null,
   };
 }
 

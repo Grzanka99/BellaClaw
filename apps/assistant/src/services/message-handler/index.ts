@@ -81,6 +81,15 @@ export class MessageHandler {
       backoffMs: [1_000, 5_000, 30_000],
       handler: (event, ctx) => this.saveDeliveredMessage(event, ctx),
     });
+    // NOTE: a finished list of an account is a card in its Bella conversation, of the app only:
+    // it is sent to no channel. An address's own list has no app and gets none
+    bus.subscribe({
+      consumer: "conversation",
+      type: EEventType.ListFinished,
+      mode: ESubscriptionMode.Durable,
+      backoffMs: [1_000, 5_000, 30_000],
+      handler: (event, ctx) => this.saveListFinished(event, ctx),
+    });
     // NOTE: the barrier of a link. It passes the address's lane, behind the address's running or
     // queued turn, then the account's Bella conversation's lane, behind that side's running turn,
     // and only then lets the owners move, on the address's lanes
@@ -392,6 +401,38 @@ export class MessageHandler {
     } finally {
       span.end(failure === undefined, {}, failure);
     }
+  }
+
+  private async saveListFinished(
+    event: TEvent<EEventType.ListFinished>,
+    ctx: TEventContext,
+  ): Promise<void> {
+    const { ownerKey, name, total, finishedAt } = event.payload;
+
+    if (IdentityService.instance.accountIdOf(ownerKey) === undefined) {
+      return;
+    }
+
+    const conversationKey = await IdentityService.instance.conversationKeyOf(ownerKey);
+
+    // written on the conversation's lane only, so the row orders with its turns
+    if (conversationKey !== event.key) {
+      await ctx.complete(async (_tx, emit) => {
+        emit(EEventType.ListFinished, event.payload, undefined, conversationKey);
+      });
+      return;
+    }
+
+    await ctx.complete(async (tx, emit) => {
+      const messageId = await this.conversations.saveListFinished(
+        tx,
+        conversationKey,
+        name,
+        total,
+        finishedAt,
+      );
+      await this.changed(tx, emit, conversationKey, ownerKey, false, undefined, messageId);
+    });
   }
 
   private async handleTurn(

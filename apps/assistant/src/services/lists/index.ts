@@ -5,7 +5,7 @@ import {
   type TListOperation,
   type TListSnapshot,
 } from "@bellaclaw/shared";
-import { and, eq, gt, gte, lt, lte, sql } from "drizzle-orm";
+import { and, eq, gt, gte, isNull, lt, lte, sql } from "drizzle-orm";
 import { DatabaseConnector, type TDatabaseTransaction } from "../database";
 import { commandFailed, ESubscriptionMode, EventBus } from "../events";
 import { ERejectionCode } from "../events/catalog";
@@ -47,6 +47,13 @@ export class ListsService {
 
         try {
           await ctx.complete(async (tx, emit) => {
+            // the owner's lists with an open item before the change
+            const open = await tx
+              .selectDistinct({ listId: listItemsTable.listId })
+              .from(listItemsTable)
+              .innerJoin(listsTable, eq(listsTable.id, listItemsTable.listId))
+              .where(and(eq(listsTable.ownerKey, ownerKey), eq(listItemsTable.done, false)));
+            const openListIds = new Set(open.map((row) => row.listId));
             const applied = await this.apply(tx, ownerKey, operations);
             const lists = await findLists(tx, ownerKey, [...applied.touchedListIds]);
             emit(
@@ -55,6 +62,41 @@ export class ListsService {
               undefined,
               undefined,
             );
+
+            // NOTE: a list is finished when the change takes it from an open item to every item
+            // done, once only: unticking and finishing it again is no second finish
+            const finishedAt = new Date();
+
+            for (const list of lists) {
+              if (
+                !openListIds.has(list.id) ||
+                list.items.length === 0 ||
+                list.items.some((item) => !item.done)
+              ) {
+                continue;
+              }
+
+              const marked = await tx
+                .update(listsTable)
+                .set({ finishedAt })
+                .where(and(eq(listsTable.id, list.id), isNull(listsTable.finishedAt)))
+                .returning({ id: listsTable.id });
+
+              if (marked.length > 0) {
+                emit(
+                  EEventType.ListFinished,
+                  {
+                    ownerKey,
+                    listId: list.id,
+                    name: list.name,
+                    total: list.items.length,
+                    finishedAt: finishedAt.getTime(),
+                  },
+                  list.id,
+                  undefined,
+                );
+              }
+            }
           });
         } catch (error) {
           await ctx.complete(async (_tx, emit) => {
