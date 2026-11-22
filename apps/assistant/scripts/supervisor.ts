@@ -30,7 +30,11 @@ const CI_PASSED_CONCLUSIONS = ["success", "skipped", "neutral"];
 const URL_CREDENTIALS = /\/\/[^/@\s]+@/g;
 
 const SRole = z.enum(["assistant", "log-viewer", "gateway"]);
-const SChildMessage = z.object({ type: z.enum(["ready", "update"]) });
+// chatId: the chat that asked for the update, which alone hears of it
+const SChildMessage = z.union([
+  z.object({ type: z.literal("ready") }),
+  z.object({ type: z.literal("update"), chatId: z.string() }),
+]);
 const SCheckRuns = z.object({
   check_runs: z.array(z.object({ conclusion: z.string().nullable() })),
 });
@@ -50,7 +54,7 @@ let childReady = false;
 let probing = false;
 let updating = false;
 let ciRetry: TOption<Timer>;
-const pendingNotices: string[] = [];
+const pendingNotices: { text: string; chatId: TOption<string> }[] = [];
 
 async function run(command: string[], cwd: string): Promise<string> {
   const proc = Bun.spawn(command, { cwd, stdout: "pipe", stderr: "pipe" });
@@ -97,15 +101,16 @@ async function setCurrent(sha: string): Promise<void> {
   await rename(`${link}.new`, link);
 }
 
-function notify(text: string): void {
+// chatId: the chat that asked for the update; undefined for a scheduled one, heard by every chat
+function notify(text: string, chatId: TOption<string>): void {
   log.info(text);
 
   if (child !== undefined && childReady) {
-    child.send({ type: "notice", text });
+    child.send({ type: "notice", text, chatId });
     return;
   }
 
-  pendingNotices.push(text);
+  pendingNotices.push({ text, chatId });
 }
 
 // resolves true once the app reports ready, false if it exits or takes too long
@@ -126,13 +131,13 @@ function startApp(dir: string): Promise<boolean> {
       }
 
       if (parsed.data.type === "update") {
-        void update(true);
+        void update(true, parsed.data.chatId);
         return;
       }
 
       childReady = true;
-      for (const text of pendingNotices.splice(0)) {
-        proc.send({ type: "notice", text });
+      for (const notice of pendingNotices.splice(0)) {
+        proc.send({ type: "notice", ...notice });
       }
       settle(true);
     },
@@ -216,7 +221,9 @@ async function listMigrations(dir: string): Promise<string> {
   return (await readdir(join(dir, "packages/database/migrations"))).sort().join("\n");
 }
 
-async function runUpdate(manual: boolean): Promise<void> {
+// manual: asked for in a chat; requester: the chat that asked, also for the CI retry of its
+// update; undefined for a scheduled update, whose notices every chat hears
+async function runUpdate(manual: boolean, requester: TOption<string>): Promise<void> {
   const failedFile = join(root, FAILED_FILE);
   const runningDir = await currentDir();
   let runningSha = basename(runningDir);
@@ -252,7 +259,7 @@ async function runUpdate(manual: boolean): Promise<void> {
 
   if (sha === runningSha) {
     if (manual) {
-      notify(`Already on ${short}.`);
+      notify(`Already on ${short}.`, requester);
     }
 
     return;
@@ -266,23 +273,23 @@ async function runUpdate(manual: boolean): Promise<void> {
 
   if (ci === ECiState.Pending) {
     if (manual) {
-      notify(`CI is still running for ${short}. Updating when it is green.`);
+      notify(`CI is still running for ${short}. Updating when it is green.`, requester);
     }
 
     // one timer, however many checks found CI pending
     clearTimeout(ciRetry);
-    ciRetry = setTimeout(() => void update(false), CI_RETRY_MS);
+    ciRetry = setTimeout(() => void update(false, requester), CI_RETRY_MS);
     return;
   }
 
   if (ci === ECiState.Failed) {
     await Bun.write(failedFile, sha);
-    notify(`Skipped the update to ${short}: its CI failed.`);
+    notify(`Skipped the update to ${short}: its CI failed.`, requester);
     return;
   }
 
   if (manual) {
-    notify(`Updating to ${short}.`);
+    notify(`Updating to ${short}.`, requester);
   }
 
   const dir = join(root, sha);
@@ -305,6 +312,7 @@ async function runUpdate(manual: boolean): Promise<void> {
         await Bun.write(failedFile, sha);
         notify(
           `The update to ${short} needs a new image. On the server run: git pull && bun run server:update`,
+          requester,
         );
         return;
       }
@@ -317,7 +325,7 @@ async function runUpdate(manual: boolean): Promise<void> {
     migrates = (await listMigrations(dir)) !== (await listMigrations(runningDir));
   } catch (error) {
     await Bun.write(failedFile, sha);
-    notify(`The update to ${short} failed, still on ${runningShort}: ${String(error)}`);
+    notify(`The update to ${short} failed, still on ${runningShort}: ${String(error)}`, requester);
     return;
   }
 
@@ -330,6 +338,7 @@ async function runUpdate(manual: boolean): Promise<void> {
     await Bun.write(failedFile, sha);
     notify(
       `The update to ${short} failed in its database migration, restarted ${runningShort}: ${String(error)}`,
+      requester,
     );
     return;
   }
@@ -340,7 +349,7 @@ async function runUpdate(manual: boolean): Promise<void> {
   probing = false;
 
   if (started) {
-    notify(`Updated to ${short}: ${subject}`);
+    notify(`Updated to ${short}: ${subject}`, requester);
     return;
   }
 
@@ -362,13 +371,13 @@ async function runUpdate(manual: boolean): Promise<void> {
   }
 
   void startApp(runningDir);
-  notify(`The update to ${short} failed to start, rolled back to ${runningShort}.`);
+  notify(`The update to ${short} failed to start, rolled back to ${runningShort}.`, requester);
 }
 
-async function update(manual: boolean): Promise<void> {
+async function update(manual: boolean, requester: TOption<string>): Promise<void> {
   if (updating) {
     if (manual) {
-      notify("An update is already running.");
+      notify("An update is already running.", requester);
     }
 
     return;
@@ -377,9 +386,9 @@ async function update(manual: boolean): Promise<void> {
   updating = true;
 
   try {
-    await runUpdate(manual);
+    await runUpdate(manual, requester);
   } catch (error) {
-    notify(`The update check failed: ${String(error)}`);
+    notify(`The update check failed: ${String(error)}`, requester);
   } finally {
     updating = false;
   }
@@ -394,7 +403,7 @@ function scheduleDailyUpdate(): void {
   }
 
   setTimeout(() => {
-    void update(false);
+    void update(false, undefined);
     scheduleDailyUpdate();
   }, next.getTime() - Date.now());
 }

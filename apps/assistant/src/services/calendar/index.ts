@@ -7,7 +7,7 @@ import { DatabaseConnector, type TDatabaseTransaction } from "../database";
 import { commandFailed, ESubscriptionMode, EventBus, type TEventContext } from "../events";
 import { EIdentityLinkOwner } from "../identity/schema";
 import { calculateAvailability } from "./availability";
-import { GwsCalendarClient, type TCalendarProbe } from "./gws";
+import { GoogleCalendarClient, type TCalendarProbe } from "./google";
 import {
   ALL_DAY_DATE,
   countRuleOccurrencesBefore,
@@ -367,7 +367,7 @@ export class CalendarService {
 
   public constructor(
     private database: DatabaseConnector = DatabaseConnector.instance,
-    private client: GwsCalendarClient = new GwsCalendarClient(),
+    private client: GoogleCalendarClient = new GoogleCalendarClient(),
   ) {}
 
   public static get instance(): CalendarService {
