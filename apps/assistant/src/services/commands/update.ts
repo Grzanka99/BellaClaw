@@ -1,4 +1,5 @@
 import { AuthorizationService } from "../authorization";
+import { IdentityService } from "../identity";
 import type { TCommand } from "./types";
 
 export const updateCommand: TCommand = {
@@ -17,7 +18,8 @@ export const updateCommand: TCommand = {
       return "Self-update is unavailable: the bot is not running under its supervisor.";
     }
 
-    process.send({ type: "update" });
+    // the update's notices go to this chat only
+    process.send({ type: "update", chatId: IdentityService.instance.addressKey(address) });
     return "Checking for an update.";
   },
 };

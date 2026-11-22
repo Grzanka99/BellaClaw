@@ -119,6 +119,26 @@ describe("Notices", () => {
     ]);
   });
 
+  test("a supervisor notice of a requested update reaches only the chat that asked", async () => {
+    const authorized = spyOn(
+      AuthorizationService.instance,
+      "listAuthorizedChatIds",
+    ).mockResolvedValue(["signal:+100", "signal:+200"]);
+
+    try {
+      await Notices.instance.handleSupervisorMessage({
+        type: "notice",
+        text: "Updated to abc1234",
+        chatId: "signal:+200",
+      });
+      await bus.idle();
+    } finally {
+      authorized.mockRestore();
+    }
+
+    expect(sendText.mock.calls).toEqual([["+200", "Updated to abc1234"]]);
+  });
+
   test("a supervisor notice reaches an app-only account with a device and a linked account with a device in their Bella conversations, once each", async () => {
     await resetIdentityLinksTable();
     await linkTestAddress("+300", "acct-1");

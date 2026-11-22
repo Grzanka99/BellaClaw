@@ -21,7 +21,12 @@ const NO_DEAD_LETTER_NOTICE: ReadonlySet<string> = new Set([
 // the user's request succeeded before these consumers ran, so their failure has nothing to retry
 const NO_DEAD_LETTER_NOTICE_CONSUMERS: ReadonlySet<string> = new Set(["conversation-title"]);
 const SEventType = z.enum(EEventType);
-const SSupervisorNotice = z.object({ type: z.literal("notice"), text: z.string() });
+// chatId: the chat that asked for the update; absent for a scheduled one, heard by every chat
+const SSupervisorNotice = z.object({
+  type: z.literal("notice"),
+  text: z.string(),
+  chatId: z.string().optional(),
+});
 
 export class Notices {
   private static _instance: TOption<Notices>;
@@ -128,7 +133,13 @@ export class Notices {
       return;
     }
 
-    const chatIds = await this.listGlobalRecipients();
+    let chatIds: string[];
+
+    if (notice.data.chatId === undefined) {
+      chatIds = await this.listGlobalRecipients();
+    } else {
+      chatIds = [await IdentityService.instance.conversationKeyOf(notice.data.chatId)];
+    }
 
     await EventBus.instance.transact(async (_tx, emit) => {
       for (const chatId of chatIds) {
