@@ -4,6 +4,7 @@ import { z } from "zod";
 
 const TIMEOUT_MS = 30_000;
 const MAX_PAGES = 20;
+const MAX_AGGREGATE_BYTES = 8 * 1024 * 1024;
 const TOKEN_LIFETIME_SECONDS = 3600;
 const TOKEN_REFRESH_MARGIN_MS = 60_000;
 const CREDENTIALS_FILE = repositoryPath(".secrets/google-calendar-service-account.json");
@@ -115,6 +116,7 @@ export class GoogleCalendarClient {
     let pageToken: TOption<string>;
     let accessRole: TOption<string>;
     let summary: TOption<string>;
+    let aggregateBytes = 0;
 
     for (let page = 0; page < MAX_PAGES; page += 1) {
       const pageParams: Record<string, unknown> = { ...params };
@@ -128,6 +130,10 @@ export class GoogleCalendarClient {
         undefined,
         signal,
       );
+      aggregateBytes += Buffer.byteLength(JSON.stringify(value));
+      if (aggregateBytes > MAX_AGGREGATE_BYTES) {
+        throw new Error(`Google Calendar result exceeded ${MAX_AGGREGATE_BYTES} bytes`);
+      }
       items.push(...readItems(value));
       accessRole = readStringProperty(value, "accessRole") ?? accessRole;
       summary = readStringProperty(value, "summary") ?? summary;
