@@ -4,7 +4,6 @@ import { z } from "zod";
 
 const TIMEOUT_MS = 30_000;
 const MAX_PAGES = 20;
-const MAX_ITEMS = 50_000;
 const TOKEN_LIFETIME_SECONDS = 3600;
 const TOKEN_REFRESH_MARGIN_MS = 60_000;
 const CREDENTIALS_FILE = repositoryPath(".secrets/google-calendar-service-account.json");
@@ -39,7 +38,7 @@ function base64Url(value: Uint8Array): string {
   return Buffer.from(value).toString("base64url");
 }
 
-function parseErrorBody(text: string): unknown {
+function parseJson(text: string): unknown {
   try {
     return JSON.parse(text);
   } catch {
@@ -130,9 +129,6 @@ export class GoogleCalendarClient {
         signal,
       );
       items.push(...readItems(value));
-      if (items.length > MAX_ITEMS) {
-        throw new Error(`Google Calendar result exceeded ${MAX_ITEMS} items`);
-      }
       accessRole = readStringProperty(value, "accessRole") ?? accessRole;
       summary = readStringProperty(value, "summary") ?? summary;
       pageToken = readPageToken(value);
@@ -209,7 +205,7 @@ export class GoogleCalendarClient {
     const text = await response.text();
     if (!response.ok) {
       let detail = response.statusText;
-      const parsed = SApiError.safeParse(parseErrorBody(text));
+      const parsed = SApiError.safeParse(parseJson(text));
       if (parsed.success) {
         detail = parsed.data.error.message;
       }
@@ -226,9 +222,13 @@ export class GoogleCalendarClient {
       return this.token.value;
     }
 
-    const key = SServiceAccountKey.safeParse(await Bun.file(this.credentialsFile).json());
+    const key = SServiceAccountKey.safeParse(
+      parseJson(await Bun.file(this.credentialsFile).text()),
+    );
     if (!key.success) {
-      throw new Error("Google Calendar service-account key is missing client_email or private_key");
+      throw new Error(
+        "Google Calendar service-account key is not valid JSON with client_email and private_key",
+      );
     }
 
     const issuedAt = Math.floor(Date.now() / 1000);
@@ -274,7 +274,7 @@ export class GoogleCalendarClient {
     const text = await response.text();
     if (!response.ok) {
       let detail = response.statusText;
-      const parsed = STokenError.safeParse(parseErrorBody(text));
+      const parsed = STokenError.safeParse(parseJson(text));
       if (parsed.success) {
         detail = parsed.data.error_description ?? parsed.data.error;
       }
