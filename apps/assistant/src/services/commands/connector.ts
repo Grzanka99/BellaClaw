@@ -29,7 +29,10 @@ export const connectorCommand: TCommand = {
       }
 
       return rows
-        .map((row) => `- ${row.id} (${row.kind}, ${STATUS_TEXT[row.status]}): ${row.url}`)
+        .map(
+          (row) =>
+            `- ${row.id} (${row.kind}, ${STATUS_TEXT[row.status]}): ${row.url} — ${row.description}`,
+        )
         .join("\n");
     }
 

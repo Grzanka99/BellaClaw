@@ -70,4 +70,15 @@ describe("update-connector", () => {
     });
     expect(request).not.toHaveBeenCalled();
   });
+
+  test("refuses a description with a line break", async () => {
+    const request = mock(async () => {
+      throw new Error("not used");
+    });
+
+    await expect(execute(request, { id: "notes", description: "Notes\nmore" })).rejects.toThrow(
+      "Invalid tool arguments",
+    );
+    expect(request).not.toHaveBeenCalled();
+  });
 });
