@@ -52,7 +52,7 @@ import one.scary.bellaclaw.model.ImageRefusal
 /**
  * The message box: attach button, text, the picked image or why it was refused above them, and the send
  * button. An empty box has a mic ([onDictate]) instead of send; while [dictation] listens, the box
- * becomes [DictationBar]. Its surfaces float over the conversation as frosted glass from [hazeState].
+ * becomes [DictationBar]. Its box floats over the conversation as frosted glass from [hazeState].
  */
 @Composable
 fun Composer(

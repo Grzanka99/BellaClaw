@@ -48,8 +48,8 @@ fun MessageList(
     onLoadOlder: () -> Unit,
     imageLoader: MessageImageLoader,
     onOpenImage: (MessageImage) -> Unit,
+    insets: PaddingValues,
     modifier: Modifier = Modifier,
-    insets: PaddingValues = PaddingValues(),
 ) {
     val listState = rememberLazyListState()
     // The oldest row is the last item of the reversed list.

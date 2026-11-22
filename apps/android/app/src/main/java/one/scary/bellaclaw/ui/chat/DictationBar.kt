@@ -47,7 +47,7 @@ import java.util.Locale
 
 /**
  * The composer while dictating: the heard text with its language above, and a bar with the loudness and
- * the finish button. Tapping the text finishes too, for fixing it at once. Both float as frosted glass from [hazeState].
+ * the finish button. Tapping the text finishes too, for fixing it at once. The text and the loudness float as frosted glass from [hazeState].
  */
 @Composable
 fun DictationBar(
@@ -153,10 +153,10 @@ private fun LanguageChip(language: Locale, languages: List<Locale>, onPick: (Loc
     }
 }
 
-/** Bars for [levels], newest on the right; slots not heard yet draw as silence. */
 private val TextShape = RoundedCornerShape(20.dp)
 private val WaveShape = RoundedCornerShape(28.dp)
 
+/** Bars for [levels], newest on the right; slots not heard yet draw as silence. */
 @Composable
 private fun Waveform(levels: List<Float>, modifier: Modifier = Modifier) {
     val color = MaterialTheme.colorScheme.primary
