@@ -162,7 +162,7 @@ export const mcpAdapter: TConnectorAdapter = {
       ) {
         if (choosesCredentials(connector)) {
           throw new ConnectorAuthRequiredError(
-            `Connector ${connector.id} needs credentials. Run !connector-auth token ${connector.id} TOKEN or !connector-auth connect ${connector.id}`,
+            `Connector ${connector.id} needs credentials. Run !connector-auth token ${connector.id} TOKEN or !connector-auth connect ${connector.id} in the Bella conversation, not in a plain chat`,
           );
         }
         throw new ConnectorAuthRequiredError(`Connector ${connector.id} requires authentication`);

@@ -108,7 +108,7 @@ bus.subscribe({
 `request` and `waitFor` hold the caller's lane. The allowed waits form an acyclic graph, kept in
 `ALLOWED_WAITS` in `events/boundaries.test.ts`:
 
-- `conversation` → `cron`, `automations`, `settings`, `memory`, `calendar`, `ai-auth`, `identity`, `lists`:
+- `conversation` → `cron`, `automations`, `settings`, `memory`, `calendar`, `ai-auth`, `identity`, `lists`, `connectors`:
   a turn of an address held while the address or its account is being linked, on a hold lane of
   its own (`link-hold|<chat key>`), bounded from the hold, then forwarded to the account's lane
 - `scheduling` → `automations`, `memory`, `identity`: a cron fire held while its address or its
