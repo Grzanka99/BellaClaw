@@ -47,7 +47,7 @@ class NewChatTest {
     private suspend fun TestScope.repository() = testServer.chatRepository(testServer.signedInStore(), backgroundScope)
 
     private fun TestScope.newChat(repository: ChatRepository, savedStateHandle: SavedStateHandle, chatId: String) =
-        ChatViewModel(chatId, repository, testServer.settingsRepository(scope = backgroundScope), savedStateHandle, ZoneOffset.UTC)
+        ChatViewModel(chatId, repository, testServer.settingsRepository(scope = backgroundScope), testServer.listsRepository(testServer.store(), backgroundScope), savedStateHandle, ZoneOffset.UTC)
             .also { collectIn(it.uiState) }
 
     private fun ChatUiState.messages() = rows.filterIsInstance<ChatRow.Item>().map { it.message }

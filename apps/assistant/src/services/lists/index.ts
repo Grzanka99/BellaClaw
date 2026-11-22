@@ -5,7 +5,7 @@ import {
   type TListOperation,
   type TListSnapshot,
 } from "@bellaclaw/shared";
-import { and, eq, gt, gte, lt, lte, sql } from "drizzle-orm";
+import { and, eq, gt, gte, isNull, lt, lte, sql } from "drizzle-orm";
 import { DatabaseConnector, type TDatabaseTransaction } from "../database";
 import { commandFailed, ESubscriptionMode, EventBus } from "../events";
 import { ERejectionCode } from "../events/catalog";
@@ -55,6 +55,37 @@ export class ListsService {
               undefined,
               undefined,
             );
+
+            // NOTE: a list is finished the first time a change leaves it with items, every one
+            // done; finishedAt makes it once only, so unticking and finishing again is no second finish
+            const finishedAt = new Date();
+
+            for (const list of lists) {
+              if (list.items.length === 0 || list.items.some((item) => !item.done)) {
+                continue;
+              }
+
+              const marked = await tx
+                .update(listsTable)
+                .set({ finishedAt })
+                .where(and(eq(listsTable.id, list.id), isNull(listsTable.finishedAt)))
+                .returning({ id: listsTable.id });
+
+              if (marked.length > 0) {
+                emit(
+                  EEventType.ListFinished,
+                  {
+                    ownerKey,
+                    listId: list.id,
+                    name: list.name,
+                    total: list.items.length,
+                    finishedAt: finishedAt.getTime(),
+                  },
+                  list.id,
+                  undefined,
+                );
+              }
+            }
           });
         } catch (error) {
           await ctx.complete(async (_tx, emit) => {

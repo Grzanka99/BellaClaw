@@ -14,7 +14,8 @@ import type {
 // reply). channel: where it came in or went out; clientMessageId: the id the app gave a message it
 // sent; createdAt: epoch ms; images: a user message's images, absent when it has none, each
 // downloadable by its mediaId or a placeholder without one; steps: a reply's tool calls by start,
-// absent when its turn used no tools, startedAt epoch ms
+// absent when its turn used no tools, startedAt epoch ms; listFinished: on a finished list's card
+// only (an assistant display row, createdAt when it finished), the list's name and item count
 export type { THistoryImage, THistoryMessage, THistoryStep } from "@bellaclaw/database";
 // POST /api/conversations/:conversationKey/messages body and answer; model: a plain chat's model;
 // images: what uploads to the conversation answered

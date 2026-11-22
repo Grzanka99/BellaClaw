@@ -134,6 +134,38 @@ describe("ListsService", () => {
     expect(changed.lists[0]?.items[1]).toMatchObject({ text: "12 eggs", done: false });
   });
 
+  test("a list finishes once: ticking its last open item emits list.finished, unticking and ticking again does not", async () => {
+    const list = await createShopping();
+    const [milk, eggs, bread] = list.items.map((item) => item.id);
+    const finished = async () =>
+      (
+        await DatabaseConnector.instance.database
+          .select()
+          .from(eventsTable)
+          .where(eq(eventsTable.type, EEventType.ListFinished))
+      ).map((event) => event.payload);
+
+    await update([
+      { op: "update_item", itemId: milk ?? "", done: true },
+      { op: "update_item", itemId: eggs ?? "", done: true },
+    ]);
+    expect(await finished()).toEqual([]);
+
+    await update([{ op: "update_item", itemId: bread ?? "", done: true }]);
+    const [first] = await finished();
+    expect(first).toEqual({
+      ownerKey: OWNER,
+      listId: list.id,
+      name: "Shopping",
+      total: 3,
+      finishedAt: expect.any(Number),
+    });
+
+    await update([{ op: "update_item", itemId: bread ?? "", done: false }]);
+    await update([{ op: "update_item", itemId: bread ?? "", done: true }]);
+    expect(await finished()).toHaveLength(1);
+  });
+
   test("moves an item down and up, keeping positions dense", async () => {
     const list = await createShopping();
     const milk = list.items[0]?.id ?? "";

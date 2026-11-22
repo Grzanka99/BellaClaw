@@ -4,6 +4,7 @@ import one.scary.bellaclaw.data.remote.ConversationBody
 import one.scary.bellaclaw.data.remote.HistoryRowBody
 import one.scary.bellaclaw.data.remote.MediaBody
 import one.scary.bellaclaw.model.ActivityStep
+import one.scary.bellaclaw.model.FinishedList
 import one.scary.bellaclaw.model.Author
 import one.scary.bellaclaw.model.BELLACLAW_CHAT_ID
 import one.scary.bellaclaw.model.ChatIcon
@@ -125,6 +126,7 @@ internal fun HistoryRowBody.toMessage(chatId: String) = Message(
     images = images.orEmpty().map { MessageImage(it.mediaId, it.mimeType) },
     steps = steps.orEmpty().map { ActivityStep(it.tool, it.label, it.detail, Instant.ofEpochMilli(it.startedAt), it.durationMs, it.failed) },
     scheduled = scheduled,
+    finishedList = listFinished?.let { FinishedList(it.name, it.total) },
 )
 
 /** Derived from the key, so it stays the same across starts. */

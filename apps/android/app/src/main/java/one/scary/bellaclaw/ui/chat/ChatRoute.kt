@@ -24,11 +24,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import one.scary.bellaclaw.R
 
-/** [onChatMissing] runs when no chat has this screen's id, e.g. a restored screen of a chat the app no longer has. */
+/** [onOpenList] opens a list's screen. [onChatMissing] runs when no chat has this screen's id, e.g. a restored screen of a chat the app no longer has. */
 @Composable
 fun ChatRoute(
     onBack: () -> Unit,
     onChatMissing: () -> Unit,
+    onOpenList: (String) -> Unit,
     viewModel: ChatViewModel = viewModel(factory = ChatViewModel.Factory),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -119,6 +120,8 @@ fun ChatRoute(
                 askMicrophone.launch(Manifest.permission.RECORD_AUDIO)
             }
         },
+        onOpenList = onOpenList,
+        onDismissList = viewModel::dismissList,
     )
 }
 

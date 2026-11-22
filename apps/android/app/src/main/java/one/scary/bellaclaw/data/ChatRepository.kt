@@ -46,7 +46,8 @@ import one.scary.bellaclaw.model.isNewChatId
  * has none while neither is known. [scope] lives as long as the application; network
  * work runs in it, so leaving a screen does not stop a send. A dropped stream and a failed read are
  * tried again after [retryMillis], doubling to 30 s. A send's image is read with [pickedImages];
- * history's images are kept in [imageCache] for the signed-in account only.
+ * history's images are kept in [imageCache] for the signed-in account only. The stream's `check` and `lists`
+ * events call [onListsChanged].
  */
 class ChatRepository(
     private val api: ApiClient,
@@ -59,10 +60,11 @@ class ChatRepository(
     private val scope: CoroutineScope,
     private val clock: Clock = Clock.systemDefaultZone(),
     private val retryMillis: Long = FIRST_RETRY_MILLIS,
+    onListsChanged: () -> Unit,
 ) {
     private val state = MutableStateFlow(ChatState())
     private val sync = ChatSync(api, state, scope, retryMillis, MAX_RETRY_MILLIS)
-    private val stream = ChatStream(api, state, sync, scope, chatStore::forget, clock, retryMillis, MAX_RETRY_MILLIS)
+    private val stream = ChatStream(api, state, sync, scope, chatStore::forget, clock, retryMillis, MAX_RETRY_MILLIS, onListsChanged)
     private val images = ChatImages(api, session, pickedImages, imageCache)
     private val sends = ChatSends(api, state, scope, sync, images, chatStore, clock) { key ->
         modelOf(key, chatStore.chats.value, settings.value)

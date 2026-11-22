@@ -17,6 +17,7 @@ import one.scary.bellaclaw.model.BELLACLAW_CHAT_ID
 import one.scary.bellaclaw.model.newChatId
 import one.scary.bellaclaw.ui.chat.ChatRoute
 import one.scary.bellaclaw.ui.home.HomeRoute
+import one.scary.bellaclaw.ui.lists.ListsRoute
 import one.scary.bellaclaw.ui.settings.SettingsRoute
 import one.scary.bellaclaw.ui.settings.models.ModelsRoute
 import one.scary.bellaclaw.ui.settings.personality.PersonalityRoute
@@ -74,6 +75,14 @@ fun BellaClawNavHost(hasPendingLink: Boolean, chatToOpen: String?, onChatOpened:
                 onBack = { entry.onBack() },
                 // Not gated on resumed: a restored entry reports this before it resumes, and the pop is idempotent.
                 onChatMissing = { navController.popBackStack(HomeDestination, inclusive = false) },
+                onOpenList = { listId -> entry.ifResumed { navController.navigate(ListsDestination(listId)) } },
+            )
+        }
+        composable<ListsDestination> { entry ->
+            ListsRoute(
+                onBack = { entry.onBack() },
+                // Not gated on resumed, like a missing chat: the pop is idempotent.
+                onGone = { navController.popBackStack<ListsDestination>(inclusive = true) },
             )
         }
         composable<SettingsDestination> { entry ->

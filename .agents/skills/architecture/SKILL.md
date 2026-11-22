@@ -242,7 +242,11 @@ Lists owns an owner's named to-do lists: its durable consumer `lists` answers
 `list-not-found` or `item-not-found` for a list or item the owner does not hold; on
 `identity.link.quiet` it moves the address's lists, ids kept, to the account. Item positions stay
 dense from 0; deleting a list deletes its items first. A list's optional `expiresAt` (epoch ms, set
-on create or by `set_expiry`, null clears it) is kept after it passes: GET /api/lists leaves expired lists out and list-lists marks them `expired`. `listLists` in `@bellaclaw/database` is the read the assistant and the gateway share. The operation and snapshot schemas and the two codes live in `@bellaclaw/shared`, which the gateway validates the app's changes with.
+on create or by `set_expiry`, null clears it) is kept after it passes: GET /api/lists leaves expired lists out and list-lists marks them `expired`. `listLists` in `@bellaclaw/database` is the read the assistant and the gateway share. The first
+change that leaves a list with items, every one done (`lists.finishedAt` marks it), emits `list.finished` in the same transaction; Conversation forwards it from the owner's lane
+to an account's Bella conversation lane and stores an app-channel display row with `listFinished`
+(name, total) that history carries, sent to no channel and never replayed. An address's own list
+gets none. The operation and snapshot schemas and the two codes live in `@bellaclaw/shared`, which the gateway validates the app's changes with.
 
 ## Adding a fact or command
 

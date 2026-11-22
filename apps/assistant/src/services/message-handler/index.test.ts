@@ -142,6 +142,7 @@ function mockConversationStore() {
         clientMessageId: clientMessageId ?? null,
         attachments: null,
         steps: null,
+        listFinished: null,
       }),
     ),
     raiseRevision: mock(async () => 1),
@@ -397,6 +398,7 @@ describe("MessageHandler", () => {
           clientMessageId: null,
           attachments: null,
           steps: null,
+          listFinished: null,
         };
         saved.push(row);
         return row;

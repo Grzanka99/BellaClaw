@@ -120,8 +120,8 @@ Notifications (when the assistant has an FCM credential, see
 
 - One push per new message for the app, to every registered device of the account, while the
   account has no app stream open: a reply to a message sent from the app, in the Bella
-  conversation or a plain chat (command and failure replies included), and a reminder, scheduled
-  task result or notice that went to the app. Never for a reply to a Signal or Discord message, a
+  conversation or a plain chat (command and failure replies included), a reminder, scheduled
+  task result or notice that went to the app, and a finished list's card. Never for a reply to a Signal or Discord message, a
   confidential reply (a login link) or the user's own message.
 - An FCM data-only message with Android priority `HIGH`. Its only data field, `ciphertext`, is
   the payload encrypted for that one device with RFC 8291 (`aes128gcm`, one record), base64url.
@@ -178,7 +178,13 @@ Conversations:
   order, each `{ mediaId, mimeType }`: one with a `mediaId` downloads by it; one this conversation
   does not keep, and every image that came through Signal or Discord, is a placeholder without
   one. Its `text` is what the user typed, without the `[Image]` markers the server stores after it
-  (one per image), so a message of images only has an empty `text`. Without a cursor, the newest
+  (one per image), so a message of images only has an empty `text`. A finished list's card is an
+  assistant display row on the `app` channel with `listFinished: { name, total }` (absent on every
+  other row), `createdAt` when the list was finished, and a plain `text` such as
+  `Zakupy · 7/7 finished` for other readers; the app draws the card from `listFinished`. A list of
+  the account gets it in the Bella conversation the first time a change (Bella's or the app's)
+  leaves it with items, every one done, never again for that list, and it is sent to no other
+  channel. Without a cursor, the newest
   50 rows; `before=<id>`
   pages older rows, `nextBefore` names the next older page; `after=<id>` returns the rows after the
   newest one the app has, `nextAfter` names the next page. A client synced at or above

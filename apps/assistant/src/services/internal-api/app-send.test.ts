@@ -274,3 +274,36 @@ test("a notice or a reminder of an account with no linked chat goes to the app's
   // listed under the account, so the app may read it
   expect(await revisions(conversationKey, accountId)).toEqual({ revision: 2, rewriteRevision: 0 });
 });
+
+test("a finished list of an account whose main channel is Signal adds a card to its Bella history and nothing to Signal", async () => {
+  const accountId = `acct-${crypto.randomUUID()}`;
+  const address = `+${Date.now()}`;
+  await linkTestAddress(address, accountId);
+  const { sendText } = await start();
+  const { conversationKey, ownerKey } = account(accountId);
+  await publishTestMessage(`signal:${address}`, "Tick the bread");
+
+  // as Lists emits it, on the owner's lane
+  await EventBus.instance.publish({
+    type: EEventType.ListFinished,
+    source: "test",
+    key: ownerKey,
+    trace: { turnId: "test:list", chatId: undefined, platform: undefined },
+    payload: { ownerKey, listId: "list-1", name: "Zakupy", total: 7, finishedAt: 5_000 },
+    causationId: undefined,
+    dedupeKey: undefined,
+  });
+  await EventBus.instance.idle();
+
+  expect(sendText.mock.calls).toEqual([[address, "Reply to Tick the bread"]]);
+  const rows = await history(conversationKey);
+  expect(rows[2]).toMatchObject({
+    listFinished: { name: "Zakupy", total: 7 },
+    author: "assistant",
+    kind: "display",
+    channel: "app",
+    text: "Zakupy · 7/7 finished",
+    createdAt: 5_000,
+  });
+  expect(await revisions(conversationKey, accountId)).toEqual({ revision: 3, rewriteRevision: 0 });
+});

@@ -26,7 +26,16 @@ import okio.BufferedSink
  * its rewrite revision. Each stream opens with `check`, then carries what [push] sends while it is open.
  */
 class FakeGateway : Dispatcher() {
-    class Row(val id: Long, val author: String, val text: String, val createdAt: Long, val clientMessageId: String?, val imageIds: List<String?>, val steps: String?)
+    class Row(
+        val id: Long,
+        val author: String,
+        val text: String,
+        val createdAt: Long,
+        val clientMessageId: String?,
+        val imageIds: List<String?>,
+        val steps: String?,
+        val listFinished: String? = null,
+    )
 
     class Conversation(val key: String, val kind: String, var title: String? = null) {
         val rows = mutableListOf<Row>()
@@ -73,6 +82,16 @@ class FakeGateway : Dispatcher() {
     var downloads = 0
         private set
 
+    /** The answer of `GET /api/lists` and of an accepted `POST /api/lists/changes`, as JSON. */
+    @Volatile
+    var lists: String = """{"lists":[]}"""
+
+    /** Bodies of the list changes that arrived, in order. */
+    val listChanges = LinkedBlockingQueue<JsonObject>()
+
+    /** Answers of the next list changes, which are refused instead: status and body. */
+    val listChangeFailures = LinkedBlockingQueue<Pair<Int, String>>()
+
     /** How many streams were opened. */
     @Volatile
     var streamsOpened = 0
@@ -92,9 +111,10 @@ class FakeGateway : Dispatcher() {
         clientMessageId: String? = null,
         imageIds: List<String?> = emptyList(),
         steps: String? = null,
+        listFinished: String? = null,
     ): Long {
         val conversation = conversation(key)
-        val row = Row(nextRowId++, author, text, CREATED_AT + nextRowId * 1000, clientMessageId, imageIds, steps)
+        val row = Row(nextRowId++, author, text, CREATED_AT + nextRowId * 1000, clientMessageId, imageIds, steps, listFinished)
         conversation.rows.add(row)
         conversation.revision++
         if (conversation.kind == "plain") {
@@ -138,6 +158,11 @@ class FakeGateway : Dispatcher() {
         return when {
             request.url.encodedPath == "/api/stream" -> stream()
             request.url.encodedPath == "/api/logout" -> json("""{"ok":true}""")
+            request.url.encodedPath == "/api/lists" -> json(lists)
+            request.url.encodedPath == "/api/lists/changes" -> {
+                listChanges.put(request.json())
+                listChangeFailures.poll()?.let { (code, text) -> failure(code, text) } ?: json(lists)
+            }
             segments == listOf("api", "conversations") && request.method == "GET" ->
                 listFailures.poll()?.let { failure(it, errorAnswer("Unavailable")) } ?: json(list())
             segments == listOf("api", "conversations") && request.method == "POST" -> json(create())
@@ -254,13 +279,14 @@ class FakeGateway : Dispatcher() {
     private fun Row.toJson() = buildJsonObject {
         put("id", id)
         put("author", author)
-        put("kind", "message")
+        put("kind", if (listFinished == null) "message" else "display")
         put("channel", "app")
         put("text", text)
         put("createdAt", createdAt)
         put("scheduled", false)
         clientMessageId?.let { put("clientMessageId", it) }
         steps?.let { put("steps", Json.parseToJsonElement(it)) }
+        listFinished?.let { put("listFinished", Json.parseToJsonElement(it)) }
         if (imageIds.isNotEmpty()) {
             putJsonArray("images") {
                 imageIds.forEach { mediaId ->

@@ -9,6 +9,7 @@ import one.scary.bellaclaw.model.Loadable
 import one.scary.bellaclaw.model.Message
 import one.scary.bellaclaw.model.MessageImage
 import one.scary.bellaclaw.model.ModelChoice
+import one.scary.bellaclaw.model.TodoList
 import java.time.LocalDate
 
 data class ChatUiState(
@@ -37,6 +38,8 @@ data class ChatUiState(
     val isReadyToSend: Boolean = false,
     /** The language last picked for dictation, as a BCP 47 tag; null means the phone's language. */
     val dictationLanguage: String? = null,
+    /** The account's lists for BellaClaw's pill, the one it shows first. */
+    val lists: List<TodoList> = emptyList(),
 ) {
     val canSend: Boolean
         get() = isReadyToSend && !isCheckingAttachment && (draft.isNotBlank() || attachmentUri != null)

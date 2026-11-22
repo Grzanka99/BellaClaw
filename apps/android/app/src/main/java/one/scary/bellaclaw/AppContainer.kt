@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.sync.Mutex
 import one.scary.bellaclaw.data.AccountRepository
 import one.scary.bellaclaw.data.ChatRepository
+import one.scary.bellaclaw.data.ListsRepository
 import one.scary.bellaclaw.data.SettingsRepository
 import one.scary.bellaclaw.data.local.ChatStore
 import one.scary.bellaclaw.data.local.ContentPickedImages
@@ -39,15 +40,18 @@ class AppContainer(context: Context) {
         ThemeStore(File(context.filesDir, "theme.json")),
         applicationScope,
     )
+    private val chatStore = ChatStore(File(context.filesDir, "chats.json"))
+    val listsRepository = ListsRepository(apiClient, sessionStore.session, chatStore, applicationScope)
     val chatRepository = ChatRepository(
         api = apiClient,
         session = sessionStore.session,
         foreground = foreground,
         settings = settingsRepository.settings,
-        chatStore = ChatStore(File(context.filesDir, "chats.json")),
+        chatStore = chatStore,
         pickedImages = ContentPickedImages(context.contentResolver),
         imageCache = ImageCache(File(context.cacheDir, "images")),
         scope = applicationScope,
+        onListsChanged = listsRepository::refresh,
     )
     val accountRepository = AccountRepository(apiClient, sessionStore, allowCleartext = BuildConfig.DEBUG, deviceLock)
     val pushRepository = PushRepository(

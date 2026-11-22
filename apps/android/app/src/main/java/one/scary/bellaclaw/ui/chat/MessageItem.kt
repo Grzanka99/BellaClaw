@@ -1,5 +1,6 @@
 package one.scary.bellaclaw.ui.chat
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -14,6 +15,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Alarm
+import androidx.compose.material.icons.outlined.TaskAlt
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -27,6 +29,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import one.scary.bellaclaw.R
 import one.scary.bellaclaw.model.Author
+import one.scary.bellaclaw.model.FinishedList
 import one.scary.bellaclaw.model.Message
 import one.scary.bellaclaw.model.MessageImage
 import one.scary.bellaclaw.model.SendState
@@ -46,6 +49,10 @@ fun MessageItem(
 ) {
     if (message.scheduled) {
         ScheduledCard(message, modifier)
+        return
+    }
+    message.finishedList?.let { list ->
+        FinishedListCard(list, message, modifier)
         return
     }
     if (message.author != Author.USER) {
@@ -157,6 +164,37 @@ private fun ScheduledCard(message: Message, modifier: Modifier) {
             }
             if (body.isNotEmpty()) {
                 MessageText(text = body, style = MaterialTheme.typography.bodyLarge, color = content)
+            }
+        }
+    }
+}
+
+/** A finished list: an outlined card with its name, its count and when it finished. */
+@Composable
+private fun FinishedListCard(list: FinishedList, message: Message, modifier: Modifier) {
+    Surface(
+        shape = CardShape,
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        modifier = modifier,
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+            Icon(
+                imageVector = Icons.Outlined.TaskAlt,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(28.dp),
+            )
+            Column(modifier = Modifier.padding(start = 16.dp)) {
+                Text(
+                    text = stringResource(R.string.list_finished_title, list.name, list.total),
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                )
+                Text(
+                    text = stringResource(R.string.list_finished_text, formatTime(message.sentAt)),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
     }

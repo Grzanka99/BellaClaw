@@ -15,6 +15,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import one.scary.bellaclaw.data.ChatRepository
 import one.scary.bellaclaw.data.FakeGateway
+import one.scary.bellaclaw.data.ListsRepository
 import one.scary.bellaclaw.data.FakeGateway.Companion.BELLA_KEY
 import one.scary.bellaclaw.data.FakeGateway.Companion.clientMessageId
 import one.scary.bellaclaw.data.SettingsRepository
@@ -71,7 +72,8 @@ class ChatViewModelTest {
         chatRepository: ChatRepository,
         savedStateHandle: SavedStateHandle = SavedStateHandle(),
         settings: SettingsRepository = testServer.settingsRepository(scope = backgroundScope),
-    ) = ChatViewModel(chatId, chatRepository, settings, savedStateHandle, ZoneOffset.UTC, Duration.INFINITE).also { collectIn(it.uiState) }
+        lists: ListsRepository = testServer.listsRepository(testServer.store(), backgroundScope),
+    ) = ChatViewModel(chatId, chatRepository, settings, lists, savedStateHandle, ZoneOffset.UTC, Duration.INFINITE).also { collectIn(it.uiState) }
 
     /** A plain chat titled Kotlin, ready to send, on [chatRepository] and [settings]. */
     private suspend fun TestScope.kotlinChat(

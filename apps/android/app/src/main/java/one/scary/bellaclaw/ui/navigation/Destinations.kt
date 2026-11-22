@@ -8,6 +8,10 @@ data object HomeDestination
 @Serializable
 data class ChatDestination(val chatId: String)
 
+/** The lists screen, opened on the list [listId]. */
+@Serializable
+data class ListsDestination(val listId: String)
+
 @Serializable
 data object SettingsDestination
 

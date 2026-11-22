@@ -65,7 +65,7 @@ class HomeViewModelTest {
         val viewModel = home(repository)
         viewModel.uiState.first { it.bellaClaw.isUnread == true }
 
-        val chat = ChatViewModel(BELLACLAW_CHAT_ID, repository, testServer.settingsRepository(scope = backgroundScope), SavedStateHandle())
+        val chat = ChatViewModel(BELLACLAW_CHAT_ID, repository, testServer.settingsRepository(scope = backgroundScope), testServer.listsRepository(testServer.store(), backgroundScope), SavedStateHandle())
         collectIn(chat.uiState)
         chat.uiState.first { state -> state.rows.any { it is ChatRow.Item } }
 
@@ -84,7 +84,7 @@ class HomeViewModelTest {
         assertEquals(listOf("plain:ada:b"), populated.chats.map { it.id })
 
         val created = "plain:ada:a"
-        val chat = ChatViewModel(created, repository, testServer.settingsRepository(scope = backgroundScope), SavedStateHandle())
+        val chat = ChatViewModel(created, repository, testServer.settingsRepository(scope = backgroundScope), testServer.listsRepository(testServer.store(), backgroundScope), SavedStateHandle())
         collectIn(chat.uiState)
         chat.uiState.first { it.isReadyToSend }
 

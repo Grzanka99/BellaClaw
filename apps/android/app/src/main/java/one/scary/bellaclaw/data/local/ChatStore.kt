@@ -17,13 +17,15 @@ import one.scary.bellaclaw.model.ModelChoice
 /**
  * What the phone keeps per conversation key: the model picked for a plain chat, and the newest row id
  * seen with its screen open; the model a plain chat was last set to or sent with ([lastModel]); and the
- * language last picked for dictation, as a BCP 47 tag ([dictationLanguage]).
+ * language last picked for dictation, as a BCP 47 tag ([dictationLanguage]); and the finished lists swiped
+ * away, by list id, each with the list's last change then, epoch ms ([dismissedLists]).
  */
 data class LocalChats(
     val models: Map<String, ModelChoice> = emptyMap(),
     val lastSeen: Map<String, Long> = emptyMap(),
     val lastModel: ModelChoice? = null,
     val dictationLanguage: String? = null,
+    val dismissedLists: Map<String, Long> = emptyMap(),
 )
 
 /** [LocalChats] as JSON in [file], written through a temporary file. A missing or unreadable file holds nothing. */
@@ -43,6 +45,11 @@ class ChatStore(
 
     suspend fun setDictationLanguage(languageTag: String) {
         change { it.copy(dictationLanguage = languageTag) }
+    }
+
+    /** Hides the list [listId] while its last change is still [updatedAt] (epoch ms). */
+    suspend fun dismissList(listId: String, updatedAt: Long) {
+        change { it.copy(dismissedLists = it.dismissedLists + (listId to updatedAt)) }
     }
 
     /** Raises the chat's last seen row to [rowId]; a lower id changes nothing. */
@@ -71,6 +78,7 @@ class ChatStore(
                 lastSeen = next.lastSeen,
                 lastModel = next.lastModel?.stored(),
                 dictationLanguage = next.dictationLanguage,
+                dismissedLists = next.dismissedLists,
             )
             withContext(ioDispatcher) {
                 file.writeAtomically(lenientJson.encodeToString(StoredChats.serializer(), stored).encodeToByteArray())
@@ -96,6 +104,7 @@ class ChatStore(
             stored.lastSeen,
             stored.lastModel?.choice(),
             stored.dictationLanguage,
+            stored.dismissedLists,
         )
     }
 
@@ -112,5 +121,6 @@ class ChatStore(
         val lastSeen: Map<String, Long> = emptyMap(),
         val lastModel: StoredModel? = null,
         val dictationLanguage: String? = null,
+        val dismissedLists: Map<String, Long> = emptyMap(),
     )
 }

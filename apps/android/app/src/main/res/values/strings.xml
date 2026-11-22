@@ -154,4 +154,27 @@
     <string name="message_sending">Sending…</string>
     <string name="message_not_sent">Not sent. Tap to try again.</string>
     <string name="image">Image</string>
+
+    <string name="time_today">today %1$s</string>
+    <string name="time_tomorrow">tomorrow %1$s</string>
+    <string name="time_day">%1$s %2$s</string>
+
+    <string name="list_open">Open the list</string>
+    <string name="list_until">Until %1$s</string>
+    <string name="list_done_disappears">Done · disappears %1$s</string>
+    <string name="list_count">%1$d/%2$d</string>
+    <string name="list_more">+%1$d</string>
+    <string name="list_progress">%1$d of %2$d</string>
+    <string name="list_progress_until">%1$d of %2$d · until %3$s</string>
+    <string name="list_add">Add…</string>
+    <string name="list_chip">%1$s %2$d/%3$d</string>
+    <string name="list_reorder">Drag to reorder</string>
+    <string name="list_actions">List actions</string>
+    <string name="list_rename">Rename</string>
+    <string name="list_name">List name</string>
+    <string name="list_delete">Delete</string>
+    <string name="list_delete_title">Delete “%1$s”?</string>
+    <string name="list_delete_text">The list and its items are deleted for good, for Bella too.</string>
+    <string name="list_finished_title">%1$s · %2$d/%2$d</string>
+    <string name="list_finished_text">Finished %1$s</string>
 </resources>
