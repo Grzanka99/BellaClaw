@@ -5,9 +5,8 @@ import type { Tool, UtcpClient } from "@utcp/sdk";
 import { z } from "zod";
 import type { TConnector } from "../config";
 
-export const MAX_RESULT_BYTES = 1024 * 1024;
-export const RESULT_TOO_LARGE =
-  "UTCP result exceeds 1 MiB. Request a smaller page or a narrower query.";
+const MAX_RESULT_BYTES = 1024 * 1024;
+const RESULT_TOO_LARGE = "UTCP result exceeds 1 MiB. Request a smaller page or a narrower query.";
 
 const SObjectArguments = z.record(z.string(), z.unknown());
 

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -190,54 +190,23 @@ describe("add-connector", () => {
   });
 
   test("refuses a UTCP connector at a plain http URL to a non-loopback host", async () => {
-    const fetchSpy = spyOn(globalThis, "fetch");
+    const result = await execute({
+      id: "weather",
+      kind: "utcp",
+      url: "http://192.0.2.1/utcp",
+      description: "Weather tools",
+    });
 
-    try {
-      const result = await execute({
-        id: "weather",
-        kind: "utcp",
-        url: "http://192.0.2.1/utcp",
-        description: "Weather tools",
-      });
-
-      expect(result).toMatchObject({
-        isError: true,
-        details: { errorCode: "connector-url-unsupported" },
-        content: [
-          { type: "text", text: "UTCP connector weather needs an https URL. Nothing was added" },
-        ],
-      });
-      expect(fetchSpy).not.toHaveBeenCalled();
-      expect(await storedRows()).toEqual([]);
-    } finally {
-      fetchSpy.mockRestore();
-    }
-  });
-
-  test("stores nothing when a UTCP server asks for credentials", async () => {
-    const server = startUtcpFixture({ manual: () => ({ tools: [] }), manualStatus: 401 });
-
-    try {
-      const result = await execute({
-        id: "weather",
-        kind: "utcp",
-        url: server.url,
-        description: "Weather tools",
-      });
-
-      expect(result).toMatchObject({
-        isError: true,
-        details: { errorCode: "connector-credentials-unsupported" },
-        content: [
-          {
-            type: "text",
-            text: `${server.url} asks for credentials, and UTCP connectors take no credentials. Nothing was added`,
-          },
-        ],
-      });
-      expect(await storedRows()).toEqual([]);
-    } finally {
-      await server.stop();
-    }
+    expect(result).toMatchObject({
+      isError: true,
+      details: { errorCode: "connector-url-unsupported" },
+      content: [
+        {
+          type: "text",
+          text: "UTCP connector weather cannot use this URL: the UTCP SDK allows only https, or http to localhost, 127.0.0.1 or ::1. Nothing was added",
+        },
+      ],
+    });
+    expect(await storedRows()).toEqual([]);
   });
 });

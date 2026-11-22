@@ -69,13 +69,6 @@ export const addConnector = defineTool({
       );
     }
 
-    if (probe.status === "auth_required" && args.kind === EConnectorKind.Utcp) {
-      throw new ToolError(
-        "connector-credentials-unsupported",
-        `${args.url} asks for credentials, and UTCP connectors take no credentials. Nothing was added`,
-      );
-    }
-
     try {
       await context.events.request(
         EEventType.ConnectorAddRequested,
