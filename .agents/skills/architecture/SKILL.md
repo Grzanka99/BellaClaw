@@ -141,7 +141,7 @@ A call across services is allowed only when it changes no state:
   by `app.device.registered` and `app.device.unregistered`): Outbound reads which account has a
   device to pick the main channel, Notices adds those accounts to a global notice's audience, and
   the internal API lists an account's devices to unregister each.
-- Drivers: `LlmClient`, `EmbeddingClient`, `aiModels`, the Discord and Signal clients, `gws`.
+- Drivers: `LlmClient`, `EmbeddingClient`, `aiModels`, the Discord and Signal clients, `GoogleCalendarClient`.
 - The stateless engine: `AgentHarness.runMain`, `runPlain`, `runScheduledTask`,
   `compactConversation`.
 - Live state an event cannot carry: `ConnectorService.open`, `ConnectorRunRegistry`, `AppStream.listen`
