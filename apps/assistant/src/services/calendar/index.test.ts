@@ -9,7 +9,7 @@ import { resetEventTables } from "../database/test-utils";
 import { CommandRejectedError, EventBus } from "../events";
 import { withEventContext } from "../events/test-utils";
 import { CalendarService } from ".";
-import type { GwsCalendarClient } from "./gws";
+import type { GoogleCalendarClient } from "./google";
 
 function googleEvent(id: string, extra: Record<string, unknown> = {}) {
   return {
@@ -54,7 +54,7 @@ describe("CalendarService mutation boundary", () => {
       await mkdir(repositoryPath(".secrets"), { recursive: true });
       await Bun.write(credentialsPath, "{}");
     }
-    const service = new CalendarService(connector(database), {} as unknown as GwsCalendarClient);
+    const service = new CalendarService(connector(database), {} as unknown as GoogleCalendarClient);
 
     try {
       await service.setup();
@@ -67,7 +67,7 @@ describe("CalendarService mutation boundary", () => {
   });
 
   test("setting the write calendar accepts only the exact writer role", async () => {
-    const service = new CalendarService(connector(database), {} as unknown as GwsCalendarClient);
+    const service = new CalendarService(connector(database), {} as unknown as GoogleCalendarClient);
 
     await expect(
       service.setWriteCalendar(database as unknown as TDatabaseTransaction, "user-1", "other", {
@@ -84,7 +84,7 @@ describe("CalendarService mutation boundary", () => {
         calls.push({ calendarId });
         return googleEvent("created");
       },
-    } as unknown as GwsCalendarClient;
+    } as unknown as GoogleCalendarClient;
     const service = new CalendarService(connector(selectingDatabase([])), client);
     Object.assign(service, { status: { ready: true, error: undefined } });
 
@@ -107,7 +107,7 @@ describe("CalendarService mutation boundary", () => {
   });
 
   test("read-only add rejects roles below reader", async () => {
-    const service = new CalendarService(connector(database), {} as unknown as GwsCalendarClient);
+    const service = new CalendarService(connector(database), {} as unknown as GoogleCalendarClient);
 
     await expect(
       service.addReadonlyCalendar(database as unknown as TDatabaseTransaction, "user-1", "other", {
@@ -132,7 +132,7 @@ describe("CalendarService mutation boundary", () => {
         }),
       }),
     } as unknown as TDatabaseTransaction;
-    const service = new CalendarService(connector(database), {} as unknown as GwsCalendarClient);
+    const service = new CalendarService(connector(database), {} as unknown as GoogleCalendarClient);
 
     const calendar = await service.addReadonlyCalendar(tx, "user-1", "housemate-calendar", {
       accessRole: "writer",
@@ -151,7 +151,7 @@ describe("CalendarService mutation boundary", () => {
         calls.push({ calendarId, body });
         return googleEvent("created");
       },
-    } as unknown as GwsCalendarClient;
+    } as unknown as GoogleCalendarClient;
     const service = new CalendarService(connector(database), client);
     Object.assign(service, { status: { ready: true, error: undefined } });
 
@@ -186,7 +186,7 @@ describe("CalendarService mutation boundary", () => {
         patchedBody = body;
         return googleEvent("timed", body);
       },
-    } as unknown as GwsCalendarClient;
+    } as unknown as GoogleCalendarClient;
     const service = new CalendarService(connector(database), client);
     Object.assign(service, { status: { ready: true, error: undefined } });
 
@@ -219,7 +219,7 @@ describe("CalendarService mutation boundary", () => {
         patchedBody = body;
         return googleEvent("all-day", body);
       },
-    } as unknown as GwsCalendarClient;
+    } as unknown as GoogleCalendarClient;
     const service = new CalendarService(connector(database), client);
     Object.assign(service, { status: { ready: true, error: undefined } });
 
@@ -243,7 +243,7 @@ describe("CalendarService mutation boundary", () => {
           googleEvent("earlier", { start: { dateTime: "2026-07-25T09:00:00+02:00" } }),
         ],
       }),
-    } as unknown as GwsCalendarClient;
+    } as unknown as GoogleCalendarClient;
     const service = new CalendarService(connector(listDatabase), client);
     Object.assign(service, { status: { ready: true, error: undefined } });
 
@@ -289,7 +289,7 @@ describe("CalendarService mutation boundary", () => {
         inserted.push(body);
         return googleEvent("successor", body);
       },
-    } as unknown as GwsCalendarClient;
+    } as unknown as GoogleCalendarClient;
     const service = new CalendarService(connector(database), client);
     Object.assign(service, { status: { ready: true, error: undefined } });
     const patch = {
@@ -382,7 +382,7 @@ describe("CalendarService mutation boundary", () => {
           writes.push("insert");
           return googleEvent("successor", body);
         },
-      } as unknown as GwsCalendarClient;
+      } as unknown as GoogleCalendarClient;
       const service = new CalendarService(connector(database), client);
       Object.assign(service, { status: { ready: true, error: undefined } });
       const patch = validateUpdateCalendarEventArgs({
@@ -417,7 +417,7 @@ describe("CalendarService mutation boundary", () => {
           ],
           workingLocationProperties: { type: "homeOffice" },
         }),
-    } as unknown as GwsCalendarClient;
+    } as unknown as GoogleCalendarClient;
     const service = new CalendarService(connector(database), client);
     Object.assign(service, { status: { ready: true, error: undefined } });
 
@@ -469,7 +469,7 @@ describe("CalendarService mutation boundary", () => {
         patched = true;
         return googleEvent("master");
       },
-    } as unknown as GwsCalendarClient;
+    } as unknown as GoogleCalendarClient;
     const service = new CalendarService(connector(database), client);
     Object.assign(service, { status: { ready: true, error: undefined } });
 
@@ -516,7 +516,7 @@ describe("CalendarService mutation boundary", () => {
           patched = true;
           return googleEvent("master");
         },
-      } as unknown as GwsCalendarClient;
+      } as unknown as GoogleCalendarClient;
       const service = new CalendarService(connector(database), client);
       Object.assign(service, { status: { ready: true, error: undefined } });
 
@@ -561,7 +561,7 @@ describe("CalendarService mutation boundary", () => {
         patched = true;
         return googleEvent("master");
       },
-    } as unknown as GwsCalendarClient;
+    } as unknown as GoogleCalendarClient;
     const service = new CalendarService(connector(database), client);
     Object.assign(service, { status: { ready: true, error: undefined } });
 
@@ -584,7 +584,7 @@ describe("CalendarService mutation boundary", () => {
         patched = true;
         return googleEvent("birthday");
       },
-    } as unknown as GwsCalendarClient;
+    } as unknown as GoogleCalendarClient;
     const service = new CalendarService(connector(database), client);
     Object.assign(service, { status: { ready: true, error: undefined } });
 
@@ -627,7 +627,7 @@ describe("CalendarService create idempotency", () => {
         ids.push(body.id);
         return googleEvent(String(body.id));
       },
-    } as unknown as GwsCalendarClient;
+    } as unknown as GoogleCalendarClient;
     const service = new CalendarService(connector(database), client);
     Object.assign(service, { status: { ready: true, error: undefined } });
 
@@ -646,12 +646,12 @@ describe("CalendarService create idempotency", () => {
       insertEvent: async (_calendarId: string, body: Record<string, unknown>) => {
         insertedId = String(body.id);
         throw new Error(
-          "gws exited with code 1: error[api]: The requested identifier already exists.",
+          "Google Calendar POST failed with HTTP 409: The requested identifier already exists.",
         );
       },
       getEvent: async (_calendarId: string, eventId: string) =>
         googleEvent(eventId, { summary: "Once" }),
-    } as unknown as GwsCalendarClient;
+    } as unknown as GoogleCalendarClient;
     const service = new CalendarService(connector(database), client);
     Object.assign(service, { status: { ready: true, error: undefined } });
 
@@ -664,12 +664,12 @@ describe("CalendarService create idempotency", () => {
   test("a failed create whose event does not exist keeps the insert error", async () => {
     const client = {
       insertEvent: async () => {
-        throw new Error("gws exited with code 1: error[api]: Invalid recurrence rule.");
+        throw new Error("Google Calendar POST failed with HTTP 400: Invalid recurrence rule.");
       },
       getEvent: async () => {
-        throw new Error("gws exited with code 1: error[api]: Not Found");
+        throw new Error("Google Calendar GET failed with HTTP 404: Not Found");
       },
-    } as unknown as GwsCalendarClient;
+    } as unknown as GoogleCalendarClient;
     const service = new CalendarService(connector(database), client);
     Object.assign(service, { status: { ready: true, error: undefined } });
 
@@ -704,7 +704,7 @@ describe("calendar commands", () => {
         deleted.push(eventId);
         return {};
       },
-    } as unknown as GwsCalendarClient;
+    } as unknown as GoogleCalendarClient;
     const service = new CalendarService(connector(database), client);
     await service.setup();
     Object.assign(service, { status: { ready: true, error: undefined } });
