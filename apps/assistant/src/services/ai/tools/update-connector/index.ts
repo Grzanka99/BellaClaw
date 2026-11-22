@@ -9,8 +9,8 @@ export const SUpdateConnectorArgs = obj({
   id: str({ minLength: 1, description: "Connector id from list-connectors" }),
   description: opt(
     str({
-      minLength: 1,
-      pattern: "\\S",
+      maxLength: 200,
+      pattern: "^[^\\r\\n]*\\S[^\\r\\n]*$",
       description: "New one-line description saying when to use the server",
     }),
   ),

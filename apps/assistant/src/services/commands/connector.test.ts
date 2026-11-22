@@ -100,8 +100,8 @@ afterEach(async () => {
 test("list shows the stored connectors in plain words", async () => {
   expect(await send("!connector list")).toBe(
     [
-      "- notes (waiting for approval to add): https://notes.example.com/mcp",
-      "- calendar (waiting for approval to remove): https://calendar.example.com/mcp",
+      "- notes (waiting for approval to add): https://notes.example.com/mcp — The notes tools",
+      "- calendar (waiting for approval to remove): https://calendar.example.com/mcp — The calendar tools",
     ].join("\n"),
   );
 });
@@ -123,7 +123,7 @@ test("reject drops a pending add and keeps a connector waiting for removal", asy
   );
   expect(await send("!connector reject calendar")).toBe("Connector calendar stays.");
   expect(await send("!connector list")).toBe(
-    "- calendar (active): https://calendar.example.com/mcp",
+    "- calendar (active): https://calendar.example.com/mcp — The calendar tools",
   );
   expect(await send("!connector reject notes")).toBe("You have no connector notes.");
 });

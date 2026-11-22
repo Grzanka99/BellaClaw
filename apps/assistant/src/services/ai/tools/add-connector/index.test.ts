@@ -149,4 +149,11 @@ describe("add-connector", () => {
     });
     expect(await storedRows()).toEqual([]);
   });
+
+  test("refuses a description with a line break", async () => {
+    await expect(
+      execute({ id: "notes", url: "https://notes.example.com/mcp", description: "Notes\nmore" }),
+    ).rejects.toThrow("Invalid tool arguments");
+    expect(await storedRows()).toEqual([]);
+  });
 });

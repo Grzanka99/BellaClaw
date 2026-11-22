@@ -16,8 +16,8 @@ export const SAddConnectorArgs = obj({
     description: "The server's http or https URL, exactly as the user gave it",
   }),
   description: str({
-    minLength: 1,
-    pattern: "\\S",
+    maxLength: 200,
+    pattern: "^[^\\r\\n]*\\S[^\\r\\n]*$",
     description: "One line saying when to use this server",
   }),
   plainChats: opt(
