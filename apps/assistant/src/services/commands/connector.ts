@@ -29,7 +29,15 @@ export const connectorCommand: TCommand = {
       }
 
       return rows
-        .map((row) => `- ${row.id} (${STATUS_TEXT[row.status]}): ${row.url} — ${row.description}`)
+        .map((row) => {
+          let access = "";
+
+          if (row.plainChats) {
+            access = ", open to plain chats";
+          }
+
+          return `- ${row.id} (${STATUS_TEXT[row.status]}${access}): ${row.url} — ${row.description}`;
+        })
         .join("\n");
     }
 

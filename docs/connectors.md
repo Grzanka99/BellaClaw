@@ -59,7 +59,7 @@ yourself:
 !connector reject CONNECTOR
 ```
 
-`list` shows each of your added connectors with its status, URL and description, written by the command
+`list` shows each of your added connectors with its status, whether plain chats may use it, its URL and description, written by the command
 itself rather than the model, so check it before approving. `approve` makes a pending add
 active or completes a pending removal; `reject` drops a pending add or keeps a connector that was
 pending removal.
