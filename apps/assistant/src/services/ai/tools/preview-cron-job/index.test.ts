@@ -137,7 +137,7 @@ describe("preview-cron-job", () => {
     expect(runScheduledTask).not.toHaveBeenCalled();
   });
 
-  test("previews overrides through the scheduled-task agent without MCP", async () => {
+  test("previews overrides through the scheduled-task agent without connectors", async () => {
     await saveAutomation("counter", COUNTER_SOURCE);
     installJobs([
       job({
@@ -150,7 +150,7 @@ describe("preview-cron-job", () => {
     const result = await preview({ name: "plain-task", automations: ["counter"] });
 
     expect(result.details).toMatchObject({ message: "Counter is at zero." });
-    expect(runScheduledTask.mock.calls[0]?.[0].withoutMcp).toBe(true);
+    expect(runScheduledTask.mock.calls[0]?.[0].withoutConnectors).toBe(true);
     const prompt = runScheduledTask.mock.calls[0]?.[0].prompt ?? "";
     expect(prompt).toContain("Write a short note.\n\n<automation_outputs>");
     expect(prompt).toContain('"text": "count 0"');

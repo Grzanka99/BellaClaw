@@ -9,10 +9,10 @@ import type {
   OAuthTokens,
 } from "@modelcontextprotocol/sdk/shared/auth.js";
 import type { FetchLike } from "@modelcontextprotocol/sdk/shared/transport.js";
-import { commandFailed, ESubscriptionMode, EventBus } from "../../events";
-import { IdentityService } from "../../identity";
-import { EIdentityLinkOwner } from "../../identity/schema";
-import { getMcpProfile, type TMcpProfile } from "../config";
+import { commandFailed, ESubscriptionMode, EventBus } from "../../../events";
+import { IdentityService } from "../../../identity";
+import { EIdentityLinkOwner } from "../../../identity/schema";
+import { getConnector, type TConnector } from "../../config";
 import { McpAuthCredentialStore } from "./store";
 
 const CALLBACK_PATH = "/mcp/oauth/callback";
@@ -41,7 +41,7 @@ let authServer: TOption<ReturnType<typeof Bun.serve>>;
 
 type TPendingState = {
   chatId: string;
-  profileId: string;
+  connectorId: string;
   key: string;
   generation: number;
   expiresAt: number;
@@ -62,13 +62,13 @@ class McpOAuthClientProvider implements OAuthClientProvider {
 
   public constructor(
     private readonly chatId: string,
-    private readonly profile: TMcpProfile,
+    private readonly connector: TConnector,
     private readonly store: McpAuthCredentialStore,
     private readonly onAuthorization: TOption<TAuthorizationRedirect>,
     private readonly generation: number,
     private readonly writesAlreadyQueued: boolean,
   ) {
-    this.key = credentialKey(chatId, profile);
+    this.key = credentialKey(chatId, connector);
   }
 
   public get redirectUrl(): string {
@@ -77,8 +77,8 @@ class McpOAuthClientProvider implements OAuthClientProvider {
 
   public get clientMetadata(): OAuthClientMetadata {
     let scope: TOption<string>;
-    if (this.profile.transport.type === "http" && this.profile.transport.oauth !== undefined) {
-      scope = this.profile.transport.oauth.scopes.join(" ");
+    if (this.connector.transport.type === "http" && this.connector.transport.oauth !== undefined) {
+      scope = this.connector.transport.oauth.scopes.join(" ");
     }
 
     return {
@@ -96,11 +96,11 @@ class McpOAuthClientProvider implements OAuthClientProvider {
 
   public async clientInformation(): Promise<TOption<OAuthClientInformationMixed>> {
     this.assertCurrentGeneration();
-    if (this.profile.transport.type !== "http" || this.profile.transport.oauth === undefined) {
+    if (this.connector.transport.type !== "http" || this.connector.transport.oauth === undefined) {
       return undefined;
     }
 
-    const clientIdEnv = this.profile.transport.oauth.clientIdEnv;
+    const clientIdEnv = this.connector.transport.oauth.clientIdEnv;
     if (clientIdEnv === undefined) {
       const clientInformation = await this.store.clientInformation(this.key);
       this.assertCurrentGeneration();
@@ -113,7 +113,7 @@ class McpOAuthClientProvider implements OAuthClientProvider {
     }
 
     const clientInformation: OAuthClientInformationMixed = { client_id: clientId };
-    const clientSecretEnv = this.profile.transport.oauth.clientSecretEnv;
+    const clientSecretEnv = this.connector.transport.oauth.clientSecretEnv;
     if (clientSecretEnv !== undefined) {
       const clientSecret = Bun.env[clientSecretEnv]?.trim();
       if (clientSecret === undefined || clientSecret.length === 0) {
@@ -146,14 +146,16 @@ class McpOAuthClientProvider implements OAuthClientProvider {
   public async redirectToAuthorization(authorizationUrl: URL): Promise<void> {
     if (this.onAuthorization === undefined) {
       throw new Error(
-        `MCP profile ${this.profile.id} needs authentication. Run !mcp-auth connect ${this.profile.id}`,
+        `Connector ${this.connector.id} needs authentication. Run !connector-auth connect ${this.connector.id}`,
       );
     }
     this.assertCurrentGeneration();
-    if (this.profile.transport.type !== "http" || this.profile.transport.oauth === undefined) {
-      throw new Error(`MCP profile ${this.profile.id} does not use OAuth`);
+    if (this.connector.transport.type !== "http" || this.connector.transport.oauth === undefined) {
+      throw new Error(`Connector ${this.connector.id} does not use OAuth`);
     }
-    for (const [name, value] of Object.entries(this.profile.transport.oauth.authorizationParams)) {
+    for (const [name, value] of Object.entries(
+      this.connector.transport.oauth.authorizationParams,
+    )) {
       if (RESERVED_AUTHORIZATION_PARAMS.has(name) || authorizationUrl.searchParams.has(name)) {
         throw new Error(`MCP OAuth authorization parameter ${name} is reserved`);
       }
@@ -162,7 +164,7 @@ class McpOAuthClientProvider implements OAuthClientProvider {
 
     pendingStates.set(this.authorizationState, {
       chatId: this.chatId,
-      profileId: this.profile.id,
+      connectorId: this.connector.id,
       key: this.key,
       generation: this.generation,
       expiresAt: Date.now() + STATE_TTL_MS,
@@ -204,19 +206,19 @@ class McpOAuthClientProvider implements OAuthClientProvider {
 
   private assertCurrentGeneration(): void {
     if (currentAuthGeneration(this.key) !== this.generation) {
-      throw new Error(`MCP authentication for profile ${this.profile.id} was cancelled`);
+      throw new Error(`MCP authentication for connector ${this.connector.id} was cancelled`);
     }
   }
 }
 
 export async function getMcpAuthProvider(
   chatId: string,
-  profile: TMcpProfile,
+  connector: TConnector,
 ): Promise<TOption<OAuthClientProvider>> {
-  if (profile.transport.type !== "http" || profile.transport.oauth === undefined) {
+  if (connector.transport.type !== "http" || connector.transport.oauth === undefined) {
     return undefined;
   }
-  const key = credentialKey(chatId, profile);
+  const key = credentialKey(chatId, connector);
   const generation = currentAuthGeneration(key);
   const existing = runtimeProviders.get(key);
   if (existing !== undefined && existing.generation === generation) {
@@ -225,7 +227,7 @@ export async function getMcpAuthProvider(
 
   const provider = new McpOAuthClientProvider(
     chatId,
-    profile,
+    connector,
     credentialStore,
     undefined,
     generation,
@@ -235,19 +237,19 @@ export async function getMcpAuthProvider(
   return provider;
 }
 
-export async function beginMcpAuth(chatId: string, profileId: string): Promise<string> {
-  const profile = await getMcpProfile(profileId);
-  if (profile.transport.type !== "http" || profile.transport.oauth === undefined) {
-    throw new Error(`MCP profile ${profileId} does not use OAuth`);
+export async function beginMcpAuth(chatId: string, connectorId: string): Promise<string> {
+  const connector = await getConnector(connectorId);
+  if (connector.transport.type !== "http" || connector.transport.oauth === undefined) {
+    throw new Error(`Connector ${connectorId} does not use OAuth`);
   }
 
-  const key = credentialKey(chatId, profile);
+  const key = credentialKey(chatId, connector);
   const generation = advanceAuthGeneration(key);
   runtimeProviders.delete(key);
-  const serverUrl = profile.transport.url;
+  const serverUrl = connector.transport.url;
   const authorizationUrl = await authQueue(key).enqueue(async () => {
     if (currentAuthGeneration(key) !== generation) {
-      throw new Error(`MCP authentication for profile ${profileId} was cancelled`);
+      throw new Error(`MCP authentication for connector ${connectorId} was cancelled`);
     }
     for (const [state, pending] of pendingStates) {
       if (pending.key === key) {
@@ -259,7 +261,7 @@ export async function beginMcpAuth(chatId: string, profileId: string): Promise<s
     let redirectUrl: TOption<string>;
     const provider = new McpOAuthClientProvider(
       chatId,
-      profile,
+      connector,
       credentialStore,
       (url) => {
         redirectUrl = url.toString();
@@ -271,26 +273,26 @@ export async function beginMcpAuth(chatId: string, profileId: string): Promise<s
     return redirectUrl;
   });
   if (authorizationUrl === undefined) {
-    throw new Error(`MCP profile ${profileId} is already connected`);
+    throw new Error(`Connector ${connectorId} is already connected`);
   }
   return authorizationUrl;
 }
 
-export async function getMcpAuthStatus(chatId: string, profileId: string): Promise<boolean> {
-  const profile = await getMcpProfile(profileId);
-  if (!usesChatCredentials(profile)) {
-    throw new Error(`MCP profile ${profileId} does not use OAuth or tokenAuth`);
+export async function getMcpAuthStatus(chatId: string, connectorId: string): Promise<boolean> {
+  const connector = await getConnector(connectorId);
+  if (!usesChatCredentials(connector)) {
+    throw new Error(`Connector ${connectorId} does not use OAuth or tokenAuth`);
   }
-  return credentialStore.hasTokens(credentialKey(chatId, profile));
+  return credentialStore.hasTokens(credentialKey(chatId, connector));
 }
 
-export async function disconnectMcpAuth(chatId: string, profileId: string): Promise<boolean> {
-  const profile = await getMcpProfile(profileId);
-  if (!usesChatCredentials(profile)) {
-    throw new Error(`MCP profile ${profileId} does not use OAuth or tokenAuth`);
+export async function disconnectMcpAuth(chatId: string, connectorId: string): Promise<boolean> {
+  const connector = await getConnector(connectorId);
+  if (!usesChatCredentials(connector)) {
+    throw new Error(`Connector ${connectorId} does not use OAuth or tokenAuth`);
   }
 
-  const key = credentialKey(chatId, profile);
+  const key = credentialKey(chatId, connector);
   advanceAuthGeneration(key);
   runtimeProviders.delete(key);
   for (const [state, pending] of pendingStates) {
@@ -304,15 +306,15 @@ export async function disconnectMcpAuth(chatId: string, profileId: string): Prom
 
 export async function saveMcpAuthToken(
   chatId: string,
-  profileId: string,
+  connectorId: string,
   token: string,
 ): Promise<void> {
-  const profile = await getMcpProfile(profileId);
-  if (profile.transport.type !== "http" || !profile.transport.tokenAuth) {
-    throw new Error(`MCP profile ${profileId} does not use tokenAuth`);
+  const connector = await getConnector(connectorId);
+  if (connector.transport.type !== "http" || !connector.transport.tokenAuth) {
+    throw new Error(`Connector ${connectorId} does not use tokenAuth`);
   }
 
-  const key = credentialKey(chatId, profile);
+  const key = credentialKey(chatId, connector);
   await authQueue(key).enqueue(() =>
     credentialStore.saveTokens(key, { access_token: token, token_type: "bearer" }),
   );
@@ -320,16 +322,16 @@ export async function saveMcpAuthToken(
 
 export async function getMcpAuthToken(
   chatId: string,
-  profile: TMcpProfile,
+  connector: TConnector,
 ): Promise<TOption<string>> {
-  if (profile.transport.type !== "http" || !profile.transport.tokenAuth) {
+  if (connector.transport.type !== "http" || !connector.transport.tokenAuth) {
     return undefined;
   }
 
-  const tokens = await credentialStore.tokens(credentialKey(chatId, profile));
+  const tokens = await credentialStore.tokens(credentialKey(chatId, connector));
   if (tokens === undefined) {
     throw new Error(
-      `MCP profile ${profile.id} needs a token. Run !mcp-auth token ${profile.id} TOKEN`,
+      `Connector ${connector.id} needs a token. Run !connector-auth token ${connector.id} TOKEN`,
     );
   }
   return tokens.access_token;
@@ -432,21 +434,21 @@ export function setupMcpAuth(): void {
       const { chatKey, ownerKey } = event.payload;
       const from = `${encodeURIComponent(chatKey)}:`;
       const moved = await credentialStore.moveAll(from, `${encodeURIComponent(ownerKey)}:`);
-      const profileIds = new Set<string>();
+      const connectorIds = new Set<string>();
 
       for (const key of moved) {
         runtimeProviders.delete(key);
         const rest = key.slice(from.length);
-        profileIds.add(rest.slice(0, rest.lastIndexOf(":")));
+        connectorIds.add(rest.slice(0, rest.lastIndexOf(":")));
       }
 
       await ctx.complete(async (_tx, emit) => {
-        for (const profileId of profileIds) {
+        for (const connectorId of connectorIds) {
           for (const chatId of [chatKey, ownerKey]) {
             emit(
               EEventType.McpAuthCredentialsChanged,
-              { chatId, profileId },
-              `${chatId}:${profileId}`,
+              { chatId, profileId: connectorId },
+              `${chatId}:${connectorId}`,
               undefined,
             );
           }
@@ -463,8 +465,8 @@ export function setupMcpAuth(): void {
   });
 }
 
-export function createMcpAuthFetch(chatId: string, profileId: string): FetchLike {
-  const key = `${encodeURIComponent(chatId)}:${profileId}`;
+export function createMcpAuthFetch(chatId: string, connectorId: string): FetchLike {
+  const key = `${encodeURIComponent(chatId)}:${connectorId}`;
   return async (url, init) => {
     let refreshToken: TOption<string>;
     if (init?.body instanceof URLSearchParams && init.body.get("grant_type") === "refresh_token") {
@@ -530,22 +532,22 @@ export async function handleMcpAuthCallback(request: Request): Promise<Response>
       if (currentAuthGeneration(pending.key) !== pending.generation) {
         throw new Error("MCP OAuth callback was cancelled");
       }
-      const profile = await getMcpProfile(pending.profileId);
-      if (profile.transport.type !== "http" || profile.transport.oauth === undefined) {
-        throw new Error(`MCP profile ${pending.profileId} does not use OAuth`);
+      const connector = await getConnector(pending.connectorId);
+      if (connector.transport.type !== "http" || connector.transport.oauth === undefined) {
+        throw new Error(`Connector ${pending.connectorId} does not use OAuth`);
       }
-      if (credentialKey(pending.chatId, profile) !== pending.key) {
+      if (credentialKey(pending.chatId, connector) !== pending.key) {
         throw new Error("MCP OAuth configuration changed during authorization");
       }
       const provider = new McpOAuthClientProvider(
         pending.chatId,
-        profile,
+        connector,
         credentialStore,
         undefined,
         pending.generation,
         true,
       );
-      await auth(provider, { serverUrl: profile.transport.url, authorizationCode: code });
+      await auth(provider, { serverUrl: connector.transport.url, authorizationCode: code });
       if (currentAuthGeneration(pending.key) !== pending.generation) {
         throw new Error("MCP OAuth callback was cancelled");
       }
@@ -558,7 +560,7 @@ export async function handleMcpAuthCallback(request: Request): Promise<Response>
         source: "mcp-auth",
         key: pending.chatId,
         trace: { turnId: createSystemTurnId(), chatId: conversationKey, platform: undefined },
-        payload: { chatId: pending.chatId, profileId: pending.profileId },
+        payload: { chatId: pending.chatId, profileId: pending.connectorId },
         causationId: undefined,
         dedupeKey: undefined,
       });
@@ -566,7 +568,7 @@ export async function handleMcpAuthCallback(request: Request): Promise<Response>
       logger.warning("MCP OAuth connection notice could not be published");
     }
     return callbackResponse(
-      `Connected MCP profile ${pending.profileId}. You can close this window.`,
+      `Connected connector ${pending.connectorId}. You can close this window.`,
       200,
     );
   } catch (_error) {
@@ -610,20 +612,20 @@ function callbackUrl(): string {
   return new URL(CALLBACK_PATH, `${publicUrl.replace(/\/$/, "")}/`).toString();
 }
 
-function usesChatCredentials(profile: TMcpProfile): boolean {
+function usesChatCredentials(connector: TConnector): boolean {
   return (
-    profile.transport.type === "http" &&
-    (profile.transport.oauth !== undefined || profile.transport.tokenAuth)
+    connector.transport.type === "http" &&
+    (connector.transport.oauth !== undefined || connector.transport.tokenAuth)
   );
 }
 
-function credentialKey(chatId: string, profile: TMcpProfile): string {
-  if (profile.transport.type !== "http" || !usesChatCredentials(profile)) {
-    throw new Error(`MCP profile ${profile.id} does not use OAuth or tokenAuth`);
+function credentialKey(chatId: string, connector: TConnector): string {
+  if (connector.transport.type !== "http" || !usesChatCredentials(connector)) {
+    throw new Error(`Connector ${connector.id} does not use OAuth or tokenAuth`);
   }
 
-  const clientIdEnv = profile.transport.oauth?.clientIdEnv;
-  const clientSecretEnv = profile.transport.oauth?.clientSecretEnv;
+  const clientIdEnv = connector.transport.oauth?.clientIdEnv;
+  const clientSecretEnv = connector.transport.oauth?.clientSecretEnv;
   let clientId: TOption<string>;
   let clientSecret: TOption<string>;
 
@@ -638,9 +640,9 @@ function credentialKey(chatId: string, profile: TMcpProfile): string {
   const fingerprint = createHash("sha256")
     .update(
       JSON.stringify({
-        url: profile.transport.url,
-        scopes: profile.transport.oauth?.scopes,
-        authorizationParams: profile.transport.oauth?.authorizationParams,
+        url: connector.transport.url,
+        scopes: connector.transport.oauth?.scopes,
+        authorizationParams: connector.transport.oauth?.authorizationParams,
         clientIdEnv,
         clientId,
         clientSecretEnv,
@@ -649,7 +651,7 @@ function credentialKey(chatId: string, profile: TMcpProfile): string {
     )
     .digest("base64url")
     .slice(0, 16);
-  return `${encodeURIComponent(chatId)}:${profile.id}:${fingerprint}`;
+  return `${encodeURIComponent(chatId)}:${connector.id}:${fingerprint}`;
 }
 
 function authQueue(key: string): AsyncQueue {

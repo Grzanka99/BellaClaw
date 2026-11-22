@@ -16,7 +16,7 @@ import type {
   ToolUseContent,
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import { emptyUsage } from "../ai/llm";
+import { emptyUsage } from "../../ai/llm";
 
 export function createMcpSamplingRequest(
   params: CreateMessageRequest["params"],

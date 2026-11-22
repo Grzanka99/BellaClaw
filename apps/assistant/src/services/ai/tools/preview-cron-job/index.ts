@@ -124,10 +124,10 @@ export const previewCronJob = defineTool({
       ctx,
       resolved?.conversationKey ?? chatId,
       resolved?.destination.channel,
-      // Dry runs must not reach MCP servers, whose tools can have side effects.
+      // Dry runs must not reach connectors, whose tools can have side effects.
       {
         runScheduledTask: (runArgs) => {
-          return context.runScheduledTask({ ...runArgs, withoutMcp: true });
+          return context.runScheduledTask({ ...runArgs, withoutConnectors: true });
         },
       },
       context.events,

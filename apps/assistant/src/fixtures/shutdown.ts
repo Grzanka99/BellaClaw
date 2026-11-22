@@ -1,7 +1,7 @@
 import { mock } from "bun:test";
 import { AppLogger } from "@bellaclaw/behavior-logs";
-import "../services/mcp";
-import { stopMcpAuthServer } from "../services/mcp/auth";
+import "../services/connectors";
+import { stopMcpAuthServer } from "../services/connectors/mcp/auth";
 
 for (const [path, name] of [
   ["../services/authorization", "AuthorizationService"],
@@ -40,7 +40,7 @@ mock.module("../services/events", () => ({
     },
   },
 }));
-mock.module("../services/mcp/auth", () => ({
+mock.module("../services/connectors/mcp/auth", () => ({
   setupMcpAuth: () => undefined,
   startMcpAuthServer: () => undefined,
   stopMcpAuthServer,

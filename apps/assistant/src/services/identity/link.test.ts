@@ -29,6 +29,7 @@ import { AuthorizationService } from "../authorization";
 import { AutomationService } from "../automation";
 import { CalendarService } from "../calendar";
 import { Commands } from "../commands";
+import { setupMcpAuth } from "../connectors/mcp/auth";
 import { ConversationStore } from "../conversation";
 import type { TConversation } from "../conversation/types";
 import { CronScheduler } from "../cron";
@@ -37,7 +38,6 @@ import { linkTestAddress, resetEventTables, resetIdentityLinksTable } from "../d
 import { CommandRejectedError, EventBus } from "../events";
 import { testEventRequester } from "../events/test-utils";
 import { ListsService } from "../lists";
-import { setupMcpAuth } from "../mcp/auth";
 import { Memory } from "../memory";
 import { FactDistiller } from "../memory/distill";
 import type { TLiveFactWindow } from "../memory/types";

@@ -12,37 +12,37 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import { resetEventTables } from "../database/test-utils";
 import { EventBus } from "../events";
-import { disconnectMcpAuth, getMcpAuthStatus, saveMcpAuthToken } from "./auth";
-import { loadMcpProfiles } from "./config";
-import { mcpResult } from "./content";
-import { createFixtureServer } from "./fixtures/server";
-import { McpService } from "./index";
-import { discoverTools, type TMcpToolContext } from "./tools";
-import type { TMcpSession } from "./types";
+import { loadConnectors } from "./config";
+import { ConnectorService } from "./index";
+import { disconnectMcpAuth, getMcpAuthStatus, saveMcpAuthToken } from "./mcp/auth";
+import { mcpResult } from "./mcp/content";
+import { createFixtureServer } from "./mcp/fixtures/server";
+import { discoverTools, type TMcpToolContext } from "./mcp/tools";
+import type { TConnectorSession } from "./types";
 
 let directory: string;
 let previousConfig: TOption<string>;
-const service = new McpService();
+const service = new ConnectorService();
 beforeEach(async () => {
-  directory = await mkdtemp(join(tmpdir(), "bellaclaw-mcp-"));
-  previousConfig = Bun.env.BELLACLAW_MCP_CONFIG;
-  Bun.env.BELLACLAW_MCP_CONFIG = join(directory, "mcp.json");
+  directory = await mkdtemp(join(tmpdir(), "bellaclaw-connectors-"));
+  previousConfig = Bun.env.BELLACLAW_CONNECTORS_CONFIG;
+  Bun.env.BELLACLAW_CONNECTORS_CONFIG = join(directory, "connectors.json");
 });
 afterEach(async () => {
   await service.close();
   if (previousConfig === undefined) {
-    delete Bun.env.BELLACLAW_MCP_CONFIG;
+    delete Bun.env.BELLACLAW_CONNECTORS_CONFIG;
   } else {
-    Bun.env.BELLACLAW_MCP_CONFIG = previousConfig;
+    Bun.env.BELLACLAW_CONNECTORS_CONFIG = previousConfig;
   }
   await rm(directory, { recursive: true, force: true });
 });
 
 async function configure(transport: object, extra: object = {}) {
   await Bun.write(
-    join(directory, "mcp.json"),
+    join(directory, "connectors.json"),
     JSON.stringify({
-      profiles: [
+      connectors: [
         {
           id: "fixture",
           description: "Fixture",
@@ -59,7 +59,7 @@ async function configure(transport: object, extra: object = {}) {
     }),
   );
 }
-function tool(session: TMcpSession, label: string) {
+function tool(session: TConnectorSession, label: string) {
   const tool = session.tools.find(
     (candidate) => candidate.label === label || candidate.name === label,
   );
@@ -70,35 +70,35 @@ function tool(session: TMcpSession, label: string) {
 }
 
 describe("MCP runtime", () => {
-  test("loads the default logs profile for local and Compose URLs", async () => {
-    const configPath = Bun.env.BELLACLAW_MCP_CONFIG;
+  test("loads the default logs connector for local and Compose URLs", async () => {
+    const configPath = Bun.env.BELLACLAW_CONNECTORS_CONFIG;
     const previousLogsUrl = Bun.env.BELLACLAW_LOGS_MCP_URL;
     const previousVaultUrl = Bun.env.BELLACLAW_VAULT_MCP_URL;
-    delete Bun.env.BELLACLAW_MCP_CONFIG;
+    delete Bun.env.BELLACLAW_CONNECTORS_CONFIG;
     delete Bun.env.BELLACLAW_LOGS_MCP_URL;
     delete Bun.env.BELLACLAW_VAULT_MCP_URL;
     try {
-      const localProfiles = await loadMcpProfiles();
-      expect(localProfiles.map((profile) => profile.id)).toEqual(["logs", "vault"]);
-      expect(localProfiles[0]?.transport).toMatchObject({
+      const localConnectors = await loadConnectors();
+      expect(localConnectors.map((connector) => connector.id)).toEqual(["logs", "vault"]);
+      expect(localConnectors[0]?.transport).toMatchObject({
         type: "http",
         url: "http://127.0.0.1:8989/mcp",
       });
-      expect(localProfiles[1]?.transport).toMatchObject({
+      expect(localConnectors[1]?.transport).toMatchObject({
         type: "http",
         url: "http://127.0.0.1:8787/mcp",
         tokenAuth: true,
       });
 
       Bun.env.BELLACLAW_LOGS_MCP_URL = "http://log-viewer:8989/mcp";
-      const composeProfiles = await loadMcpProfiles();
-      expect(composeProfiles[0]?.transport).toMatchObject({
+      const composeConnectors = await loadConnectors();
+      expect(composeConnectors[0]?.transport).toMatchObject({
         type: "http",
         url: "http://log-viewer:8989/mcp",
       });
     } finally {
       if (configPath !== undefined) {
-        Bun.env.BELLACLAW_MCP_CONFIG = configPath;
+        Bun.env.BELLACLAW_CONNECTORS_CONFIG = configPath;
       }
       if (previousLogsUrl === undefined) {
         delete Bun.env.BELLACLAW_LOGS_MCP_URL;
@@ -111,42 +111,45 @@ describe("MCP runtime", () => {
     }
   });
 
-  test("missing config disables MCP; malformed and duplicate profiles fail clearly", async () => {
-    expect(await loadMcpProfiles()).toEqual([]);
+  test("missing config disables connectors; malformed and duplicate connectors fail clearly", async () => {
+    expect(await loadConnectors()).toEqual([]);
     await configure({ type: "stdio", command: "bun" });
-    const profiles = await loadMcpProfiles();
+    const connectors = await loadConnectors();
     await Bun.write(
-      join(directory, "mcp.json"),
-      JSON.stringify({ profiles: [profiles[0], profiles[0]] }),
+      join(directory, "connectors.json"),
+      JSON.stringify({ connectors: [connectors[0], connectors[0]] }),
     );
-    await expect(loadMcpProfiles()).rejects.toThrow("Duplicate MCP profile");
-    await Bun.write(join(directory, "mcp.json"), JSON.stringify({ profiles: [{ id: "invalid" }] }));
-    await expect(loadMcpProfiles()).rejects.toThrow("Invalid MCP configuration");
+    await expect(loadConnectors()).rejects.toThrow("Duplicate connector");
+    await Bun.write(
+      join(directory, "connectors.json"),
+      JSON.stringify({ connectors: [{ id: "invalid" }] }),
+    );
+    await expect(loadConnectors()).rejects.toThrow("Invalid connectors configuration");
     await configure({
       type: "http",
       url: "https://example.com/mcp",
       oauth: { clientSecretEnv: "SECRET" },
     });
-    await expect(loadMcpProfiles()).rejects.toThrow("clientSecretEnv requires clientIdEnv");
+    await expect(loadConnectors()).rejects.toThrow("clientSecretEnv requires clientIdEnv");
     await configure({
       type: "http",
       url: "https://example.com/mcp",
       oauth: {},
       tokenAuth: true,
     });
-    await expect(loadMcpProfiles()).rejects.toThrow("cannot use both oauth and tokenAuth");
+    await expect(loadConnectors()).rejects.toThrow("cannot use both oauth and tokenAuth");
   });
 
   test("stdio paginates tools, preserves schemas, isolates context and reports server errors", async () => {
     await configure({
       type: "stdio",
       command: process.execPath,
-      args: [join(import.meta.dir, "fixtures/server.ts")],
+      args: [join(import.meta.dir, "mcp/fixtures/server.ts")],
     });
     const session = await service.open({
       ownerKey: "account:a",
       conversationKey: "discord:a",
-      profileId: "fixture",
+      connectorId: "fixture",
       turnId: "turn:now",
     });
     const read = tool(session, "read.foo");
@@ -178,7 +181,7 @@ describe("MCP runtime", () => {
     await expect(read.execute("bad", { query: 12 })).rejects.toThrow("Invalid arguments");
     const missingContext = await service.open({
       ownerKey: "discord:missing",
-      profileId: "fixture",
+      connectorId: "fixture",
     });
     const missingContextRead = tool(missingContext, "read.foo");
     expect(JSON.stringify(missingContextRead.parameters)).not.toContain('"excludeTurnId"');
@@ -199,7 +202,7 @@ describe("MCP runtime", () => {
     const other = await service.open({
       ownerKey: "account:b",
       conversationKey: "discord:b",
-      profileId: "fixture",
+      connectorId: "fixture",
       turnId: "other",
     });
     expect((await tool(other, "read.foo").execute("b", { query: "q" })).content[0]).toEqual({
@@ -225,11 +228,11 @@ describe("MCP runtime", () => {
       {
         type: "stdio",
         command: process.execPath,
-        args: [join(import.meta.dir, "fixtures/server.ts")],
+        args: [join(import.meta.dir, "mcp/fixtures/server.ts")],
       },
       { tools: ["read.foo"], resources: false, prompts: false },
     );
-    const session = await service.open({ ownerKey: "a", profileId: "fixture" });
+    const session = await service.open({ ownerKey: "a", connectorId: "fixture" });
     expect(session.tools).toHaveLength(1);
     expect(session.tools[0]?.label).toBe("read.foo");
   });
@@ -238,12 +241,12 @@ describe("MCP runtime", () => {
     await configure({
       type: "stdio",
       command: process.execPath,
-      args: [join(import.meta.dir, "fixtures/server.ts")],
+      args: [join(import.meta.dir, "mcp/fixtures/server.ts")],
     });
     let requests = 0;
     const session = await service.open({
       ownerKey: "a",
-      profileId: "fixture",
+      connectorId: "fixture",
       elicit: async (params) => {
         requests++;
         expect(params.mode).toBe("url");
@@ -255,7 +258,7 @@ describe("MCP runtime", () => {
     expect(requests).toBe(1);
     const declined = await service.open({
       ownerKey: "b",
-      profileId: "fixture",
+      connectorId: "fixture",
       elicit: async () => ({ action: "decline" }),
     });
     await expect(tool(declined, "url").execute("url", {})).rejects.toThrow();
@@ -287,7 +290,7 @@ describe("MCP runtime", () => {
       let samples = 0;
       const session = await service.open({
         ownerKey: "a",
-        profileId: "fixture",
+        connectorId: "fixture",
         sample: async (params) => {
           samples++;
           expect(params.messages[0]?.content).toEqual({ type: "text", text: "Summarize fixture" });
@@ -388,7 +391,7 @@ describe("MCP runtime", () => {
     });
     try {
       await configure({ type: "http", url: `http://127.0.0.1:${http.port}/mcp` });
-      const session = await service.open({ ownerKey: "a", profileId: "fixture" });
+      const session = await service.open({ ownerKey: "a", connectorId: "fixture" });
       await session.close();
       expect(deletions).toBe(1);
       expect(session.signal.aborted).toBe(true);
@@ -401,7 +404,7 @@ describe("MCP runtime", () => {
     }
   });
 
-  test("token profiles send each chat's own bearer token; sessions close on mcp.auth.credentials.changed", async () => {
+  test("token connectors send each chat's own bearer token; sessions close on mcp.auth.credentials.changed", async () => {
     await resetEventTables();
     Object.assign(EventBus, { _instance: undefined });
     const bus = EventBus.instance;
@@ -444,21 +447,21 @@ describe("MCP runtime", () => {
         headers: { authorization: "Bearer operator-token" },
         tokenAuth: true,
       });
-      await expect(service.open({ ownerKey: "a", profileId: "fixture" })).rejects.toThrow(
-        "Run !mcp-auth token fixture TOKEN",
+      await expect(service.open({ ownerKey: "a", connectorId: "fixture" })).rejects.toThrow(
+        "Run !connector-auth token fixture TOKEN",
       );
       expect(authorizations.size).toBe(0);
 
       await saveMcpAuthToken("a", "fixture", "token-a");
       await saveMcpAuthToken("b", "fixture", "token-b");
-      const first = await service.open({ ownerKey: "a", profileId: "fixture" });
+      const first = await service.open({ ownerKey: "a", connectorId: "fixture" });
       expect(authorizations).toEqual(new Set(["Bearer token-a"]));
       await saveMcpAuthToken("a", "fixture", "token-a2");
       expect(first.signal.aborted).toBe(false);
       await credentialsChanged("a");
       expect(first.signal.aborted).toBe(true);
 
-      const second = await service.open({ ownerKey: "b", profileId: "fixture" });
+      const second = await service.open({ ownerKey: "b", connectorId: "fixture" });
       expect(authorizations).toEqual(new Set(["Bearer token-a", "Bearer token-b"]));
       await second.close();
 
@@ -479,9 +482,9 @@ describe("MCP runtime", () => {
 
   test("resource listing paginates and tolerates only unsupported template listing", async () => {
     await configure({ type: "stdio", command: "unused" });
-    const [profile] = await loadMcpProfiles();
-    if (profile === undefined) {
-      throw new Error("Missing MCP test profile");
+    const [connector] = await loadConnectors();
+    if (connector === undefined) {
+      throw new Error("Missing test connector");
     }
     const resourceCursors: TOption<string>[] = [];
     const templateCursors: TOption<string>[] = [];
@@ -516,14 +519,14 @@ describe("MCP runtime", () => {
     } as unknown as Client;
     const context: TMcpToolContext = {
       client,
-      profile,
-      args: { ownerKey: "test", profileId: profile.id },
+      connector,
+      args: { ownerKey: "test", connectorId: connector.id },
       signal: new AbortController().signal,
       updates: [],
     };
     const tools = await discoverTools(context);
     const list = tool(
-      { profile, tools, signal: context.signal, close: async () => {} },
+      { connector, tools, signal: context.signal, close: async () => {} },
       "mcp-list-resources",
     );
 
@@ -554,9 +557,9 @@ describe("MCP runtime", () => {
     await configure({
       type: "stdio",
       command: process.execPath,
-      args: [join(import.meta.dir, "fixtures/server.ts")],
+      args: [join(import.meta.dir, "mcp/fixtures/server.ts")],
     });
-    const session = await service.open({ ownerKey: "a", profileId: "fixture" });
+    const session = await service.open({ ownerKey: "a", connectorId: "fixture" });
     const controller = new AbortController();
     const request = tool(session, "wait").execute("w", {}, controller.signal);
     controller.abort(new Error("cancel test"));

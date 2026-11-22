@@ -202,7 +202,7 @@ test("a scripted session stores one row per visible message with its channel, a 
   await expectChanged(2, 0);
   await send(chatId, "!update", "client-2");
   await expectChanged(1, 0);
-  await publish(chatId, EEventType.NoticeReady, "Connected MCP profile notes.");
+  await publish(chatId, EEventType.NoticeReady, "Connected connector notes.");
   await expectChanged(1, 0);
   await publish(chatId, EEventType.DeliveryReady, "Take a break.");
   await expectChanged(1, 0);
@@ -264,7 +264,7 @@ test("a scripted session stores one row per visible message with its channel, a 
     {
       author: ERole.Assistant,
       kind: "display",
-      message: "Connected MCP profile notes.",
+      message: "Connected connector notes.",
       channel: EMessagePlatform.Signal,
       clientMessageId: null,
       replayed: false,

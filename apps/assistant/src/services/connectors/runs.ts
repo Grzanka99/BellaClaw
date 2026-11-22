@@ -1,11 +1,11 @@
 import type { TOption } from "@bellaclaw/shared";
 import { compile } from "@earendil-works/pi-schema";
 import { formats } from "@earendil-works/pi-schema/formats";
-import type { ElicitRequest, ElicitResult } from "@modelcontextprotocol/sdk/types.js";
+import type { TMcpElicit, TMcpElicitParams, TMcpElicitResult } from "./mcp/types";
 
 type TPendingElicitation = {
-  params: ElicitRequest["params"];
-  resolve: (result: ElicitResult) => void;
+  params: TMcpElicitParams;
+  resolve: (result: TMcpElicitResult) => void;
 };
 
 type TRunCompletion = {
@@ -19,7 +19,7 @@ type TStatusOutcome = { kind: "completed"; result: TRunCompletion } | { kind: "c
 
 type TLiveRun = {
   chatId: string;
-  profileId: string;
+  connectorId: string;
   controller: AbortController;
   completion: Promise<TRunCompletion>;
   close: () => Promise<void>;
@@ -30,32 +30,29 @@ type TLiveRun = {
   finishing: TOption<Promise<void>>;
 };
 
-export type TMcpRunStatus =
-  | { status: "completed"; runId: string; profileId: string; result: TRunCompletion }
-  | { status: "needs_input"; runId: string; profileId: string; request: ElicitRequest["params"] };
+export type TConnectorRunStatus =
+  | { status: "completed"; runId: string; connectorId: string; result: TRunCompletion }
+  | { status: "needs_input"; runId: string; connectorId: string; request: TMcpElicitParams };
 
-export class McpRunRegistry {
-  private static _instance: TOption<McpRunRegistry>;
+export class ConnectorRunRegistry {
+  private static _instance: TOption<ConnectorRunRegistry>;
   private runs = new Map<string, TLiveRun>();
 
-  public static get instance(): McpRunRegistry {
-    if (McpRunRegistry._instance === undefined) {
-      McpRunRegistry._instance = new McpRunRegistry();
+  public static get instance(): ConnectorRunRegistry {
+    if (ConnectorRunRegistry._instance === undefined) {
+      ConnectorRunRegistry._instance = new ConnectorRunRegistry();
     }
-    return McpRunRegistry._instance;
+    return ConnectorRunRegistry._instance;
   }
 
   public start(args: {
     chatId: string;
-    profileId: string;
+    connectorId: string;
     inputTimeoutMs: number;
     controller: AbortController;
-    run: (
-      signal: AbortSignal,
-      elicit: (params: ElicitRequest["params"], signal: AbortSignal) => Promise<ElicitResult>,
-    ) => Promise<TRunCompletion>;
+    run: (signal: AbortSignal, elicit: TMcpElicit) => Promise<TRunCompletion>;
     close: () => Promise<void>;
-  }): Promise<TMcpRunStatus> {
+  }): Promise<TConnectorRunStatus> {
     const runId = crypto.randomUUID();
     let notifyChanged: () => void = () => undefined;
     const changed = new Promise<void>((resolve) => {
@@ -63,7 +60,7 @@ export class McpRunRegistry {
     });
     const live: TLiveRun = {
       chatId: args.chatId,
-      profileId: args.profileId,
+      connectorId: args.connectorId,
       controller: args.controller,
       completion: Promise.resolve({
         text: undefined,
@@ -98,8 +95,8 @@ export class McpRunRegistry {
     return this.waitForStatus(runId, live);
   }
 
-  public list(chatId: string): TMcpRunStatus[] {
-    const statuses: TMcpRunStatus[] = [];
+  public list(chatId: string): TConnectorRunStatus[] {
+    const statuses: TConnectorRunStatus[] = [];
     for (const [runId, live] of this.runs) {
       if (live.chatId !== chatId || live.pending === undefined) {
         continue;
@@ -107,7 +104,7 @@ export class McpRunRegistry {
       statuses.push({
         status: "needs_input",
         runId,
-        profileId: live.profileId,
+        connectorId: live.connectorId,
         request: live.pending.params,
       });
     }
@@ -117,13 +114,13 @@ export class McpRunRegistry {
   public async resume(
     chatId: string,
     runId: string,
-    result: ElicitResult,
+    result: TMcpElicitResult,
     signal?: AbortSignal,
-  ): Promise<TMcpRunStatus> {
+  ): Promise<TConnectorRunStatus> {
     const live = this.requireOwned(chatId, runId);
     const pending = live.pending;
     if (pending === undefined) {
-      throw new Error("MCP run is not waiting for input");
+      throw new Error("Connector run is not waiting for input");
     }
     if (signal?.aborted) {
       live.controller.abort(signal.reason);
@@ -166,17 +163,17 @@ export class McpRunRegistry {
   private waitForInput(
     runId: string,
     live: TLiveRun,
-    params: ElicitRequest["params"],
+    params: TMcpElicitParams,
     signal: AbortSignal,
     inputTimeoutMs: number,
-  ): Promise<ElicitResult> {
+  ): Promise<TMcpElicitResult> {
     if (signal.aborted || live.controller.signal.aborted) {
       return Promise.resolve({ action: "cancel" });
     }
     if (live.pending !== undefined) {
-      return Promise.reject(new Error("MCP run requested concurrent elicitation"));
+      return Promise.reject(new Error("Connector run requested concurrent elicitation"));
     }
-    return new Promise<ElicitResult>((resolve) => {
+    return new Promise<TMcpElicitResult>((resolve) => {
       let pending: TPendingElicitation;
       const abort = () => {
         signal.removeEventListener("abort", abort);
@@ -210,7 +207,7 @@ export class McpRunRegistry {
     });
   }
 
-  private async waitForStatus(runId: string, live: TLiveRun): Promise<TMcpRunStatus> {
+  private async waitForStatus(runId: string, live: TLiveRun): Promise<TConnectorRunStatus> {
     const completed: Promise<TStatusOutcome> = live.completion.then((result) => ({
       kind: "completed",
       result,
@@ -218,20 +215,20 @@ export class McpRunRegistry {
     const changed: Promise<TStatusOutcome> = live.changed.then(() => ({ kind: "changed" }));
     const outcome = await Promise.race([completed, changed]);
     if (outcome.kind === "completed") {
-      return { status: "completed", runId, profileId: live.profileId, result: outcome.result };
+      return { status: "completed", runId, connectorId: live.connectorId, result: outcome.result };
     }
     const pending = live.pending;
     if (pending === undefined) {
       const result = await live.completion;
-      return { status: "completed", runId, profileId: live.profileId, result };
+      return { status: "completed", runId, connectorId: live.connectorId, result };
     }
-    return { status: "needs_input", runId, profileId: live.profileId, request: pending.params };
+    return { status: "needs_input", runId, connectorId: live.connectorId, request: pending.params };
   }
 
   private requireOwned(chatId: string, runId: string): TLiveRun {
     const live = this.runs.get(runId);
     if (live === undefined || live.chatId !== chatId) {
-      throw new Error("Unknown MCP run");
+      throw new Error("Unknown connector run");
     }
     return live;
   }

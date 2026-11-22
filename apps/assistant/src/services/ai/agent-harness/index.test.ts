@@ -23,10 +23,10 @@ import type {
   CreateMessageResultWithTools,
   ElicitRequest,
 } from "@modelcontextprotocol/sdk/types.js";
+import { ConnectorRunRegistry } from "../../connectors/runs";
 import type { TConversation } from "../../conversation/types";
 import type { TEventRequester } from "../../events";
 import { testEventRequester } from "../../events/test-utils";
-import { McpRunRegistry } from "../../mcp/runs";
 import { EMessagePlatform } from "../../messaging/types";
 import { DefaultConfigRecord, EConfigKey } from "../../settings/schema";
 import { EAgentName } from "../agents";
@@ -53,7 +53,7 @@ const TEST_TRACE: TBehaviorTraceContext = {
 
 describe("AgentHarness", () => {
   const previousApiKey = Bun.env.OPENROUTER_API_KEY;
-  const previousMcpConfig = Bun.env.BELLACLAW_MCP_CONFIG;
+  const previousConnectorsConfig = Bun.env.BELLACLAW_CONNECTORS_CONFIG;
   const previousOpencodeGoProvider = aiModels.getProvider(EAiProvider.OpencodeGo);
   const faux = fauxProvider({
     provider: EAiProvider.Openrouter,
@@ -79,18 +79,18 @@ describe("AgentHarness", () => {
       aiModels.setProvider(previousOpencodeGoProvider);
     }
 
-    if (previousMcpConfig === undefined) {
-      delete Bun.env.BELLACLAW_MCP_CONFIG;
+    if (previousConnectorsConfig === undefined) {
+      delete Bun.env.BELLACLAW_CONNECTORS_CONFIG;
     } else {
-      Bun.env.BELLACLAW_MCP_CONFIG = previousMcpConfig;
+      Bun.env.BELLACLAW_CONNECTORS_CONFIG = previousConnectorsConfig;
     }
   });
 
-  test("keeps main and scheduled task runs available when MCP configuration is malformed", async () => {
+  test("keeps main and scheduled task runs available when connectors configuration is malformed", async () => {
     const directory = await mkdtemp(join(tmpdir(), "bellaclaw-agent-harness-"));
-    const configPath = join(directory, "mcp.json");
-    await Bun.write(configPath, JSON.stringify({ profiles: [{ id: "invalid" }] }));
-    Bun.env.BELLACLAW_MCP_CONFIG = configPath;
+    const configPath = join(directory, "connectors.json");
+    await Bun.write(configPath, JSON.stringify({ connectors: [{ id: "invalid" }] }));
+    Bun.env.BELLACLAW_CONNECTORS_CONFIG = configPath;
     const warnings = spyOn(logger, "warning").mockImplementation(() => undefined);
     const toolNames: string[][] = [];
     faux.setResponses([
@@ -122,12 +122,14 @@ describe("AgentHarness", () => {
       ).toBe("scheduled reply");
       expect(toolNames).toHaveLength(2);
       for (const names of toolNames) {
-        expect(names).not.toContain("delegate-mcp");
-        expect(names).not.toContain("resume-mcp");
-        expect(names).not.toContain("cancel-mcp");
+        expect(names).not.toContain("delegate-connector");
+        expect(names).not.toContain("resume-connector");
+        expect(names).not.toContain("cancel-connector");
       }
       expect(warnings).toHaveBeenCalledTimes(2);
-      expect(warnings).toHaveBeenCalledWith(expect.stringContaining("Invalid MCP configuration"));
+      expect(warnings).toHaveBeenCalledWith(
+        expect.stringContaining("Invalid connectors configuration"),
+      );
     } finally {
       warnings.mockRestore();
       await rm(directory, { recursive: true, force: true });
@@ -296,15 +298,15 @@ describe("AgentHarness", () => {
   test.each([
     "empty",
     "malformed",
-  ])("resumes a scheduled MCP question with %s current configuration", async (configuration) => {
+  ])("resumes a scheduled connector question with %s current configuration", async (configuration) => {
     const directory = await mkdtemp(join(tmpdir(), "bellaclaw-agent-harness-"));
-    const configPath = join(directory, "mcp.json");
-    let profiles: Array<{ id: string }> = [];
+    const configPath = join(directory, "connectors.json");
+    let connectors: Array<{ id: string }> = [];
     if (configuration === "malformed") {
-      profiles = [{ id: "invalid" }];
+      connectors = [{ id: "invalid" }];
     }
-    await Bun.write(configPath, JSON.stringify({ profiles }));
-    Bun.env.BELLACLAW_MCP_CONFIG = configPath;
+    await Bun.write(configPath, JSON.stringify({ connectors }));
+    Bun.env.BELLACLAW_CONNECTORS_CONFIG = configPath;
 
     try {
       const chatId = crypto.randomUUID();
@@ -319,9 +321,9 @@ describe("AgentHarness", () => {
         },
       };
       let answer = "";
-      const pending = await McpRunRegistry.instance.start({
+      const pending = await ConnectorRunRegistry.instance.start({
         chatId,
-        profileId: "files",
+        connectorId: "files",
         inputTimeoutMs: 1_000,
         controller: new AbortController(),
         close,
@@ -336,7 +338,7 @@ describe("AgentHarness", () => {
           contexts.push({ ...context, messages: structuredClone(context.messages) });
           return fauxAssistantMessage(
             fauxToolCall(
-              "resume-mcp",
+              "resume-connector",
               { runId: pending.runId, action: "accept", content: { folder: "docs" } },
               { id: "resume-scheduled" },
             ),
@@ -358,20 +360,20 @@ describe("AgentHarness", () => {
       });
 
       const toolNames = getCurrentTools(contexts[0]?.messages ?? []).map((tool) => tool.name);
-      expect(toolNames).toContain("resume-mcp");
-      expect(toolNames).toContain("cancel-mcp");
-      expect(toolNames).not.toContain("delegate-mcp");
+      expect(toolNames).toContain("resume-connector");
+      expect(toolNames).toContain("cancel-connector");
+      expect(toolNames).not.toContain("delegate-connector");
       expect(JSON.stringify(contexts[0]?.messages)).toContain("Which folder?");
       expect(answer).toBe(JSON.stringify({ action: "accept", content: { folder: "docs" } }));
       expect(result.text).toBe("The scheduled file operation completed.");
       expect(close).toHaveBeenCalledTimes(1);
-      expect(McpRunRegistry.instance.list(chatId)).toEqual([]);
+      expect(ConnectorRunRegistry.instance.list(chatId)).toEqual([]);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
   });
 
-  test("uses refreshed MCP tools on the next specialist turn", async () => {
+  test("uses refreshed connector tools on the next specialist turn", async () => {
     const schema = obj({}, { open: true });
     const tools: AgentTool[] = [];
     const replacement: AgentTool = {
@@ -409,8 +411,8 @@ describe("AgentHarness", () => {
     };
 
     const result = await harness.run({
-      name: EAgentName.Mcp,
-      prompt: "Use the MCP tools",
+      name: EAgentName.Connector,
+      prompt: "Use the connector tools",
       conversationKey: "discord:1",
       ownerKey: "discord:1",
       settings: { ...DefaultConfigRecord, [EConfigKey.AiProvider]: EAiProvider.Openrouter },
@@ -421,8 +423,8 @@ describe("AgentHarness", () => {
       parentToolCallId: "delegate-call",
       signal: undefined,
       delegationCount: undefined,
-      mcp: {
-        profile: {
+      connector: {
+        connector: {
           id: "files",
           description: "Files",
           instructions: "Use file tools",
@@ -1072,13 +1074,13 @@ describe("AgentHarness", () => {
     }
   });
 
-  test("returns only the MCP specialist answer to Main", async () => {
+  test("returns only the connector specialist answer to Main", async () => {
     const directory = await mkdtemp(join(tmpdir(), "bellaclaw-agent-harness-"));
-    const configPath = join(directory, "mcp.json");
+    const configPath = join(directory, "connectors.json");
     await Bun.write(
       configPath,
       JSON.stringify({
-        profiles: [
+        connectors: [
           {
             id: "fixture",
             description: "Fixture",
@@ -1086,20 +1088,20 @@ describe("AgentHarness", () => {
             transport: {
               type: "stdio",
               command: process.execPath,
-              args: [join(import.meta.dir, "../../mcp/fixtures/server.ts")],
+              args: [join(import.meta.dir, "../../connectors/mcp/fixtures/server.ts")],
             },
           },
         ],
       }),
     );
-    Bun.env.BELLACLAW_MCP_CONFIG = configPath;
+    Bun.env.BELLACLAW_CONNECTORS_CONFIG = configPath;
     let toolResult = "";
     faux.setResponses([
       fauxAssistantMessage(
         fauxToolCall(
-          "delegate-mcp",
-          { profileId: "fixture", task: "Read the note", context: "none" },
-          { id: "mcp-delegate" },
+          "delegate-connector",
+          { connectorId: "fixture", task: "Read the note", context: "none" },
+          { id: "connector-delegate" },
         ),
       ),
       fauxAssistantMessage("Specialist answer"),
@@ -1129,13 +1131,13 @@ describe("AgentHarness", () => {
     }
   });
 
-  test("tells Scheduling which MCP profiles scheduled tasks can use", async () => {
+  test("tells Scheduling which connectors scheduled tasks can use", async () => {
     const directory = await mkdtemp(join(tmpdir(), "bellaclaw-agent-harness-"));
-    const configPath = join(directory, "mcp.json");
+    const configPath = join(directory, "connectors.json");
     await Bun.write(
       configPath,
       JSON.stringify({
-        profiles: [
+        connectors: [
           {
             id: "vault",
             description: "Edit notes",
@@ -1145,11 +1147,15 @@ describe("AgentHarness", () => {
         ],
       }),
     );
-    Bun.env.BELLACLAW_MCP_CONFIG = configPath;
+    Bun.env.BELLACLAW_CONNECTORS_CONFIG = configPath;
     let schedulingPrompt = "";
     faux.setResponses([
       fauxAssistantMessage(
-        fauxToolCall("delegate-scheduling", { task: "Every minute" }, { id: "profiles-delegate" }),
+        fauxToolCall(
+          "delegate-scheduling",
+          { task: "Every minute" },
+          { id: "connectors-delegate" },
+        ),
       ),
       (context) => {
         schedulingPrompt = getCurrentSystemPrompt(context.messages) ?? "";
@@ -1170,7 +1176,7 @@ describe("AgentHarness", () => {
         signal: undefined,
       });
       expect(schedulingPrompt).toContain(
-        "<scheduled_task_mcp_profiles>\nvault: Edit notes\n</scheduled_task_mcp_profiles>",
+        "<scheduled_task_connectors>\nvault: Edit notes\n</scheduled_task_connectors>",
       );
     } finally {
       await rm(directory, { recursive: true, force: true });
@@ -2032,7 +2038,7 @@ describe("stepDetail", () => {
       ["web-search", { query: "  OVH invoice\n terms ", maxResults: 5, topic: "news" }],
       ["web-fetch", { url: "https://www.ovhcloud.com/en/pricing", format: "markdown" }],
       ["web-fetch", { url: "not a url" }],
-      ["delegate-mcp", { profileId: "vault", task: "Read the trip note" }],
+      ["delegate-connector", { connectorId: "vault", task: "Read the trip note" }],
       ["delegate-calendar", { task: "  Move the dentist\n to Friday " }],
     ];
 

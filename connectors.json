@@ -1,5 +1,5 @@
 {
-  "profiles": [
+  "connectors": [
     {
       "id": "logs",
       "description": "Inspect BellaClaw failures, turn latency, and model prompt-cache usage.",

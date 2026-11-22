@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { ElicitRequest } from "@modelcontextprotocol/sdk/types.js";
-import { McpRunRegistry } from "./runs";
+import { ConnectorRunRegistry } from "./runs";
 
 const request: ElicitRequest["params"] = {
   mode: "form",
@@ -12,14 +12,14 @@ const request: ElicitRequest["params"] = {
   },
 };
 
-describe("McpRunRegistry", () => {
+describe("ConnectorRunRegistry", () => {
   test("resumes repeated questions on the same run and retains its transcript", async () => {
     const chatId = crypto.randomUUID();
     const transcript: string[] = [];
     let closes = 0;
-    const first = await McpRunRegistry.instance.start({
+    const first = await ConnectorRunRegistry.instance.start({
       chatId,
-      profileId: "files",
+      connectorId: "files",
       inputTimeoutMs: 1_000,
       controller: new AbortController(),
       close: async () => {
@@ -38,7 +38,7 @@ describe("McpRunRegistry", () => {
     });
 
     expect(first.status).toBe("needs_input");
-    const second = await McpRunRegistry.instance.resume(chatId, first.runId, {
+    const second = await ConnectorRunRegistry.instance.resume(chatId, first.runId, {
       action: "accept",
       content: { folder: "docs" },
     });
@@ -46,7 +46,7 @@ describe("McpRunRegistry", () => {
       status: "needs_input",
       request: { message: "Which filename?" },
     });
-    const completed = await McpRunRegistry.instance.resume(chatId, first.runId, {
+    const completed = await ConnectorRunRegistry.instance.resume(chatId, first.runId, {
       action: "accept",
       content: { folder: "notes.txt" },
     });
@@ -59,16 +59,16 @@ describe("McpRunRegistry", () => {
       JSON.stringify({ action: "accept", content: { folder: "docs" } }),
       JSON.stringify({ action: "accept", content: { folder: "notes.txt" } }),
     ]);
-    expect(McpRunRegistry.instance.list(chatId)).toEqual([]);
+    expect(ConnectorRunRegistry.instance.list(chatId)).toEqual([]);
     expect(closes).toBe(1);
   });
 
   test("only the owning chat can resume or cancel a run", async () => {
     const chatId = crypto.randomUUID();
     let closes = 0;
-    const status = await McpRunRegistry.instance.start({
+    const status = await ConnectorRunRegistry.instance.start({
       chatId,
-      profileId: "files",
+      connectorId: "files",
       inputTimeoutMs: 1_000,
       controller: new AbortController(),
       close: async () => {
@@ -81,13 +81,13 @@ describe("McpRunRegistry", () => {
     });
 
     expect(() =>
-      McpRunRegistry.instance.resume("another-chat", status.runId, { action: "decline" }),
-    ).toThrow("Unknown MCP run");
-    expect(() => McpRunRegistry.instance.cancel("another-chat", status.runId)).toThrow(
-      "Unknown MCP run",
+      ConnectorRunRegistry.instance.resume("another-chat", status.runId, { action: "decline" }),
+    ).toThrow("Unknown connector run");
+    expect(() => ConnectorRunRegistry.instance.cancel("another-chat", status.runId)).toThrow(
+      "Unknown connector run",
     );
-    await McpRunRegistry.instance.cancel(chatId, status.runId);
-    expect(McpRunRegistry.instance.list(chatId)).toEqual([]);
+    await ConnectorRunRegistry.instance.cancel(chatId, status.runId);
+    expect(ConnectorRunRegistry.instance.list(chatId)).toEqual([]);
     expect(closes).toBe(1);
   });
 
@@ -95,9 +95,9 @@ describe("McpRunRegistry", () => {
     const chatId = crypto.randomUUID();
     let closes = 0;
     let runAborted = false;
-    const status = await McpRunRegistry.instance.start({
+    const status = await ConnectorRunRegistry.instance.start({
       chatId,
-      profileId: "files",
+      connectorId: "files",
       inputTimeoutMs: 1_000,
       controller: new AbortController(),
       close: async () => {
@@ -117,7 +117,7 @@ describe("McpRunRegistry", () => {
       },
     });
     const caller = new AbortController();
-    const resumed = McpRunRegistry.instance.resume(
+    const resumed = ConnectorRunRegistry.instance.resume(
       chatId,
       status.runId,
       { action: "accept", content: { folder: "docs" } },
@@ -133,16 +133,16 @@ describe("McpRunRegistry", () => {
       result: { stopReason: "aborted" },
     });
     expect(runAborted).toBe(true);
-    expect(McpRunRegistry.instance.list(chatId)).toEqual([]);
+    expect(ConnectorRunRegistry.instance.list(chatId)).toEqual([]);
     expect(closes).toBe(1);
   });
 
   test("expires and closes an unanswered run without another registry call", async () => {
     const chatId = crypto.randomUUID();
     let closes = 0;
-    await McpRunRegistry.instance.start({
+    await ConnectorRunRegistry.instance.start({
       chatId,
-      profileId: "files",
+      connectorId: "files",
       inputTimeoutMs: 10,
       controller: new AbortController(),
       close: async () => {
@@ -155,7 +155,7 @@ describe("McpRunRegistry", () => {
     });
 
     await Bun.sleep(30);
-    expect(McpRunRegistry.instance.list(chatId)).toEqual([]);
+    expect(ConnectorRunRegistry.instance.list(chatId)).toEqual([]);
     expect(closes).toBe(1);
   });
 
@@ -163,9 +163,9 @@ describe("McpRunRegistry", () => {
     const chatId = crypto.randomUUID();
     let rejectRun: (error: Error) => void = () => undefined;
     let closes = 0;
-    await McpRunRegistry.instance.start({
+    await ConnectorRunRegistry.instance.start({
       chatId,
-      profileId: "files",
+      connectorId: "files",
       inputTimeoutMs: 1_000,
       controller: new AbortController(),
       close: async () => {
@@ -182,7 +182,7 @@ describe("McpRunRegistry", () => {
 
     rejectRun(new Error("disconnected"));
     await Bun.sleep(0);
-    expect(McpRunRegistry.instance.list(chatId)).toEqual([]);
+    expect(ConnectorRunRegistry.instance.list(chatId)).toEqual([]);
     expect(closes).toBe(1);
   });
 });

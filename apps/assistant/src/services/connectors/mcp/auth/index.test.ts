@@ -4,19 +4,19 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { EEventType } from "@bellaclaw/database";
 import { auth } from "@modelcontextprotocol/sdk/client/auth.js";
-import { EventBus, type TEventDraft } from "../../events";
+import { EventBus, type TEventDraft } from "../../../events";
 
 let directory: string;
 let oauthServer: ReturnType<typeof Bun.serve>;
 let service: typeof import(".");
-let profile: Awaited<ReturnType<typeof import("../config").getMcpProfile>>;
+let connector: Awaited<ReturnType<typeof import("../../config").getConnector>>;
 let refreshes = 0;
 let blockedTokenExchange: Promise<void> | undefined;
 let markTokenExchangeStarted: (() => void) | undefined;
 let blockedRefreshExchange: Promise<void> | undefined;
 let markRefreshExchangeStarted: (() => void) | undefined;
 
-const previousConfigPath = Bun.env.BELLACLAW_MCP_CONFIG;
+const previousConfigPath = Bun.env.BELLACLAW_CONNECTORS_CONFIG;
 const previousCredentialsPath = Bun.env.BELLACLAW_MCP_CREDENTIALS_PATH;
 const previousPublicUrl = Bun.env.BELLACLAW_MCP_PUBLIC_URL;
 const previousClientId = Bun.env.BELLACLAW_TEST_MCP_CLIENT_ID;
@@ -77,11 +77,11 @@ beforeAll(async () => {
   });
 
   const origin = `http://127.0.0.1:${oauthServer.port}`;
-  const configPath = join(directory, "mcp.json");
+  const configPath = join(directory, "connectors.json");
   await writeFile(
     configPath,
     JSON.stringify({
-      profiles: [
+      connectors: [
         {
           id: "documents",
           description: "Test documents",
@@ -99,7 +99,7 @@ beforeAll(async () => {
         },
         {
           id: "reserved-parameter",
-          description: "Invalid test profile",
+          description: "Invalid test connector",
           instructions: "Test reserved authorization parameters.",
           transport: {
             type: "http",
@@ -115,24 +115,24 @@ beforeAll(async () => {
       ],
     }),
   );
-  Bun.env.BELLACLAW_MCP_CONFIG = configPath;
+  Bun.env.BELLACLAW_CONNECTORS_CONFIG = configPath;
   Bun.env.BELLACLAW_MCP_CREDENTIALS_PATH = join(directory, "credentials.json");
   Bun.env.BELLACLAW_MCP_PUBLIC_URL = "http://localhost:3080";
   Bun.env.BELLACLAW_TEST_MCP_CLIENT_ID = "test-client";
   Bun.env.BELLACLAW_TEST_MCP_CLIENT_SECRET = "test-secret";
 
   service = await import(".");
-  const config = await import("../config");
-  profile = await config.getMcpProfile("documents");
+  const config = await import("../../config");
+  connector = await config.getConnector("documents");
 });
 
 afterAll(async () => {
   oauthServer.stop(true);
   await rm(directory, { recursive: true, force: true });
   if (previousConfigPath === undefined) {
-    delete Bun.env.BELLACLAW_MCP_CONFIG;
+    delete Bun.env.BELLACLAW_CONNECTORS_CONFIG;
   } else {
-    Bun.env.BELLACLAW_MCP_CONFIG = previousConfigPath;
+    Bun.env.BELLACLAW_CONNECTORS_CONFIG = previousConfigPath;
   }
   if (previousCredentialsPath === undefined) {
     delete Bun.env.BELLACLAW_MCP_CREDENTIALS_PATH;
@@ -190,9 +190,9 @@ describe("MCP OAuth", () => {
 
   test("closes the runtime session when starting authentication fails", async () => {
     const chatId = "signal:reserved";
-    const config = await import("../config");
-    const reservedProfile = await config.getMcpProfile("reserved-parameter");
-    const provider = await service.getMcpAuthProvider(chatId, reservedProfile);
+    const config = await import("../../config");
+    const reservedConnector = await config.getConnector("reserved-parameter");
+    const provider = await service.getMcpAuthProvider(chatId, reservedConnector);
     expect(provider).toBeDefined();
     if (provider === undefined) {
       throw new Error("Missing OAuth provider");
@@ -201,7 +201,7 @@ describe("MCP OAuth", () => {
       "OAuth authorization parameter state is reserved",
     );
     await expect(provider.tokens()).rejects.toThrow(
-      "MCP authentication for profile reserved-parameter was cancelled",
+      "MCP authentication for connector reserved-parameter was cancelled",
     );
   });
 
@@ -216,12 +216,12 @@ describe("MCP OAuth", () => {
     const stored = await readFile(credentialsPath, "utf8");
     expect(stored).toContain("refresh-first");
 
-    const provider = await service.getMcpAuthProvider("signal:first", profile);
+    const provider = await service.getMcpAuthProvider("signal:first", connector);
     expect(provider).toBeDefined();
     if (provider === undefined) {
       throw new Error("Missing OAuth provider");
     }
-    const serverUrl = profile.transport.type === "http" ? profile.transport.url : "";
+    const serverUrl = connector.transport.type === "http" ? connector.transport.url : "";
     const refreshFetch = service.createMcpAuthFetch("signal:first", "documents");
     await Promise.all([
       auth(provider, { serverUrl, fetchFn: refreshFetch }),
@@ -267,16 +267,16 @@ describe("MCP OAuth", () => {
     );
     expect(callback.status).toBe(200);
 
-    const provider = await service.getMcpAuthProvider(chatId, profile);
+    const provider = await service.getMcpAuthProvider(chatId, connector);
     expect(provider).toBeDefined();
     if (provider === undefined) {
       throw new Error("Missing OAuth provider");
     }
     await expect(service.beginMcpAuth(chatId, "documents")).rejects.toThrow(
-      "MCP profile documents is already connected",
+      "Connector documents is already connected",
     );
     await expect(provider.tokens()).rejects.toThrow(
-      "MCP authentication for profile documents was cancelled",
+      "MCP authentication for connector documents was cancelled",
     );
   });
 
@@ -290,7 +290,7 @@ describe("MCP OAuth", () => {
     );
     expect(firstCallback.status).toBe(200);
 
-    const provider = await service.getMcpAuthProvider(chatId, profile);
+    const provider = await service.getMcpAuthProvider(chatId, connector);
     expect(provider).toBeDefined();
     if (provider === undefined) {
       throw new Error("Missing OAuth provider");
@@ -318,7 +318,7 @@ describe("MCP OAuth", () => {
       expect(secondCallback.status).toBe(200);
       expect(notifications).toEqual(["connected"]);
       await expect(provider.tokens()).rejects.toThrow(
-        "MCP authentication for profile documents was cancelled",
+        "MCP authentication for connector documents was cancelled",
       );
     } finally {
       publish.mockRestore();
@@ -407,7 +407,7 @@ describe("MCP OAuth", () => {
     );
     expect(callback.status).toBe(200);
 
-    const provider = await service.getMcpAuthProvider(chatId, profile);
+    const provider = await service.getMcpAuthProvider(chatId, connector);
     expect(provider).toBeDefined();
     if (provider === undefined) {
       throw new Error("Missing OAuth provider");
@@ -423,7 +423,7 @@ describe("MCP OAuth", () => {
     });
     markRefreshExchangeStarted = markStarted;
 
-    const serverUrl = profile.transport.type === "http" ? profile.transport.url : "";
+    const serverUrl = connector.transport.type === "http" ? connector.transport.url : "";
     const refreshing = auth(provider, {
       serverUrl,
       fetchFn: service.createMcpAuthFetch(chatId, "documents"),
@@ -437,7 +437,7 @@ describe("MCP OAuth", () => {
     expect(await service.getMcpAuthStatus(chatId, "documents")).toBe(false);
 
     const reconnectUrl = new URL(await service.beginMcpAuth(chatId, "documents"));
-    const reconnectedProvider = await service.getMcpAuthProvider(chatId, profile);
+    const reconnectedProvider = await service.getMcpAuthProvider(chatId, connector);
     expect(reconnectedProvider).not.toBe(provider);
     const reconnectCallback = await service.handleMcpAuthCallback(
       new Request(

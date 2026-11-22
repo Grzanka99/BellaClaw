@@ -2,9 +2,9 @@ import type { TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
 import type { TOption } from "@bellaclaw/shared";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { Message } from "@earendil-works/pi-ai";
+import type { TConnector } from "../../connectors/config";
 import type { TConversation } from "../../conversation/types";
 import type { TEventRequester } from "../../events";
-import type { TMcpProfile } from "../../mcp/config";
 import type { EMessagePlatform, TAttachmentRef } from "../../messaging/types";
 import type { TConfigRecord } from "../../settings/schema";
 import type { EAgentName } from "../agents";
@@ -28,9 +28,9 @@ export type TAgentRunArgs = {
   images?: TTurnImages;
   parentToolCallId: TOption<string>;
   signal: TOption<AbortSignal>;
-  mcp?: { profile: TMcpProfile; tools: AgentTool[] };
-  /** Dry runs must not reach MCP servers, whose tools can have side effects. */
-  withoutMcp?: boolean;
+  connector?: { connector: TConnector; tools: AgentTool[] };
+  /** Dry runs must not reach connectors, whose tools can have side effects. */
+  withoutConnectors?: boolean;
   /** The model the root agent runs on instead of the one its settings resolve to. */
   model?: TLlmModelConfig;
   /** The reply turn's tool calls as they start and end; delegated runs report none. */

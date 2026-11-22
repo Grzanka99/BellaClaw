@@ -259,7 +259,7 @@ test("a message queued behind a running turn turns typing on again when it start
         await internalRequest(
           "POST",
           path,
-          JSON.stringify({ clientMessageId: "m-3", text: "!mcp-auth" }),
+          JSON.stringify({ clientMessageId: "m-3", text: "!connector-auth" }),
         )
       ).status,
     ).toBe(200);
@@ -270,7 +270,7 @@ test("a message queued behind a running turn turns typing on again when it start
         type: "reply",
         accountId,
         conversationKey,
-        text: "Usage: !mcp-auth connect|disconnect|status PROFILE or !mcp-auth token PROFILE TOKEN",
+        text: "Usage: !connector-auth connect|disconnect|status CONNECTOR or !connector-auth token CONNECTOR TOKEN",
       }),
     ).toEqual([typing(true), typing(true), changed(1), typing(true)]);
   } finally {
@@ -319,12 +319,12 @@ test("a confidential command reply to an app message streams once as a reply and
   const conversationKey = `bella:${accountId}`;
   const address = `+${Date.now()}`;
   const usage =
-    "Usage: !mcp-auth connect|disconnect|status PROFILE or !mcp-auth token PROFILE TOKEN";
+    "Usage: !connector-auth connect|disconnect|status CONNECTOR or !connector-auth token CONNECTOR TOKEN";
   await linkTestAddress(address, accountId);
   const { sendText } = await start();
   const stream = await openStream();
 
-  await sendApp(accountId, "!mcp-auth", "m-1");
+  await sendApp(accountId, "!connector-auth", "m-1");
 
   expect(await stream.drainToMarker()).toEqual([
     { type: "reply", accountId, conversationKey, text: usage },
@@ -339,7 +339,7 @@ test("a confidential command reply to an app message streams once as a reply and
       .where(eq(eventsTable.type, EEventType.ConversationChanged)),
   ).toEqual([]);
 
-  await publishTestMessage(`signal:${address}`, "!mcp-auth");
+  await publishTestMessage(`signal:${address}`, "!connector-auth");
 
   expect(sendText.mock.calls).toEqual([[address, usage]]);
   expect(await stream.drainToMarker()).toEqual([]);

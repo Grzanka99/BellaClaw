@@ -23,13 +23,6 @@ import {
   str,
   union,
 } from "@earendil-works/pi-schema";
-import type {
-  CreateMessageRequest,
-  CreateMessageResult,
-  CreateMessageResultWithTools,
-  ElicitRequest,
-  ElicitResult,
-} from "@modelcontextprotocol/sdk/types.js";
 import type { TToolLogPolicy } from "../../app-logger/sanitizers";
 import {
   sanitizeToolCallArguments,
@@ -37,6 +30,11 @@ import {
   sanitizeToolResultError,
 } from "../../app-logger/sanitizers";
 import { startSpan, type TBehaviorSpan } from "../../app-logger/span";
+import { ConnectorService } from "../../connectors";
+import { loadConnectors } from "../../connectors/config";
+import { createMcpSamplingRequest, createMcpSamplingResult } from "../../connectors/mcp/sampling";
+import type { TMcpElicit, TMcpSampleParams, TMcpSampleResult } from "../../connectors/mcp/types";
+import { ConnectorRunRegistry, type TConnectorRunStatus } from "../../connectors/runs";
 import { compactConversation } from "../../conversation/compaction";
 import {
   attachmentBlock,
@@ -44,10 +42,6 @@ import {
   SAttachmentBlock,
   type TConversation,
 } from "../../conversation/types";
-import { McpService } from "../../mcp";
-import { loadMcpProfiles } from "../../mcp/config";
-import { McpRunRegistry, type TMcpRunStatus } from "../../mcp/runs";
-import { createMcpSamplingRequest, createMcpSamplingResult } from "../../mcp/sampling";
 import type { TAttachmentRef } from "../../messaging/types";
 import { EConfigKey, type TConfigRecord } from "../../settings/schema";
 import { AGENTS, EAgentName } from "../agents";
@@ -260,8 +254,8 @@ export class AgentHarness {
       toolExecution: "parallel",
       prepareNextTurnWithContext: (context) => {
         let nextTools = context.context.tools;
-        if (args.mcp !== undefined) {
-          nextTools = [...args.mcp.tools];
+        if (args.connector !== undefined) {
+          nextTools = [...args.connector.tools];
           agent.state.tools = nextTools;
         }
 
@@ -461,9 +455,9 @@ export class AgentHarness {
           (args.name === EAgentName.Main || args.name === EAgentName.Plain) &&
           args.conversationKey !== undefined
         ) {
-          const pendingRuns = McpRunRegistry.instance.list(args.conversationKey);
+          const pendingRuns = ConnectorRunRegistry.instance.list(args.conversationKey);
           if (pendingRuns.length > 0) {
-            prompt += `\n\nPending MCP runs awaiting this user's response:\n${JSON.stringify(pendingRuns)}`;
+            prompt += `\n\nPending connector runs awaiting this user's response:\n${JSON.stringify(pendingRuns)}`;
           }
         }
         await agent.prompt({
@@ -685,24 +679,24 @@ export class AgentHarness {
       }
     }
 
-    if (args.mcp !== undefined) {
+    if (args.connector !== undefined) {
       parts.push(
-        `<mcp_profile_instructions>${args.mcp.profile.instructions}</mcp_profile_instructions>`,
+        `<connector_instructions>${args.connector.connector.instructions}</connector_instructions>`,
       );
     }
 
     if (args.name === EAgentName.Scheduling) {
-      let profiles: Awaited<ReturnType<typeof loadMcpProfiles>> = [];
+      let connectors: Awaited<ReturnType<typeof loadConnectors>> = [];
       try {
-        profiles = await loadMcpProfiles();
+        connectors = await loadConnectors();
       } catch (error) {
-        this.logger.warning(`MCP profiles unavailable to Scheduling: ${String(error)}`);
+        this.logger.warning(`Connectors unavailable to Scheduling: ${String(error)}`);
       }
-      if (profiles.length > 0) {
-        const summary = profiles
-          .map((profile) => `${profile.id}: ${profile.description}`)
+      if (connectors.length > 0) {
+        const summary = connectors
+          .map((connector) => `${connector.id}: ${connector.description}`)
           .join("\n");
-        parts.push(`<scheduled_task_mcp_profiles>\n${summary}\n</scheduled_task_mcp_profiles>`);
+        parts.push(`<scheduled_task_connectors>\n${summary}\n</scheduled_task_connectors>`);
       }
     }
 
@@ -735,12 +729,12 @@ export class AgentHarness {
       ...this.createDelegationTools(args),
     ];
 
-    if (agentDefinition.mcp && args.withoutMcp !== true) {
-      tools.push(...(await this.createMcpDelegationTools(args)));
+    if (agentDefinition.connectors && args.withoutConnectors !== true) {
+      tools.push(...(await this.createConnectorDelegationTools(args)));
     }
 
-    if (args.mcp !== undefined) {
-      tools.push(...args.mcp.tools);
+    if (args.connector !== undefined) {
+      tools.push(...args.connector.tools);
     }
 
     return tools;
@@ -814,28 +808,28 @@ export class AgentHarness {
     });
   }
 
-  private async createMcpDelegationTools(
+  private async createConnectorDelegationTools(
     args: TAgentRunArgs & { delegationCount: TOption<() => void> },
   ): Promise<AgentTool[]> {
-    let profiles: Awaited<ReturnType<typeof loadMcpProfiles>> = [];
+    let connectors: Awaited<ReturnType<typeof loadConnectors>> = [];
     try {
-      profiles = await loadMcpProfiles();
+      connectors = await loadConnectors();
     } catch (error) {
-      this.logger.warning(`MCP delegation disabled: ${String(error)}`);
+      this.logger.warning(`Connector delegation disabled: ${String(error)}`);
     }
     if (args.name === EAgentName.Plain) {
-      profiles = profiles.filter((profile) => profile.plainChats);
+      connectors = connectors.filter((connector) => connector.plainChats);
     }
-    const profileSummary = profiles
-      .map((profile) => `${profile.id}: ${profile.description}`)
+    const connectorSummary = connectors
+      .map((connector) => `${connector.id}: ${connector.description}`)
       .join("\n");
     const delegateSchema = obj(
       {
-        profileId: str({
+        connectorId: str({
           minLength: 1,
-          description: `One configured profile:\n${profileSummary}`,
+          description: `One configured connector:\n${connectorSummary}`,
         }),
-        task: str({ minLength: 1, description: "Focused task for the MCP specialist" }),
+        task: str({ minLength: 1, description: "Focused task for the connector specialist" }),
         context: str({
           minLength: 1,
           description: "Recent conversation context needed for this task, stated explicitly",
@@ -855,9 +849,9 @@ export class AgentHarness {
     const cancelSchema = obj({ runId: str({ minLength: 1 }) }, { open: true });
     const tools: AgentTool[] = [
       {
-        name: "delegate-mcp",
-        label: "Delegate MCP",
-        description: `Run one configured MCP specialist. Profiles:\n${profileSummary}`,
+        name: "delegate-connector",
+        label: "Delegate connector",
+        description: `Run one configured connector specialist. Connectors:\n${connectorSummary}`,
         parameters: delegateSchema,
         executionMode: SEQUENTIAL,
         execute: async (toolCallId, parameters, signal) => {
@@ -865,29 +859,26 @@ export class AgentHarness {
           if (args.name === EAgentName.Main || args.name === EAgentName.Plain) {
             args.delegationCount?.();
           }
-          const profile = profiles.find((candidate) => candidate.id === parsed.profileId);
-          if (profile === undefined) {
-            throw new Error(`Unknown MCP profile: ${parsed.profileId}`);
+          const connector = connectors.find((candidate) => candidate.id === parsed.connectorId);
+          if (connector === undefined) {
+            throw new Error(`Unknown connector: ${parsed.connectorId}`);
           }
           // credentials belong to the owner, pending runs to the conversation
-          const ownerKey = this.requireMcpChatId(args.ownerKey);
-          const conversationKey = this.requireMcpChatId(args.conversationKey);
+          const ownerKey = this.requireConnectorChatId(args.ownerKey);
+          const conversationKey = this.requireConnectorChatId(args.conversationKey);
           const controller = new AbortController();
           const abort = () => controller.abort();
           signal?.addEventListener("abort", abort, { once: true });
           args.signal?.addEventListener("abort", abort, { once: true });
           let sampleCount = 0;
-          let forwardElicitation: (
-            params: ElicitRequest["params"],
-            requestSignal: AbortSignal,
-          ) => Promise<ElicitResult> = () => {
+          let forwardElicitation: TMcpElicit = () => {
             return Promise.reject(new Error("MCP elicitation started before the specialist"));
           };
           try {
-            const session = await McpService.instance.open({
+            const session = await ConnectorService.instance.open({
               ownerKey,
               conversationKey,
-              profileId: profile.id,
+              connectorId: connector.id,
               turnId: args.trace.turnId,
               signal: controller.signal,
               sample: (params, requestSignal) => {
@@ -907,23 +898,23 @@ export class AgentHarness {
               },
               elicit: (params, requestSignal) => forwardElicitation(params, requestSignal),
             });
-            const status = await McpRunRegistry.instance.start({
+            const status = await ConnectorRunRegistry.instance.start({
               chatId: conversationKey,
-              profileId: profile.id,
-              inputTimeoutMs: profile.inputTimeoutMs,
+              connectorId: connector.id,
+              inputTimeoutMs: connector.inputTimeoutMs,
               controller,
               close: () => session.close(),
               run: async (runSignal, elicit) => {
                 forwardElicitation = elicit;
                 const result = await this.run({
                   ...args,
-                  name: EAgentName.Mcp,
-                  prompt: this.createMcpPrompt(args.prompt, parsed.task, parsed.context),
+                  name: EAgentName.Connector,
+                  prompt: this.createConnectorPrompt(args.prompt, parsed.task, parsed.context),
                   conversation: undefined,
                   parentToolCallId: toolCallId,
                   signal: AbortSignal.any([runSignal, session.signal]),
                   delegationCount: undefined,
-                  mcp: { profile: session.profile, tools: session.tools },
+                  connector: { connector: session.connector, tools: session.tools },
                   model: undefined,
                   onStep: undefined,
                 });
@@ -936,7 +927,7 @@ export class AgentHarness {
                 };
               },
             });
-            return this.mcpStatusResult(status);
+            return this.connectorStatusResult(status);
           } finally {
             signal?.removeEventListener("abort", abort);
             args.signal?.removeEventListener("abort", abort);
@@ -944,45 +935,45 @@ export class AgentHarness {
         },
       },
       {
-        name: "resume-mcp",
-        label: "Resume MCP",
-        description: "Resume an MCP run that requested user input",
+        name: "resume-connector",
+        label: "Resume connector",
+        description: "Resume a connector run that requested user input",
         parameters: resumeSchema,
         executionMode: SEQUENTIAL,
         execute: async (_toolCallId, parameters, signal) => {
           const parsed = validateToolArguments(resumeSchema, parameters);
-          const status = await McpRunRegistry.instance.resume(
-            this.requireMcpChatId(args.conversationKey),
+          const status = await ConnectorRunRegistry.instance.resume(
+            this.requireConnectorChatId(args.conversationKey),
             parsed.runId,
             { action: parsed.action, content: parsed.content },
             signal,
           );
-          return this.mcpStatusResult(status);
+          return this.connectorStatusResult(status);
         },
       },
       {
-        name: "cancel-mcp",
-        label: "Cancel MCP",
-        description: "Cancel a live MCP run owned by this chat",
+        name: "cancel-connector",
+        label: "Cancel connector",
+        description: "Cancel a live connector run owned by this chat",
         parameters: cancelSchema,
         executionMode: SEQUENTIAL,
         execute: async (_toolCallId, parameters) => {
           const parsed = validateToolArguments(cancelSchema, parameters);
-          await McpRunRegistry.instance.cancel(
-            this.requireMcpChatId(args.conversationKey),
+          await ConnectorRunRegistry.instance.cancel(
+            this.requireConnectorChatId(args.conversationKey),
             parsed.runId,
           );
           return {
-            content: [{ type: "text", text: "MCP run cancelled" }],
+            content: [{ type: "text", text: "Connector run cancelled" }],
             details: { status: "cancelled", runId: parsed.runId },
           };
         },
       },
     ];
-    if (profiles.length === 0) {
+    if (connectors.length === 0) {
       if (
         args.conversationKey === undefined ||
-        McpRunRegistry.instance.list(args.conversationKey).length === 0
+        ConnectorRunRegistry.instance.list(args.conversationKey).length === 0
       ) {
         return [];
       }
@@ -991,18 +982,18 @@ export class AgentHarness {
     return tools;
   }
 
-  private requireMcpChatId(chatId: TOption<string>): string {
+  private requireConnectorChatId(chatId: TOption<string>): string {
     if (chatId === undefined) {
-      throw new Error("MCP delegation requires a chat owner");
+      throw new Error("Connector delegation requires a chat owner");
     }
     return chatId;
   }
 
-  private createMcpPrompt(original: string, task: string, context: string): string {
+  private createConnectorPrompt(original: string, task: string, context: string): string {
     return `Original user message:\n${original}\n\nDelegated task:\n${task}\n\nRelevant context:\n${context}`;
   }
 
-  private mcpStatusResult(status: TMcpRunStatus) {
+  private connectorStatusResult(status: TConnectorRunStatus) {
     const content: [{ type: "text"; text: string }] = [
       { type: "text", text: JSON.stringify(status) },
     ];
@@ -1013,14 +1004,14 @@ export class AgentHarness {
   }
 
   private async sampleMcp(
-    params: CreateMessageRequest["params"],
+    params: TMcpSampleParams,
     settings: TConfigRecord,
     conversationKey: TAgentRunArgs["conversationKey"],
     trace: TBehaviorTraceContext,
     parentToolCallId: string,
     iteration: number,
     signal: AbortSignal,
-  ): Promise<CreateMessageResult | CreateMessageResultWithTools> {
+  ): Promise<TMcpSampleResult> {
     if (params.toolChoice?.mode === "required") {
       throw new Error("MCP sampling toolChoice mode 'required' is not supported");
     }
@@ -1046,7 +1037,7 @@ export class AgentHarness {
     this.llm.logModelRequestCompleted({
       span,
       purpose: EModelPurpose.SpecialistAccurate,
-      agentName: EAgentName.Mcp,
+      agentName: EAgentName.Connector,
       parentToolCallId,
       iteration,
       message: result,
@@ -1128,7 +1119,7 @@ export function isSerializedToolCall(text: string, tools: Array<{ name: string }
 // web-fetch and the specialist delegate tools have their own rule in stepDetail
 const STEP_DETAIL_FIELDS = new Map([
   ["web-search", "query"],
-  ["delegate-mcp", "profileId"],
+  ["delegate-connector", "connectorId"],
 ]);
 
 // what a step shows of its call: a fetch's host, a delegation's task, or the field

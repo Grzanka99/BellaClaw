@@ -22,9 +22,9 @@ import {
   UrlElicitationRequiredError,
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import type { TMcpProfile } from "./config";
+import type { TConnector } from "../config";
+import type { TConnectorOpenArgs } from "../types";
 import { mcpJsonResult, mcpResult } from "./content";
-import type { TMcpOpenArgs } from "./types";
 
 const SObjectArguments = z.record(z.string(), z.unknown());
 const SEmpty = obj({}, { open: true });
@@ -49,8 +49,8 @@ const SCompletion = obj(
 
 export type TMcpToolContext = {
   client: Client;
-  profile: TMcpProfile;
-  args: TMcpOpenArgs;
+  connector: TConnector;
+  args: TConnectorOpenArgs;
   signal: AbortSignal;
   updates: ResourceUpdatedNotification["params"][];
 };
@@ -62,9 +62,9 @@ export function requestOptions(context: TMcpToolContext, signal?: AbortSignal): 
   }
   return {
     signal: combined,
-    timeout: context.profile.requestTimeoutMs + context.profile.inputTimeoutMs,
+    timeout: context.connector.requestTimeoutMs + context.connector.inputTimeoutMs,
     resetTimeoutOnProgress: true,
-    maxTotalTimeout: context.profile.requestTimeoutMs + context.profile.inputTimeoutMs,
+    maxTotalTimeout: context.connector.requestTimeoutMs + context.connector.inputTimeoutMs,
   };
 }
 
@@ -88,7 +88,7 @@ async function* pages<TPage extends { nextCursor?: string }>(
 }
 
 export async function discoverTools(context: TMcpToolContext): Promise<AgentTool[]> {
-  const { client, profile } = context;
+  const { client, connector } = context;
   const tools: AgentTool[] = [];
   if (client.getServerCapabilities()?.tools !== undefined) {
     const names = new Set<string>();
@@ -97,7 +97,7 @@ export async function discoverTools(context: TMcpToolContext): Promise<AgentTool
       "MCP tool discovery returned a repeated pagination cursor",
     )) {
       for (const tool of page.tools) {
-        if (profile.tools !== undefined && !profile.tools.includes(tool.name)) {
+        if (connector.tools !== undefined && !connector.tools.includes(tool.name)) {
           continue;
         }
         if (names.has(tool.name)) {
@@ -115,7 +115,7 @@ function remoteTool(context: TMcpToolContext, tool: Tool): AgentTool {
   const properties = { ...tool.inputSchema.properties };
   const injected: Record<string, string> = {};
   const contextArgumentNames = new Set<string>();
-  for (const [name, source] of Object.entries(context.profile.contextArguments)) {
+  for (const [name, source] of Object.entries(context.connector.contextArguments)) {
     contextArgumentNames.add(name);
     if (!(name in properties)) {
       continue;
@@ -203,9 +203,9 @@ function remoteTool(context: TMcpToolContext, tool: Tool): AgentTool {
 
 function capabilityTools(context: TMcpToolContext): AgentTool[] {
   const tools: AgentTool[] = [];
-  const { client, profile } = context;
+  const { client, connector } = context;
   const capabilities = client.getServerCapabilities();
-  if (profile.resources && capabilities?.resources !== undefined) {
+  if (connector.resources && capabilities?.resources !== undefined) {
     tools.push(
       metaTool(
         "mcp-list-resources",
@@ -263,7 +263,7 @@ function capabilityTools(context: TMcpToolContext): AgentTool[] {
       );
     }
   }
-  if (profile.prompts && capabilities?.prompts !== undefined) {
+  if (connector.prompts && capabilities?.prompts !== undefined) {
     tools.push(
       metaTool(
         "mcp-list-prompts",
@@ -288,7 +288,7 @@ function capabilityTools(context: TMcpToolContext): AgentTool[] {
       ),
     );
   }
-  if (capabilities?.completions !== undefined && (profile.resources || profile.prompts)) {
+  if (capabilities?.completions !== undefined && (connector.resources || connector.prompts)) {
     tools.push(
       metaTool(
         "mcp-complete",
@@ -297,13 +297,13 @@ function capabilityTools(context: TMcpToolContext): AgentTool[] {
         async (args, signal) => {
           let ref: { type: "ref/prompt"; name: string } | { type: "ref/resource"; uri: string };
           if (args.kind === "prompt") {
-            if (!profile.prompts) {
-              throw new Error("Prompts are disabled for this profile");
+            if (!connector.prompts) {
+              throw new Error("Prompts are disabled for this connector");
             }
             ref = { type: "ref/prompt", name: args.name };
           } else {
-            if (!profile.resources) {
-              throw new Error("Resources are disabled for this profile");
+            if (!connector.resources) {
+              throw new Error("Resources are disabled for this connector");
             }
             ref = { type: "ref/resource", uri: args.name };
           }
