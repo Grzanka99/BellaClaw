@@ -71,10 +71,11 @@ A tapped notification names its chat in the intent (`MainActivity.EXTRA_CHAT_ID`
 `chatToOpen` `BellaClawNavHost` opens above Home, replacing what was there (a chat already on top
 stays, with its draft), and then reports opened.
 
-Both `NavHost`s take the same transitions (`NavTransitions.kt`): forward, a 300 ms slide from the end;
-back, the reverse slide. The back gesture seeks the predictive pair
+Both `NavHost`s take the same transitions (`NavTransitions.kt`): forward, the new screen slides in from
+the right over the old one, which moves a quarter to the left (400 ms, emphasized decelerate); back, the
+reverse (300 ms, standard). The back gesture seeks the predictive pair
 (`predictivePopEnterTransition`/`predictivePopExitTransition`, which otherwise default to Navigation's
-own fade and scale), set to the same slide.
+own fade and scale), set to the same slide with linear easing, so the screen follows the finger.
 Screens get navigation as lambdas, and those lambdas act only while their back stack entry is
 resumed, so taps during a transition push or pop once. The one exception is the missing-chat return
 to Home, which a restored entry reports before it resumes. A destination's arguments reach its
