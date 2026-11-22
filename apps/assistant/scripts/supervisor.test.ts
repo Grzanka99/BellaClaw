@@ -14,7 +14,7 @@ process.on("message", (message) => appendFileSync(out + "/notices", JSON.stringi
 process.send({ type: "ready" });
 if (!existsSync(out + "/asked")) {
   writeFileSync(out + "/asked", "");
-  process.send({ type: "update" });
+  process.send({ type: "update", chatId: "signal:+100" });
 }
 setInterval(() => undefined, 1000);
 `;
@@ -119,7 +119,10 @@ describe("supervisor", () => {
     await Bun.write(join(image, "compose.yaml"), "services: { local: {} }\n");
     start();
 
-    expect(await outcome()).toContain(`Updated to ${sha.slice(0, 7)}: next`);
+    const notice = await outcome();
+    expect(notice).toContain(`Updated to ${sha.slice(0, 7)}: next`);
+    // the restarted app reports it to the chat that asked
+    expect(notice).toContain(`"chatId":"signal:+100"`);
     expect(await readlink(join(releases, "current"))).toBe(sha);
     expect(await readlink(join(releases, sha, ".secrets"))).toBe(join(image, ".secrets"));
   });

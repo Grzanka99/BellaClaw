@@ -106,7 +106,7 @@ describe("commands consumer", () => {
       activated.mockRestore();
     }
 
-    expect(send.mock.calls).toEqual([[{ type: "update" }]]);
+    expect(send.mock.calls).toEqual([[{ type: "update", chatId: "discord:100" }]]);
     expect(await payloadsOf(EEventType.ReplyReady)).toEqual([
       {
         ...testMessageOrigin("discord:100", EMessagePlatform.Discord),
