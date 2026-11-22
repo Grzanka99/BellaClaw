@@ -56,6 +56,9 @@ dependencies {
     implementation(libs.okhttp)
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.messaging)
+    implementation(libs.haze)
+    implementation(libs.haze.blur)
+    implementation(libs.haze.blur.materials)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)

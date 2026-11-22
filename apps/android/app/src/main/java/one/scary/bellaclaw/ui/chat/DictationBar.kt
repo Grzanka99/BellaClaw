@@ -41,20 +41,27 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import dev.chrisbanes.haze.HazeState
 import one.scary.bellaclaw.R
 import java.util.Locale
 
 /**
  * The composer while dictating: the heard text with its language above, and a bar with the loudness and
- * the finish button. Tapping the text finishes too, for fixing it at once.
+ * the finish button. Tapping the text finishes too, for fixing it at once. Both float as frosted glass from [hazeState].
  */
 @Composable
-fun DictationBar(dictation: Dictation, onFinish: () -> Unit, onEditText: () -> Unit, modifier: Modifier = Modifier) {
+fun DictationBar(
+    dictation: Dictation,
+    onFinish: () -> Unit,
+    onEditText: () -> Unit,
+    hazeState: HazeState,
+    modifier: Modifier = Modifier,
+) {
     Column(modifier = modifier.fillMaxWidth().padding(8.dp)) {
         Surface(
-            shape = RoundedCornerShape(20.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            modifier = Modifier.fillMaxWidth().clickable(onClick = onEditText),
+            shape = TextShape,
+            color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = GLASS_ALPHA),
+            modifier = Modifier.fillMaxWidth().frosted(hazeState, TextShape).clickable(onClick = onEditText),
         ) {
             Column(modifier = Modifier.padding(start = 16.dp, top = 12.dp, end = 12.dp, bottom = 12.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -84,9 +91,9 @@ fun DictationBar(dictation: Dictation, onFinish: () -> Unit, onEditText: () -> U
         Spacer(Modifier.height(8.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             Surface(
-                shape = RoundedCornerShape(28.dp),
-                color = MaterialTheme.colorScheme.primaryContainer,
-                modifier = Modifier.weight(1f).height(56.dp),
+                shape = WaveShape,
+                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = GLASS_ALPHA),
+                modifier = Modifier.weight(1f).height(56.dp).frosted(hazeState, WaveShape),
             ) {
                 Waveform(levels = dictation.levels, modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp))
             }
@@ -147,6 +154,9 @@ private fun LanguageChip(language: Locale, languages: List<Locale>, onPick: (Loc
 }
 
 /** Bars for [levels], newest on the right; slots not heard yet draw as silence. */
+private val TextShape = RoundedCornerShape(20.dp)
+private val WaveShape = RoundedCornerShape(28.dp)
+
 @Composable
 private fun Waveform(levels: List<Float>, modifier: Modifier = Modifier) {
     val color = MaterialTheme.colorScheme.primary

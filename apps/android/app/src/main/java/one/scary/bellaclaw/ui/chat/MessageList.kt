@@ -39,6 +39,7 @@ import java.time.format.FormatStyle
  * otherwise the list stays put.
  * Reaching the oldest row asks for older ones with [onLoadOlder]; a failed send retries on [onRetry];
  * a tapped image opens with [onOpenImage].
+ * [insets] keep the first and last rows clear of the bars the list scrolls under.
  */
 @Composable
 fun MessageList(
@@ -48,6 +49,7 @@ fun MessageList(
     imageLoader: MessageImageLoader,
     onOpenImage: (MessageImage) -> Unit,
     modifier: Modifier = Modifier,
+    insets: PaddingValues = PaddingValues(),
 ) {
     val listState = rememberLazyListState()
     // The oldest row is the last item of the reversed list.
@@ -77,7 +79,12 @@ fun MessageList(
         state = listState,
         modifier = modifier.fillMaxSize(),
         reverseLayout = true,
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+        contentPadding = PaddingValues(
+            start = 16.dp,
+            end = 16.dp,
+            top = 12.dp + insets.calculateTopPadding(),
+            bottom = 12.dp + insets.calculateBottomPadding(),
+        ),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         items(rows, key = { it.key }) { row ->

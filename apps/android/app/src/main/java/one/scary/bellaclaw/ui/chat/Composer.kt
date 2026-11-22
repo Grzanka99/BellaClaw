@@ -45,13 +45,14 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import dev.chrisbanes.haze.HazeState
 import one.scary.bellaclaw.R
 import one.scary.bellaclaw.model.ImageRefusal
 
 /**
  * The message box: attach button, text, the picked image or why it was refused above them, and the send
  * button. An empty box has a mic ([onDictate]) instead of send; while [dictation] listens, the box
- * becomes [DictationBar].
+ * becomes [DictationBar]. Its surfaces float over the conversation as frosted glass from [hazeState].
  */
 @Composable
 fun Composer(
@@ -67,6 +68,7 @@ fun Composer(
     thumbnailLoader: ThumbnailLoader,
     dictation: Dictation,
     onDictate: () -> Unit,
+    hazeState: HazeState,
     modifier: Modifier = Modifier,
 ) {
     val focusRequester = remember { FocusRequester() }
@@ -80,6 +82,7 @@ fun Composer(
             dictation = dictation,
             onFinish = { finishDictation(false) },
             onEditText = { finishDictation(true) },
+            hazeState = hazeState,
             modifier = modifier,
         )
         return
@@ -105,9 +108,9 @@ fun Composer(
         verticalAlignment = Alignment.Bottom,
     ) {
         Surface(
-            shape = RoundedCornerShape(28.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            modifier = Modifier.weight(1f),
+            shape = BoxShape,
+            color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = GLASS_ALPHA),
+            modifier = Modifier.weight(1f).frosted(hazeState, BoxShape),
         ) {
             Column {
                 attachmentUri?.let { uri ->
@@ -185,6 +188,8 @@ fun Composer(
         }
     }
 }
+
+private val BoxShape = RoundedCornerShape(28.dp)
 
 @Composable
 private fun AttachmentPreview(uri: String, loader: ThumbnailLoader, onRemove: () -> Unit) {

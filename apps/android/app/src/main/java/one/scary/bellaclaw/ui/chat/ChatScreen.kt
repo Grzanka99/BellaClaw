@@ -1,14 +1,19 @@
 package one.scary.bellaclaw.ui.chat
 
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
+import dev.chrisbanes.haze.HazeInput
+import dev.chrisbanes.haze.blur.hazeBlur
+import dev.chrisbanes.haze.blur.materials.HazeMaterials
+import dev.chrisbanes.haze.hazeSource
+import dev.chrisbanes.haze.rememberHazeState
 import one.scary.bellaclaw.R
 import one.scary.bellaclaw.model.Author
 import one.scary.bellaclaw.model.ChatKind
@@ -44,13 +49,17 @@ fun ChatScreen(
     modifier: Modifier = Modifier,
 ) {
     val isBellaClaw = state.kind == ChatKind.BELLACLAW
+    // The conversation scrolls under the bars: BellaClaw's bar is frosted glass, its list pill and the composer float.
+    val hazeState = rememberHazeState()
     Scaffold(
         modifier = modifier,
         topBar = {
             if (isBellaClaw) {
                 Column {
-                    BellaClawTopBar(isStreamOpen = state.isStreamOpen, onBack = onBack)
-                    ListPill(lists = state.lists, onOpen = onOpenList, onDismiss = onDismissList)
+                    Box(modifier = Modifier.hazeBlur(HazeInput.Sources(hazeState), HazeMaterials.thin())) {
+                        BellaClawTopBar(isStreamOpen = state.isStreamOpen, onBack = onBack)
+                    }
+                    ListPill(lists = state.lists, hazeState = hazeState, onOpen = onOpenList, onDismiss = onDismissList)
                 }
             } else {
                 PlainChatTopBar(
@@ -78,6 +87,7 @@ fun ChatScreen(
                 thumbnailLoader = thumbnailLoader,
                 dictation = dictation,
                 onDictate = onDictate,
+                hazeState = hazeState,
                 modifier = Modifier.navigationBarsPadding().imePadding(),
             )
         },
@@ -88,7 +98,8 @@ fun ChatScreen(
             onLoadOlder = onLoadOlder,
             imageLoader = imageLoader,
             onOpenImage = onOpenImage,
-            modifier = Modifier.padding(padding),
+            modifier = Modifier.hazeSource(hazeState),
+            insets = padding,
         )
     }
     state.picker?.let { picker ->
