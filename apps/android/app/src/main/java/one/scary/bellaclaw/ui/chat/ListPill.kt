@@ -32,6 +32,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import dev.chrisbanes.haze.HazeState
 import one.scary.bellaclaw.R
 import one.scary.bellaclaw.model.TodoList
 import one.scary.bellaclaw.ui.components.formatEndTime
@@ -42,27 +43,28 @@ private val PillShape = RoundedCornerShape(24.dp)
 /**
  * The account's lists under BellaClaw's bar: the first of [lists] with its progress ring, its end and its count,
  * and "+N" for the others. Green once every item is ticked; then a swipe either way dismisses it. A tap opens it.
+ * It floats over the conversation, blurring what [hazeState] captures behind it.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ListPill(lists: List<TodoList>, onOpen: (String) -> Unit, onDismiss: (TodoList) -> Unit, modifier: Modifier = Modifier) {
+fun ListPill(lists: List<TodoList>, hazeState: HazeState, onOpen: (String) -> Unit, onDismiss: (TodoList) -> Unit, modifier: Modifier = Modifier) {
     val list = lists.firstOrNull() ?: return
     key(list.id, list.isFinished) {
         val state = rememberSwipeToDismissBoxState()
         SwipeToDismissBox(
             state = state,
             backgroundContent = {},
-            modifier = modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+            modifier = modifier.padding(horizontal = 8.dp, vertical = 4.dp),
             gesturesEnabled = list.isFinished,
             onDismiss = { onDismiss(list) },
         ) {
-            PillContent(list, others = lists.size - 1, onOpen = { onOpen(list.id) })
+            PillContent(list, others = lists.size - 1, hazeState = hazeState, onOpen = { onOpen(list.id) })
         }
     }
 }
 
 @Composable
-private fun PillContent(list: TodoList, others: Int, onOpen: () -> Unit) {
+private fun PillContent(list: TodoList, others: Int, hazeState: HazeState, onOpen: () -> Unit) {
     val extra = BellaClawThemeTokens.extraColors
     val colors = MaterialTheme.colorScheme
     val finished = list.isFinished
@@ -70,9 +72,9 @@ private fun PillContent(list: TodoList, others: Int, onOpen: () -> Unit) {
     Surface(
         onClick = onOpen,
         shape = PillShape,
-        color = if (finished) extra.doneContainer else colors.primaryContainer,
+        color = (if (finished) extra.doneContainer else colors.primaryContainer).copy(alpha = GLASS_ALPHA),
         contentColor = content,
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().frosted(hazeState, PillShape),
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,

@@ -3,6 +3,8 @@ package one.scary.bellaclaw.ui.chat
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -20,6 +22,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import one.scary.bellaclaw.R
@@ -39,6 +42,7 @@ import java.time.format.FormatStyle
  * otherwise the list stays put.
  * Reaching the oldest row asks for older ones with [onLoadOlder]; a failed send retries on [onRetry];
  * a tapped image opens with [onOpenImage].
+ * [insets] keep the first and last rows clear of the bars the list scrolls under.
  */
 @Composable
 fun MessageList(
@@ -47,9 +51,11 @@ fun MessageList(
     onLoadOlder: () -> Unit,
     imageLoader: MessageImageLoader,
     onOpenImage: (MessageImage) -> Unit,
+    insets: PaddingValues,
     modifier: Modifier = Modifier,
 ) {
     val listState = rememberLazyListState()
+    val layoutDirection = LocalLayoutDirection.current
     // The oldest row is the last item of the reversed list.
     val atTop by remember {
         derivedStateOf {
@@ -77,7 +83,12 @@ fun MessageList(
         state = listState,
         modifier = modifier.fillMaxSize(),
         reverseLayout = true,
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+        contentPadding = PaddingValues(
+            start = 16.dp + insets.calculateStartPadding(layoutDirection),
+            end = 16.dp + insets.calculateEndPadding(layoutDirection),
+            top = 12.dp + insets.calculateTopPadding(),
+            bottom = 12.dp + insets.calculateBottomPadding(),
+        ),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         items(rows, key = { it.key }) { row ->
