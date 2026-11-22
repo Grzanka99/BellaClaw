@@ -219,6 +219,13 @@ export async function getMcpAuthProvider(
     return undefined;
   }
   const key = credentialKey(chatId, connector);
+  // a stored connector uses OAuth once a connect registered a client; otherwise a token or nothing
+  if (
+    choosesCredentials(connector) &&
+    (await credentialStore.clientInformation(key)) === undefined
+  ) {
+    return undefined;
+  }
   const generation = currentAuthGeneration(key);
   const existing = runtimeProviders.get(key);
   if (existing !== undefined && existing.generation === generation) {
@@ -314,10 +321,12 @@ export async function saveMcpAuthToken(
     throw new Error(`Connector ${connectorId} does not use tokenAuth`);
   }
 
+  // the token replaces every credential, so a stored connector that had OAuth uses the token
   const key = credentialKey(chatId, connector);
-  await authQueue(key).enqueue(() =>
-    credentialStore.saveTokens(key, { access_token: token, token_type: "bearer" }),
-  );
+  await authQueue(key).enqueue(async () => {
+    await credentialStore.delete(key);
+    await credentialStore.saveTokens(key, { access_token: token, token_type: "bearer" });
+  });
 }
 
 export async function getMcpAuthToken(
@@ -328,7 +337,15 @@ export async function getMcpAuthToken(
     return undefined;
   }
 
-  const tokens = await credentialStore.tokens(credentialKey(chatId, connector));
+  const key = credentialKey(chatId, connector);
+  const tokens = await credentialStore.tokens(key);
+  if (choosesCredentials(connector)) {
+    // OAuth tokens go through the provider; no credentials leave the server's 401 to report
+    if ((await credentialStore.clientInformation(key)) !== undefined) {
+      return undefined;
+    }
+    return tokens?.access_token;
+  }
   if (tokens === undefined) {
     throw new Error(
       `Connector ${connector.id} needs a token. Run !connector-auth token ${connector.id} TOKEN`,
@@ -421,6 +438,29 @@ export function setupMcpAuth(): void {
         emit(EEventType.McpAuthCredentialsChanged, { chatId, profileId }, undefined, undefined);
         emit(EEventType.McpAuthTokenSaved, { chatId, profileId }, undefined, undefined);
       });
+    },
+  });
+  // a deleted stored connector takes the owner's credentials for it along
+  bus.subscribe({
+    consumer: "mcp-auth",
+    type: EEventType.ConnectorsChanged,
+    mode: ESubscriptionMode.Durable,
+    backoffMs: [1_000, 5_000],
+    handler: async (event) => {
+      const { ownerKey, connectorId, connector } = event.payload;
+
+      if (connector !== null) {
+        return;
+      }
+
+      const deleted = await credentialStore.deleteAll(
+        `${encodeURIComponent(ownerKey)}:${connectorId}:`,
+      );
+
+      for (const key of deleted) {
+        advanceAuthGeneration(key);
+        runtimeProviders.delete(key);
+      }
     },
   });
   // NOTE: the account keeps its credentials when it has any; otherwise the address's move to it.
@@ -610,6 +650,15 @@ function callbackUrl(): string {
     throw new Error("BELLACLAW_MCP_PUBLIC_URL is required for MCP OAuth");
   }
   return new URL(CALLBACK_PATH, `${publicUrl.replace(/\/$/, "")}/`).toString();
+}
+
+// a stored connector: oauth and tokenAuth both set, which a file connector cannot have
+export function choosesCredentials(connector: TConnector): boolean {
+  return (
+    connector.transport.type === "http" &&
+    connector.transport.oauth !== undefined &&
+    connector.transport.tokenAuth
+  );
 }
 
 function usesChatCredentials(connector: TConnector): boolean {

@@ -13,8 +13,8 @@
       description (one line saying when to use the server) and optional plainChats (true lets the
       app's plain chats use it; false when omitted).
       Returns id, status pending_add, either toolCount (how many tools the server offers) or
-      authenticationRequired true (the server asked for credentials), approvalCommand and
-      rejectCommand. Fails with nothing added when the server cannot be reached or is not an MCP
+      authenticationRequired true (the server asked for credentials) with tokenCommand and
+      connectCommand, approvalCommand and rejectCommand. Fails with nothing added when the server cannot be reached or is not an MCP
       server, or when the id is taken.
     </description>
   </tool>
@@ -25,6 +25,7 @@
     <rule>Write the description as one line saying when to use the server, in terms of the user's tasks</rule>
     <rule>Leave plainChats out unless the user asks for the app's plain chats to use the server</rule>
     <rule>After it succeeds, quote approvalCommand and rejectCommand exactly as returned</rule>
+    <rule>When authenticationRequired is true, tell the user that after approving they give credentials themselves by sending tokenCommand (with their token in place of TOKEN) or connectCommand (to sign in), quoted exactly as returned. Never ask the user to send you a token</rule>
     <rule>If the id is taken, call list-connectors and pick another id; if the server cannot be reached, say so and add nothing</rule>
   </usage_rules>
 

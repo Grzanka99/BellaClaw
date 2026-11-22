@@ -44,6 +44,38 @@ minimal default environment plus the connector's `env` values. HTTP headers are 
 An authenticated specialist's connection belongs to its chat and invocation. It stays alive
 across questions to the user and closes when that invocation completes or is cancelled.
 
+## Connectors added through the assistant
+
+Besides the server-wide, operator-managed `connectors.json`, each user (an account, or an
+unlinked chat) can add their own MCP servers by asking the assistant: “connect my notes server at https://notes.example.com/mcp”.
+The assistant checks once that the URL answers as an MCP server, then asks to add it. The new
+connector stays pending and unusable until you approve it; asking to remove one leaves it in use,
+pending removal, until you approve that too. You approve with a chat command you send
+yourself:
+
+```text
+!connector list
+!connector approve CONNECTOR
+!connector reject CONNECTOR
+```
+
+`list` shows each of your added connectors with its status and URL, written by the command
+itself rather than the model, so check it before approving. `approve` makes a pending add
+active or completes a pending removal; `reject` drops a pending add or keeps a connector that was
+pending removal.
+
+If the server asks for credentials, give them after approval with `!connector-auth`, choosing by
+the command you send: `!connector-auth token CONNECTOR TOKEN` sends that bearer token, and
+`!connector-auth connect CONNECTOR` signs in with OAuth through the server's client registration
+(this needs `BELLACLAW_MCP_PUBLIC_URL`, see [Per-chat OAuth](#per-chat-oauth)). `status` and
+`disconnect` work as for other connectors. Send a token only in this command, never in a
+message to the assistant. Approving a removal also deletes your saved credentials for it.
+
+Added connectors belong to you alone. They use HTTP or HTTPS only and always offer all of the
+server's tools. They are closed to the app's plain chats unless you ask the assistant to switch
+that on. Their specialist uses the server's own instructions in place of operator-written ones. An
+id that `connectors.json` already uses cannot be added.
+
 ## Supported capabilities
 
 - Stdio and Streamable HTTP, using the pinned official TypeScript MCP SDK.
@@ -75,6 +107,9 @@ Commands use the existing `!` prefix:
 !connector-auth token CONNECTOR TOKEN
 !connector-auth status CONNECTOR
 !connector-auth disconnect CONNECTOR
+!connector list
+!connector approve CONNECTOR
+!connector reject CONNECTOR
 ```
 
 Prompt execution enters the normal message pipeline. Natural-language requests to use a named

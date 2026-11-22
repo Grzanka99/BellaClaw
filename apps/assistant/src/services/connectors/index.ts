@@ -16,6 +16,7 @@ import {
   getConnector,
   loadFileConnectors,
   storedConnector,
+  type TConnector,
   type TStoredConnectorFields,
 } from "./config";
 import { mcpAdapter } from "./mcp";
@@ -277,16 +278,6 @@ export class ConnectorService {
               .where(eq(connectorsTable.ownerKey, chatKey));
           }
 
-          // the address's connectors are gone, so its open sessions close
-          for (const connectorId of movingIds) {
-            emit(
-              EEventType.ConnectorsChanged,
-              { ownerKey: chatKey, connectorId, connector: null },
-              connectorId,
-              undefined,
-            );
-          }
-
           emit(
             EEventType.IdentityLinkMoved,
             { ...event.payload, owner: EIdentityLinkOwner.Connectors },
@@ -313,9 +304,17 @@ export class ConnectorService {
     fields: TStoredConnectorFields,
     signal: TOption<AbortSignal>,
   ): Promise<TConnectorProbe> {
-    // inputTimeoutMs: the probe asks the user nothing, so a request ends at the request timeout
-    const connector = {
+    // inputTimeoutMs: the probe asks the user nothing, so a request ends at the request timeout;
+    // transport: no credentials, whatever the owner has saved
+    const connector: TConnector = {
       ...storedConnector(fields),
+      transport: {
+        type: "http",
+        url: fields.url,
+        headers: {},
+        oauth: undefined,
+        tokenAuth: false,
+      },
       resources: false,
       prompts: false,
       inputTimeoutMs: 0,

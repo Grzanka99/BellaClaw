@@ -18,7 +18,12 @@ import {
   type TConnectorAdapter,
   type TConnectorSession,
 } from "../types";
-import { createMcpAuthFetch, getMcpAuthProvider, getMcpAuthToken } from "./auth";
+import {
+  choosesCredentials,
+  createMcpAuthFetch,
+  getMcpAuthProvider,
+  getMcpAuthToken,
+} from "./auth";
 import { discoverTools, requestOptions, type TMcpToolContext } from "./tools";
 
 const logger = createLogger("MCP");
@@ -155,6 +160,11 @@ export const mcpAdapter: TConnectorAdapter = {
         error instanceof UnauthorizedError ||
         (error instanceof StreamableHTTPError && error.code === 401)
       ) {
+        if (choosesCredentials(connector)) {
+          throw new ConnectorAuthRequiredError(
+            `Connector ${connector.id} needs credentials. Run !connector-auth token ${connector.id} TOKEN or !connector-auth connect ${connector.id}`,
+          );
+        }
         throw new ConnectorAuthRequiredError(`Connector ${connector.id} requires authentication`);
       }
       throw error;

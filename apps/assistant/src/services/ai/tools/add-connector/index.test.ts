@@ -124,6 +124,8 @@ describe("add-connector", () => {
         authenticationRequired: true,
         approvalCommand: "!connector approve private",
         rejectCommand: "!connector reject private",
+        tokenCommand: "!connector-auth token private TOKEN",
+        connectCommand: "!connector-auth connect private",
       });
       expect(await storedRows()).toEqual([{ id: "private", status: EConnectorStatus.PendingAdd }]);
     } finally {

@@ -129,13 +129,20 @@ export type TStoredConnectorFields = Pick<
   "id" | "url" | "description" | "plainChats"
 >;
 
-// the connector a stored row gives
+// the connector a stored row gives; oauth and tokenAuth both set, which a file connector cannot
+// have: the user picks a token or OAuth by the !connector-auth command they send
 export function storedConnector(row: TStoredConnectorFields): TConnector {
   return {
     id: row.id,
     description: row.description,
     instructions: undefined,
-    transport: { type: "http", url: row.url, headers: {}, oauth: undefined, tokenAuth: false },
+    transport: {
+      type: "http",
+      url: row.url,
+      headers: {},
+      oauth: { scopes: [], authorizationParams: {} },
+      tokenAuth: true,
+    },
     tools: undefined,
     contextArguments: {},
     resources: true,

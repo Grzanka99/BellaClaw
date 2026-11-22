@@ -70,6 +70,25 @@ export class McpAuthCredentialStore {
     });
   }
 
+  // Deletes every credential whose key starts with prefix. Returns the deleted keys
+  public deleteAll(prefix: string): Promise<string[]> {
+    return this.queue.enqueue(async () => {
+      const credentials = await this.readAll();
+      const deleted = Object.keys(credentials).filter((key) => key.startsWith(prefix));
+
+      if (deleted.length === 0) {
+        return [];
+      }
+
+      for (const key of deleted) {
+        delete credentials[key];
+      }
+
+      await writeJsonAtomically(this.path(), credentials);
+      return deleted;
+    });
+  }
+
   // Moves every credential whose key starts with from to the same key under to, or drops them
   // when a key under to exists already. Returns the moved or dropped keys
   public moveAll(from: string, to: string): Promise<string[]> {

@@ -81,12 +81,15 @@ export const addConnector = defineTool({
       rejectCommand: `!connector reject ${args.id}`,
     };
 
+    // after approval the user saves credentials with one of these commands
     if (probe.status === "auth_required") {
       return {
         id: args.id,
         status: EConnectorStatus.PendingAdd,
         authenticationRequired: true,
         ...commands,
+        tokenCommand: `!connector-auth token ${args.id} TOKEN`,
+        connectCommand: `!connector-auth connect ${args.id}`,
       };
     }
 
