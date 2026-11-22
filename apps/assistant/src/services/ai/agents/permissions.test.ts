@@ -206,7 +206,7 @@ describe("agent permissions", () => {
     try {
       // the repository's connectors leave plainChats out, so vault and logs are closed to plain chats
       delete Bun.env.BELLACLAW_CONNECTORS_CONFIG;
-      const production = await loadConnectors();
+      const production = await loadConnectors("discord:1");
       expect(production.map((connector) => [connector.id, connector.plainChats]).sort()).toEqual([
         ["logs", false],
         ["vault", false],

@@ -1,5 +1,11 @@
 export { AsyncQueue } from "./async-queue";
 export {
+  CONNECTOR_EXISTS,
+  CONNECTOR_NOT_FOUND,
+  CONNECTOR_NOT_PENDING,
+  SConnectorId,
+} from "./connectors";
+export {
   ADDRESS_LINKED_ELSEWHERE,
   APP_PUSH_MAX_BYTES,
   CONVERSATION_NOT_FOUND,

@@ -78,7 +78,7 @@ describe("MCP runtime", () => {
     delete Bun.env.BELLACLAW_LOGS_MCP_URL;
     delete Bun.env.BELLACLAW_VAULT_MCP_URL;
     try {
-      const localConnectors = await loadConnectors();
+      const localConnectors = await loadConnectors("account:a");
       expect(localConnectors.map((connector) => connector.id)).toEqual(["logs", "vault"]);
       expect(localConnectors[0]?.transport).toMatchObject({
         type: "http",
@@ -91,7 +91,7 @@ describe("MCP runtime", () => {
       });
 
       Bun.env.BELLACLAW_LOGS_MCP_URL = "http://log-viewer:8989/mcp";
-      const composeConnectors = await loadConnectors();
+      const composeConnectors = await loadConnectors("account:a");
       expect(composeConnectors[0]?.transport).toMatchObject({
         type: "http",
         url: "http://log-viewer:8989/mcp",
@@ -112,32 +112,36 @@ describe("MCP runtime", () => {
   });
 
   test("missing config disables connectors; malformed and duplicate connectors fail clearly", async () => {
-    expect(await loadConnectors()).toEqual([]);
+    expect(await loadConnectors("account:a")).toEqual([]);
     await configure({ type: "stdio", command: "bun" });
-    const connectors = await loadConnectors();
+    const connectors = await loadConnectors("account:a");
     await Bun.write(
       join(directory, "connectors.json"),
       JSON.stringify({ connectors: [connectors[0], connectors[0]] }),
     );
-    await expect(loadConnectors()).rejects.toThrow("Duplicate connector");
+    await expect(loadConnectors("account:a")).rejects.toThrow("Duplicate connector");
     await Bun.write(
       join(directory, "connectors.json"),
       JSON.stringify({ connectors: [{ id: "invalid" }] }),
     );
-    await expect(loadConnectors()).rejects.toThrow("Invalid connectors configuration");
+    await expect(loadConnectors("account:a")).rejects.toThrow("Invalid connectors configuration");
     await configure({
       type: "http",
       url: "https://example.com/mcp",
       oauth: { clientSecretEnv: "SECRET" },
     });
-    await expect(loadConnectors()).rejects.toThrow("clientSecretEnv requires clientIdEnv");
+    await expect(loadConnectors("account:a")).rejects.toThrow(
+      "clientSecretEnv requires clientIdEnv",
+    );
     await configure({
       type: "http",
       url: "https://example.com/mcp",
       oauth: {},
       tokenAuth: true,
     });
-    await expect(loadConnectors()).rejects.toThrow("cannot use both oauth and tokenAuth");
+    await expect(loadConnectors("account:a")).rejects.toThrow(
+      "cannot use both oauth and tokenAuth",
+    );
   });
 
   test("stdio paginates tools, preserves schemas, isolates context and reports server errors", async () => {
@@ -482,7 +486,7 @@ describe("MCP runtime", () => {
 
   test("resource listing paginates and tolerates only unsupported template listing", async () => {
     await configure({ type: "stdio", command: "unused" });
-    const [connector] = await loadConnectors();
+    const [connector] = await loadConnectors("account:a");
     if (connector === undefined) {
       throw new Error("Missing test connector");
     }

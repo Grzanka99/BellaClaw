@@ -14,7 +14,7 @@ export const mcpPromptsCommand: TCommand = {
       const connectorId = args.trim();
       if (connectorId.length === 0) {
         return (
-          (await loadConnectors())
+          (await loadConnectors(ownerKey))
             .map((connector) => `${connector.id}: ${connector.description}`)
             .join("\n") || "No connectors configured."
         );
@@ -43,7 +43,7 @@ export const mcpPromptCommand: TCommand = {
   name: "mcp-prompt",
   description: "Ask the assistant to run an MCP prompt template",
   usage: "!mcp-prompt CONNECTOR PROMPT [JSON_ARGUMENTS]",
-  handler: async (_chatId, args) => {
+  handler: async (ownerKey, args) => {
     const match = args.trim().match(/^(\S+)\s+(\S+)(?:\s+([\s\S]+))?$/);
     const connectorId = match?.[1];
     const promptName = match?.[2];
@@ -51,7 +51,7 @@ export const mcpPromptCommand: TCommand = {
       return "Usage: !mcp-prompt CONNECTOR PROMPT [JSON_ARGUMENTS]";
     }
     try {
-      const connector = await getConnector(connectorId);
+      const connector = await getConnector(ownerKey, connectorId);
       if (!connector.prompts) {
         return "Prompts are disabled for this connector.";
       }

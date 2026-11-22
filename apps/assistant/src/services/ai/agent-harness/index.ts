@@ -679,7 +679,7 @@ export class AgentHarness {
       }
     }
 
-    if (args.connector !== undefined) {
+    if (args.connector?.connector.instructions !== undefined) {
       parts.push(
         `<connector_instructions>${args.connector.connector.instructions}</connector_instructions>`,
       );
@@ -688,7 +688,7 @@ export class AgentHarness {
     if (args.name === EAgentName.Scheduling) {
       let connectors: Awaited<ReturnType<typeof loadConnectors>> = [];
       try {
-        connectors = await loadConnectors();
+        connectors = await loadConnectors(this.requireConnectorChatId(args.ownerKey));
       } catch (error) {
         this.logger.warning(`Connectors unavailable to Scheduling: ${String(error)}`);
       }
@@ -813,7 +813,7 @@ export class AgentHarness {
   ): Promise<AgentTool[]> {
     let connectors: Awaited<ReturnType<typeof loadConnectors>> = [];
     try {
-      connectors = await loadConnectors();
+      connectors = await loadConnectors(this.requireConnectorChatId(args.ownerKey));
     } catch (error) {
       this.logger.warning(`Connector delegation disabled: ${String(error)}`);
     }

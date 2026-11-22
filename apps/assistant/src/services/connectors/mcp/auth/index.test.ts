@@ -123,7 +123,7 @@ beforeAll(async () => {
 
   service = await import(".");
   const config = await import("../../config");
-  connector = await config.getConnector("documents");
+  connector = await config.getConnector("signal:first", "documents");
 });
 
 afterAll(async () => {
@@ -191,7 +191,7 @@ describe("MCP OAuth", () => {
   test("closes the runtime session when starting authentication fails", async () => {
     const chatId = "signal:reserved";
     const config = await import("../../config");
-    const reservedConnector = await config.getConnector("reserved-parameter");
+    const reservedConnector = await config.getConnector(chatId, "reserved-parameter");
     const provider = await service.getMcpAuthProvider(chatId, reservedConnector);
     expect(provider).toBeDefined();
     if (provider === undefined) {

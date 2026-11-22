@@ -1,5 +1,11 @@
-import { repositoryPath } from "@bellaclaw/shared";
+import { connectorsTable, EConnectorStatus } from "@bellaclaw/database";
+import { repositoryPath, SConnectorId, type TOption } from "@bellaclaw/shared";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
+import { DatabaseConnector } from "../database";
+
+const REQUEST_TIMEOUT_MS = 120_000;
+const INPUT_TIMEOUT_MS = 900_000;
 
 const SOAuth = z
   .object({
@@ -13,7 +19,7 @@ const SOAuth = z
   });
 
 export const SConnector = z.object({
-  id: z.string().regex(/^[a-z][a-z0-9-]*$/),
+  id: SConnectorId,
   description: z.string().min(1),
   instructions: z.string().min(1),
   transport: z.discriminatedUnion("type", [
@@ -56,15 +62,19 @@ export const SConnector = z.object({
   // true: the app's plain chats may use the connector; closed to them by default, as a connector may
   // hold the user's personal notes
   plainChats: z.boolean().default(false),
-  requestTimeoutMs: z.number().int().positive().default(120_000),
-  inputTimeoutMs: z.number().int().positive().default(900_000),
+  requestTimeoutMs: z.number().int().positive().default(REQUEST_TIMEOUT_MS),
+  inputTimeoutMs: z.number().int().positive().default(INPUT_TIMEOUT_MS),
 });
 
-export type TConnector = z.infer<typeof SConnector>;
+// instructions: the operator's, from connectors.json only
+export type TConnector = Omit<z.infer<typeof SConnector>, "instructions"> & {
+  instructions: TOption<string>;
+};
 
 const SConnectorsConfig = z.object({ connectors: z.array(SConnector) });
 
-export async function loadConnectors(): Promise<TConnector[]> {
+// the operator's connectors.json, the same for every owner
+export async function loadFileConnectors(): Promise<TConnector[]> {
   const configuredPath = Bun.env.BELLACLAW_CONNECTORS_CONFIG?.trim();
   let path = repositoryPath("connectors.json");
   if (configuredPath !== undefined && configuredPath.length > 0) {
@@ -88,8 +98,47 @@ export async function loadConnectors(): Promise<TConnector[]> {
   return parsed.data.connectors;
 }
 
-export async function getConnector(id: string): Promise<TConnector> {
-  const connector = (await loadConnectors()).find((candidate) => candidate.id === id);
+// the file's connectors and the owner's usable stored ones (active, or pending removal); a stored
+// connector whose id the file also has is left out
+export async function loadConnectors(ownerKey: string): Promise<TConnector[]> {
+  const fileConnectors = await loadFileConnectors();
+  const rows = await DatabaseConnector.instance.run((db) =>
+    db
+      .select()
+      .from(connectorsTable)
+      .where(
+        and(
+          eq(connectorsTable.ownerKey, ownerKey),
+          inArray(connectorsTable.status, [
+            EConnectorStatus.Active,
+            EConnectorStatus.PendingRemoval,
+          ]),
+        ),
+      )
+      .orderBy(asc(connectorsTable.createdAt)),
+  );
+  const fileIds = new Set(fileConnectors.map((connector) => connector.id));
+  const stored: TConnector[] = rows
+    .filter((row) => !fileIds.has(row.id))
+    .map((row) => ({
+      id: row.id,
+      description: row.description,
+      instructions: undefined,
+      transport: { type: "http", url: row.url, headers: {}, oauth: undefined, tokenAuth: false },
+      tools: undefined,
+      contextArguments: {},
+      resources: true,
+      prompts: true,
+      sampling: true,
+      plainChats: row.plainChats,
+      requestTimeoutMs: REQUEST_TIMEOUT_MS,
+      inputTimeoutMs: INPUT_TIMEOUT_MS,
+    }));
+  return [...fileConnectors, ...stored];
+}
+
+export async function getConnector(ownerKey: string, id: string): Promise<TConnector> {
+  const connector = (await loadConnectors(ownerKey)).find((candidate) => candidate.id === id);
   if (connector === undefined) {
     throw new Error(`Unknown connector: ${id}`);
   }

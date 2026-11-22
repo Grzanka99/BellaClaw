@@ -7,7 +7,9 @@ import type { TOption } from "@bellaclaw/shared";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { z } from "zod";
-import { ConnectorService } from "../../assistant/src/services/connectors";
+import { loadFileConnectors } from "../../assistant/src/services/connectors/config";
+import { mcpAdapter } from "../../assistant/src/services/connectors/mcp";
+import type { TConnectorSession } from "../../assistant/src/services/connectors/types";
 import { createLogViewerApp, type TLogViewerApplication } from "./app";
 
 const STextToolResult = z.object({
@@ -17,12 +19,12 @@ const STextToolResult = z.object({
 let application: TOption<TLogViewerApplication>;
 let client: TOption<Client>;
 let httpServer: TOption<ReturnType<typeof Bun.serve>>;
-let connectorService: TOption<ConnectorService>;
+let session: TOption<TConnectorSession>;
 let previousConnectorsConfig: TOption<string>;
 let tempDir: TOption<string>;
 
 afterEach(async () => {
-  await connectorService?.close();
+  await session?.close();
   await client?.close();
   httpServer?.stop(true);
   await application?.close();
@@ -40,7 +42,7 @@ afterEach(async () => {
   application = undefined;
   client = undefined;
   httpServer = undefined;
-  connectorService = undefined;
+  session = undefined;
   previousConnectorsConfig = undefined;
   tempDir = undefined;
 });
@@ -133,7 +135,7 @@ describe("behavior log MCP server", () => {
     expect(await Bun.file(dbPath).exists()).toBe(false);
   });
 
-  test("works through ConnectorService with chat and diagnostic turn context injected", async () => {
+  test("works through the MCP connector adapter with chat and diagnostic turn context injected", async () => {
     tempDir = mkdtempSync(join(tmpdir(), "bellaclaw-log-mcp-service-"));
     const dbPath = join(tempDir, "logs.db");
     const logger = new AppLogger({ dbPath, stdout() {} });
@@ -201,8 +203,13 @@ describe("behavior log MCP server", () => {
     );
     previousConnectorsConfig = Bun.env.BELLACLAW_CONNECTORS_CONFIG;
     Bun.env.BELLACLAW_CONNECTORS_CONFIG = configPath;
-    connectorService = new ConnectorService();
-    const session = await connectorService.open({
+    const connector = (await loadFileConnectors()).find((candidate) => candidate.id === "logs");
+
+    if (connector === undefined) {
+      throw new Error("The logs connector is missing");
+    }
+
+    session = await mcpAdapter.open(connector, {
       ownerKey: chatId,
       conversationKey: chatId,
       connectorId: "logs",

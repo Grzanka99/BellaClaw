@@ -27,6 +27,19 @@ export enum EConversationKind {
   Plain = "plain",
 }
 
+// the protocol of a connector the assistant added
+export enum EConnectorKind {
+  Mcp = "mcp",
+}
+
+// pending_add: added, not usable until the user approves; pending_removal: removal asked, usable
+// until the user approves it
+export enum EConnectorStatus {
+  PendingAdd = "pending_add",
+  Active = "active",
+  PendingRemoval = "pending_removal",
+}
+
 export enum EEventType {
   MessageReceived = "message.received",
   MessageAuthorized = "message.authorized",
@@ -113,6 +126,11 @@ export enum EEventType {
   ListsUpdateRequested = "lists.update.requested",
   ListsChanged = "lists.changed",
   ListFinished = "list.finished",
+  ConnectorAddRequested = "connector.add.requested",
+  ConnectorUpdateRequested = "connector.update.requested",
+  ConnectorRemoveRequested = "connector.remove.requested",
+  ConnectorResolveRequested = "connector.resolve.requested",
+  ConnectorsChanged = "connectors.changed",
   CommandRejected = "command.rejected",
   EventDeadLettered = "event.dead_lettered",
   AppStarted = "app.started",

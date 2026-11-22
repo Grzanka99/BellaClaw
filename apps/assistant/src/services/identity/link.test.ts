@@ -29,6 +29,7 @@ import { AuthorizationService } from "../authorization";
 import { AutomationService } from "../automation";
 import { CalendarService } from "../calendar";
 import { Commands } from "../commands";
+import { ConnectorService } from "../connectors";
 import { setupMcpAuth } from "../connectors/mcp/auth";
 import { ConversationStore } from "../conversation";
 import type { TConversation } from "../conversation/types";
@@ -70,6 +71,7 @@ function reset() {
     CalendarService,
     AutomationService,
     ListsService,
+    ConnectorService,
     Memory,
     FactDistiller,
     ScheduledDelivery,
@@ -93,6 +95,7 @@ async function resetOwnerTables() {
     "calendars",
     "list_items",
     "lists",
+    "connectors",
   ]) {
     await database().run(sql.raw(`DELETE FROM ${table}`));
   }
@@ -113,6 +116,7 @@ function setupOwners(drain: (conversationKey: string) => Promise<boolean>) {
   CronScheduler.instance.subscribe();
   AutomationService.instance.setup();
   ListsService.instance.setup();
+  ConnectorService.instance.setup();
   Memory.instance.setup();
   FactDistiller.instance.setup();
   MessageHandler.instance.setup();

@@ -11,6 +11,8 @@ import {
 } from "drizzle-orm/sqlite-core";
 import type {
   EAutomationStatus,
+  EConnectorKind,
+  EConnectorStatus,
   EConversationKind,
   ECronFinishedReason,
   ECronJobStatus,
@@ -163,6 +165,27 @@ export const listItemsTable = sqliteTable(
     updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull(),
   },
   (table) => [index("list_items_list_position_idx").on(table.listId, table.position)],
+);
+
+// the connectors the assistant added for an owner, beside the operator's connectors.json; id: a slug
+// the agent chose, unique per owner; kind: the protocol; url: the server's http or https URL;
+// description: the routing line the delegating agents see; plainChats: the app's plain chats may use
+// it; status: pending_add until the user approves, active, pending_removal until the user approves
+// the removal (still usable)
+export const connectorsTable = sqliteTable(
+  "connectors",
+  {
+    ownerKey: text("ownerKey").notNull(),
+    id: text("id").notNull(),
+    kind: text("kind").$type<EConnectorKind>().notNull(),
+    url: text("url").notNull(),
+    description: text("description").notNull(),
+    plainChats: integer("plainChats", { mode: "boolean" }).notNull().default(false),
+    status: text("status").$type<EConnectorStatus>().notNull(),
+    createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.ownerKey, table.id] })],
 );
 
 export const conversationSummariesTable = sqliteTable("conversation_summaries", {

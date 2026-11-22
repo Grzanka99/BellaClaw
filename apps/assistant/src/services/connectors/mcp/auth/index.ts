@@ -238,7 +238,7 @@ export async function getMcpAuthProvider(
 }
 
 export async function beginMcpAuth(chatId: string, connectorId: string): Promise<string> {
-  const connector = await getConnector(connectorId);
+  const connector = await getConnector(chatId, connectorId);
   if (connector.transport.type !== "http" || connector.transport.oauth === undefined) {
     throw new Error(`Connector ${connectorId} does not use OAuth`);
   }
@@ -279,7 +279,7 @@ export async function beginMcpAuth(chatId: string, connectorId: string): Promise
 }
 
 export async function getMcpAuthStatus(chatId: string, connectorId: string): Promise<boolean> {
-  const connector = await getConnector(connectorId);
+  const connector = await getConnector(chatId, connectorId);
   if (!usesChatCredentials(connector)) {
     throw new Error(`Connector ${connectorId} does not use OAuth or tokenAuth`);
   }
@@ -287,7 +287,7 @@ export async function getMcpAuthStatus(chatId: string, connectorId: string): Pro
 }
 
 export async function disconnectMcpAuth(chatId: string, connectorId: string): Promise<boolean> {
-  const connector = await getConnector(connectorId);
+  const connector = await getConnector(chatId, connectorId);
   if (!usesChatCredentials(connector)) {
     throw new Error(`Connector ${connectorId} does not use OAuth or tokenAuth`);
   }
@@ -309,7 +309,7 @@ export async function saveMcpAuthToken(
   connectorId: string,
   token: string,
 ): Promise<void> {
-  const connector = await getConnector(connectorId);
+  const connector = await getConnector(chatId, connectorId);
   if (connector.transport.type !== "http" || !connector.transport.tokenAuth) {
     throw new Error(`Connector ${connectorId} does not use tokenAuth`);
   }
@@ -532,7 +532,7 @@ export async function handleMcpAuthCallback(request: Request): Promise<Response>
       if (currentAuthGeneration(pending.key) !== pending.generation) {
         throw new Error("MCP OAuth callback was cancelled");
       }
-      const connector = await getConnector(pending.connectorId);
+      const connector = await getConnector(pending.chatId, pending.connectorId);
       if (connector.transport.type !== "http" || connector.transport.oauth === undefined) {
         throw new Error(`Connector ${pending.connectorId} does not use OAuth`);
       }
