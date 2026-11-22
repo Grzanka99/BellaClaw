@@ -87,6 +87,7 @@ describe("list-connectors", () => {
       userConnectors: [
         {
           id: "notes",
+          kind: EConnectorKind.Mcp,
           url: "https://notes.example.com/mcp",
           description: "notes tools",
           plainChats: true,
@@ -94,6 +95,7 @@ describe("list-connectors", () => {
         },
         {
           id: "github",
+          kind: EConnectorKind.Mcp,
           url: "https://github.example.com/mcp",
           description: "github tools",
           plainChats: false,
@@ -101,6 +103,7 @@ describe("list-connectors", () => {
         },
         {
           id: "old",
+          kind: EConnectorKind.Mcp,
           url: "https://old.example.com/mcp",
           description: "old tools",
           plainChats: false,

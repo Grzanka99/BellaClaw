@@ -28,7 +28,9 @@ export const connectorCommand: TCommand = {
         return "You have no added connectors.";
       }
 
-      return rows.map((row) => `- ${row.id} (${STATUS_TEXT[row.status]}): ${row.url}`).join("\n");
+      return rows
+        .map((row) => `- ${row.id} (${row.kind}, ${STATUS_TEXT[row.status]}): ${row.url}`)
+        .join("\n");
     }
 
     if ((action !== "approve" && action !== "reject") || id === undefined || extra !== undefined) {

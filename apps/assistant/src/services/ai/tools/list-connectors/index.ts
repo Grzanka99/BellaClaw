@@ -27,6 +27,7 @@ export const listConnectors = defineTool({
       })),
       userConnectors: stored.map((row) => ({
         id: row.id,
+        kind: row.kind,
         url: row.url,
         description: row.description,
         plainChats: row.plainChats,

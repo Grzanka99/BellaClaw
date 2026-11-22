@@ -10,7 +10,8 @@
     <description>
       Returns serverConnectors and userConnectors. serverConnectors are set up by the server's
       operator for everyone: id and description; they are read-only and cannot be changed or
-      removed here. userConnectors are the user's own: id, url, description, plainChats and status:
+      removed here. userConnectors are the user's own: id, kind (mcp or utcp: the server's protocol),
+      url, description, plainChats and status:
       pending_add (waiting for the user's approval, not usable yet), active (usable), or
       pending_removal (still usable, waiting for the user's approval of the removal). Takes no
       parameters.

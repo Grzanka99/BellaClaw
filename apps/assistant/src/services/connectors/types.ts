@@ -32,3 +32,6 @@ export type TConnectorProbe = { status: "ready"; toolCount: number } | { status:
 
 // the server answered that the session needs credentials
 export class ConnectorAuthRequiredError extends Error {}
+
+// the adapter cannot use the connector's URL; the message is ours, never the server's
+export class ConnectorUrlError extends Error {}

@@ -24,6 +24,8 @@
     "@jitl/quickjs-wasmfile-release-sync": "^0.32.0",
     "@libsql/client": "^0.17.3",
     "@modelcontextprotocol/sdk": "1.30.0",
+    "@utcp/http": "1.1.14",
+    "@utcp/sdk": "1.2.0",
     "croner": "^10.0.1",
     "discord.js": "^14.25.1",
     "drizzle-orm": "^0.45.2",

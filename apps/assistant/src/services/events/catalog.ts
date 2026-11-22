@@ -585,6 +585,7 @@ const SConnectorAddRequested = z
   .object({
     ownerKey: z.string(),
     id: z.string(),
+    kind: z.enum(EConnectorKind),
     url: z.string(),
     description: z.string(),
     plainChats: z.boolean(),

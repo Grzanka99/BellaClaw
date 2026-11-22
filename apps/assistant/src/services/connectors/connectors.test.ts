@@ -57,7 +57,14 @@ async function send<T extends EEventType>(
 function add(id: string, ownerKey = OWNER, url = "https://example.com/mcp") {
   return send(
     EEventType.ConnectorAddRequested,
-    { ownerKey, id, url, description: "Example tools", plainChats: false },
+    {
+      ownerKey,
+      id,
+      kind: EConnectorKind.Mcp,
+      url,
+      description: "Example tools",
+      plainChats: false,
+    },
     ownerKey,
   );
 }
@@ -136,7 +143,7 @@ describe("stored connectors", () => {
     expect(deliveries).toEqual([{ status: "done" }]);
   });
 
-  test("rejects an add of an existing, a file connector's, or a malformed id, and a non-http URL", async () => {
+  test("rejects an add of an existing, a file connector's, or a malformed id and a non-http URL", async () => {
     await add("notes");
 
     await expect(add("notes")).rejects.toMatchObject({

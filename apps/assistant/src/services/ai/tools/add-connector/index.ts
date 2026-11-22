@@ -1,15 +1,25 @@
-import { EConnectorStatus, EEventType } from "@bellaclaw/database";
+import { EConnectorKind, EConnectorStatus, EEventType } from "@bellaclaw/database";
 import { CONNECTOR_EXISTS } from "@bellaclaw/shared";
-import { bool, obj, opt, str } from "@earendil-works/pi-schema";
+import { bool, obj, oneOf, opt, str } from "@earendil-works/pi-schema";
 import { ConnectorService, type TConnectorProbe } from "../../../connectors";
+import { ConnectorUrlError } from "../../../connectors/types";
 import { CommandRejectedError } from "../../../events";
 import { defineTool, requireChatId, ToolError } from "../define-tool";
 import instructions from "./instructions.xml" with { type: "text" };
+
+const SERVER_NAMES: Record<EConnectorKind, string> = {
+  [EConnectorKind.Mcp]: "an MCP server",
+  [EConnectorKind.Utcp]: "a UTCP server",
+};
 
 export const SAddConnectorArgs = obj({
   id: str({
     pattern: "^[a-z][a-z0-9-]*$",
     description: "Short lowercase id: a letter, then letters, digits or hyphens",
+  }),
+  kind: oneOf([EConnectorKind.Mcp, EConnectorKind.Utcp], {
+    description:
+      "The protocol the user named; when they named none, try mcp and, if that cannot connect, utcp",
   }),
   url: str({
     pattern: "^https?://\\S+$",
@@ -29,7 +39,7 @@ export const addConnector = defineTool({
   name: "add-connector",
   label: "Add connector",
   description:
-    "Check that a URL is a reachable MCP server, then ask to add it as the user's connector. It stays unusable until the user approves it.",
+    "Check that a URL is a reachable MCP or UTCP server, then ask to add it as the user's connector. It stays unusable until the user approves it.",
   schema: SAddConnectorArgs,
   instructions,
   mode: "sequential",
@@ -44,20 +54,39 @@ export const addConnector = defineTool({
     try {
       probe = await ConnectorService.instance.probe(
         ownerKey,
-        { id: args.id, url: args.url, description: args.description, plainChats },
+        { id: args.id, kind: args.kind, url: args.url, description: args.description, plainChats },
         signal,
       );
-    } catch (_error) {
+    } catch (error) {
+      // our own text, naming no server-supplied detail
+      if (error instanceof ConnectorUrlError) {
+        throw new ToolError("connector-url-unsupported", `${error.message}. Nothing was added`);
+      }
+
       throw new ToolError(
         "connector-unreachable",
-        `Could not connect to ${args.url} as an MCP server. Nothing was added`,
+        `Could not connect to ${args.url} as ${SERVER_NAMES[args.kind]}. Nothing was added`,
+      );
+    }
+
+    if (probe.status === "auth_required" && args.kind === EConnectorKind.Utcp) {
+      throw new ToolError(
+        "connector-credentials-unsupported",
+        `${args.url} asks for credentials, and UTCP connectors take no credentials. Nothing was added`,
       );
     }
 
     try {
       await context.events.request(
         EEventType.ConnectorAddRequested,
-        { ownerKey, id: args.id, url: args.url, description: args.description, plainChats },
+        {
+          ownerKey,
+          id: args.id,
+          kind: args.kind,
+          url: args.url,
+          description: args.description,
+          plainChats,
+        },
         {
           outcome: EEventType.ConnectorsChanged,
           step: undefined,
