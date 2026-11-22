@@ -1,12 +1,11 @@
 import { AuthorizationService } from "../authorization";
-import { IdentityService } from "../identity";
 import type { TCommand } from "./types";
 
 export const updateCommand: TCommand = {
   name: "update",
   description: "Check for a new version now and install it.",
   usage: "!update",
-  handler: async (_ownerKey, _args, _ctx, address) => {
+  handler: async (ownerKey, _args, _ctx, address) => {
     // An update restarts the bot for everyone, so only an activated chat may ask for one, even
     // with the activation gate disabled.
     if (!(await AuthorizationService.instance.isActivated(address))) {
@@ -19,7 +18,7 @@ export const updateCommand: TCommand = {
     }
 
     // the update's notices go to this chat only
-    process.send({ type: "update", chatId: IdentityService.instance.addressKey(address) });
+    process.send({ type: "update", chatId: ownerKey });
     return "Checking for an update.";
   },
 };
