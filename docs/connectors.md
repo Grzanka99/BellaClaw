@@ -89,7 +89,9 @@ HTTPS, or HTTP to `localhost`, `127.0.0.1` or `[::1]`, so the manual's URL must 
 
 The SDK fetches the manual again each time the connector is used, so its tools, descriptions and
 schemas are always the server's current ones. The URL may also point to an OpenAPI (or Swagger)
-document, which the SDK converts into a manual. Each tool result is limited to 1 MiB; a streamed
+document, which the SDK converts into a manual. The converter skips an operation without an
+`operationId`, and a document whose `servers` URL is relative registers its tools, but their calls
+are refused because the URL is not https. Each tool result is limited to 1 MiB; a streamed
 (SSE or streamable HTTP) result is read in full before the limit is applied.
 
 - Tools use the call templates of the SDK's HTTP plugin: HTTP, SSE and streamable HTTP. CLI,

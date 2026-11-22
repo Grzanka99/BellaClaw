@@ -59,12 +59,12 @@ export const utcpAdapter: TConnectorAdapter = {
       throw new Error(`UTCP manual registration failed: ${registered.errors.join(", ")}`);
     }
 
-    // registerManual takes no signal: an abort during it ends the open here
-    signal.throwIfAborted();
-
     // registerManual replaced the name's non-word characters; tool names are "<manual>.<tool>"
     const prefix = `${manualTemplate.name}.`;
     const tools = await client.getTools();
+
+    // registerManual and getTools take no signal: an abort during them ends the open here
+    signal.throwIfAborted();
 
     let closed = false;
     const session: TConnectorSession = {

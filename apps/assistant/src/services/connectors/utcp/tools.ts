@@ -1,6 +1,4 @@
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
-import { compile } from "@earendil-works/pi-schema";
-import { formats } from "@earendil-works/pi-schema/formats";
 import type { Tool, UtcpClient } from "@utcp/sdk";
 import { z } from "zod";
 import type { TConnector } from "../config";
@@ -32,19 +30,15 @@ export function remoteTool(context: TUtcpToolContext, tool: Tool, remoteName: st
       if (!parsed.success) {
         throw new Error("UTCP tool arguments must be a structured object");
       }
-      if (!compile(tool.inputs, { formats, unresolvedRefs: "reject" }).check(parsed.data)) {
-        throw new Error(`Invalid arguments for UTCP tool ${remoteName}`);
-      }
       const signals = [context.signal, AbortSignal.timeout(context.connector.requestTimeoutMs)];
       if (signal !== undefined) {
         signals.push(signal);
       }
+      const combined = AbortSignal.any(signals);
       let result: unknown;
       try {
-        result = await untilAborted(
-          context.client.callTool(tool.name, parsed.data),
-          AbortSignal.any(signals),
-        );
+        combined.throwIfAborted();
+        result = await untilAborted(context.client.callTool(tool.name, parsed.data), combined);
       } catch (error) {
         let message = String(error);
         if (error instanceof Error) {

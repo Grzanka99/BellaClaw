@@ -20,6 +20,10 @@ export const mcpPromptsCommand: TCommand = {
             .join("\n") || "No connectors configured."
         );
       }
+      const connector = await getConnector(ownerKey, connectorId);
+      if (connector.kind !== EConnectorKind.Mcp) {
+        return "This connector does not expose prompt templates.";
+      }
       const session = await ConnectorService.instance.open({ ownerKey, connectorId });
       try {
         const list = session.tools.find((tool) => tool.name === "mcp-list-prompts");
