@@ -8,7 +8,7 @@
     "dev": "bun --env-file=../../.env run --watch src/index.ts",
     "start": "bun --env-file=../../.env run src/index.ts",
     "test": "bun test",
-    "typecheck": "bunx tsc --noEmit"
+    "typecheck": "bunx tsc --noEmit && bunx tsc --noEmit -p src/client"
   },
   "dependencies": {
     "@bellaclaw/behavior-logs": "workspace:*",

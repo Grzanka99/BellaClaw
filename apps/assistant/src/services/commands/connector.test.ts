@@ -57,7 +57,7 @@ async function store(id: string, status: EConnectorStatus, createdAt: number) {
     kind: EConnectorKind.Mcp,
     url: `https://${id}.example.com/mcp`,
     description: `The ${id} tools`,
-    plainChats: false,
+    plainChats: id === "calendar",
     status,
     createdAt: new Date(createdAt),
     updatedAt: new Date(createdAt),
@@ -101,7 +101,7 @@ test("list shows the stored connectors in plain words", async () => {
   expect(await send("!connector list")).toBe(
     [
       "- notes (mcp, waiting for approval to add): https://notes.example.com/mcp — The notes tools",
-      "- calendar (mcp, waiting for approval to remove): https://calendar.example.com/mcp — The calendar tools",
+      "- calendar (mcp, waiting for approval to remove, open to plain chats): https://calendar.example.com/mcp — The calendar tools",
     ].join("\n"),
   );
 });
@@ -123,7 +123,7 @@ test("reject drops a pending add and keeps a connector waiting for removal", asy
   );
   expect(await send("!connector reject calendar")).toBe("Connector calendar stays.");
   expect(await send("!connector list")).toBe(
-    "- calendar (mcp, active): https://calendar.example.com/mcp — The calendar tools",
+    "- calendar (mcp, active, open to plain chats): https://calendar.example.com/mcp — The calendar tools",
   );
   expect(await send("!connector reject notes")).toBe("You have no connector notes.");
 });

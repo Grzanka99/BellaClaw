@@ -53,7 +53,7 @@ describe("log viewer", () => {
     application = createLogViewerApp({ dbPath });
 
     const page = await application.app.request("/api/logs");
-    const body: TLogReaderResult<TLogViewerPage> = await page.json();
+    const body = (await page.json()) as TLogReaderResult<TLogViewerPage>;
     const health = await application.app.request("/health");
 
     expect(page.status).toBe(503);
@@ -82,7 +82,7 @@ describe("log viewer", () => {
     application = createLogViewerApp({ dbPath });
 
     const first = await application.app.request("/api/logs?q=distinctive&success=success");
-    const firstBody: TLogReaderResult<TLogViewerPage> = await first.json();
+    const firstBody = (await first.json()) as TLogReaderResult<TLogViewerPage>;
 
     expect(firstBody.success).toBe(true);
 
@@ -100,7 +100,7 @@ describe("log viewer", () => {
     const older = await application.app.request(
       `/api/logs?q=distinctive&success=success&until=${firstBody.data.query.until}&beforeCreatedAt=${last?.createdAtMs}&beforeId=${last?.id}`,
     );
-    const olderBody: TLogReaderResult<TLogViewerPage> = await older.json();
+    const olderBody = (await older.json()) as TLogReaderResult<TLogViewerPage>;
 
     expect(olderBody.success && olderBody.data.page.events.map((event) => event.summary)).toEqual([
       "distinctive lookup 0",
@@ -120,7 +120,7 @@ describe("log viewer", () => {
       await logger.flush();
       application = createLogViewerApp({ dbPath });
       const home = await application.app.request("/api/logs?live=1&range=all&event=tool.finished");
-      const homeBody: TLogReaderResult<TLogViewerPage> = await home.json();
+      const homeBody = (await home.json()) as TLogReaderResult<TLogViewerPage>;
       expect(homeBody.success).toBe(true);
 
       if (!homeBody.success) {
@@ -149,7 +149,7 @@ describe("log viewer", () => {
         const response = await application.app.request(
           `/api/logs/new?live=1&range=all&event=tool.finished&afterCreatedAt=${cursor?.createdAtMs}&afterId=${cursor?.id}`,
         );
-        const body: TLogReaderResult<TLogLiveUpdate> = await response.json();
+        const body = (await response.json()) as TLogReaderResult<TLogLiveUpdate>;
         expect(body.success).toBe(true);
 
         if (!body.success) {
