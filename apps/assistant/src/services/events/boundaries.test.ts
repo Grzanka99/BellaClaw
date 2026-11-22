@@ -140,6 +140,7 @@ const ALLOWED_WAITS: Record<string, string[]> = {
     "ai-auth",
     "identity",
     "lists",
+    "connectors",
   ],
   // a scheduled task's search-memory tool refreshes the facts first; a cron fire is held while
   // its address or account is being linked
