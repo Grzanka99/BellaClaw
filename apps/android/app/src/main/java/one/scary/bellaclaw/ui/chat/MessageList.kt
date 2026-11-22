@@ -24,6 +24,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import one.scary.bellaclaw.R
 import one.scary.bellaclaw.model.MessageImage
+import one.scary.bellaclaw.model.SendState
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
@@ -32,8 +33,10 @@ import java.time.format.FormatStyle
  * The conversation, newest at the bottom. [rows] come newest first. User messages are bubbles,
  * assistant replies plain full-width text.
  * A reply's activity card shows below the newest row while the reply is in progress and stays the same
- * item above the reply once it lands; rows come, go and move animated.
- * A new bottom item scrolls into view when the reader was at the bottom; otherwise the list stays put.
+ * item above the reply once it lands; rows fade in and out. A card opened or closed by a tap keeps its
+ * header in place and moves the rows below it instead.
+ * A new bottom item scrolls into view when the reader was at the bottom or it is their own send;
+ * otherwise the list stays put.
  * Reaching the oldest row asks for older ones with [onLoadOlder]; a failed send retries on [onRetry];
  * a tapped image opens with [onOpenImage].
  */
@@ -60,9 +63,11 @@ fun MessageList(
         }
     }
     val atBottom by remember { derivedStateOf { listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0 } }
-    val bottomKey = rows.firstOrNull()?.key
+    val bottom = rows.firstOrNull()
+    val bottomKey = bottom?.key
     // Read while composing the new bottom item, so it reflects the layout from before that item.
-    val follow = remember(bottomKey) { atBottom }
+    // A card opened by a tap leaves the list off the bottom, so the reader's own send follows regardless.
+    val follow = remember(bottomKey) { atBottom || (bottom is ChatRow.Item && bottom.message.sendState == SendState.PENDING) }
     LaunchedEffect(bottomKey) {
         if (follow) {
             listState.scrollToItem(0)
@@ -76,11 +81,12 @@ fun MessageList(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         items(rows, key = { it.key }) { row ->
-            val animated = Modifier.animateItem()
+            // No placement animation: a resizing card would leave its neighbours sliding behind it.
+            val animated = Modifier.animateItem(placementSpec = null)
             when (row) {
                 is ChatRow.Day -> DayChip(row.date, animated)
                 is ChatRow.Item -> MessageItem(row.message, onRetry, imageLoader, onOpenImage, animated)
-                is ChatRow.Activity -> ActivityCard(row.rows, row.seconds, row.isLive, animated)
+                is ChatRow.Activity -> ActivityCard(row.rows, row.seconds, row.isLive, { listState.dispatchRawDelta(it) }, animated)
             }
         }
     }
