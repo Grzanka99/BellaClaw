@@ -120,21 +120,31 @@ export async function loadConnectors(ownerKey: string): Promise<TConnector[]> {
   const fileIds = new Set(fileConnectors.map((connector) => connector.id));
   const stored: TConnector[] = rows
     .filter((row) => !fileIds.has(row.id))
-    .map((row) => ({
-      id: row.id,
-      description: row.description,
-      instructions: undefined,
-      transport: { type: "http", url: row.url, headers: {}, oauth: undefined, tokenAuth: false },
-      tools: undefined,
-      contextArguments: {},
-      resources: true,
-      prompts: true,
-      sampling: true,
-      plainChats: row.plainChats,
-      requestTimeoutMs: REQUEST_TIMEOUT_MS,
-      inputTimeoutMs: INPUT_TIMEOUT_MS,
-    }));
+    .map((row) => storedConnector(row));
   return [...fileConnectors, ...stored];
+}
+
+export type TStoredConnectorFields = Pick<
+  typeof connectorsTable.$inferSelect,
+  "id" | "url" | "description" | "plainChats"
+>;
+
+// the connector a stored row gives
+export function storedConnector(row: TStoredConnectorFields): TConnector {
+  return {
+    id: row.id,
+    description: row.description,
+    instructions: undefined,
+    transport: { type: "http", url: row.url, headers: {}, oauth: undefined, tokenAuth: false },
+    tools: undefined,
+    contextArguments: {},
+    resources: true,
+    prompts: true,
+    sampling: true,
+    plainChats: row.plainChats,
+    requestTimeoutMs: REQUEST_TIMEOUT_MS,
+    inputTimeoutMs: INPUT_TIMEOUT_MS,
+  };
 }
 
 export async function getConnector(ownerKey: string, id: string): Promise<TConnector> {

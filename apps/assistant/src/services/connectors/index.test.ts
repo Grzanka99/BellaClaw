@@ -530,7 +530,7 @@ describe("MCP runtime", () => {
     };
     const tools = await discoverTools(context);
     const list = tool(
-      { connector, tools, signal: context.signal, close: async () => {} },
+      { connector, tools, instructions: undefined, signal: context.signal, close: async () => {} },
       "mcp-list-resources",
     );
 

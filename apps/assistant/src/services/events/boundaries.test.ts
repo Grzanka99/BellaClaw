@@ -42,7 +42,7 @@ const ALLOWED: Record<string, string> = {
   "ai -> conversation/compaction": "compactConversation, the stateless compaction engine",
   "ai -> cron": "CronScheduler.get and list reads; preview dry runs",
   "ai -> embedding": "driver",
-  "ai -> connectors": "ConnectorService.open: live sockets",
+  "ai -> connectors": "ConnectorService.open: live sockets; probe and listStored reads",
   "ai -> connectors/config": "connector config reads",
   "ai -> connectors/runs": "ConnectorRunRegistry: live abort controllers and resolvers",
   "ai -> connectors/mcp/sampling": "pure request and result mappers",

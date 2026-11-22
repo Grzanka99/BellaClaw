@@ -6,21 +6,31 @@ import {
   SConnectorId,
   type TOption,
 } from "@bellaclaw/shared";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
-import type { TDatabaseTransaction } from "../database";
+import { DatabaseConnector, type TDatabaseTransaction } from "../database";
 import { commandFailed, ESubscriptionMode, EventBus, type TEventContext } from "../events";
 import { ERejectionCode } from "../events/catalog";
 import { EIdentityLinkOwner } from "../identity/schema";
-import { getConnector, loadFileConnectors } from "./config";
+import {
+  getConnector,
+  loadFileConnectors,
+  storedConnector,
+  type TStoredConnectorFields,
+} from "./config";
 import { mcpAdapter } from "./mcp";
-import type { TConnectorOpenArgs, TConnectorSession } from "./types";
+import {
+  ConnectorAuthRequiredError,
+  type TConnectorOpenArgs,
+  type TConnectorProbe,
+  type TConnectorSession,
+} from "./types";
 
-export type { TConnectorOpenArgs, TConnectorSession } from "./types";
+export type { TConnectorOpenArgs, TConnectorProbe, TConnectorSession } from "./types";
 
 const SConnectorUrl = z.url({ protocol: /^https?$/ });
 
-type TStoredConnector = typeof connectorsTable.$inferSelect;
+export type TStoredConnector = typeof connectorsTable.$inferSelect;
 
 // an expected refusal of a connector command; errorCode: undefined for invalid input
 class ConnectorRejection extends Error {
@@ -294,6 +304,47 @@ export class ConnectorService {
     this.sessions.set(session, { ownerKey: args.ownerKey, connectorId: connector.id });
     session.signal.addEventListener("abort", () => this.sessions.delete(session), { once: true });
     return session;
+  }
+
+  // opens the server once as the stored connector would be and counts its own tools; a request for
+  // credentials gives auth_required, any other failure throws
+  public async probe(
+    ownerKey: string,
+    fields: TStoredConnectorFields,
+    signal: TOption<AbortSignal>,
+  ): Promise<TConnectorProbe> {
+    // inputTimeoutMs: the probe asks the user nothing, so a request ends at the request timeout
+    const connector = {
+      ...storedConnector(fields),
+      resources: false,
+      prompts: false,
+      inputTimeoutMs: 0,
+    };
+    let session: TConnectorSession;
+
+    try {
+      session = await mcpAdapter.open(connector, { ownerKey, connectorId: connector.id, signal });
+    } catch (error) {
+      if (error instanceof ConnectorAuthRequiredError) {
+        return { status: "auth_required" };
+      }
+      throw error;
+    }
+
+    const toolCount = session.tools.length;
+    await session.close();
+    return { status: "ready", toolCount };
+  }
+
+  // the owner's stored connectors in every status, oldest first
+  public async listStored(ownerKey: string): Promise<TStoredConnector[]> {
+    return DatabaseConnector.instance.run((db) =>
+      db
+        .select()
+        .from(connectorsTable)
+        .where(eq(connectorsTable.ownerKey, ownerKey))
+        .orderBy(asc(connectorsTable.createdAt)),
+    );
   }
 
   public async disconnect(chatId: string, connectorId: string): Promise<void> {

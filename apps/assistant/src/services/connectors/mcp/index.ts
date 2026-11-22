@@ -1,7 +1,11 @@
 import { createLogger, type TOption } from "@bellaclaw/shared";
+import { UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import {
+  StreamableHTTPClientTransport,
+  StreamableHTTPError,
+} from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import {
   CreateMessageRequestSchema,
@@ -9,7 +13,11 @@ import {
   ResourceUpdatedNotificationSchema,
   ToolListChangedNotificationSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import type { TConnectorAdapter, TConnectorSession } from "../types";
+import {
+  ConnectorAuthRequiredError,
+  type TConnectorAdapter,
+  type TConnectorSession,
+} from "../types";
 import { createMcpAuthFetch, getMcpAuthProvider, getMcpAuthToken } from "./auth";
 import { discoverTools, requestOptions, type TMcpToolContext } from "./tools";
 
@@ -74,6 +82,7 @@ export const mcpAdapter: TConnectorAdapter = {
     const session: TConnectorSession = {
       connector,
       tools: [],
+      instructions: undefined,
       signal,
       close: async () => {
         if (closed) {
@@ -125,6 +134,7 @@ export const mcpAdapter: TConnectorAdapter = {
         ...requestOptions(context),
         timeout: connector.requestTimeoutMs,
       });
+      session.instructions = client.getInstructions();
       session.tools.push(...(await discoverTools(context)));
       let refreshing = Promise.resolve();
       client.setNotificationHandler(ToolListChangedNotificationSchema, () => {
@@ -141,6 +151,12 @@ export const mcpAdapter: TConnectorAdapter = {
       return session;
     } catch (error) {
       await session.close();
+      if (
+        error instanceof UnauthorizedError ||
+        (error instanceof StreamableHTTPError && error.code === 401)
+      ) {
+        throw new ConnectorAuthRequiredError(`Connector ${connector.id} requires authentication`);
+      }
       throw error;
     }
   },

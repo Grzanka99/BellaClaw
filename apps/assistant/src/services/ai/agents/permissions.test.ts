@@ -51,8 +51,15 @@ const EXPECTED_TOOL_NAMES: Record<EAgentName, readonly string[]> = {
     "delegate-scheduling",
     "delegate-automations",
     "delegate-lists",
+    "delegate-connector-manager",
   ],
   [EAgentName.Connector]: [],
+  [EAgentName.ConnectorManager]: [
+    "list-connectors",
+    "add-connector",
+    "update-connector",
+    "remove-connector",
+  ],
   [EAgentName.Memory]: ["search-memory", "remember-memory", "forget-memory"],
   [EAgentName.Plain]: ["web-search", "web-fetch"],
   [EAgentName.Settings]: ["get-settings", "update-settings"],
@@ -138,7 +145,11 @@ describe("agent permissions", () => {
             tool.name === "update-cron-job" ||
             tool.name === "unschedule-cron-job" ||
             tool.name === "delegate-lists" ||
-            tool.name === "update-lists"
+            tool.name === "update-lists" ||
+            tool.name === "delegate-connector-manager" ||
+            tool.name === "add-connector" ||
+            tool.name === "update-connector" ||
+            tool.name === "remove-connector"
           ) {
             expect(tool.executionMode).toBe("sequential");
           }

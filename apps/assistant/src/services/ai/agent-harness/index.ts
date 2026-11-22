@@ -685,6 +685,12 @@ export class AgentHarness {
       );
     }
 
+    if (args.connector?.instructions !== undefined) {
+      parts.push(
+        `<server_reported_instructions>${args.connector.instructions}</server_reported_instructions>`,
+      );
+    }
+
     if (args.name === EAgentName.Scheduling) {
       let connectors: Awaited<ReturnType<typeof loadConnectors>> = [];
       try {
@@ -914,7 +920,11 @@ export class AgentHarness {
                   parentToolCallId: toolCallId,
                   signal: AbortSignal.any([runSignal, session.signal]),
                   delegationCount: undefined,
-                  connector: { connector: session.connector, tools: session.tools },
+                  connector: {
+                    connector: session.connector,
+                    tools: session.tools,
+                    instructions: session.instructions,
+                  },
                   model: undefined,
                   onStep: undefined,
                 });
