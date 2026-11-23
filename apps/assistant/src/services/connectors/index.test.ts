@@ -12,7 +12,7 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import { resetEventTables } from "../database/test-utils";
 import { EventBus } from "../events";
-import { loadConnectors } from "./config";
+import { loadConnectors, loadFileConnectors } from "./config";
 import { ConnectorService } from "./index";
 import { disconnectMcpAuth, getMcpAuthStatus, saveMcpAuthToken } from "./mcp/auth";
 import { mcpResult } from "./mcp/content";
@@ -142,6 +142,43 @@ describe("MCP runtime", () => {
     await expect(loadConnectors("account:a")).rejects.toThrow(
       "cannot use both oauth and tokenAuth",
     );
+  });
+
+  test("a server set up before the rename keeps its config variable and profiles key", async () => {
+    const previousLegacyConfig = Bun.env.BELLACLAW_MCP_CONFIG;
+    const legacyPath = join(directory, "mcp.json");
+    await Bun.write(
+      legacyPath,
+      JSON.stringify({
+        profiles: [
+          {
+            id: "legacy",
+            description: "Legacy",
+            instructions: "Use legacy tools",
+            transport: { type: "stdio", command: "bun" },
+          },
+        ],
+      }),
+    );
+    try {
+      Bun.env.BELLACLAW_MCP_CONFIG = legacyPath;
+      expect((await loadFileConnectors()).map((connector) => connector.id)).toEqual([]);
+
+      delete Bun.env.BELLACLAW_CONNECTORS_CONFIG;
+      expect((await loadFileConnectors()).map((connector) => connector.id)).toEqual(["legacy"]);
+
+      Bun.env.BELLACLAW_MCP_CONFIG = join(directory, "missing.json");
+      expect((await loadFileConnectors()).map((connector) => connector.id)).toEqual([
+        "logs",
+        "vault",
+      ]);
+    } finally {
+      if (previousLegacyConfig === undefined) {
+        delete Bun.env.BELLACLAW_MCP_CONFIG;
+      } else {
+        Bun.env.BELLACLAW_MCP_CONFIG = previousLegacyConfig;
+      }
+    }
   });
 
   test("stdio paginates tools, preserves schemas, isolates context and reports server errors", async () => {
