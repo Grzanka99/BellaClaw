@@ -64,8 +64,8 @@ fun chatRows(messages: List<Message>, zone: ZoneId, activityKeys: Map<Instant, S
 
 /**
  * The card of one run's [rows], oldest first. Its state and outcome are the newest stored or streamed row's,
- * the pending send's only while it has none. A failed send's card shows open, so its retry shows; any
- * other finished one starts folded.
+ * the pending send's only while it has none. A reply that only repeats its outcome adds no line. A failed
+ * send's card shows open, so its retry shows; any other finished one starts folded.
  */
 private fun commandCard(cardKey: String, rows: List<Pair<Message, CommandRun>>): ChatRow.Command {
     val request = rows.firstOrNull { (message, _) -> message.author == Author.USER }?.first
@@ -73,8 +73,16 @@ private fun commandCard(cardKey: String, rows: List<Pair<Message, CommandRun>>):
     val sendState = request?.sendState ?: SendState.STORED
     val failed = sendState == SendState.FAILED
     val state = if (failed) CommandState.FAILED else newest.state
-    val lines = rows.filter { (message, _) -> message.author == Author.ASSISTANT }.map { (message, command) ->
-        CommandLine(message.text, command.state, command.rows)
+    val replies = rows.filter { (message, command) ->
+        message.author == Author.ASSISTANT && message.text != command.outcome
+    }
+    // a step a later step followed has ended, though its row was stored running
+    val lines = replies.mapIndexed { index, (message, command) ->
+        var lineState = command.state
+        if (index < replies.lastIndex && lineState == CommandState.RUNNING) {
+            lineState = CommandState.DONE
+        }
+        CommandLine(message.text, lineState, command.rows)
     }
     return ChatRow.Command(
         key = "command-$cardKey",

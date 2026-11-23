@@ -41,7 +41,7 @@ import one.scary.bellaclaw.ui.components.MessageText
 import one.scary.bellaclaw.ui.theme.BellaClawThemeTokens
 
 /**
- * A command's run: folded, a chip with the command and its outcome; open, the card with one step line per
+ * A command's run: folded, a chip with the command and its outcome below it; open, the card with one step line per
  * reply or notice, rows as one item each. A tap on the header folds or unfolds it with [onToggle]; a failed
  * send retries on [onRetry].
  */
@@ -63,16 +63,17 @@ fun CommandCard(card: ChatRow.Command, onToggle: () -> Unit, onRetry: (String) -
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Icon(Icons.Outlined.Terminal, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
-                Text(
-                    text = card.header,
-                    style = MaterialTheme.typography.labelLarge.copy(fontFamily = FontFamily.Monospace),
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false),
-                )
-                card.outcome?.let {
-                    Text(text = it, style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                Column(modifier = Modifier.weight(1f, fill = false)) {
+                    Text(
+                        text = card.header,
+                        style = MaterialTheme.typography.labelLarge.copy(fontFamily = FontFamily.Monospace),
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    card.outcome?.let {
+                        Text(text = it, style = MaterialTheme.typography.labelMedium, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                    }
                 }
                 if (card.state == CommandState.RUNNING) {
                     CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
@@ -154,7 +155,7 @@ private fun ResultRows(rows: List<CommandRow>) {
                     val (background, content) = when (status.tone) {
                         CommandTone.NEUTRAL -> MaterialTheme.colorScheme.surfaceContainerHighest to MaterialTheme.colorScheme.onSurfaceVariant
                         CommandTone.GOOD -> extra.doneContainer to extra.onDoneContainer
-                        CommandTone.WARNING -> MaterialTheme.colorScheme.tertiaryContainer to MaterialTheme.colorScheme.onTertiaryContainer
+                        CommandTone.WARNING -> extra.warningContainer to extra.onWarningContainer
                         CommandTone.BAD -> MaterialTheme.colorScheme.errorContainer to MaterialTheme.colorScheme.onErrorContainer
                     }
                     Surface(shape = RoundedCornerShape(6.dp), color = background, contentColor = content) {

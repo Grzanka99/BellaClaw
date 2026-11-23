@@ -468,6 +468,7 @@ class ChatViewModelTest {
 
         val done = viewModel.uiState.first { it.cards().single().state == CommandState.DONE }.cards().single()
         assertEquals(listOf("Checking for an update.", "Updated to 3f9c2a1."), done.lines.map { it.text })
+        assertEquals(listOf(CommandState.DONE, CommandState.DONE), done.lines.map { it.state })
         assertTrue(done.isFolded)
         assertEquals(0, viewModel.uiState.value.rows.count { it is ChatRow.Item })
     }
@@ -555,7 +556,8 @@ class ChatViewModelTest {
         assertEquals(listOf("Open this link to sign in"), stored.lines.map { it.text })
 
         val reread = viewModel(BELLACLAW_CHAT_ID, repository()).uiState.first { it.cards().isNotEmpty() }.cards().single()
-        assertEquals(listOf("login started"), reread.lines.map { it.text })
+        assertTrue(reread.lines.isEmpty())
+        assertEquals("login started", reread.outcome)
     }
 
     @Test
