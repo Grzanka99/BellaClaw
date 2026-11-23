@@ -1,6 +1,8 @@
 import type { TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
 import {
   EAutomationStatus,
+  EConnectorKind,
+  EConnectorStatus,
   EConversationKind,
   ECronFinishedReason,
   ECronJobStatus,
@@ -577,6 +579,54 @@ const SListFinished = z
   })
   .strict();
 
+// a connector the assistant adds for the owner, pending until the user approves; id and url are
+// checked by Connectors, which rejects a bad one as invalid
+const SConnectorAddRequested = z
+  .object({
+    ownerKey: z.string(),
+    id: z.string(),
+    url: z.string(),
+    description: z.string(),
+    plainChats: z.boolean(),
+  })
+  .strict();
+
+// the owner's stored connector's changeable fields, in any status
+const SConnectorUpdateRequested = z
+  .object({
+    ownerKey: z.string(),
+    id: z.string(),
+    description: z.string().optional(),
+    plainChats: z.boolean().optional(),
+  })
+  .strict();
+
+// removes the owner's stored connector: a pending add at once, an active one once the user approves
+const SConnectorRemoveRequested = z.object({ ownerKey: z.string(), id: z.string() }).strict();
+
+// the user's decision on the owner's pending add or removal
+const SConnectorResolveRequested = z
+  .object({ ownerKey: z.string(), id: z.string(), decision: z.enum(["approve", "reject"]) })
+  .strict();
+
+// a stored connector after a change; dates as epoch ms
+const SConnectorState = z
+  .object({
+    kind: z.enum(EConnectorKind),
+    url: z.string(),
+    description: z.string(),
+    plainChats: z.boolean(),
+    status: z.enum(EConnectorStatus),
+    createdAt: z.number().int(),
+    updatedAt: z.number().int(),
+  })
+  .strict();
+
+// connector: the owner's stored connector after the command, null when its row is gone
+const SConnectorsChanged = z
+  .object({ ownerKey: z.string(), connectorId: z.string(), connector: SConnectorState.nullable() })
+  .strict();
+
 // errorCode: the handler's stable code for an expected failure, such as job-not-found
 const SCommandRejected = z
   .object({
@@ -691,6 +741,11 @@ export type TEventPayloads = {
   [EEventType.ListsUpdateRequested]: z.infer<typeof SListsUpdateRequested>;
   [EEventType.ListsChanged]: z.infer<typeof SListsChanged>;
   [EEventType.ListFinished]: z.infer<typeof SListFinished>;
+  [EEventType.ConnectorAddRequested]: z.infer<typeof SConnectorAddRequested>;
+  [EEventType.ConnectorUpdateRequested]: z.infer<typeof SConnectorUpdateRequested>;
+  [EEventType.ConnectorRemoveRequested]: z.infer<typeof SConnectorRemoveRequested>;
+  [EEventType.ConnectorResolveRequested]: z.infer<typeof SConnectorResolveRequested>;
+  [EEventType.ConnectorsChanged]: z.infer<typeof SConnectorsChanged>;
   [EEventType.CommandRejected]: z.infer<typeof SCommandRejected>;
   [EEventType.EventDeadLettered]: z.infer<typeof SEventDeadLettered>;
   [EEventType.AppStarted]: z.infer<typeof SAppStarted>;
@@ -787,6 +842,11 @@ export const EVENT_SCHEMAS: { [K in EEventType]: z.ZodType<TEventPayloads[K]> } 
   [EEventType.ListsUpdateRequested]: SListsUpdateRequested,
   [EEventType.ListsChanged]: SListsChanged,
   [EEventType.ListFinished]: SListFinished,
+  [EEventType.ConnectorAddRequested]: SConnectorAddRequested,
+  [EEventType.ConnectorUpdateRequested]: SConnectorUpdateRequested,
+  [EEventType.ConnectorRemoveRequested]: SConnectorRemoveRequested,
+  [EEventType.ConnectorResolveRequested]: SConnectorResolveRequested,
+  [EEventType.ConnectorsChanged]: SConnectorsChanged,
   [EEventType.CommandRejected]: SCommandRejected,
   [EEventType.EventDeadLettered]: SEventDeadLettered,
   [EEventType.AppStarted]: SAppStarted,
@@ -881,6 +941,11 @@ export const EVENT_KINDS: Record<EEventType, EEventKind> = {
   [EEventType.ListsUpdateRequested]: EEventKind.Command,
   [EEventType.ListsChanged]: EEventKind.Event,
   [EEventType.ListFinished]: EEventKind.Event,
+  [EEventType.ConnectorAddRequested]: EEventKind.Command,
+  [EEventType.ConnectorUpdateRequested]: EEventKind.Command,
+  [EEventType.ConnectorRemoveRequested]: EEventKind.Command,
+  [EEventType.ConnectorResolveRequested]: EEventKind.Command,
+  [EEventType.ConnectorsChanged]: EEventKind.Event,
   [EEventType.CommandRejected]: EEventKind.Event,
   [EEventType.EventDeadLettered]: EEventKind.Event,
   [EEventType.AppStarted]: EEventKind.Event,

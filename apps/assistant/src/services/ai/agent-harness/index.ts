@@ -679,16 +679,22 @@ export class AgentHarness {
       }
     }
 
-    if (args.connector !== undefined) {
+    if (args.connector?.connector.instructions !== undefined) {
       parts.push(
         `<connector_instructions>${args.connector.connector.instructions}</connector_instructions>`,
+      );
+    }
+
+    if (args.connector?.instructions !== undefined) {
+      parts.push(
+        `<server_reported_instructions>${args.connector.instructions}</server_reported_instructions>`,
       );
     }
 
     if (args.name === EAgentName.Scheduling) {
       let connectors: Awaited<ReturnType<typeof loadConnectors>> = [];
       try {
-        connectors = await loadConnectors();
+        connectors = await loadConnectors(this.requireConnectorChatId(args.ownerKey));
       } catch (error) {
         this.logger.warning(`Connectors unavailable to Scheduling: ${String(error)}`);
       }
@@ -813,7 +819,7 @@ export class AgentHarness {
   ): Promise<AgentTool[]> {
     let connectors: Awaited<ReturnType<typeof loadConnectors>> = [];
     try {
-      connectors = await loadConnectors();
+      connectors = await loadConnectors(this.requireConnectorChatId(args.ownerKey));
     } catch (error) {
       this.logger.warning(`Connector delegation disabled: ${String(error)}`);
     }
@@ -914,7 +920,11 @@ export class AgentHarness {
                   parentToolCallId: toolCallId,
                   signal: AbortSignal.any([runSignal, session.signal]),
                   delegationCount: undefined,
-                  connector: { connector: session.connector, tools: session.tools },
+                  connector: {
+                    connector: session.connector,
+                    tools: session.tools,
+                    instructions: session.instructions,
+                  },
                   model: undefined,
                   onStep: undefined,
                 });

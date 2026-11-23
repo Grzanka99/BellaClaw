@@ -1,0 +1,30 @@
+<instructions>
+
+  <purpose>
+    Change one of the user's own connectors: its description, or whether the app's plain chats
+    may use it. For a new URL, remove the connector and add the new one.
+  </purpose>
+
+  <tool>
+    <name>update-connector</name>
+    <description>
+      Takes id and at least one of description (one line saying when to use the server) and
+      plainChats (true lets the app's plain chats use it). Returns id, description, plainChats and
+      status after the change.
+    </description>
+  </tool>
+
+  <usage_rules>
+    <rule>Call list-connectors first and use an id it returned</rule>
+    <rule>Give only the fields the user wants changed</rule>
+    <rule>If the tool reports a missing connector, nothing was changed: call list-connectors again</rule>
+  </usage_rules>
+
+  <examples>
+    <example>
+      <context>User says: "let my plain chats use the notes server" (list-connectors returned notes)</context>
+      <toolCall>{ "id": "notes", "plainChats": true }</toolCall>
+    </example>
+  </examples>
+
+</instructions>

@@ -29,6 +29,7 @@ export function createFixtureServer() {
         prompts: {},
         completions: {},
       },
+      instructions: "Fixture server instructions",
     },
   );
   server.setRequestHandler(ListToolsRequestSchema, async (request) => {

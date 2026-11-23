@@ -1,0 +1,33 @@
+<instructions>
+
+  <purpose>
+    Read the connectors (external tool servers) the assistant knows for this user. Call it before
+    changing or removing a connector, to get its id.
+  </purpose>
+
+  <tool>
+    <name>list-connectors</name>
+    <description>
+      Returns serverConnectors and userConnectors. serverConnectors are set up by the server's
+      operator for everyone: id and description; they are read-only and cannot be changed or
+      removed here. userConnectors are the user's own: id, url, description, plainChats and status:
+      pending_add (waiting for the user's approval, not usable yet), active (usable), or
+      pending_removal (still usable, waiting for the user's approval of the removal). Takes no
+      parameters.
+    </description>
+  </tool>
+
+  <usage_rules>
+    <rule>Call it whenever the user asks which connectors they have, and before update-connector or remove-connector</rule>
+    <rule>Match the user's words to a connector by its id, url or description</rule>
+    <rule>When a server connector is asked to be changed or removed, say it is set up server-wide and cannot be changed here</rule>
+  </usage_rules>
+
+  <examples>
+    <example>
+      <context>User says: "what servers are you connected to?"</context>
+      <toolCall />
+    </example>
+  </examples>
+
+</instructions>

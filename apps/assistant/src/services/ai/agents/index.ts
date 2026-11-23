@@ -1,5 +1,6 @@
 import type { TOption } from "@bellaclaw/shared";
 import type { ToolExecutionMode } from "@earendil-works/pi-agent-core";
+import { addConnector } from "../tools/add-connector";
 import { automationDelete } from "../tools/automation-delete";
 import { automationGet } from "../tools/automation-get";
 import { automationList } from "../tools/automation-list";
@@ -15,16 +16,19 @@ import { forgetMemory } from "../tools/forget-memory";
 import { getSettings } from "../tools/get-settings";
 import { listCalendarEvents } from "../tools/list-calendar-events";
 import { listCalendars } from "../tools/list-calendars";
+import { listConnectors } from "../tools/list-connectors";
 import { listCronJobs } from "../tools/list-cron-jobs";
 import { listLists } from "../tools/list-lists";
 import { previewCronJob } from "../tools/preview-cron-job";
 import { rememberMemory } from "../tools/remember-memory";
+import { removeConnector } from "../tools/remove-connector";
 import { removeReadonlyCalendar } from "../tools/remove-readonly-calendar";
 import { scheduleOnce } from "../tools/schedule-once";
 import { scheduleRecurring } from "../tools/schedule-recurring";
 import { searchMemory } from "../tools/search-memory";
 import { unscheduleCronJob } from "../tools/unschedule-cron-job";
 import { updateCalendarEvent } from "../tools/update-calendar-event";
+import { updateConnector } from "../tools/update-connector";
 import { updateCronJob } from "../tools/update-cron-job";
 import { updateLists } from "../tools/update-lists";
 import { updateSettings } from "../tools/update-settings";
@@ -34,6 +38,7 @@ import { EModelPurpose } from "../types";
 import automationsInstructions from "./automations.xml" with { type: "text" };
 import calendarInstructions from "./calendar.xml" with { type: "text" };
 import connectorInstructions from "./connector.xml" with { type: "text" };
+import connectorManagerInstructions from "./connector-manager.xml" with { type: "text" };
 import listsInstructions from "./lists.xml" with { type: "text" };
 import mainInstructions from "./main.xml" with { type: "text" };
 import memoryInstructions from "./memory.xml" with { type: "text" };
@@ -48,6 +53,7 @@ export enum EAgentName {
   Lists = "lists",
   Main = "main",
   Connector = "connector",
+  ConnectorManager = "connector-manager",
   Memory = "memory",
   Plain = "plain",
   Settings = "settings",
@@ -144,6 +150,7 @@ export const AGENTS: Record<EAgentName, TAgentDefinition> = {
       EAgentName.Scheduling,
       EAgentName.Automations,
       EAgentName.Lists,
+      EAgentName.ConnectorManager,
     ],
     connectors: true,
     delegation: undefined,
@@ -157,6 +164,21 @@ export const AGENTS: Record<EAgentName, TAgentDefinition> = {
     delegates: [],
     connectors: false,
     delegation: undefined,
+  },
+  // NOTE: manages the owner's connectors; only Main delegates to it
+  [EAgentName.ConnectorManager]: {
+    purpose: EModelPurpose.Specialist,
+    maxIterations: 12,
+    base: true,
+    instructions: connectorManagerInstructions,
+    tools: [listConnectors, addConnector, updateConnector, removeConnector],
+    delegates: [],
+    connectors: false,
+    delegation: {
+      description:
+        "Required for adding, listing, changing or removing the user's connectors (external tool servers the assistant can use). Pass the user's own words, including any server URL exactly as the user gave it.",
+      mode: "sequential",
+    },
   },
   [EAgentName.Memory]: {
     purpose: EModelPurpose.Specialist,

@@ -320,6 +320,6 @@ private fun toolIcon(tool: String): ImageVector = when (tool) {
     "delegate-calendar" -> Icons.Outlined.CalendarMonth
     "delegate-scheduling", "delegate-automations" -> Icons.Outlined.Alarm
     "delegate-settings" -> Icons.Outlined.Settings
-    "delegate-connector", "resume-connector", "cancel-connector" -> Icons.Outlined.Hub
+    "delegate-connector", "resume-connector", "cancel-connector", "delegate-connector-manager" -> Icons.Outlined.Hub
     else -> Icons.Outlined.Build
 }

@@ -108,12 +108,12 @@ bus.subscribe({
 `request` and `waitFor` hold the caller's lane. The allowed waits form an acyclic graph, kept in
 `ALLOWED_WAITS` in `events/boundaries.test.ts`:
 
-- `conversation` → `cron`, `automations`, `settings`, `memory`, `calendar`, `ai-auth`, `identity`, `lists`:
+- `conversation` → `cron`, `automations`, `settings`, `memory`, `calendar`, `ai-auth`, `identity`, `lists`, `connectors`:
   a turn of an address held while the address or its account is being linked, on a hold lane of
   its own (`link-hold|<chat key>`), bounded from the hold, then forwarded to the account's lane
 - `scheduling` → `automations`, `memory`, `identity`: a cron fire held while its address or its
   account is being linked, bounded from the fire's time like a held message
-- `commands` → `mcp-auth`, `ai-auth`, `calendar`
+- `commands` → `mcp-auth`, `ai-auth`, `calendar`, `connectors`
 - `ai-auth` → `settings`
 - `authorization` → `identity`: a message held while its address or its account is being linked.
   It waits on Identity's read model (`waitWhileLinking`), bounded from the message's arrival
@@ -153,7 +153,9 @@ A call across services is allowed only when it changes no state:
 - Reads, including reads that prepare a command (`AutomationService.resolveNames`,
   `CronScheduler.get`), `ConversationStore.findMessage` (the row a push carries), dry runs, status slash commands, and pure functions such as
   `parseCanonicalChatKey` and `IdentityService.accountIdOf`, `plainConversationKey` and
-  `isPlainConversation`.
+  `isPlainConversation`, `ConnectorService.listStored` (an owner's stored connectors, which
+  `!connector list` and list-connectors show) and `ConnectorService.probe` (one credential-free
+  open of a server before add-connector stores it).
 
 Every other cross-service interaction is a message. The exact import list, with a reason per pair,
 is `ALLOWED` in `events/boundaries.test.ts`.
@@ -185,7 +187,7 @@ Table owners: `memories`, `conversation_summaries`, `conversations` → Conversa
 `fact_distillation_state` → Memory · `cron_engine_jobs` → Cron · `automations`,
 `automation_drafts` → Automations · `user_configs` → Settings · `calendars` → Calendar ·
 `message_authorizations` → Authorization · `identity_links` → Identity · `app_media`,
-`app_devices` → App channel · `lists`, `list_items` → Lists ·
+`app_devices` → App channel · `lists`, `list_items` → Lists · `connectors` → Connectors ·
 `events`, `event_deliveries` → EventBus.
 
 Every change of a transcript (`memories`), and a plain chat's title, raises the conversation's
@@ -247,6 +249,15 @@ change that leaves a list with items, every one done (`lists.finishedAt` marks i
 to an account's Bella conversation lane and stores an app-channel display row with `listFinished`
 (name, total) that history carries, sent to no channel and never replayed. An address's own list
 gets none. The operation and snapshot schemas and the two codes live in `@bellaclaw/shared`, which the gateway validates the app's changes with.
+
+Connectors owns an owner's added MCP servers: its durable consumer `connectors` answers
+`connector.add.requested`, `connector.update.requested`, `connector.remove.requested` and
+`connector.resolve.requested` on the owner's lane with `connectors.changed` (the row, or null once
+it is deleted), or `command.rejected` with `connector-exists`, `connector-not-found` or
+`connector-not-pending`. An add waits in `pending_add` and a removal in `pending_removal` until
+`!connector approve|reject`, a chat command only the user sends, requests the resolve. On
+`identity.link.quiet` it moves the address's rows to the account. `mcp-auth` deletes the owner's
+credentials for a connector on `connectors.changed` with null.
 
 ## Adding a fact or command
 

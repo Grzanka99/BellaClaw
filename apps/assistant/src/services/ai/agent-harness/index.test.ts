@@ -438,6 +438,7 @@ describe("AgentHarness", () => {
           inputTimeoutMs: 1_000,
         },
         tools,
+        instructions: undefined,
       },
     });
 
@@ -1126,6 +1127,65 @@ describe("AgentHarness", () => {
       expect(toolResult).toContain("Specialist answer");
       expect(toolResult).not.toContain("Delegated task");
       expect(toolResult).not.toContain("messages");
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("gives the connector specialist the instructions the server reports", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "bellaclaw-agent-harness-"));
+    const configPath = join(directory, "connectors.json");
+    await Bun.write(
+      configPath,
+      JSON.stringify({
+        connectors: [
+          {
+            id: "fixture",
+            description: "Fixture",
+            instructions: "Use fixture",
+            transport: {
+              type: "stdio",
+              command: process.execPath,
+              args: [join(import.meta.dir, "../../connectors/mcp/fixtures/server.ts")],
+            },
+          },
+        ],
+      }),
+    );
+    Bun.env.BELLACLAW_CONNECTORS_CONFIG = configPath;
+    let specialistPrompt = "";
+    faux.setResponses([
+      fauxAssistantMessage(
+        fauxToolCall(
+          "delegate-connector",
+          { connectorId: "fixture", task: "Read the note", context: "none" },
+          { id: "connector-instructions" },
+        ),
+      ),
+      (context) => {
+        specialistPrompt = getCurrentSystemPrompt(context.messages) ?? "";
+        return fauxAssistantMessage("Specialist answer");
+      },
+      fauxAssistantMessage("Done"),
+    ]);
+    try {
+      await AgentHarness.instance.runMain({
+        prompt: "Check my notes",
+        conversationKey: "discord:1",
+        ownerKey: "discord:1",
+        settings: { ...DefaultConfigRecord, [EConfigKey.AiProvider]: EAiProvider.Openrouter },
+        currentTimeContext: undefined,
+        platform: EMessagePlatform.Discord,
+        trace: TEST_TRACE,
+        events: testEventRequester,
+        signal: undefined,
+      });
+      expect(specialistPrompt).toContain(
+        "<connector_instructions>Use fixture</connector_instructions>",
+      );
+      expect(specialistPrompt).toContain(
+        "<server_reported_instructions>Fixture server instructions</server_reported_instructions>",
+      );
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

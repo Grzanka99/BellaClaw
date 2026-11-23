@@ -1,0 +1,31 @@
+<instructions>
+
+  <purpose>
+    Remove one of the user's own connectors. A connector still waiting for approval is removed at
+    once; an active one becomes pending_removal and stays usable until the user approves the
+    removal with a chat command.
+  </purpose>
+
+  <tool>
+    <name>remove-connector</name>
+    <description>
+      Takes id. Returns id and status: removed (it is gone), or pending_removal with
+      approvalCommand and rejectCommand.
+    </description>
+  </tool>
+
+  <usage_rules>
+    <rule>Call list-connectors first and use an id it returned</rule>
+    <rule>Remove a connector only when the user asked for it</rule>
+    <rule>For pending_removal, quote approvalCommand and rejectCommand exactly as returned</rule>
+    <rule>If the tool reports a missing connector, nothing was removed: call list-connectors again</rule>
+  </usage_rules>
+
+  <examples>
+    <example>
+      <context>User says: "disconnect the notes server" (list-connectors returned notes, active)</context>
+      <toolCall>{ "id": "notes" }</toolCall>
+    </example>
+  </examples>
+
+</instructions>

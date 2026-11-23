@@ -16,6 +16,7 @@ export enum EIdentityLinkOwner {
   Automations = "automations",
   McpAuth = "mcp-auth",
   Lists = "lists",
+  Connectors = "connectors",
 }
 
 export const SIdentityLink = z.object({

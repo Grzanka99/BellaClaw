@@ -28,7 +28,8 @@ export type TAgentRunArgs = {
   images?: TTurnImages;
   parentToolCallId: TOption<string>;
   signal: TOption<AbortSignal>;
-  connector?: { connector: TConnector; tools: AgentTool[] };
+  // instructions: what the server itself reported when the session opened
+  connector?: { connector: TConnector; tools: AgentTool[]; instructions: TOption<string> };
   /** Dry runs must not reach connectors, whose tools can have side effects. */
   withoutConnectors?: boolean;
   /** The model the root agent runs on instead of the one its settings resolve to. */

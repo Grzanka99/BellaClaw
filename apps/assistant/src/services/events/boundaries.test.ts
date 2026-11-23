@@ -42,7 +42,7 @@ const ALLOWED: Record<string, string> = {
   "ai -> conversation/compaction": "compactConversation, the stateless compaction engine",
   "ai -> cron": "CronScheduler.get and list reads; preview dry runs",
   "ai -> embedding": "driver",
-  "ai -> connectors": "ConnectorService.open: live sockets",
+  "ai -> connectors": "ConnectorService.open: live sockets; probe and listStored reads",
   "ai -> connectors/config": "connector config reads",
   "ai -> connectors/runs": "ConnectorRunRegistry: live abort controllers and resolvers",
   "ai -> connectors/mcp/sampling": "pure request and result mappers",
@@ -54,7 +54,8 @@ const ALLOWED: Record<string, string> = {
   "commands -> ai/auth": "status reads",
   "commands -> authorization": "listAuthorizedChatIds, a cached read model",
   "commands -> identity": "IdentityService.addressKey, a pure function",
-  "commands -> connectors": "status read: lists a connector's prompts",
+  "commands -> connectors":
+    "status reads: lists a connector's prompts and the owner's stored connectors",
   "commands -> messaging": "deleteAttachment: a driver call, no stored state",
   "commands -> connectors/mcp/auth": "status read",
   "commands -> connectors/config": "connector config reads",
@@ -139,11 +140,12 @@ const ALLOWED_WAITS: Record<string, string[]> = {
     "ai-auth",
     "identity",
     "lists",
+    "connectors",
   ],
   // a scheduled task's search-memory tool refreshes the facts first; a cron fire is held while
   // its address or account is being linked
   scheduling: ["automations", "memory", "identity"],
-  commands: ["mcp-auth", "ai-auth", "calendar"],
+  commands: ["mcp-auth", "ai-auth", "calendar", "connectors"],
   "ai-auth": ["settings"],
   // a message held while its address or account is being linked
   authorization: ["identity"],
