@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AppLogger, LogReader, type TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
+import { EConnectorKind } from "@bellaclaw/database";
 import { logger, type TOption } from "@bellaclaw/shared";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import {
@@ -426,6 +427,7 @@ describe("AgentHarness", () => {
       connector: {
         connector: {
           id: "files",
+          kind: EConnectorKind.Mcp,
           description: "Files",
           instructions: "Use file tools",
           transport: { type: "stdio", command: "fixture", args: [], env: {} },

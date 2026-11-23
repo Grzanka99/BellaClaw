@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { connectorsTable, EEventType } from "@bellaclaw/database";
+import { connectorsTable, EConnectorKind, EEventType } from "@bellaclaw/database";
 import type { TOption } from "@bellaclaw/shared";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { DatabaseConnector } from "../../../database";
@@ -48,6 +48,7 @@ async function addApproved(id: string) {
   await send(EEventType.ConnectorAddRequested, {
     ownerKey: OWNER,
     id,
+    kind: EConnectorKind.Mcp,
     url: `http://127.0.0.1:${server.port}/mcp`,
     description: "Private tools",
     plainChats: false,

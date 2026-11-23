@@ -36,7 +36,7 @@ export const connectorCommand: TCommand = {
             access = ", open to plain chats";
           }
 
-          return `- ${row.id} (${STATUS_TEXT[row.status]}${access}): ${row.url} — ${row.description}`;
+          return `- ${row.id} (${row.kind}, ${STATUS_TEXT[row.status]}${access}): ${row.url} — ${row.description}`;
         })
         .join("\n");
     }

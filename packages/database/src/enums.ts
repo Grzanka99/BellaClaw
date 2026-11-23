@@ -30,6 +30,7 @@ export enum EConversationKind {
 // the protocol of a connector the assistant added
 export enum EConnectorKind {
   Mcp = "mcp",
+  Utcp = "utcp",
 }
 
 // pending_add: added, not usable until the user approves; pending_removal: removal asked, usable

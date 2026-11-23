@@ -2,11 +2,12 @@ import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { connectorsTable, EConnectorStatus } from "@bellaclaw/database";
+import { connectorsTable, EConnectorKind, EConnectorStatus } from "@bellaclaw/database";
 import type { TOption } from "@bellaclaw/shared";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { ConnectorService } from "../../../connectors";
 import { createFixtureServer } from "../../../connectors/mcp/fixtures/server";
+import { httpTool, startUtcpFixture } from "../../../connectors/utcp/fixtures/server";
 import { DatabaseConnector } from "../../../database";
 import { resetEventTables } from "../../../database/test-utils";
 import { EventBus } from "../../../events";
@@ -86,6 +87,7 @@ describe("add-connector", () => {
     try {
       const result = await execute({
         id: "fixture",
+        kind: "mcp",
         url: `http://127.0.0.1:${http.port}/mcp`,
         description: "Fixture tools",
       });
@@ -114,6 +116,7 @@ describe("add-connector", () => {
     try {
       const result = await execute({
         id: "private",
+        kind: "mcp",
         url: `http://127.0.0.1:${http.port}/mcp`,
         description: "Private tools",
       });
@@ -138,7 +141,7 @@ describe("add-connector", () => {
     const url = `http://127.0.0.1:${http.port}/mcp`;
     await http.stop(true);
 
-    const result = await execute({ id: "gone", url, description: "Gone tools" });
+    const result = await execute({ id: "gone", kind: "mcp", url, description: "Gone tools" });
 
     expect(result).toMatchObject({
       isError: true,
@@ -150,9 +153,71 @@ describe("add-connector", () => {
     expect(await storedRows()).toEqual([]);
   });
 
+  test("stores a pending UTCP connector after reading its manual, and reports its tool count", async () => {
+    const server = startUtcpFixture({
+      manual: (origin) => ({
+        utcp_version: "1.0.0",
+        tools: [
+          httpTool("weather", `${origin}/weather`),
+          httpTool("forecast", `${origin}/weather`),
+        ],
+      }),
+    });
+
+    try {
+      const result = await execute({
+        id: "weather",
+        kind: "utcp",
+        url: server.url,
+        description: "Weather tools",
+      });
+
+      expect(result?.details).toEqual({
+        id: "weather",
+        status: EConnectorStatus.PendingAdd,
+        toolCount: 2,
+        approvalCommand: "!connector approve weather",
+        rejectCommand: "!connector reject weather",
+      });
+      expect(
+        await DatabaseConnector.instance.database
+          .select({ id: connectorsTable.id, kind: connectorsTable.kind })
+          .from(connectorsTable),
+      ).toEqual([{ id: "weather", kind: EConnectorKind.Utcp }]);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  test("refuses a UTCP connector at a plain http URL to a non-loopback host", async () => {
+    const result = await execute({
+      id: "weather",
+      kind: "utcp",
+      url: "http://192.0.2.1/utcp",
+      description: "Weather tools",
+    });
+
+    expect(result).toMatchObject({
+      isError: true,
+      details: { errorCode: "connector-url-unsupported" },
+      content: [
+        {
+          type: "text",
+          text: "UTCP connector weather cannot use this URL: the UTCP SDK allows only https, or http to localhost, 127.0.0.1 or ::1. Nothing was added",
+        },
+      ],
+    });
+    expect(await storedRows()).toEqual([]);
+  });
+
   test("refuses a description with a line break", async () => {
     await expect(
-      execute({ id: "notes", url: "https://notes.example.com/mcp", description: "Notes\nmore" }),
+      execute({
+        id: "notes",
+        kind: "mcp",
+        url: "https://notes.example.com/mcp",
+        description: "Notes\nmore",
+      }),
     ).rejects.toThrow("Invalid tool arguments");
     expect(await storedRows()).toEqual([]);
   });

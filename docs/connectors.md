@@ -1,7 +1,8 @@
 # Connectors
 
-A connector is an external tool server BellaClaw reaches through one generic specialist. Every
-connector is an MCP server. Both conversation and scheduled-task agents can delegate to a
+A connector is an external tool server BellaClaw reaches through one generic specialist: an MCP
+server, or a UTCP server added through the assistant (see [UTCP connectors](#utcp-connectors)).
+`connectors.json` holds MCP servers only. Both conversation and scheduled-task agents can delegate to a
 connector. Adding a server requires configuration, not a new agent or tool implementation.
 
 ## Configure connectors
@@ -50,8 +51,8 @@ across questions to the user and closes when that invocation completes or is can
 ## Connectors added through the assistant
 
 Besides the server-wide, operator-managed `connectors.json`, each user (an account, or an
-unlinked chat) can add their own MCP servers by asking the assistant: “connect my notes server at https://notes.example.com/mcp”.
-The assistant checks once that the URL answers as an MCP server, then asks to add it. The new
+unlinked chat) can add their own MCP or UTCP servers by asking the assistant: “connect my notes server at https://notes.example.com/mcp”.
+The assistant checks once that the URL answers as an MCP (or UTCP) server, then asks to add it. The new
 connector stays pending and unusable until you approve it; asking to remove one leaves it in use,
 pending removal, until you approve that too. You approve with a chat command you send
 yourself:
@@ -62,12 +63,13 @@ yourself:
 !connector reject CONNECTOR
 ```
 
-`list` shows each of your added connectors with its status, whether plain chats may use it, its URL and description, written by the command
+`list` shows each of your added connectors with its kind (`mcp` or `utcp`), status, whether plain
+chats may use it, its URL and description, written by the command
 itself rather than the model, so check it before approving. `approve` makes a pending add
 active or completes a pending removal; `reject` drops a pending add or keeps a connector that was
 pending removal.
 
-If the server asks for credentials, give them after approval with `!connector-auth`, choosing by
+If an MCP server asks for credentials, give them after approval with `!connector-auth`, choosing by
 the command you send: `!connector-auth token CONNECTOR TOKEN` sends that bearer token, and
 `!connector-auth connect CONNECTOR` signs in with OAuth through the server's client registration
 (this needs `BELLACLAW_MCP_PUBLIC_URL`, see [Per-chat OAuth](#per-chat-oauth)). `status` and
@@ -75,11 +77,44 @@ the command you send: `!connector-auth token CONNECTOR TOKEN` sends that bearer 
 message to the assistant. Approving a removal also deletes your saved credentials for it.
 
 Added connectors belong to you alone. They use HTTP or HTTPS only and always offer all of the
-server's tools. They are closed to the app's plain chats unless you ask the assistant to switch
-that on. Their specialist uses the server's own instructions in place of operator-written ones. An
+server's tools that BellaClaw can run. They are closed to the app's plain chats unless you ask the
+assistant to switch that on. An added MCP connector's specialist uses the server's own instructions in place of operator-written ones. An
 id that `connectors.json` already uses cannot be added.
 
+## UTCP connectors
+
+A [UTCP](https://www.utcp.io) server publishes a manual: a JSON list of tools, each with a call
+template saying how to call it over HTTP. Add one by asking the assistant and naming UTCP: “add
+the UTCP weather server at https://weather.example.com/utcp”. When you name no protocol, the
+assistant tries MCP first and UTCP if that cannot connect. Approval works as for any added
+connector, and `!connector list` shows it as `utcp`. The UTCP SDK sends requests only over
+HTTPS, or HTTP to `localhost`, `127.0.0.1` or `[::1]`, so the manual's URL must be one of those.
+
+The SDK fetches the manual again each time the connector is used, so its tools, descriptions and
+schemas are always the server's current ones. The URL may also point to an OpenAPI (or Swagger)
+document, which the SDK converts into a manual. The converter skips an operation without an
+`operationId`, and a document whose `servers` URL is relative registers its tools, but their calls
+are refused because the URL is not https. Each tool result is limited to 1 MiB; a streamed
+(SSE or streamable HTTP) result is read in full before the limit is applied.
+
+- Tools use the call templates of the SDK's HTTP plugin: HTTP, SSE and streamable HTTP. CLI,
+  Text/File and UTCP-over-MCP call templates are not supported and may be added later; the SDK
+  rejects a manual with such a tool, and the connector cannot be added or opened.
+- `!connector-auth` does not apply to UTCP connectors. A server that answers the manual request
+  with an error, including one that asks for credentials, cannot be reached and is not added.
+- A call template may name variables (`${NAME}` or `$NAME`), such as an API key in a header. The SDK
+  reads a variable from the assistant's environment. The environment variable it reads is the
+  connector's id with each `-` written as `__`, then `_` and the variable's name: `API_KEY` of
+  connector `weather` is `weather_API_KEY`, and of connector `my-notes` it is `my__notes_API_KEY`.
+  A variable that is not set makes the request that names it fail.
+
+UTCP uses the pinned official TypeScript SDK (`@utcp/sdk`, `@utcp/http`). It has no prompts,
+resources, sampling or elicitation, so `!mcp-prompts` answers "This connector does not expose prompt templates."
+
 ## Supported capabilities
+
+For MCP connectors:
+
 
 - Stdio and Streamable HTTP, using the pinned official TypeScript MCP SDK.
 - Paginated tool discovery, runtime JSON Schemas, typed Pi tool calls, tool-list changes,

@@ -1,4 +1,4 @@
-import { connectorsTable, EConnectorStatus } from "@bellaclaw/database";
+import { connectorsTable, EConnectorKind, EConnectorStatus } from "@bellaclaw/database";
 import { repositoryPath, SConnectorId, type TOption } from "@bellaclaw/shared";
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
@@ -66,9 +66,10 @@ export const SConnector = z.object({
   inputTimeoutMs: z.number().int().positive().default(INPUT_TIMEOUT_MS),
 });
 
-// instructions: the operator's, from connectors.json only
+// instructions: the operator's, from connectors.json only; kind: always mcp for a file connector
 export type TConnector = Omit<z.infer<typeof SConnector>, "instructions"> & {
   instructions: TOption<string>;
+  kind: EConnectorKind;
 };
 
 // Deliberate exception to the no-shims rule: servers set up before the rename from `mcp.json`
@@ -109,7 +110,7 @@ export async function loadFileConnectors(): Promise<TConnector[]> {
     }
     ids.add(connector.id);
   }
-  return parsed.data.connectors;
+  return parsed.data.connectors.map((connector) => ({ ...connector, kind: EConnectorKind.Mcp }));
 }
 
 // the file's connectors and the owner's usable stored ones (active, or pending removal); a stored
@@ -140,23 +141,27 @@ export async function loadConnectors(ownerKey: string): Promise<TConnector[]> {
 
 export type TStoredConnectorFields = Pick<
   typeof connectorsTable.$inferSelect,
-  "id" | "url" | "description" | "plainChats"
+  "id" | "kind" | "url" | "description" | "plainChats"
 >;
 
-// the connector a stored row gives; oauth and tokenAuth both set, which a file connector cannot
-// have: the user picks a token or OAuth by the !connector-auth command they send
+// the connector a stored row gives. An MCP one has oauth and tokenAuth both set, which a file
+// connector cannot have: the user picks a token or OAuth by the !connector-auth command they send.
+// A UTCP one has neither: it takes no credentials
 export function storedConnector(row: TStoredConnectorFields): TConnector {
+  let oauth: TOption<z.infer<typeof SOAuth>>;
+  let tokenAuth = false;
+
+  if (row.kind === EConnectorKind.Mcp) {
+    oauth = { scopes: [], authorizationParams: {} };
+    tokenAuth = true;
+  }
+
   return {
     id: row.id,
+    kind: row.kind,
     description: row.description,
     instructions: undefined,
-    transport: {
-      type: "http",
-      url: row.url,
-      headers: {},
-      oauth: { scopes: [], authorizationParams: {} },
-      tokenAuth: true,
-    },
+    transport: { type: "http", url: row.url, headers: {}, oauth, tokenAuth },
     tools: undefined,
     contextArguments: {},
     resources: true,

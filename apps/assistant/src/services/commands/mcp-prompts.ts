@@ -1,3 +1,4 @@
+import { EConnectorKind } from "@bellaclaw/database";
 import { z } from "zod";
 import { ConnectorService } from "../connectors";
 import { getConnector, loadConnectors } from "../connectors/config";
@@ -18,6 +19,10 @@ export const mcpPromptsCommand: TCommand = {
             .map((connector) => `${connector.id}: ${connector.description}`)
             .join("\n") || "No connectors configured."
         );
+      }
+      const connector = await getConnector(ownerKey, connectorId);
+      if (connector.kind !== EConnectorKind.Mcp) {
+        return "This connector does not expose prompt templates.";
       }
       const session = await ConnectorService.instance.open({ ownerKey, connectorId });
       try {
@@ -52,6 +57,9 @@ export const mcpPromptCommand: TCommand = {
     }
     try {
       const connector = await getConnector(ownerKey, connectorId);
+      if (connector.kind !== EConnectorKind.Mcp) {
+        return "This connector does not expose prompt templates.";
+      }
       if (!connector.prompts) {
         return "Prompts are disabled for this connector.";
       }

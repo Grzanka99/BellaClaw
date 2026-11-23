@@ -250,7 +250,7 @@ to an account's Bella conversation lane and stores an app-channel display row wi
 (name, total) that history carries, sent to no channel and never replayed. An address's own list
 gets none. The operation and snapshot schemas and the two codes live in `@bellaclaw/shared`, which the gateway validates the app's changes with.
 
-Connectors owns an owner's added MCP servers: its durable consumer `connectors` answers
+Connectors owns an owner's added MCP and UTCP servers: its durable consumer `connectors` answers
 `connector.add.requested`, `connector.update.requested`, `connector.remove.requested` and
 `connector.resolve.requested` on the owner's lane with `connectors.changed` (the row, or null once
 it is deleted), or `command.rejected` with `connector-exists`, `connector-not-found` or

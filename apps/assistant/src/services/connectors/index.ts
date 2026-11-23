@@ -22,14 +22,21 @@ import {
 import { mcpAdapter } from "./mcp";
 import {
   ConnectorAuthRequiredError,
+  type TConnectorAdapter,
   type TConnectorOpenArgs,
   type TConnectorProbe,
   type TConnectorSession,
 } from "./types";
+import { utcpAdapter } from "./utcp";
 
 export type { TConnectorOpenArgs, TConnectorProbe, TConnectorSession } from "./types";
 
 const SConnectorUrl = z.url({ protocol: /^https?$/ });
+
+const ADAPTERS: Record<EConnectorKind, TConnectorAdapter> = {
+  [EConnectorKind.Mcp]: mcpAdapter,
+  [EConnectorKind.Utcp]: utcpAdapter,
+};
 
 export type TStoredConnector = typeof connectorsTable.$inferSelect;
 
@@ -82,7 +89,7 @@ export class ConnectorService {
       mode: ESubscriptionMode.Durable,
       backoffMs: [],
       handler: async (event, ctx) => {
-        const { ownerKey, id, url, description, plainChats } = event.payload;
+        const { ownerKey, id, kind, url, description, plainChats } = event.payload;
 
         if (!SConnectorId.safeParse(id).success) {
           await this.reject(ctx, event.type, new ConnectorRejection(undefined, `Invalid id ${id}`));
@@ -136,7 +143,7 @@ export class ConnectorService {
             .values({
               ownerKey,
               id,
-              kind: EConnectorKind.Mcp,
+              kind,
               url,
               description: description.trim(),
               plainChats,
@@ -291,7 +298,7 @@ export class ConnectorService {
 
   public async open(args: TConnectorOpenArgs): Promise<TConnectorSession> {
     const connector = await getConnector(args.ownerKey, args.connectorId);
-    const session = await mcpAdapter.open(connector, args);
+    const session = await ADAPTERS[connector.kind].open(connector, args);
     this.sessions.set(session, { ownerKey: args.ownerKey, connectorId: connector.id });
     session.signal.addEventListener("abort", () => this.sessions.delete(session), { once: true });
     return session;
@@ -322,7 +329,11 @@ export class ConnectorService {
     let session: TConnectorSession;
 
     try {
-      session = await mcpAdapter.open(connector, { ownerKey, connectorId: connector.id, signal });
+      session = await ADAPTERS[connector.kind].open(connector, {
+        ownerKey,
+        connectorId: connector.id,
+        signal,
+      });
     } catch (error) {
       if (error instanceof ConnectorAuthRequiredError) {
         return { status: "auth_required" };
