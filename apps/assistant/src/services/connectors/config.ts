@@ -71,14 +71,28 @@ export type TConnector = Omit<z.infer<typeof SConnector>, "instructions"> & {
   instructions: TOption<string>;
 };
 
-const SConnectorsConfig = z.object({ connectors: z.array(SConnector) });
+// Deliberate exception to the no-shims rule: servers set up before the rename from `mcp.json`
+// keep their `BELLACLAW_MCP_CONFIG` variable and `profiles` key
+const SConnectorsConfig = z.union([
+  z.object({ connectors: z.array(SConnector) }),
+  z
+    .object({ profiles: z.array(SConnector) })
+    .transform(({ profiles }) => ({ connectors: profiles })),
+]);
 
 // the operator's connectors.json, the same for every owner
 export async function loadFileConnectors(): Promise<TConnector[]> {
   const configuredPath = Bun.env.BELLACLAW_CONNECTORS_CONFIG?.trim();
   let path = repositoryPath("connectors.json");
+  const legacyPath = Bun.env.BELLACLAW_MCP_CONFIG?.trim();
   if (configuredPath !== undefined && configuredPath.length > 0) {
     path = repositoryPath(configuredPath);
+  } else if (
+    legacyPath !== undefined &&
+    legacyPath.length > 0 &&
+    (await Bun.file(repositoryPath(legacyPath)).exists())
+  ) {
+    path = repositoryPath(legacyPath);
   }
   const file = Bun.file(path);
   if (!(await file.exists())) {
