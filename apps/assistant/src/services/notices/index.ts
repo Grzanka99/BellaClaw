@@ -1,5 +1,5 @@
 import { EEventType } from "@bellaclaw/database";
-import type { TOption } from "@bellaclaw/shared";
+import { SCommandRun, type TOption } from "@bellaclaw/shared";
 import { z } from "zod";
 import { AppChannel } from "../app";
 import { AuthorizationService } from "../authorization";
@@ -21,11 +21,13 @@ const NO_DEAD_LETTER_NOTICE: ReadonlySet<string> = new Set([
 // the user's request succeeded before these consumers ran, so their failure has nothing to retry
 const NO_DEAD_LETTER_NOTICE_CONSUMERS: ReadonlySet<string> = new Set(["conversation-title"]);
 const SEventType = z.enum(EEventType);
-// chatId: the chat that asked for the update; absent for a scheduled one, heard by every chat
+// chatId: the chat that asked for the update; absent for a scheduled one, heard by every chat.
+// command: the !update run the notice is a step of; absent for a scheduled one
 const SSupervisorNotice = z.object({
   type: z.literal("notice"),
   text: z.string(),
   chatId: z.string().optional(),
+  command: SCommandRun.optional(),
 });
 
 export class Notices {
@@ -148,7 +150,7 @@ export class Notices {
           source: "notices",
           key: chatId,
           trace: { turnId: `update:${crypto.randomUUID()}`, chatId, platform: undefined },
-          payload: { chatId, text: notice.data.text },
+          payload: { chatId, text: notice.data.text, command: notice.data.command },
           causationId: undefined,
           dedupeKey: undefined,
         });

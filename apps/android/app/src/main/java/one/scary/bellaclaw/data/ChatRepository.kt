@@ -27,6 +27,7 @@ import one.scary.bellaclaw.model.BELLACLAW_CHAT_ID
 import one.scary.bellaclaw.model.BellaClawChat
 import one.scary.bellaclaw.model.Chat
 import one.scary.bellaclaw.model.ChatNotification
+import one.scary.bellaclaw.model.CommandEntry
 import one.scary.bellaclaw.model.Effort
 import one.scary.bellaclaw.model.ImageCheck
 import one.scary.bellaclaw.model.Message
@@ -116,6 +117,9 @@ class ChatRepository(
     val openConversations: Flow<Set<String>> = combine(sync.openChats, state) { open, current ->
         open.mapNotNullTo(HashSet()) { current.keyOf(it) }
     }.distinctUntilChanged()
+
+    /** The command catalog as last read on a stream's connect; empty until read. */
+    val commands: Flow<List<CommandEntry>> = state.map { it.commands }.distinctUntilChanged()
 
     /** Whether the live stream to the server is open. */
     val isStreamOpen: Flow<Boolean> = state.map { it.isStreamOpen }.distinctUntilChanged()

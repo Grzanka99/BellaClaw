@@ -1,5 +1,6 @@
 import { createHmac, createPublicKey, randomBytes, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
+import { SCommandRun } from "./commands";
 import type { TOption } from "./option";
 
 export const GATEWAY_LINK_TOKEN_TTL_MS = 10 * 60 * 1000;
@@ -366,7 +367,8 @@ export type TGatewayActivationCheck = z.infer<typeof SGatewayActivationCheck>;
 // an empty line keeps an idle connection open. accountId: the account the event belongs to.
 // changed: the conversation's transcript changed, with its revisions; typing: a turn of the
 // conversation started (true) or ended (false); deleted: the plain chat is gone; reply: a
-// confidential reply to a message sent from the app, never stored, for app streams only; step: a
+// confidential reply to a message sent from the app, never stored, for app streams only, with the
+// command run and the request's clientMessageId when it answers a command; step: a
 // tool call of the reply turn started, completed or failed, stepId its tool call id, tool the
 // tool's name, startedAt epoch ms, durationMs once it ended; lists: the account's lists changed,
 // with no conversation. Nothing replays
@@ -381,7 +383,12 @@ export const SGatewayStreamEvent = z.discriminatedUnion("type", [
   }).strict(),
   SGatewayStreamEventBase.extend({ type: z.literal("typing"), typing: z.boolean() }).strict(),
   SGatewayStreamEventBase.extend({ type: z.literal("deleted") }).strict(),
-  SGatewayStreamEventBase.extend({ type: z.literal("reply"), text: z.string() }).strict(),
+  SGatewayStreamEventBase.extend({
+    type: z.literal("reply"),
+    text: z.string(),
+    command: SCommandRun.optional(),
+    clientMessageId: z.string().optional(),
+  }).strict(),
   SGatewayStreamEventBase.extend({
     type: z.literal("step"),
     stepId: z.string(),

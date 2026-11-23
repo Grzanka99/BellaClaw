@@ -41,13 +41,14 @@ import java.time.format.FormatStyle
  * A new bottom item scrolls into view when the reader was at the bottom or it is their own send;
  * otherwise the list stays put.
  * Reaching the oldest row asks for older ones with [onLoadOlder]; a failed send retries on [onRetry];
- * a tapped image opens with [onOpenImage].
+ * a tapped image opens with [onOpenImage]; a tapped command card folds or unfolds with [onToggleCard].
  * [insets] keep the first and last rows clear of the bars the list scrolls under.
  */
 @Composable
 fun MessageList(
     rows: List<ChatRow>,
     onRetry: (String) -> Unit,
+    onToggleCard: (String) -> Unit,
     onLoadOlder: () -> Unit,
     imageLoader: MessageImageLoader,
     onOpenImage: (MessageImage) -> Unit,
@@ -73,7 +74,10 @@ fun MessageList(
     val bottomKey = bottom?.key
     // Read while composing the new bottom item, so it reflects the layout from before that item.
     // A card opened by a tap leaves the list off the bottom, so the reader's own send follows regardless.
-    val follow = remember(bottomKey) { atBottom || (bottom is ChatRow.Item && bottom.message.sendState == SendState.PENDING) }
+    val follow = remember(bottomKey) {
+        atBottom || (bottom is ChatRow.Item && bottom.message.sendState == SendState.PENDING) ||
+            (bottom is ChatRow.Command && bottom.sendState == SendState.PENDING)
+    }
     LaunchedEffect(bottomKey) {
         if (follow) {
             listState.scrollToItem(0)
@@ -98,6 +102,7 @@ fun MessageList(
                 is ChatRow.Day -> DayChip(row.date, animated)
                 is ChatRow.Item -> MessageItem(row.message, onRetry, imageLoader, onOpenImage, animated)
                 is ChatRow.Activity -> ActivityCard(row.rows, row.seconds, row.isLive, { listState.dispatchRawDelta(it) }, animated)
+                is ChatRow.Command -> CommandCard(row, { onToggleCard(row.key) }, onRetry, animated)
             }
         }
     }

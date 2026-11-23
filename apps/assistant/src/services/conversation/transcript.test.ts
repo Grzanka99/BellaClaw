@@ -212,13 +212,14 @@ test("a scripted session stores one row per visible message with its channel, a 
   await send(chatId, "Are you there?", "client-3");
   await expectChanged(2, 0);
   await send(chatId, "!dashboard", "client-4");
-  await expectChanged(0, 0);
-  // the delete is the eighth change, and sets rewriteRevision to it
+  await expectChanged(1, 0);
+  // the delete is the ninth change, and sets rewriteRevision to it
   const reply = (await rows(chatId)).find((row) => row.message === "Reply to Hello");
   await requestDelete(chatId, reply?.id ?? 0);
-  await expectChanged(1, 8);
+  await expectChanged(1, 9);
 
-  // the dashboard link is sent on the channel it was asked on, and stored nowhere
+  // the dashboard link is sent on the channel it was asked on, and stored nowhere: its command
+  // stores a card of its name and outcome
   const link = sendText.mock.calls.find(([, text]) => text.includes("/link?token="));
   expect(link?.[0]).toBe(chatId.slice("signal:".length));
   expect(
@@ -302,6 +303,22 @@ test("a scripted session stores one row per visible message with its channel, a 
       clientMessageId: null,
       replayed: false,
     },
+    {
+      author: ERole.User,
+      kind: "display",
+      message: "!dashboard",
+      channel: EMessagePlatform.Signal,
+      clientMessageId: "client-4",
+      replayed: false,
+    },
+    {
+      author: ERole.Assistant,
+      kind: "display",
+      message: "link sent",
+      channel: EMessagePlatform.Signal,
+      clientMessageId: null,
+      replayed: false,
+    },
   ]);
 
   // fact distillation reads the model's message rows only, never display rows
@@ -312,7 +329,7 @@ test("a scripted session stores one row per visible message with its channel, a 
   // the next turn replays the model's rows only: compaction gets this same state; its appends
   // keep rewriteRevision at the delete
   await send(chatId, "Again", "client-5");
-  await expectChanged(2, 8);
+  await expectChanged(2, 9);
 
   const conversation: TOption<TConversation> = runMain.mock.calls[2]?.[0].conversation;
   expect(

@@ -143,6 +143,7 @@ function mockConversationStore() {
         attachments: null,
         steps: null,
         listFinished: null,
+        command: null,
       }),
     ),
     raiseRevision: mock(async () => 1),
@@ -399,6 +400,7 @@ describe("MessageHandler", () => {
           attachments: null,
           steps: null,
           listFinished: null,
+          command: null,
         };
         saved.push(row);
         return row;

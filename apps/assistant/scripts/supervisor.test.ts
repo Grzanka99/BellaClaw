@@ -14,7 +14,7 @@ process.on("message", (message) => appendFileSync(out + "/notices", JSON.stringi
 process.send({ type: "ready" });
 if (!existsSync(out + "/asked")) {
   writeFileSync(out + "/asked", "");
-  process.send({ type: "update", chatId: "signal:+100" });
+  process.send({ type: "update", chatId: "signal:+100", runId: "run-1" });
 }
 setInterval(() => undefined, 1000);
 `;
@@ -121,8 +121,11 @@ describe("supervisor", () => {
 
     const notice = await outcome();
     expect(notice).toContain(`Updated to ${sha.slice(0, 7)}: next`);
-    // the restarted app reports it to the chat that asked
+    // the restarted app reports it to the chat that asked, as the last step of its !update run
     expect(notice).toContain(`"chatId":"signal:+100"`);
+    expect(notice).toContain(
+      `"command":{"runId":"run-1","name":"update","state":"done","outcome":"updated to ${sha.slice(0, 7)}"}`,
+    );
     expect(await readlink(join(releases, "current"))).toBe(sha);
     expect(await readlink(join(releases, sha, ".secrets"))).toBe(join(image, ".secrets"));
   });

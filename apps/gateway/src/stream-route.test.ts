@@ -297,6 +297,40 @@ test("a confidential reply reaches the account's app streams only", async () => 
   }
 });
 
+test("a command's confidential reply reaches the app stream with its run and the request's id, as sent", async () => {
+  const { sendApp, assistant, store, startFollowing } = createTestApp();
+  const alice = await registerApp(sendApp, store, "alice");
+  const stopFollowing = await startFollowing();
+
+  try {
+    const aliceApp = await openAppStream(sendApp, alice.token);
+    expect(await aliceApp.next(1)).toEqual([{ type: "check" }]);
+    const conversationKey = `bella:${alice.publicId}`;
+    const command = { runId: "run-1", name: "app", state: "done" as const, outcome: "link sent" };
+    assistant.push({
+      type: "reply",
+      accountId: alice.publicId,
+      conversationKey,
+      text: "https://example.test/app",
+      command,
+      clientMessageId: "m-1",
+    });
+    expect(await aliceApp.next(1)).toEqual([
+      {
+        type: "reply",
+        conversationKey,
+        text: "https://example.test/app",
+        command,
+        clientMessageId: "m-1",
+      },
+    ]);
+
+    await aliceApp.close();
+  } finally {
+    await stopFollowing();
+  }
+});
+
 test("the phone sees typing start and stop, then a nudge, then the reply in history; another account's stream carries none of it", async () => {
   const database = await createAssistantDatabase();
   let stopFollowing = async () => {};

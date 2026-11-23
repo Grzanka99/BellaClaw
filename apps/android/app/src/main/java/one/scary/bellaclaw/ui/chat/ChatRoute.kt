@@ -100,6 +100,7 @@ fun ChatRoute(
         onSend = viewModel::send,
         onOpenModelPicker = viewModel::openModelPicker,
         onRetry = viewModel::retry,
+        onToggleCard = viewModel::toggleCard,
         onLoadOlder = viewModel::loadOlder,
         pickerEvents = ModelPickerEvents(
             onModel = viewModel::onPickerModel,

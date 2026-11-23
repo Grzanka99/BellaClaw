@@ -1,24 +1,22 @@
 import { EEventType } from "@bellaclaw/database";
+import { COMMAND_CATALOG, type TCommandEntry } from "@bellaclaw/shared";
 import type { TCalendarAccess } from "../calendar/types";
 import type { TCommand } from "./types";
 
+// outcome: the outcome of an added calendar
 function createCalendarAddCommand(
-  name: string,
-  description: string,
+  entry: TCommandEntry,
   reply: string,
+  outcome: string,
   access: TCalendarAccess,
 ): TCommand {
-  const usage = `!${name} CALENDAR_ID`;
-
   return {
-    name,
-    description,
-    usage,
+    entry,
     handler: async (chatId, args, ctx) => {
       const calendarId = args.trim();
 
       if (calendarId.length === 0) {
-        return `Usage: ${usage}`;
+        return { text: `Usage: ${entry.usage}`, state: "failed", outcome: "usage" };
       }
 
       try {
@@ -32,24 +30,32 @@ function createCalendarAddCommand(
             timeoutMs: undefined,
           },
         );
-        return `${reply}: ${added.payload.summary ?? added.payload.calendarId}`;
+        return {
+          text: `${reply}: ${added.payload.summary ?? added.payload.calendarId}`,
+          state: "done",
+          outcome,
+        };
       } catch (error) {
-        return `Can't use that calendar: ${String(error)}`;
+        return {
+          text: `Can't use that calendar: ${String(error)}`,
+          state: "failed",
+          outcome: "failed",
+        };
       }
     },
   };
 }
 
 export const calendarAddReadCommand = createCalendarAddCommand(
-  "calendar_add-read",
-  "Add a Google calendar the bot reads events from. The calendar must already be shared with the bot's service account. It is always stored read-only.",
+  COMMAND_CATALOG["calendar_add-read"],
   "Read-only calendar added",
+  "calendar added",
   "read",
 );
 
 export const calendarAddWriteCommand = createCalendarAddCommand(
-  "calendar_add-write",
-  "Set the Google calendar the bot writes events to. The calendar must already be shared with the bot's service account with write access. Sending it again replaces the current one.",
+  COMMAND_CATALOG["calendar_add-write"],
   "Write calendar set",
+  "write calendar set",
   "write",
 );

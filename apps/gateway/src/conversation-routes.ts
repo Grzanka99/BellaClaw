@@ -1,5 +1,6 @@
 import type { THistoryCursor, TOwnedConversation } from "@bellaclaw/database";
 import {
+  COMMAND_CATALOG,
   SGatewayAppMessage,
   SGatewayListsUpdate,
   SGatewayModelUpdate,
@@ -10,6 +11,7 @@ import type { Context, Hono } from "hono";
 import { z } from "zod";
 import type {
   TApiError,
+  TCommandsResponse,
   TConversationDeletedResponse,
   TConversationsResponse,
   THistoryResponse,
@@ -317,6 +319,10 @@ export function registerConversationRoutes(
       },
     });
   });
+
+  app.get("/api/commands", requireSession, (c) =>
+    c.json<TCommandsResponse>({ commands: Object.values(COMMAND_CATALOG) }),
+  );
 
   app.get("/api/model", requireSession, async (c) =>
     respond(c, await internalApi.getModel(c.var.account.publicId)),

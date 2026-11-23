@@ -1,6 +1,6 @@
 import { readdir, readlink, rename, rm, symlink } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
-import { createLogger, type TOption } from "@bellaclaw/shared";
+import { createLogger, type TCommandState, type TOption } from "@bellaclaw/shared";
 import type { Subprocess } from "bun";
 import { z } from "zod";
 
@@ -30,10 +30,11 @@ const CI_PASSED_CONCLUSIONS = ["success", "skipped", "neutral"];
 const URL_CREDENTIALS = /\/\/[^/@\s]+@/g;
 
 const SRole = z.enum(["assistant", "log-viewer", "gateway"]);
-// chatId: the chat that asked for the update, which alone hears of it
+// chatId: the chat that asked for the update, which alone hears of it; runId: the !update run its
+// notices are steps of
 const SChildMessage = z.union([
   z.object({ type: z.literal("ready") }),
-  z.object({ type: z.literal("update"), chatId: z.string() }),
+  z.object({ type: z.literal("update"), chatId: z.string(), runId: z.string() }),
 ]);
 const SCheckRuns = z.object({
   check_runs: z.array(z.object({ conclusion: z.string().nullable() })),
@@ -54,7 +55,17 @@ let childReady = false;
 let probing = false;
 let updating = false;
 let ciRetry: TOption<Timer>;
-const pendingNotices: { text: string; chatId: TOption<string> }[] = [];
+
+// the chat that asked for an update, and the !update run that asked
+type TRequester = { chatId: string; runId: string };
+type TNotice = {
+  type: "notice";
+  text: string;
+  chatId: TOption<string>;
+  command: TOption<{ runId: string; name: string; state: TCommandState; outcome: string }>;
+};
+
+const pendingNotices: TNotice[] = [];
 
 async function run(command: string[], cwd: string): Promise<string> {
   const proc = Bun.spawn(command, { cwd, stdout: "pipe", stderr: "pipe" });
@@ -101,16 +112,29 @@ async function setCurrent(sha: string): Promise<void> {
   await rename(`${link}.new`, link);
 }
 
-// chatId: the chat that asked for the update; undefined for a scheduled one, heard by every chat
-function notify(text: string, chatId: TOption<string>): void {
+// requester: undefined for a scheduled update, heard by every chat; state and outcome: the step
+// of the requester's run
+function notify(
+  text: string,
+  requester: TOption<TRequester>,
+  state: TCommandState,
+  outcome: string,
+): void {
   log.info(text);
 
+  const notice: TNotice = { type: "notice", text, chatId: undefined, command: undefined };
+
+  if (requester !== undefined) {
+    notice.chatId = requester.chatId;
+    notice.command = { runId: requester.runId, name: "update", state, outcome };
+  }
+
   if (child !== undefined && childReady) {
-    child.send({ type: "notice", text, chatId });
+    child.send(notice);
     return;
   }
 
-  pendingNotices.push({ text, chatId });
+  pendingNotices.push(notice);
 }
 
 // resolves true once the app reports ready, false if it exits or takes too long
@@ -131,13 +155,13 @@ function startApp(dir: string): Promise<boolean> {
       }
 
       if (parsed.data.type === "update") {
-        void update(true, parsed.data.chatId);
+        void update(true, { chatId: parsed.data.chatId, runId: parsed.data.runId });
         return;
       }
 
       childReady = true;
       for (const notice of pendingNotices.splice(0)) {
-        proc.send({ type: "notice", ...notice });
+        proc.send(notice);
       }
       settle(true);
     },
@@ -223,7 +247,7 @@ async function listMigrations(dir: string): Promise<string> {
 
 // manual: asked for in a chat; requester: the chat that asked, also for the CI retry of its
 // update; undefined for a scheduled update, whose notices every chat hears
-async function runUpdate(manual: boolean, requester: TOption<string>): Promise<void> {
+async function runUpdate(manual: boolean, requester: TOption<TRequester>): Promise<void> {
   const failedFile = join(root, FAILED_FILE);
   const runningDir = await currentDir();
   let runningSha = basename(runningDir);
@@ -259,7 +283,7 @@ async function runUpdate(manual: boolean, requester: TOption<string>): Promise<v
 
   if (sha === runningSha) {
     if (manual) {
-      notify(`Already on ${short}.`, requester);
+      notify(`Already on ${short}.`, requester, "done", `already on ${short}`);
     }
 
     return;
@@ -273,23 +297,30 @@ async function runUpdate(manual: boolean, requester: TOption<string>): Promise<v
 
   if (ci === ECiState.Pending) {
     if (manual) {
-      notify(`CI is still running for ${short}. Updating when it is green.`, requester);
+      notify(
+        `CI is still running for ${short}. Updating when it is green.`,
+        requester,
+        "running",
+        "waiting for CI",
+      );
     }
 
     // one timer, however many checks found CI pending
-    clearTimeout(ciRetry);
-    ciRetry = setTimeout(() => void update(false, requester), CI_RETRY_MS);
+    ciRetry = setTimeout(() => {
+      ciRetry = undefined;
+      void update(false, requester);
+    }, CI_RETRY_MS);
     return;
   }
 
   if (ci === ECiState.Failed) {
     await Bun.write(failedFile, sha);
-    notify(`Skipped the update to ${short}: its CI failed.`, requester);
+    notify(`Skipped the update to ${short}: its CI failed.`, requester, "failed", "CI failed");
     return;
   }
 
   if (manual) {
-    notify(`Updating to ${short}.`, requester);
+    notify(`Updating to ${short}.`, requester, "running", `updating to ${short}`);
   }
 
   const dir = join(root, sha);
@@ -313,6 +344,8 @@ async function runUpdate(manual: boolean, requester: TOption<string>): Promise<v
         notify(
           `The update to ${short} needs a new image. On the server run: git pull && bun run server:update`,
           requester,
+          "failed",
+          "needs new image",
         );
         return;
       }
@@ -325,7 +358,12 @@ async function runUpdate(manual: boolean, requester: TOption<string>): Promise<v
     migrates = (await listMigrations(dir)) !== (await listMigrations(runningDir));
   } catch (error) {
     await Bun.write(failedFile, sha);
-    notify(`The update to ${short} failed, still on ${runningShort}: ${String(error)}`, requester);
+    notify(
+      `The update to ${short} failed, still on ${runningShort}: ${String(error)}`,
+      requester,
+      "failed",
+      "update failed",
+    );
     return;
   }
 
@@ -339,6 +377,8 @@ async function runUpdate(manual: boolean, requester: TOption<string>): Promise<v
     notify(
       `The update to ${short} failed in its database migration, restarted ${runningShort}: ${String(error)}`,
       requester,
+      "failed",
+      "update failed",
     );
     return;
   }
@@ -349,7 +389,7 @@ async function runUpdate(manual: boolean, requester: TOption<string>): Promise<v
   probing = false;
 
   if (started) {
-    notify(`Updated to ${short}: ${subject}`, requester);
+    notify(`Updated to ${short}: ${subject}`, requester, "done", `updated to ${short}`);
     return;
   }
 
@@ -371,13 +411,19 @@ async function runUpdate(manual: boolean, requester: TOption<string>): Promise<v
   }
 
   void startApp(runningDir);
-  notify(`The update to ${short} failed to start, rolled back to ${runningShort}.`, requester);
+  notify(
+    `The update to ${short} failed to start, rolled back to ${runningShort}.`,
+    requester,
+    "failed",
+    "update failed",
+  );
 }
 
-async function update(manual: boolean, requester: TOption<string>): Promise<void> {
-  if (updating) {
+async function update(manual: boolean, requester: TOption<TRequester>): Promise<void> {
+  // a pending CI wait is an update in progress
+  if (updating || ciRetry !== undefined) {
     if (manual) {
-      notify("An update is already running.", requester);
+      notify("An update is already running.", requester, "failed", "already running");
     }
 
     return;
@@ -388,7 +434,7 @@ async function update(manual: boolean, requester: TOption<string>): Promise<void
   try {
     await runUpdate(manual, requester);
   } catch (error) {
-    notify(`The update check failed: ${String(error)}`, requester);
+    notify(`The update check failed: ${String(error)}`, requester, "failed", "check failed");
   } finally {
     updating = false;
   }

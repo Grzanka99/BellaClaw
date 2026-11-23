@@ -7,14 +7,14 @@ import {
   type TGatewayStreamEvent,
   type TOption,
 } from "@bellaclaw/shared";
-import { eq } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import type { AgentHarness } from "../ai/agent-harness";
 import { AuthorizationService } from "../authorization";
 import { Commands } from "../commands";
 import { DatabaseConnector } from "../database";
 import { linkTestAddress } from "../database/test-utils";
 import { EventBus } from "../events";
-import { publishTestMessage } from "../events/test-utils";
+import { publishTestMessage, testMessageOrigin } from "../events/test-utils";
 import { IdentityService } from "../identity";
 import { handleInternalApiRequest, setupInternalApi } from "../internal-api";
 import { internalRequest, resetServices, TEST_SECRET } from "../internal-api/test-utils";
@@ -253,7 +253,7 @@ test("a message queued behind a running turn turns typing on again when it start
       ).status,
     ).toBe(200);
     // a confidential command reply follows the second request's typing on on the conversation's
-    // own lanes, and is neither stored nor nudged
+    // own lanes
     expect(
       (
         await internalRequest(
@@ -263,6 +263,17 @@ test("a message queued behind a running turn turns typing on again when it start
         )
       ).status,
     ).toBe(200);
+    // the reply carries its run: the id of the third message.authorized, the command's
+    let runId = "";
+    while (runId === "") {
+      const authorized = await DatabaseConnector.instance.database
+        .select()
+        .from(eventsTable)
+        .where(eq(eventsTable.type, EEventType.MessageAuthorized))
+        .orderBy(asc(eventsTable.seq));
+      runId = authorized[2]?.id ?? "";
+      await Bun.sleep(10);
+    }
 
     // the second request turns typing on while the first turn runs
     expect(
@@ -271,6 +282,8 @@ test("a message queued behind a running turn turns typing on again when it start
         accountId,
         conversationKey,
         text: "Usage: !connector-auth connect|disconnect|status CONNECTOR or !connector-auth token CONNECTOR TOKEN",
+        command: { runId, name: "connector-auth", state: "failed", outcome: "usage" },
+        clientMessageId: "m-3",
       }),
     ).toEqual([typing(true), typing(true), changed(1), typing(true)]);
   } finally {
@@ -287,6 +300,8 @@ test("a message queued behind a running turn turns typing on again when it start
     changed(3),
     typing(false),
     changed(4),
+    // the command's redacted card, stored once its reply is sent behind the turns
+    changed(5),
   ]);
   await stream.close();
 });
@@ -314,39 +329,91 @@ test("a Signal message of a linked address streams under the address's account; 
   await stream.close();
 });
 
-test("a confidential command reply to an app message streams once as a reply and is neither stored nor nudged; on Signal it is sent and streams nothing", async () => {
+test("a confidential command reply to an app message streams once as a reply with its run, and stores only the redacted card; on Signal it is sent and streams no reply", async () => {
   const accountId = `acct-${crypto.randomUUID()}`;
   const conversationKey = `bella:${accountId}`;
   const address = `+${Date.now()}`;
   const usage =
     "Usage: !connector-auth connect|disconnect|status CONNECTOR or !connector-auth token CONNECTOR TOKEN";
+  const command = {
+    runId: expect.any(String),
+    name: "connector-auth",
+    state: "failed" as const,
+    outcome: "usage",
+  };
   await linkTestAddress(address, accountId);
   const { sendText } = await start();
   const stream = await openStream();
 
-  await sendApp(accountId, "!connector-auth", "m-1");
+  await sendApp(accountId, "!connector-auth token vault secret-1 extra", "m-1");
 
   expect(await stream.drainToMarker()).toEqual([
-    { type: "reply", accountId, conversationKey, text: usage },
+    { type: "reply", accountId, conversationKey, text: usage, command, clientMessageId: "m-1" },
+    { type: "changed", accountId, conversationKey, revision: 1, rewriteRevision: 0 },
   ]);
-  expect(
-    await listHistory(DatabaseConnector.instance.database, conversationKey, undefined, 50),
-  ).toEqual([]);
-  expect(
-    await DatabaseConnector.instance.database
-      .select()
-      .from(eventsTable)
-      .where(eq(eventsTable.type, EEventType.ConversationChanged)),
-  ).toEqual([]);
+  const history = await listHistory(
+    DatabaseConnector.instance.database,
+    conversationKey,
+    undefined,
+    50,
+  );
+  expect(history.map((message) => message.text)).toEqual(["!connector-auth", "usage"]);
+  expect(JSON.stringify(history)).not.toContain("secret-1");
 
   await publishTestMessage(`signal:${address}`, "!connector-auth");
 
   expect(sendText.mock.calls).toEqual([[address, usage]]);
-  expect(await stream.drainToMarker()).toEqual([]);
+  expect(await stream.drainToMarker()).toEqual([
+    { type: "changed", accountId, conversationKey, revision: 2, rewriteRevision: 0 },
+  ]);
   await stream.close();
 });
 
-test("!app and !dashboard from the app answer with a stored plain reply and no link; from Signal they send a confidential link", async () => {
+test("a confidential command reply streams with its run and the request's client message id", async () => {
+  const accountId = `acct-${crypto.randomUUID()}`;
+  const conversationKey = `bella:${accountId}`;
+  const command = {
+    runId: "run-1",
+    name: "connector-auth",
+    state: "done" as const,
+    outcome: "link sent",
+  };
+  await start();
+  const stream = await openStream();
+
+  await EventBus.instance.publish({
+    type: EEventType.ReplyReady,
+    source: "test",
+    key: conversationKey,
+    trace: { turnId: "test:reply", chatId: conversationKey, platform: EMessagePlatform.App },
+    payload: {
+      ...testMessageOrigin(conversationKey, EMessagePlatform.App),
+      ownerKey: `account:${accountId}`,
+      text: "https://example.test/authorize",
+      confidential: true,
+      display: {
+        text: "link sent",
+        request: { text: "!connector-auth", receivedAt: Date.now(), clientMessageId: "m-1" },
+        command,
+      },
+    },
+    causationId: undefined,
+    dedupeKey: undefined,
+  });
+  await EventBus.instance.idle();
+
+  expect(await stream.drainToMarker()).toContainEqual({
+    type: "reply",
+    accountId,
+    conversationKey,
+    text: "https://example.test/authorize",
+    command,
+    clientMessageId: "m-1",
+  });
+  await stream.close();
+});
+
+test("!app and !dashboard from the app answer with a stored plain reply and no link; from Signal they send a confidential link and store only its card", async () => {
   const originalUrl = Bun.env.BELLACLAW_GATEWAY_PUBLIC_URL;
   const originalSecret = Bun.env.BELLACLAW_GATEWAY_SECRET;
   Bun.env.BELLACLAW_GATEWAY_PUBLIC_URL = "https://dashboard.test";
@@ -382,7 +449,15 @@ test("!app and !dashboard from the app answer with a stored plain reply and no l
     expect(sendText.mock.calls.map((call) => call[0])).toEqual([address, address]);
     expect(sendText.mock.calls[0]?.[1]).toStartWith("https://dashboard.test/app?token=");
     expect(sendText.mock.calls[1]?.[1]).toStartWith("https://dashboard.test/link?token=");
-    expect(await stream.drainToMarker()).toEqual([]);
+    expect(await stream.drainToMarker()).toEqual([
+      { type: "changed", accountId, conversationKey, revision: 3, rewriteRevision: 0 },
+      { type: "changed", accountId, conversationKey, revision: 4, rewriteRevision: 0 },
+    ]);
+    expect(
+      JSON.stringify(
+        await listHistory(DatabaseConnector.instance.database, conversationKey, undefined, 50),
+      ),
+    ).not.toContain("token=");
     await stream.close();
   } finally {
     Bun.env.BELLACLAW_GATEWAY_PUBLIC_URL = originalUrl;

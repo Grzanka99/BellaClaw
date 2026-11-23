@@ -117,9 +117,18 @@ describe("Notices", () => {
       ["+100", "Updated to abc1234"],
       ["+200", "Updated to abc1234"],
     ]);
+    // a scheduled update belongs to no command run
+    const notices = await DatabaseConnector.instance.database
+      .select()
+      .from(eventsTable)
+      .where(eq(eventsTable.type, EEventType.NoticeReady));
+    expect(notices.map((row) => row.payload)).toEqual([
+      { chatId: "signal:+100", text: "Updated to abc1234" },
+      { chatId: "signal:+200", text: "Updated to abc1234" },
+    ]);
   });
 
-  test("a supervisor notice of a requested update reaches only the chat that asked", async () => {
+  test("a supervisor notice of a requested update reaches only the chat that asked, as a step of its run", async () => {
     const authorized = spyOn(
       AuthorizationService.instance,
       "listAuthorizedChatIds",
@@ -130,6 +139,7 @@ describe("Notices", () => {
         type: "notice",
         text: "Updated to abc1234",
         chatId: "signal:+200",
+        command: { runId: "run-1", name: "update", state: "done", outcome: "updated to abc1234" },
       });
       await bus.idle();
     } finally {
@@ -137,6 +147,20 @@ describe("Notices", () => {
     }
 
     expect(sendText.mock.calls).toEqual([["+200", "Updated to abc1234"]]);
+    const notices = await DatabaseConnector.instance.database
+      .select()
+      .from(eventsTable)
+      .where(eq(eventsTable.type, EEventType.NoticeReady));
+    expect(notices.map((row) => ({ key: row.key, payload: row.payload }))).toEqual([
+      {
+        key: "signal:+200",
+        payload: {
+          chatId: "signal:+200",
+          text: "Updated to abc1234",
+          command: { runId: "run-1", name: "update", state: "done", outcome: "updated to abc1234" },
+        },
+      },
+    ]);
   });
 
   test("a supervisor notice reaches an app-only account with a device and a linked account with a device in their Bella conversations, once each", async () => {

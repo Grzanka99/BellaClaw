@@ -25,6 +25,15 @@ let bus: EventBus;
 let directory: string;
 let previousConfig: TOption<string>;
 
+async function lastReply() {
+  const replies = await DatabaseConnector.instance.database
+    .select()
+    .from(eventsTable)
+    .where(eq(eventsTable.type, EEventType.ReplyReady))
+    .orderBy(asc(eventsTable.seq));
+  return replies.at(-1)?.payload as { text: string; display: { command: unknown } };
+}
+
 // sends a message through the commands consumer and returns its reply
 async function send(content: string) {
   await bus.publish({
@@ -42,12 +51,7 @@ async function send(content: string) {
     dedupeKey: undefined,
   });
   await bus.idle();
-  const replies = await DatabaseConnector.instance.database
-    .select()
-    .from(eventsTable)
-    .where(eq(eventsTable.type, EEventType.ReplyReady))
-    .orderBy(asc(eventsTable.seq));
-  return (replies.at(-1)?.payload as { text: string }).text;
+  return (await lastReply()).text;
 }
 
 async function store(id: string, status: EConnectorStatus, createdAt: number) {
@@ -104,6 +108,25 @@ test("list shows the stored connectors in plain words", async () => {
       "- calendar (mcp, waiting for approval to remove, open to plain chats): https://calendar.example.com/mcp — The calendar tools",
     ].join("\n"),
   );
+  // the app's card: one row per connector, its status as a coloured label
+  expect((await lastReply()).display.command).toEqual({
+    runId: expect.any(String),
+    name: "connector",
+    state: "done",
+    outcome: "2 connectors",
+    rows: [
+      {
+        title: "notes",
+        status: { label: "waiting for approval to add", tone: "warning" },
+        detail: "https://notes.example.com/mcp",
+      },
+      {
+        title: "calendar",
+        status: { label: "waiting for approval to remove", tone: "warning" },
+        detail: "https://calendar.example.com/mcp",
+      },
+    ],
+  });
 });
 
 test("approve makes a pending add active and removes a pending removal", async () => {

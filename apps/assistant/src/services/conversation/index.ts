@@ -579,8 +579,8 @@ export class ConversationStore {
     return row.id;
   }
 
-  // display: stored with kind display and no model message, so it is never replayed. Returns the
-  // reply's row id
+  // display: stored with kind display and no model message, so it is never replayed. A command
+  // run goes on the reply row and, without its rows, on the request row. Returns the reply's row id
   public async saveDisplayMessage(
     db: TDatabaseHandle,
     chatId: string,
@@ -588,6 +588,15 @@ export class ConversationStore {
     display: TDisplay,
     sentAt: number,
   ): Promise<number> {
+    let command: TOption<string>;
+    let requestCommand: TOption<string>;
+
+    if (display.command !== undefined) {
+      const { runId, name, state, outcome } = display.command;
+      command = JSON.stringify(display.command);
+      requestCommand = JSON.stringify({ runId, name, state, outcome });
+    }
+
     if (display.request !== undefined) {
       await db.insert(memoriesTable).values({
         chatId,
@@ -597,6 +606,7 @@ export class ConversationStore {
         message: display.request.text,
         createdAt: new Date(display.request.receivedAt),
         clientMessageId: display.request.clientMessageId,
+        command: requestCommand,
       });
     }
     const row = await db
@@ -608,6 +618,7 @@ export class ConversationStore {
         author: ERole.Assistant,
         message: display.text,
         createdAt: new Date(sentAt),
+        command,
       })
       .returning({ id: memoriesTable.id })
       .get();

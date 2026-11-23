@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { appMediaTable, memoriesTable } from "@bellaclaw/database";
-import type { TListOperation } from "@bellaclaw/shared";
+import { COMMAND_CATALOG, type TListOperation } from "@bellaclaw/shared";
+import { eq } from "drizzle-orm";
 import { createAssistantDatabase, createTestApp, PASSWORD, registerApp } from "./test-utils";
 
 test("the app reads its personality settings, changes each and reads the change back; an invalid change answers 400 and changes nothing; another account's are its own", async () => {
@@ -111,8 +112,28 @@ test("an app account with no chat lists its Bella conversation, sends, and reads
     });
 
     // a command and its reply are display rows; a fetch by cursor returns only the missing rows
-    const command = await database.insertRow(conversationKey, "user", "display", "!help", "m-2");
-    const answer = await database.insertRow(conversationKey, "assistant", "display", "Commands");
+    const command = await database.insertRow(
+      conversationKey,
+      "user",
+      "display",
+      "!connector list",
+      "m-2",
+    );
+    const answer = await database.insertRow(
+      conversationKey,
+      "assistant",
+      "display",
+      "You have no added connectors.",
+    );
+    const run = { runId: "run-1", name: "connector", state: "done", outcome: "no connectors" };
+    await database.db
+      .update(memoriesTable)
+      .set({ command: JSON.stringify(run) })
+      .where(eq(memoriesTable.id, command.id));
+    await database.db
+      .update(memoriesTable)
+      .set({ command: JSON.stringify(run) })
+      .where(eq(memoriesTable.id, answer.id));
     await database.setRevision(conversationKey, `account:${alice.publicId}`, 3, 0);
     const appended = await (
       await sendApp("GET", `${path}?after=${reply.id}`, undefined, alice.token)
@@ -125,6 +146,8 @@ test("an app account with no chat lists its Bella conversation, sends, and reads
       [command.id, "display"],
       [answer.id, "display"],
     ]);
+    expect(appended.messages[0].command).toEqual(run);
+    expect(appended.messages[1].command).toEqual(run);
 
     const both = await sendApp("GET", `${path}?after=1&before=9`, undefined, alice.token);
     expect(both.status).toBe(400);
@@ -549,4 +572,22 @@ test("the app's list changes go to the assistant for its account and answer its 
   } finally {
     await database.remove();
   }
+});
+
+test("the app reads the command catalog in palette order, and needs a session", async () => {
+  const { sendApp, store } = createTestApp();
+  const alice = await registerApp(sendApp, store, "alice");
+
+  expect((await sendApp("GET", "/api/commands")).status).toBe(401);
+
+  const response = await sendApp("GET", "/api/commands", undefined, alice.token);
+  expect(response.status).toBe(200);
+  const body = await response.json();
+  expect(body).toEqual({ commands: Object.values(COMMAND_CATALOG) });
+  expect(body.commands[0]).toEqual({
+    name: "connector",
+    group: "Connectors",
+    description: COMMAND_CATALOG.connector.description,
+    usage: "!connector list | !connector approve|reject CONNECTOR",
+  });
 });

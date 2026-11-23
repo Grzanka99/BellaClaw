@@ -1,6 +1,8 @@
 package one.scary.bellaclaw.data.remote
 
 import kotlinx.serialization.Serializable
+import one.scary.bellaclaw.model.CommandState
+import one.scary.bellaclaw.model.CommandTone
 
 // Request and answer bodies of the gateway's conversation routes and its live stream.
 
@@ -23,7 +25,7 @@ data class ConversationBody(
  * A row of history: a message or a display row. [author] is `user` or `assistant`; [createdAt] epoch ms.
  * An assistant row has the [steps] of its reply, by start, when there were any; [scheduled] marks a
  * delivery of a scheduled job, such as a reminder or an automation's output; [listFinished] marks the card
- * of a list the first time it finished.
+ * of a list the first time it finished. A row of a command's run has its [command].
  */
 @Serializable
 data class HistoryRowBody(
@@ -36,7 +38,31 @@ data class HistoryRowBody(
     val steps: List<StepBody>? = null,
     val scheduled: Boolean,
     val listFinished: ListFinishedBody? = null,
+    val command: CommandBody? = null,
 )
+
+/** A command's run as of one row; [name] without "!". */
+@Serializable
+data class CommandBody(
+    val runId: String,
+    val name: String,
+    val state: CommandState,
+    val outcome: String? = null,
+    val rows: List<CommandRowBody>? = null,
+)
+
+@Serializable
+data class CommandRowBody(val title: String, val status: CommandStatusBody? = null, val detail: String? = null)
+
+@Serializable
+data class CommandStatusBody(val label: String, val tone: CommandTone)
+
+/** GET /api/commands: the command catalog, in its order. */
+@Serializable
+data class CommandsBody(val commands: List<CommandEntryBody>)
+
+@Serializable
+data class CommandEntryBody(val name: String, val group: String, val description: String, val usage: String)
 
 /** A finished step of a reply; [startedAt] epoch ms. */
 @Serializable
@@ -86,7 +112,8 @@ data class ConversationCreatedBody(val conversationKey: String)
 /**
  * The data of one event of GET /api/stream; which fields it has depends on the event's type. A plain
  * class: a `reply`'s [text] can hold a sign-in link. A `step` has [stepId], [tool], [label], [detail], [state]
- * (`started`, then `completed` or `failed` with [durationMs]) and [startedAt], epoch ms.
+ * (`started`, then `completed` or `failed` with [durationMs]) and [startedAt], epoch ms. A `reply` to a
+ * command sent from the app has its [command] and the send's [clientMessageId].
  */
 @Serializable
 class StreamEventBody(
@@ -100,4 +127,6 @@ class StreamEventBody(
     val state: String? = null,
     val startedAt: Long? = null,
     val durationMs: Long? = null,
+    val command: CommandBody? = null,
+    val clientMessageId: String? = null,
 )

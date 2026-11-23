@@ -11,12 +11,14 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import one.scary.bellaclaw.data.remote.ApiClient
 import one.scary.bellaclaw.data.remote.ApiResult
+import one.scary.bellaclaw.data.remote.CommandsBody
 import one.scary.bellaclaw.data.remote.ConversationBody
 import one.scary.bellaclaw.data.remote.ConversationCreatedBody
 import one.scary.bellaclaw.data.remote.ConversationsBody
 import one.scary.bellaclaw.data.remote.EmptyBody
 import one.scary.bellaclaw.data.remote.HistoryBody
 import one.scary.bellaclaw.data.remote.HistoryRowBody
+import one.scary.bellaclaw.model.CommandEntry
 import one.scary.bellaclaw.model.isNewChatId
 
 /**
@@ -93,6 +95,23 @@ internal class ChatSync(
             stale
         }
         stale.forEach { key -> scope.launch { syncHistory(key) } }
+    }
+
+    /** Reads the command catalog; a failed read keeps the one held. */
+    suspend fun refreshCommands() {
+        val generation = state.value.generation
+        val result = api.getSignedIn<CommandsBody>("/api/commands")
+        if (result !is ApiResult.Success) {
+            return
+        }
+        val commands = result.value.commands.map { CommandEntry(it.name, it.group, it.description, it.usage) }
+        state.update { current ->
+            if (current.generation != generation) {
+                current
+            } else {
+                current.copy(commands = commands)
+            }
+        }
     }
 
     /**

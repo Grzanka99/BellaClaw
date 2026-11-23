@@ -21,7 +21,7 @@ import one.scary.bellaclaw.model.Message
  * [firstRetryMillis], doubling to [maxRetryMillis]. A `check` or `changed` has [sync] read the list, and
  * [sync]'s failed reads are tried again in the stream's scope. A `deleted` event has the phone [forget]
  * the conversation; a `reply` is dated by [clock]. A `step` is kept until its conversation's typing ends or a `check`.
- * A `check` or `lists` event calls [onListsChanged], so the lists are read again.
+ * A `check` or `lists` event calls [onListsChanged], so the lists are read again. A `check` reads the command catalog.
  */
 internal class ChatStream(
     private val api: ApiClient,
@@ -85,6 +85,7 @@ internal class ChatStream(
             "check" -> {
                 state.update { it.copy(isStreamOpen = true, typing = emptySet(), steps = emptyMap()) }
                 scope.launch { sync.refreshList() }
+                scope.launch { sync.refreshCommands() }
                 onListsChanged()
             }
             "lists" -> onListsChanged()
@@ -113,7 +114,15 @@ internal class ChatStream(
             "reply" -> if (key != null && event.text != null) {
                 state.update { current ->
                     val chatId = current.conversation(key)?.chatId() ?: key
-                    val reply = Message("reply-${UUID.randomUUID()}", chatId, Author.ASSISTANT, event.text, clock.instant())
+                    val reply = Message(
+                        "reply-${UUID.randomUUID()}",
+                        chatId,
+                        Author.ASSISTANT,
+                        event.text,
+                        clock.instant(),
+                        command = event.command?.toRun(),
+                        clientMessageId = event.clientMessageId,
+                    )
                     current.copy(replies = current.replies + (key to current.replies[key].orEmpty() + reply))
                 }
             }

@@ -106,7 +106,11 @@ describe("commands consumer", () => {
       activated.mockRestore();
     }
 
-    expect(send.mock.calls).toEqual([[{ type: "update", chatId: "discord:100" }]]);
+    const runIds = (await rowsOf(EEventType.MessageAuthorized)).map((row) => row.id);
+    // the supervisor's notices come back as later steps of the same run
+    expect(send.mock.calls).toEqual([
+      [{ type: "update", chatId: "discord:100", runId: runIds[1] }],
+    ]);
     expect(await payloadsOf(EEventType.ReplyReady)).toEqual([
       {
         ...testMessageOrigin("discord:100", EMessagePlatform.Discord),
@@ -114,12 +118,17 @@ describe("commands consumer", () => {
         display: {
           text: "Self-update is unavailable: the bot is not running under its supervisor.",
           request: { text: "!update", receivedAt: 1 },
+          command: { runId: runIds[0], name: "update", state: "failed", outcome: "unavailable" },
         },
       },
       {
         ...testMessageOrigin("discord:100", EMessagePlatform.Discord),
         text: "Checking for an update.",
-        display: { text: "Checking for an update.", request: { text: "!update", receivedAt: 2 } },
+        display: {
+          text: "Checking for an update.",
+          request: { text: "!update", receivedAt: 2 },
+          command: { runId: runIds[1], name: "update", state: "running", outcome: "checking" },
+        },
       },
       {
         ...testMessageOrigin("discord:999", EMessagePlatform.Discord),
@@ -127,6 +136,7 @@ describe("commands consumer", () => {
         display: {
           text: "Updating requires BELLACLAW_ACTIVATION_TOKEN and an activated chat.",
           request: { text: "!update", receivedAt: 3 },
+          command: { runId: runIds[2], name: "update", state: "failed", outcome: "not activated" },
         },
       },
     ]);
@@ -146,9 +156,14 @@ describe("commands consumer", () => {
             { channel: EMessagePlatform.Discord, address: "100" },
             "!update",
             ctx,
+            "run-1",
           ),
         ),
-      ).toBe("Self-update is unavailable: the bot is not running under its supervisor.");
+      ).toMatchObject({
+        result: {
+          text: "Self-update is unavailable: the bot is not running under its supervisor.",
+        },
+      });
       expect(
         await withEventContext((ctx) =>
           runCommand(
@@ -156,9 +171,12 @@ describe("commands consumer", () => {
             { channel: EMessagePlatform.Discord, address: "999" },
             "!update",
             ctx,
+            "run-2",
           ),
         ),
-      ).toBe("Updating requires BELLACLAW_ACTIVATION_TOKEN and an activated chat.");
+      ).toMatchObject({
+        result: { text: "Updating requires BELLACLAW_ACTIVATION_TOKEN and an activated chat." },
+      });
     } finally {
       activated.mockRestore();
     }
@@ -172,11 +190,11 @@ describe("commands consumer", () => {
 
     try {
       const reply = await withEventContext((ctx) =>
-        runCommand("account:acct-1", signal, "!dashboard", ctx),
+        runCommand("account:acct-1", signal, "!dashboard", ctx, "run-1"),
       );
       let text = "";
-      if (typeof reply === "object" && "confidential" in reply) {
-        text = reply.confidential;
+      if (typeof reply?.result === "object" && "confidential" in reply.result) {
+        text = reply.result.confidential;
       }
       const token = text.match(/token=([^\s]+)/)?.[1] ?? "";
 
@@ -197,11 +215,11 @@ describe("commands consumer", () => {
 
     try {
       const reply = await withEventContext((ctx) =>
-        runCommand("account:acct-1", signal, "!app", ctx),
+        runCommand("account:acct-1", signal, "!app", ctx, "run-1"),
       );
       let text = "";
-      if (typeof reply === "object" && "confidential" in reply) {
-        text = reply.confidential;
+      if (typeof reply?.result === "object" && "confidential" in reply.result) {
+        text = reply.result.confidential;
       }
       const token = text.match(/^https:\/\/dashboard\.test\/app\?token=([^\s]+)\n/)?.[1] ?? "";
 
@@ -211,12 +229,45 @@ describe("commands consumer", () => {
 
       Bun.env.BELLACLAW_GATEWAY_SECRET = "";
       expect(
-        await withEventContext((ctx) => runCommand("account:acct-1", signal, "!app", ctx)),
-      ).toBe("The dashboard is not configured.");
+        await withEventContext((ctx) => runCommand("account:acct-1", signal, "!app", ctx, "run-2")),
+      ).toMatchObject({ result: { text: "The dashboard is not configured." } });
     } finally {
       Bun.env.BELLACLAW_GATEWAY_PUBLIC_URL = originalUrl;
       Bun.env.BELLACLAW_GATEWAY_SECRET = originalSecret;
     }
+  });
+
+  test("a confidential reply stores only the command's name and outcome; the link is only in its text", async () => {
+    const originalUrl = Bun.env.BELLACLAW_GATEWAY_PUBLIC_URL;
+    const originalSecret = Bun.env.BELLACLAW_GATEWAY_SECRET;
+    Bun.env.BELLACLAW_GATEWAY_PUBLIC_URL = "https://dashboard.test";
+    Bun.env.BELLACLAW_GATEWAY_SECRET = "gateway-secret";
+
+    try {
+      await authorized("discord:100", "!dashboard now", 4);
+    } finally {
+      Bun.env.BELLACLAW_GATEWAY_PUBLIC_URL = originalUrl;
+      Bun.env.BELLACLAW_GATEWAY_SECRET = originalSecret;
+    }
+
+    const [authorizedRow] = await rowsOf(EEventType.MessageAuthorized);
+    const [reply] = await payloadsOf(EEventType.ReplyReady);
+    expect(reply).toEqual({
+      ...testMessageOrigin("discord:100", EMessagePlatform.Discord),
+      text: expect.stringContaining("https://dashboard.test/link?token="),
+      confidential: true,
+      display: {
+        text: "link sent",
+        request: { text: "!dashboard", receivedAt: 4 },
+        command: {
+          runId: authorizedRow?.id,
+          name: "dashboard",
+          state: "done",
+          outcome: "link sent",
+        },
+      },
+    });
+    expect(JSON.stringify((reply as { display: unknown }).display)).not.toContain("token=");
   });
 
   test("an MCP prompt command becomes turn.requested keyed by the chat with its trace", async () => {
@@ -275,6 +326,12 @@ describe("commands consumer", () => {
         display: {
           text: "MCP prompt request failed: Error: Unknown connector: missing",
           request: { text: "!mcp-prompt missing summarize", receivedAt: 1 },
+          command: {
+            runId: expect.any(String),
+            name: "mcp-prompt",
+            state: "failed",
+            outcome: "failed",
+          },
         },
       },
       {
@@ -287,6 +344,12 @@ describe("commands consumer", () => {
             "MCP prompt listing failed: Error: Invalid connectors configuration:",
           ),
           request: { text: "!mcp-prompts", receivedAt: 2 },
+          command: {
+            runId: expect.any(String),
+            name: "mcp-prompts",
+            state: "failed",
+            outcome: "failed",
+          },
         },
       },
     ]);

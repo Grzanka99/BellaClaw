@@ -1,5 +1,20 @@
 export { AsyncQueue } from "./async-queue";
 export {
+  COMMAND_CATALOG,
+  SCommandEntry,
+  SCommandRow,
+  SCommandRun,
+  SCommandState,
+  SCommandTone,
+  SGatewayCommands,
+  type TCommandEntry,
+  type TCommandRow,
+  type TCommandRun,
+  type TCommandState,
+  type TCommandTone,
+  type TGatewayCommands,
+} from "./commands";
+export {
   CONNECTOR_EXISTS,
   CONNECTOR_NOT_FOUND,
   CONNECTOR_NOT_PENDING,

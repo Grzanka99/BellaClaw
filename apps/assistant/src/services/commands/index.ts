@@ -27,9 +27,9 @@ const REGISTERED_COMMANDS: TCommand[] = [
 ];
 
 export function formatCommandList(): string {
-  return REGISTERED_COMMANDS.map((command) => `- ${command.usage} — ${command.description}`).join(
-    "\n",
-  );
+  return REGISTERED_COMMANDS.map(
+    (command) => `- ${command.entry.usage} — ${command.entry.description}`,
+  ).join("\n");
 }
 
 export async function runCommand(
@@ -37,7 +37,8 @@ export async function runCommand(
   address: TChatAddress,
   content: string,
   ctx: TEventContext,
-): Promise<TOption<TCommandResult>> {
+  runId: string,
+): Promise<TOption<{ name: string; result: TCommandResult }>> {
   const trimmed = content.trim();
 
   if (!trimmed.startsWith(COMMAND_PREFIX)) {
@@ -56,13 +57,18 @@ export async function runCommand(
     args = trimmed.slice(separatorIndex + 1);
   }
 
-  const command = REGISTERED_COMMANDS.find((candidate) => candidate.name === name.toLowerCase());
+  const command = REGISTERED_COMMANDS.find(
+    (candidate) => candidate.entry.name === name.toLowerCase(),
+  );
 
   if (command === undefined) {
     return undefined;
   }
 
-  return command.handler(chatId, args, ctx, address);
+  return {
+    name: command.entry.name,
+    result: await command.handler(chatId, args, ctx, address, runId),
+  };
 }
 
 export class Commands {
@@ -94,49 +100,73 @@ export class Commands {
     ctx: TEventContext,
   ): Promise<void> {
     const { content, attachments, receivedAt, clientMessageId, model, ...origin } = event.payload;
-    let result: TOption<TCommandResult>;
+    let ran: TOption<{ name: string; result: TCommandResult }>;
 
     // NOTE: commands act for the owner: its calendars, credentials and logins; activation is
     // per address. A plain chat has none: its "!" messages are text for the model
     if (origin.kind === EConversationKind.Bella) {
-      result = await runCommand(
+      ran = await runCommand(
         origin.ownerKey,
         { channel: origin.channel, address: origin.replyAddress },
         content,
         ctx,
+        event.id,
       );
     }
 
     await ctx.complete(async (_tx, emit) => {
-      if (typeof result === "string") {
-        emit(
-          EEventType.ReplyReady,
-          {
-            ...origin,
-            text: result,
-            display: { text: result, request: { text: content, receivedAt, clientMessageId } },
-          },
-          undefined,
-          undefined,
-        );
-        return;
-      }
-
-      if (result !== undefined && "confidential" in result) {
-        emit(
-          EEventType.ReplyReady,
-          { ...origin, text: result.confidential, confidential: true },
-          undefined,
-          undefined,
-        );
-        return;
-      }
-
+      const runId = event.id;
+      const request = { text: content, receivedAt, clientMessageId };
       let prompt = content;
       let images = attachments;
-      if (result !== undefined) {
-        prompt = result.prompt;
-        images = [];
+
+      if (ran !== undefined) {
+        const { name, result } = ran;
+
+        if ("prompt" in result) {
+          prompt = result.prompt;
+          images = [];
+        } else if ("confidential" in result) {
+          // the secret is only in the text; the stored card holds the command's name and outcome
+          emit(
+            EEventType.ReplyReady,
+            {
+              ...origin,
+              text: result.confidential,
+              confidential: true,
+              display: {
+                text: result.outcome,
+                request: { ...request, text: `${COMMAND_PREFIX}${name}` },
+                command: { runId, name, state: result.state, outcome: result.outcome },
+              },
+            },
+            undefined,
+            undefined,
+          );
+          return;
+        } else {
+          emit(
+            EEventType.ReplyReady,
+            {
+              ...origin,
+              text: result.text,
+              display: {
+                text: result.text,
+                request,
+                command: {
+                  runId,
+                  name,
+                  state: result.state,
+                  outcome: result.outcome,
+                  rows: result.rows,
+                },
+              },
+            },
+            undefined,
+            undefined,
+          );
+          return;
+        }
       }
 
       emit(
@@ -148,7 +178,7 @@ export class Commands {
     });
 
     // a command takes no image: nothing references the files its message came with
-    if (result !== undefined) {
+    if (ran !== undefined) {
       for (const ref of attachments) {
         try {
           await MessagingAdapter.instance.deleteAttachment(ref);
