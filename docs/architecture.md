@@ -114,7 +114,7 @@ Main can use web tools and delegate to:
 | Scheduling | Create, update, list, and remove reminders or recurring tasks. |
 | Automations | Write, preview, save, run, pause, and delete automation scripts. |
 
-A plain chat of the app runs the plain agent instead: web tools and the MCP profiles open to plain
+A plain chat of the app runs the plain agent instead: web tools and the connectors open to plain
 chats (those that set `plainChats: true`; `vault` and `logs` stay closed), no specialists, so no
 memory, calendar, scheduling, settings or automations. Conversation creates and deletes plain chats
 (`conversation.create.requested`, `conversation.delete.requested`); a delete removes the chat's
@@ -130,7 +130,7 @@ consumer of `turn.completed` makes one Utility-model call on the account's setti
 title on the registry row with `conversation.changed`.
 
 Specialists receive only role-specific tools and cannot delegate again. Scheduling can dry-run a
-job with automations, which starts a scheduled-task agent run without MCP tools. Only the Memory
+job with automations, which starts a scheduled-task agent run without connector tools. Only the Memory
 specialist can write conversation facts; other specialists do not write conversation memory.
 
 ## Scheduled Work

@@ -51,7 +51,7 @@ export class Notices {
       mode: ESubscriptionMode.Durable,
       backoffMs: this.backoffMs,
       handler: (event, ctx) =>
-        this.notify(ctx, event.payload.chatId, `Connected MCP profile ${event.payload.profileId}.`),
+        this.notify(ctx, event.payload.chatId, `Connected connector ${event.payload.profileId}.`),
     });
     bus.subscribe({
       consumer: "notices",

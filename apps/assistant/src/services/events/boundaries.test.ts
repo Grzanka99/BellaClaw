@@ -9,12 +9,12 @@ import { AuthorizationService } from "../authorization";
 import { AutomationService } from "../automation";
 import { CalendarService } from "../calendar";
 import { Commands } from "../commands";
+import { ConnectorService } from "../connectors";
+import { setupMcpAuth } from "../connectors/mcp/auth";
 import { CronScheduler } from "../cron";
 import { IdentityService } from "../identity";
 import { setupInternalApi } from "../internal-api";
 import { ListsService } from "../lists";
-import { McpService } from "../mcp";
-import { setupMcpAuth } from "../mcp/auth";
 import { Memory } from "../memory";
 import { FactDistiller } from "../memory/distill";
 import { MessageHandler } from "../message-handler";
@@ -42,10 +42,10 @@ const ALLOWED: Record<string, string> = {
   "ai -> conversation/compaction": "compactConversation, the stateless compaction engine",
   "ai -> cron": "CronScheduler.get and list reads; preview dry runs",
   "ai -> embedding": "driver",
-  "ai -> mcp": "McpService.open: live sockets",
-  "ai -> mcp/config": "profile config reads",
-  "ai -> mcp/runs": "McpRunRegistry: live abort controllers and resolvers",
-  "ai -> mcp/sampling": "pure request and result mappers",
+  "ai -> connectors": "ConnectorService.open: live sockets",
+  "ai -> connectors/config": "connector config reads",
+  "ai -> connectors/runs": "ConnectorRunRegistry: live abort controllers and resolvers",
+  "ai -> connectors/mcp/sampling": "pure request and result mappers",
   "ai -> memory": "Memory.searchFacts read; request timeout and error constants",
   "ai -> identity": "IdentityService.resolve, a cached read model",
   "ai -> lists": "ListsService.list read",
@@ -54,10 +54,10 @@ const ALLOWED: Record<string, string> = {
   "commands -> ai/auth": "status reads",
   "commands -> authorization": "listAuthorizedChatIds, a cached read model",
   "commands -> identity": "IdentityService.addressKey, a pure function",
-  "commands -> mcp": "status read: lists a profile's prompts",
+  "commands -> connectors": "status read: lists a connector's prompts",
   "commands -> messaging": "deleteAttachment: a driver call, no stored state",
-  "commands -> mcp/auth": "status read",
-  "commands -> mcp/config": "profile config reads",
+  "commands -> connectors/mcp/auth": "status read",
+  "commands -> connectors/config": "connector config reads",
   "app -> conversation": "ConversationStore.findMessage read: the text of the row a push carries",
   "app -> identity": "IdentityService.accountIdOf, a pure function",
   "app -> messaging": "registerAttachmentStore: boot wiring of the app's files, no stored state",
@@ -86,8 +86,8 @@ const ALLOWED: Record<string, string> = {
   "internal-api -> app":
     "AppChannel.store, open and findAttachments: an upload's bytes, which no event may carry, go to the App channel's store; reads of it. openEdgeConnection and reportPresence: the edge's presence, live state an event cannot carry. listDeviceIds, a cached read model that prepares the unregister commands",
   "internal-api -> messaging/chat-key": "pure functions",
-  "mcp -> ai/llm": "driver helper",
-  "mcp -> identity": "IdentityService.resolve for a connection's trace, a cached read model",
+  "connectors -> ai/llm": "driver helper",
+  "connectors -> identity": "IdentityService.resolve for a connection's trace, a cached read model",
   "memory -> ai/llm": "driver",
   "memory -> conversation": "ConversationStore.findChatIds read",
   "memory -> embedding": "driver",
@@ -304,7 +304,7 @@ describe("boundaries", () => {
       ListsService.instance.setup();
       setupAiAuth();
       setupMcpAuth();
-      McpService.instance.setup();
+      ConnectorService.instance.setup();
       setupInternalApi();
       AppStream.instance.setup();
       await AppChannel.instance.setup();
@@ -338,7 +338,7 @@ describe("boundaries", () => {
         "ListsService.setup",
         "setupAiAuth",
         "setupMcpAuth",
-        "McpService.setup",
+        "ConnectorService.setup",
         "setupInternalApi",
         "AppStream.setup",
         "AppChannel.setup",

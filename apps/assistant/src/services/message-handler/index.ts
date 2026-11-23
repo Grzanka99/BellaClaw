@@ -524,7 +524,7 @@ export class MessageHandler {
     // stores the user's message and fails with a reply saying so, without compaction or a model
     // run on another model. Otherwise the config the check answers is the one the plain agent runs
     // on and the compaction summary uses, without resolving the choice again; every other purpose,
-    // such as the MCP specialist's, uses that provider's saved preference for its purpose, else
+    // such as the connector specialist's, uses that provider's saved preference for its purpose, else
     // the provider's default
     let unavailable: TOption<string>;
     let chosen: TOption<TLlmModelConfig>;

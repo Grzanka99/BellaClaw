@@ -1,29 +1,29 @@
 import { z } from "zod";
-import { McpService } from "../mcp";
-import { getMcpProfile, loadMcpProfiles } from "../mcp/config";
+import { ConnectorService } from "../connectors";
+import { getConnector, loadConnectors } from "../connectors/config";
 import type { TCommand } from "./types";
 
 const SPromptArguments = z.record(z.string(), z.string());
 
 export const mcpPromptsCommand: TCommand = {
   name: "mcp-prompts",
-  description: "List MCP profiles, or list a profile's prompt templates",
-  usage: "!mcp-prompts [PROFILE]",
+  description: "List connectors, or list a connector's prompt templates",
+  usage: "!mcp-prompts [CONNECTOR]",
   handler: async (ownerKey, args) => {
     try {
-      const profileId = args.trim();
-      if (profileId.length === 0) {
+      const connectorId = args.trim();
+      if (connectorId.length === 0) {
         return (
-          (await loadMcpProfiles())
-            .map((profile) => `${profile.id}: ${profile.description}`)
-            .join("\n") || "No MCP profiles configured."
+          (await loadConnectors())
+            .map((connector) => `${connector.id}: ${connector.description}`)
+            .join("\n") || "No connectors configured."
         );
       }
-      const session = await McpService.instance.open({ ownerKey, profileId });
+      const session = await ConnectorService.instance.open({ ownerKey, connectorId });
       try {
         const list = session.tools.find((tool) => tool.name === "mcp-list-prompts");
         if (list === undefined) {
-          return "This profile does not expose prompt templates.";
+          return "This connector does not expose prompt templates.";
         }
         const result = await list.execute(crypto.randomUUID(), {});
         return result.content
@@ -42,18 +42,18 @@ export const mcpPromptsCommand: TCommand = {
 export const mcpPromptCommand: TCommand = {
   name: "mcp-prompt",
   description: "Ask the assistant to run an MCP prompt template",
-  usage: "!mcp-prompt PROFILE PROMPT [JSON_ARGUMENTS]",
+  usage: "!mcp-prompt CONNECTOR PROMPT [JSON_ARGUMENTS]",
   handler: async (_chatId, args) => {
     const match = args.trim().match(/^(\S+)\s+(\S+)(?:\s+([\s\S]+))?$/);
-    const profileId = match?.[1];
+    const connectorId = match?.[1];
     const promptName = match?.[2];
-    if (profileId === undefined || promptName === undefined) {
-      return "Usage: !mcp-prompt PROFILE PROMPT [JSON_ARGUMENTS]";
+    if (connectorId === undefined || promptName === undefined) {
+      return "Usage: !mcp-prompt CONNECTOR PROMPT [JSON_ARGUMENTS]";
     }
     try {
-      const profile = await getMcpProfile(profileId);
-      if (!profile.prompts) {
-        return "Prompts are disabled for this profile.";
+      const connector = await getConnector(connectorId);
+      if (!connector.prompts) {
+        return "Prompts are disabled for this connector.";
       }
       let promptArguments: Record<string, string> = {};
       if (match?.[3] !== undefined) {
@@ -70,7 +70,7 @@ export const mcpPromptCommand: TCommand = {
         promptArguments = parsed.data;
       }
       return {
-        prompt: `Use MCP profile ${profileId} to run the explicitly requested prompt template ${promptName} with arguments ${JSON.stringify(promptArguments)}.`,
+        prompt: `Use connector ${connectorId} to run the explicitly requested prompt template ${promptName} with arguments ${JSON.stringify(promptArguments)}.`,
       };
     } catch (error) {
       return `MCP prompt request failed: ${String(error)}`;

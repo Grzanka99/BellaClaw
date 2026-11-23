@@ -1,4 +1,3 @@
-import { EEventType } from "@bellaclaw/database";
 import { createLogger, type TOption } from "@bellaclaw/shared";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
@@ -10,39 +9,14 @@ import {
   ResourceUpdatedNotificationSchema,
   ToolListChangedNotificationSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { ESubscriptionMode, EventBus } from "../events";
+import type { TConnectorAdapter, TConnectorSession } from "../types";
 import { createMcpAuthFetch, getMcpAuthProvider, getMcpAuthToken } from "./auth";
-import { getMcpProfile } from "./config";
 import { discoverTools, requestOptions, type TMcpToolContext } from "./tools";
-import type { TMcpOpenArgs, TMcpSession } from "./types";
 
-export type { TMcpOpenArgs, TMcpSession } from "./types";
+const logger = createLogger("MCP");
 
-export class McpService {
-  private static _instance: McpService;
-  private logger = createLogger("MCP");
-  private sessions = new Map<TMcpSession, { ownerKey: string; profileId: string }>();
-
-  public static get instance() {
-    if (McpService._instance === undefined) {
-      McpService._instance = new McpService();
-    }
-    return McpService._instance;
-  }
-
-  // live: closing sessions must not replay after a restart
-  public setup(): void {
-    EventBus.instance.subscribe({
-      consumer: "mcp-sessions",
-      type: EEventType.McpAuthCredentialsChanged,
-      mode: ESubscriptionMode.Live,
-      backoffMs: [],
-      handler: (event) => this.disconnect(event.payload.chatId, event.payload.profileId),
-    });
-  }
-
-  public async open(args: TMcpOpenArgs): Promise<TMcpSession> {
-    const profile = await getMcpProfile(args.profileId);
+export const mcpAdapter: TConnectorAdapter = {
+  open: async (connector, args) => {
     const controller = new AbortController();
     let signal = controller.signal;
     if (args.signal !== undefined) {
@@ -53,7 +27,7 @@ export class McpService {
       { name: "bellaclaw", version: "1.0.0" },
       { capabilities: { elicitation: { form: {}, url: {} } } },
     );
-    if (profile.sampling && args.sample !== undefined) {
+    if (connector.sampling && args.sample !== undefined) {
       client.registerCapabilities({ sampling: { tools: {} } });
       client.setRequestHandler(CreateMessageRequestSchema, (request, extra) => {
         if (args.sample === undefined) {
@@ -68,7 +42,7 @@ export class McpService {
       }
       return args.elicit(request.params, AbortSignal.any([signal, extra.signal]));
     });
-    const context: TMcpToolContext = { client, profile, args, signal, updates: [] };
+    const context: TMcpToolContext = { client, connector, args, signal, updates: [] };
     client.setNotificationHandler(ResourceUpdatedNotificationSchema, (notification) => {
       // A bounded session-local queue; callers can reread the listed resource URIs.
       if (context.updates.length === 100) {
@@ -77,28 +51,28 @@ export class McpService {
       context.updates.push(notification.params);
     });
     let transport: Transport;
-    if (profile.transport.type === "stdio") {
+    if (connector.transport.type === "stdio") {
       transport = new StdioClientTransport({
-        command: profile.transport.command,
-        args: profile.transport.args,
-        env: profile.transport.env,
+        command: connector.transport.command,
+        args: connector.transport.args,
+        env: connector.transport.env,
         stderr: "ignore",
       });
     } else {
-      const headers = new Headers(profile.transport.headers);
-      const token = await getMcpAuthToken(args.ownerKey, profile);
+      const headers = new Headers(connector.transport.headers);
+      const token = await getMcpAuthToken(args.ownerKey, connector);
       if (token !== undefined) {
         headers.set("Authorization", `Bearer ${token}`);
       }
-      transport = new StreamableHTTPClientTransport(new URL(profile.transport.url), {
-        authProvider: await getMcpAuthProvider(args.ownerKey, profile),
-        fetch: createMcpAuthFetch(args.ownerKey, profile.id),
+      transport = new StreamableHTTPClientTransport(new URL(connector.transport.url), {
+        authProvider: await getMcpAuthProvider(args.ownerKey, connector),
+        fetch: createMcpAuthFetch(args.ownerKey, connector.id),
         requestInit: { headers },
       });
     }
     let closed = false;
-    const session: TMcpSession = {
-      profile,
+    const session: TConnectorSession = {
+      connector,
       tools: [],
       signal,
       close: async () => {
@@ -108,7 +82,6 @@ export class McpService {
         closed = true;
         controller.abort(new Error("MCP session closed"));
         signal.removeEventListener("abort", abort);
-        this.sessions.delete(session);
         try {
           if (transport instanceof StreamableHTTPClientTransport) {
             let timeout: TOption<ReturnType<typeof setTimeout>>;
@@ -118,7 +91,7 @@ export class McpService {
                 new Promise<void>((_, reject) => {
                   timeout = setTimeout(
                     () => reject(new Error("MCP session termination timed out")),
-                    Math.min(profile.requestTimeoutMs, 5_000),
+                    Math.min(connector.requestTimeoutMs, 5_000),
                   );
                 }),
               ]);
@@ -129,29 +102,28 @@ export class McpService {
             }
           }
         } catch {
-          this.logger.warning(`Failed to terminate MCP session for profile ${profile.id}`);
+          logger.warning(`Failed to terminate MCP session for connector ${connector.id}`);
         } finally {
           await client.close();
         }
       },
     };
     const abort = () => {
-      void session.close().catch(() => this.logger.warning("Failed to close MCP session"));
+      void session.close().catch(() => logger.warning("Failed to close MCP session"));
     };
     client.onclose = () => {
       controller.abort(new Error("MCP server disconnected"));
-      this.sessions.delete(session);
     };
     client.onerror = () => {
       if (!closed && !signal.aborted) {
-        this.logger.warning(`MCP transport error for profile ${profile.id}`);
+        logger.warning(`MCP transport error for connector ${connector.id}`);
       }
     };
     signal.addEventListener("abort", abort, { once: true });
     try {
       await client.connect(transport, {
         ...requestOptions(context),
-        timeout: profile.requestTimeoutMs,
+        timeout: connector.requestTimeoutMs,
       });
       session.tools.push(...(await discoverTools(context)));
       let refreshing = Promise.resolve();
@@ -163,28 +135,13 @@ export class McpService {
               session.tools.splice(0, session.tools.length, ...tools);
             }
           })
-          .catch(() => this.logger.warning(`MCP tool refresh failed for profile ${profile.id}`));
+          .catch(() => logger.warning(`MCP tool refresh failed for connector ${connector.id}`));
       });
       signal.throwIfAborted();
-      this.sessions.set(session, { ownerKey: args.ownerKey, profileId: profile.id });
       return session;
     } catch (error) {
       await session.close();
       throw error;
     }
-  }
-
-  public async disconnect(chatId: string, profileId: string): Promise<void> {
-    const closing: Promise<void>[] = [];
-    for (const [session, owner] of this.sessions) {
-      if (owner.ownerKey === chatId && owner.profileId === profileId) {
-        closing.push(session.close());
-      }
-    }
-    await Promise.all(closing);
-  }
-
-  public async close(): Promise<void> {
-    await Promise.all([...this.sessions.keys()].map((session) => session.close()));
-  }
-}
+  },
+};

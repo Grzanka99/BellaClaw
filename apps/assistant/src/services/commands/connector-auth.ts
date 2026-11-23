@@ -1,19 +1,21 @@
 import { EEventType } from "@bellaclaw/database";
-import { getMcpAuthStatus } from "../mcp/auth";
+import { getMcpAuthStatus } from "../connectors/mcp/auth";
 import type { TCommand } from "./types";
 
-const USAGE = "Usage: !mcp-auth connect|disconnect|status PROFILE or !mcp-auth token PROFILE TOKEN";
+const USAGE =
+  "Usage: !connector-auth connect|disconnect|status CONNECTOR or !connector-auth token CONNECTOR TOKEN";
 
-export const mcpAuthCommand: TCommand = {
-  name: "mcp-auth",
+export const connectorAuthCommand: TCommand = {
+  name: "connector-auth",
   description:
-    "Connect, disconnect, or check authentication for an OAuth or token MCP profile in this chat.",
-  usage: "!mcp-auth connect|disconnect|status PROFILE | !mcp-auth token PROFILE TOKEN",
+    "Connect, disconnect, or check authentication for an OAuth or token connector in this chat.",
+  usage:
+    "!connector-auth connect|disconnect|status CONNECTOR | !connector-auth token CONNECTOR TOKEN",
   handler: async (chatId, args, ctx) => {
-    const [action, profileId, token, extra] = args.trim().split(/\s+/);
+    const [action, connectorId, token, extra] = args.trim().split(/\s+/);
     const valid =
       action !== undefined &&
-      profileId !== undefined &&
+      connectorId !== undefined &&
       ((action === "token" && token !== undefined && extra === undefined) ||
         (["connect", "disconnect", "status"].includes(action) && token === undefined));
     // a malformed command may carry a token in any of its words, so the usage answer is
@@ -26,7 +28,7 @@ export const mcpAuthCommand: TCommand = {
       if (action === "token" && token !== undefined) {
         await ctx.request(
           EEventType.McpAuthTokenSaveRequested,
-          { chatId, profileId, token },
+          { chatId, profileId: connectorId, token },
           {
             outcome: EEventType.McpAuthTokenSaved,
             step: undefined,
@@ -34,12 +36,12 @@ export const mcpAuthCommand: TCommand = {
             timeoutMs: undefined,
           },
         );
-        return { confidential: `Saved the token for MCP profile ${profileId} in this chat.` };
+        return { confidential: `Saved the token for connector ${connectorId} in this chat.` };
       }
       if (action === "connect") {
         const created = await ctx.request(
           EEventType.McpAuthConnectRequested,
-          { chatId, profileId },
+          { chatId, profileId: connectorId },
           {
             outcome: EEventType.McpAuthLinkCreated,
             step: undefined,
@@ -47,12 +49,14 @@ export const mcpAuthCommand: TCommand = {
             timeoutMs: undefined,
           },
         );
-        return { confidential: `Open this link to connect ${profileId}:\n${created.payload.url}` };
+        return {
+          confidential: `Open this link to connect ${connectorId}:\n${created.payload.url}`,
+        };
       }
       if (action === "disconnect") {
         const outcome = await ctx.request(
           EEventType.McpAuthDisconnectRequested,
-          { chatId, profileId },
+          { chatId, profileId: connectorId },
           {
             outcome: EEventType.McpAuthDisconnected,
             step: undefined,
@@ -61,21 +65,21 @@ export const mcpAuthCommand: TCommand = {
           },
         );
         if (outcome.payload.disconnected) {
-          return `Disconnected MCP profile ${profileId}.`;
+          return `Disconnected connector ${connectorId}.`;
         }
-        return `MCP profile ${profileId} was not connected.`;
+        return `Connector ${connectorId} was not connected.`;
       }
 
-      const connected = await getMcpAuthStatus(chatId, profileId);
+      const connected = await getMcpAuthStatus(chatId, connectorId);
       if (connected) {
-        return `MCP profile ${profileId} is connected.`;
+        return `Connector ${connectorId} is connected.`;
       }
-      return `MCP profile ${profileId} is not connected.`;
+      return `Connector ${connectorId} is not connected.`;
     } catch (error) {
       if (action === "token") {
-        return { confidential: `MCP authentication failed: ${String(error)}` };
+        return { confidential: `Connector authentication failed: ${String(error)}` };
       }
-      return `MCP authentication failed: ${String(error)}`;
+      return `Connector authentication failed: ${String(error)}`;
     }
   },
 };

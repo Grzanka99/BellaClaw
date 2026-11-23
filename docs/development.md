@@ -39,7 +39,7 @@ bun run dev:sim          # containers, migrations, sim + log viewer + assistant
 bun run sim              # lists the commands
 ```
 
-It needs Podman. Models, MCP and embeddings are real; the database, notes vault and behavior logs
+It needs Podman. Models, connectors and embeddings are real; the database, notes vault and behavior logs
 are throwaway and live in `~/.config/bellaclaw-sim`, never in `.env` or your production data. The
 first conversation asks you to log in to a model provider once. Steps and commands:
 [`.agents/skills/signal-sim/SKILL.md`](../.agents/skills/signal-sim/SKILL.md).

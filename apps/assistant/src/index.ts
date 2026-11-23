@@ -8,6 +8,12 @@ import { AuthorizationService } from "./services/authorization";
 import { AutomationService } from "./services/automation";
 import { CalendarService } from "./services/calendar";
 import { Commands } from "./services/commands";
+import { ConnectorService } from "./services/connectors";
+import {
+  setupMcpAuth,
+  startMcpAuthServer,
+  stopMcpAuthServer,
+} from "./services/connectors/mcp/auth";
 import { CronScheduler } from "./services/cron";
 import { DiscordSingleton } from "./services/discord";
 import { EventBus } from "./services/events";
@@ -18,8 +24,6 @@ import {
   stopInternalApiServer,
 } from "./services/internal-api";
 import { ListsService } from "./services/lists";
-import { McpService } from "./services/mcp";
-import { setupMcpAuth, startMcpAuthServer, stopMcpAuthServer } from "./services/mcp/auth";
 import { Memory } from "./services/memory";
 import { FactDistiller } from "./services/memory/distill";
 import { MessageHandler } from "./services/message-handler";
@@ -66,7 +70,7 @@ async function init(): Promise<void> {
     ListsService.instance.setup();
     setupAiAuth();
     setupMcpAuth();
-    McpService.instance.setup();
+    ConnectorService.instance.setup();
     setupInternalApi();
     AppStream.instance.setup();
     await AppChannel.instance.setup();
@@ -140,7 +144,7 @@ async function init(): Promise<void> {
 for (const signal of ["SIGINT", "SIGTERM"]) {
   process.once(signal, () => {
     void Promise.allSettled([
-      McpService.instance.close(),
+      ConnectorService.instance.close(),
       stopMcpAuthServer(),
       stopInternalApiServer(),
       EventBus.instance.stop(),

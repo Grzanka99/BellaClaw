@@ -1,12 +1,12 @@
 ---
 name: signal-sim
-description: Talk to a running BellaClaw assistant from the shell through a fake Signal server. Use to test assistant behaviour empirically (real model, real MCP, throwaway database and vault), to reproduce a conversation bug, or to check a change end to end.
+description: Talk to a running BellaClaw assistant from the shell through a fake Signal server. Use to test assistant behaviour empirically (real model, real connectors, throwaway database and vault), to reproduce a conversation bug, or to check a change end to end.
 ---
 
 # signal-sim
 
 `apps/signal-sim` is a fake `signal-cli-rest-api`. The real assistant connects to it as its Signal
-account, and you speak to the assistant as any phone number with `bun run sim`. Models, MCP and
+account, and you speak to the assistant as any phone number with `bun run sim`. Models, connectors and
 embeddings are real; the database, notes vault and behavior logs are throwaway.
 
 `bun run sim` with no arguments prints every command. Each takes `--json`.
@@ -34,7 +34,7 @@ Each phone number is its own chat and needs these once. `--from` defaults to `+1
    connected, send `!ai-auth login opencode-go` (or `openai-codex`), give the returned link and code
    to the user, and wait for them to finish. Done when a normal message gets a model reply.
 3. Vault, only when the test touches notes:
-   `bun run sim send --wait "!mcp-auth token vault $(bun run --silent sim vault-token)"`.
+   `bun run sim send --wait "!connector-auth token vault $(bun run --silent sim vault-token)"`.
 
 ## 3. Converse
 

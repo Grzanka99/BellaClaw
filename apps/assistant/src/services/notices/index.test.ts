@@ -64,7 +64,7 @@ describe("Notices", () => {
     );
     await bus.idle();
 
-    expect(sendText.mock.calls).toEqual([["+100", "Connected MCP profile documents."]]);
+    expect(sendText.mock.calls).toEqual([["+100", "Connected connector documents."]]);
   });
 
   test("ai.auth.login.needed fans out to every authorized chat", async () => {

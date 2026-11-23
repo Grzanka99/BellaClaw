@@ -13,7 +13,7 @@ import { testMessageOrigin, withEventContext } from "../events/test-utils";
 import { EMessagePlatform, type TAttachmentRef } from "../messaging/types";
 import { Commands, runCommand } from ".";
 
-const originalMcpConfig = Bun.env.BELLACLAW_MCP_CONFIG;
+const originalConnectorsConfig = Bun.env.BELLACLAW_CONNECTORS_CONFIG;
 const signal = { channel: EMessagePlatform.Signal, address: "+100" };
 
 async function rowsOf(type: EEventType) {
@@ -68,10 +68,10 @@ describe("commands consumer", () => {
   afterEach(async () => {
     await bus.idle();
     await bus.stop();
-    if (originalMcpConfig === undefined) {
-      delete Bun.env.BELLACLAW_MCP_CONFIG;
+    if (originalConnectorsConfig === undefined) {
+      delete Bun.env.BELLACLAW_CONNECTORS_CONFIG;
     } else {
-      Bun.env.BELLACLAW_MCP_CONFIG = originalMcpConfig;
+      Bun.env.BELLACLAW_CONNECTORS_CONFIG = originalConnectorsConfig;
     }
     await rm(directory, { recursive: true, force: true });
   });
@@ -220,11 +220,11 @@ describe("commands consumer", () => {
   });
 
   test("an MCP prompt command becomes turn.requested keyed by the chat with its trace", async () => {
-    const configPath = join(directory, "mcp.json");
+    const configPath = join(directory, "connectors.json");
     await Bun.write(
       configPath,
       JSON.stringify({
-        profiles: [
+        connectors: [
           {
             id: "documents",
             description: "Documents",
@@ -235,7 +235,7 @@ describe("commands consumer", () => {
         ],
       }),
     );
-    Bun.env.BELLACLAW_MCP_CONFIG = configPath;
+    Bun.env.BELLACLAW_CONNECTORS_CONFIG = configPath;
 
     await authorized("discord:channel-1", '!mcp-prompt documents summarize {"style":"brief"}', 5, [
       {
@@ -253,38 +253,38 @@ describe("commands consumer", () => {
     expect(rows[0]?.payload).toEqual({
       ...testMessageOrigin("discord:channel-1", EMessagePlatform.Discord),
       content:
-        'Use MCP profile documents to run the explicitly requested prompt template summarize with arguments {"style":"brief"}.',
+        'Use connector documents to run the explicitly requested prompt template summarize with arguments {"style":"brief"}.',
       attachments: [],
       receivedAt: 5,
     });
   });
 
   test("a command reply becomes reply.ready", async () => {
-    const configPath = join(directory, "mcp.json");
-    await Bun.write(configPath, JSON.stringify({ profiles: [] }));
-    Bun.env.BELLACLAW_MCP_CONFIG = configPath;
+    const configPath = join(directory, "connectors.json");
+    await Bun.write(configPath, JSON.stringify({ connectors: [] }));
+    Bun.env.BELLACLAW_CONNECTORS_CONFIG = configPath;
 
     await authorized("discord:channel-1", "!mcp-prompt missing summarize", 1);
-    await Bun.write(configPath, JSON.stringify({ profiles: [{ id: "INVALID" }] }));
+    await Bun.write(configPath, JSON.stringify({ connectors: [{ id: "INVALID" }] }));
     await authorized("discord:channel-1", "!mcp-prompts", 2);
 
     expect(await payloadsOf(EEventType.ReplyReady)).toEqual([
       {
         ...testMessageOrigin("discord:channel-1", EMessagePlatform.Discord),
-        text: "MCP prompt request failed: Error: Unknown MCP profile: missing",
+        text: "MCP prompt request failed: Error: Unknown connector: missing",
         display: {
-          text: "MCP prompt request failed: Error: Unknown MCP profile: missing",
+          text: "MCP prompt request failed: Error: Unknown connector: missing",
           request: { text: "!mcp-prompt missing summarize", receivedAt: 1 },
         },
       },
       {
         ...testMessageOrigin("discord:channel-1", EMessagePlatform.Discord),
         text: expect.stringContaining(
-          "MCP prompt listing failed: Error: Invalid MCP configuration:",
+          "MCP prompt listing failed: Error: Invalid connectors configuration:",
         ),
         display: {
           text: expect.stringContaining(
-            "MCP prompt listing failed: Error: Invalid MCP configuration:",
+            "MCP prompt listing failed: Error: Invalid connectors configuration:",
           ),
           request: { text: "!mcp-prompts", receivedAt: 2 },
         },

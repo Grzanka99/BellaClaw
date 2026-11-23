@@ -144,7 +144,7 @@ A call across services is allowed only when it changes no state:
 - Drivers: `LlmClient`, `EmbeddingClient`, `aiModels`, the Discord and Signal clients, `GoogleCalendarClient`.
 - The stateless engine: `AgentHarness.runMain`, `runPlain`, `runScheduledTask`,
   `compactConversation`.
-- Live state an event cannot carry: `McpService.open`, `McpRunRegistry`, `AppStream.listen`
+- Live state an event cannot carry: `ConnectorService.open`, `ConnectorRunRegistry`, `AppStream.listen`
   (the gateway's open streams), `AppStream.step` (a reply turn's tool calls as they run, which
   the turn sends straight to the open streams; its reply row stores them),
   `AppChannel.openEdgeConnection`, `reportPresence` and `hasOpenStream` (which accounts have an open stream at the gateway, in memory only).

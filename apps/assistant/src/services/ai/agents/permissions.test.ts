@@ -5,8 +5,8 @@ import { join } from "node:path";
 import type { TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
 import type { TOption } from "@bellaclaw/shared";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
+import { loadConnectors } from "../../connectors/config";
 import { testEventRequester } from "../../events/test-utils";
-import { loadMcpProfiles } from "../../mcp/config";
 import { DefaultConfigRecord } from "../../settings/schema";
 import { AgentHarness } from "../agent-harness";
 import type { TAgentRunArgs } from "../agent-harness/types";
@@ -52,7 +52,7 @@ const EXPECTED_TOOL_NAMES: Record<EAgentName, readonly string[]> = {
     "delegate-automations",
     "delegate-lists",
   ],
-  [EAgentName.Mcp]: [],
+  [EAgentName.Connector]: [],
   [EAgentName.Memory]: ["search-memory", "remember-memory", "forget-memory"],
   [EAgentName.Plain]: ["web-search", "web-fetch"],
   [EAgentName.Settings]: ["get-settings", "update-settings"],
@@ -79,9 +79,9 @@ const EXPECTED_TOOL_NAMES: Record<EAgentName, readonly string[]> = {
 describe("agent permissions", () => {
   test("assembles the production tools and execution modes for every agent", async () => {
     const directory = await mkdtemp(join(tmpdir(), "bellaclaw-permissions-"));
-    const configPath = join(directory, "mcp.json");
-    const previousConfigPath = Bun.env.BELLACLAW_MCP_CONFIG;
-    Bun.env.BELLACLAW_MCP_CONFIG = configPath;
+    const configPath = join(directory, "connectors.json");
+    const previousConfigPath = Bun.env.BELLACLAW_CONNECTORS_CONFIG;
+    Bun.env.BELLACLAW_CONNECTORS_CONFIG = configPath;
     const harness = AgentHarness.instance as unknown as {
       createTools(
         args: TAgentRunArgs & { delegationCount: TOption<() => void> },
@@ -148,7 +148,7 @@ describe("agent permissions", () => {
       await Bun.write(
         configPath,
         JSON.stringify({
-          profiles: [
+          connectors: [
             {
               id: "files",
               description: "File operations",
@@ -174,29 +174,29 @@ describe("agent permissions", () => {
       });
 
       expect(configuredTools.map((tool) => tool.name).slice(-3)).toEqual([
-        "delegate-mcp",
-        "resume-mcp",
-        "cancel-mcp",
+        "delegate-connector",
+        "resume-connector",
+        "cancel-connector",
       ]);
-      for (const name of ["delegate-mcp", "resume-mcp", "cancel-mcp"]) {
+      for (const name of ["delegate-connector", "resume-connector", "cancel-connector"]) {
         expect(configuredTools.find((tool) => tool.name === name)?.executionMode).toBe(
           "sequential",
         );
       }
     } finally {
       if (previousConfigPath === undefined) {
-        delete Bun.env.BELLACLAW_MCP_CONFIG;
+        delete Bun.env.BELLACLAW_CONNECTORS_CONFIG;
       } else {
-        Bun.env.BELLACLAW_MCP_CONFIG = previousConfigPath;
+        Bun.env.BELLACLAW_CONNECTORS_CONFIG = previousConfigPath;
       }
       await rm(directory, { recursive: true, force: true });
     }
   });
 
-  test("the plain agent has web tools and MCP, with no memory, calendar, scheduling, settings or automation tool and no profile closed to plain chats", async () => {
+  test("the plain agent has web tools and connectors, with no memory, calendar, scheduling, settings or automation tool and no connector closed to plain chats", async () => {
     const directory = await mkdtemp(join(tmpdir(), "bellaclaw-permissions-"));
-    const configPath = join(directory, "mcp.json");
-    const previousConfigPath = Bun.env.BELLACLAW_MCP_CONFIG;
+    const configPath = join(directory, "connectors.json");
+    const previousConfigPath = Bun.env.BELLACLAW_CONNECTORS_CONFIG;
     const harness = AgentHarness.instance as unknown as {
       createTools(
         args: TAgentRunArgs & { delegationCount: TOption<() => void> },
@@ -204,19 +204,19 @@ describe("agent permissions", () => {
     };
 
     try {
-      // the repository's profiles leave plainChats out, so vault and logs are closed to plain chats
-      delete Bun.env.BELLACLAW_MCP_CONFIG;
-      const production = await loadMcpProfiles();
-      expect(production.map((profile) => [profile.id, profile.plainChats]).sort()).toEqual([
+      // the repository's connectors leave plainChats out, so vault and logs are closed to plain chats
+      delete Bun.env.BELLACLAW_CONNECTORS_CONFIG;
+      const production = await loadConnectors();
+      expect(production.map((connector) => [connector.id, connector.plainChats]).sort()).toEqual([
         ["logs", false],
         ["vault", false],
       ]);
 
-      Bun.env.BELLACLAW_MCP_CONFIG = configPath;
+      Bun.env.BELLACLAW_CONNECTORS_CONFIG = configPath;
       await Bun.write(
         configPath,
         JSON.stringify({
-          profiles: [
+          connectors: [
             ...production,
             {
               id: "notes",
@@ -252,26 +252,26 @@ describe("agent permissions", () => {
       expect(tools.map((tool) => tool.name)).toEqual([
         "web-search",
         "web-fetch",
-        "delegate-mcp",
-        "resume-mcp",
-        "cancel-mcp",
+        "delegate-connector",
+        "resume-connector",
+        "cancel-connector",
       ]);
-      const delegate = tools.find((tool) => tool.name === "delegate-mcp");
+      const delegate = tools.find((tool) => tool.name === "delegate-connector");
       expect(delegate?.description).toContain("files: File operations");
       expect(delegate?.description).not.toContain("vault");
       expect(delegate?.description).not.toContain("logs");
       expect(delegate?.description).not.toContain("notes");
 
-      for (const profileId of ["vault", "logs", "notes"]) {
+      for (const connectorId of ["vault", "logs", "notes"]) {
         await expect(
-          delegate?.execute("call-1", { profileId, task: "read", context: "none" }),
-        ).rejects.toThrow(`Unknown MCP profile: ${profileId}`);
+          delegate?.execute("call-1", { connectorId, task: "read", context: "none" }),
+        ).rejects.toThrow(`Unknown connector: ${connectorId}`);
       }
     } finally {
       if (previousConfigPath === undefined) {
-        delete Bun.env.BELLACLAW_MCP_CONFIG;
+        delete Bun.env.BELLACLAW_CONNECTORS_CONFIG;
       } else {
-        Bun.env.BELLACLAW_MCP_CONFIG = previousConfigPath;
+        Bun.env.BELLACLAW_CONNECTORS_CONFIG = previousConfigPath;
       }
       await rm(directory, { recursive: true, force: true });
     }

@@ -6,8 +6,8 @@ import type { TChatAddress } from "../identity";
 import { MessagingAdapter } from "../messaging";
 import { aiAuthCommand } from "./ai-auth";
 import { calendarAddReadCommand, calendarAddWriteCommand } from "./calendar-add";
+import { connectorAuthCommand } from "./connector-auth";
 import { appCommand, dashboardCommand } from "./dashboard";
-import { mcpAuthCommand } from "./mcp-auth";
 import { mcpPromptCommand, mcpPromptsCommand } from "./mcp-prompts";
 import { COMMAND_PREFIX, type TCommand, type TCommandResult } from "./types";
 import { updateCommand } from "./update";
@@ -15,7 +15,7 @@ import { updateCommand } from "./update";
 const REGISTERED_COMMANDS: TCommand[] = [
   calendarAddWriteCommand,
   calendarAddReadCommand,
-  mcpAuthCommand,
+  connectorAuthCommand,
   mcpPromptsCommand,
   mcpPromptCommand,
   aiAuthCommand,

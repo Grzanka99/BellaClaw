@@ -12,5 +12,6 @@ plans
 .env
 .env.*
 .secrets
+connectors.*.json
 mcp.*.json
 README.md

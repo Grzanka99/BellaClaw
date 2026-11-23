@@ -7,7 +7,7 @@ import type { TOption } from "@bellaclaw/shared";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { z } from "zod";
-import { McpService } from "../../assistant/src/services/mcp";
+import { ConnectorService } from "../../assistant/src/services/connectors";
 import { createLogViewerApp, type TLogViewerApplication } from "./app";
 
 const STextToolResult = z.object({
@@ -17,20 +17,20 @@ const STextToolResult = z.object({
 let application: TOption<TLogViewerApplication>;
 let client: TOption<Client>;
 let httpServer: TOption<ReturnType<typeof Bun.serve>>;
-let mcpService: TOption<McpService>;
-let previousMcpConfig: TOption<string>;
+let connectorService: TOption<ConnectorService>;
+let previousConnectorsConfig: TOption<string>;
 let tempDir: TOption<string>;
 
 afterEach(async () => {
-  await mcpService?.close();
+  await connectorService?.close();
   await client?.close();
   httpServer?.stop(true);
   await application?.close();
 
-  if (previousMcpConfig === undefined) {
-    delete Bun.env.BELLACLAW_MCP_CONFIG;
+  if (previousConnectorsConfig === undefined) {
+    delete Bun.env.BELLACLAW_CONNECTORS_CONFIG;
   } else {
-    Bun.env.BELLACLAW_MCP_CONFIG = previousMcpConfig;
+    Bun.env.BELLACLAW_CONNECTORS_CONFIG = previousConnectorsConfig;
   }
 
   if (tempDir !== undefined) {
@@ -40,8 +40,8 @@ afterEach(async () => {
   application = undefined;
   client = undefined;
   httpServer = undefined;
-  mcpService = undefined;
-  previousMcpConfig = undefined;
+  connectorService = undefined;
+  previousConnectorsConfig = undefined;
   tempDir = undefined;
 });
 
@@ -133,7 +133,7 @@ describe("behavior log MCP server", () => {
     expect(await Bun.file(dbPath).exists()).toBe(false);
   });
 
-  test("works through McpService with chat and diagnostic turn context injected", async () => {
+  test("works through ConnectorService with chat and diagnostic turn context injected", async () => {
     tempDir = mkdtempSync(join(tmpdir(), "bellaclaw-log-mcp-service-"));
     const dbPath = join(tempDir, "logs.db");
     const logger = new AppLogger({ dbPath, stdout() {} });
@@ -184,11 +184,11 @@ describe("behavior log MCP server", () => {
       port: 0,
       fetch: application.app.fetch,
     });
-    const configPath = join(tempDir, "mcp.json");
+    const configPath = join(tempDir, "connectors.json");
     await Bun.write(
       configPath,
       JSON.stringify({
-        profiles: [
+        connectors: [
           {
             id: "logs",
             description: "Behavior logs",
@@ -199,13 +199,13 @@ describe("behavior log MCP server", () => {
         ],
       }),
     );
-    previousMcpConfig = Bun.env.BELLACLAW_MCP_CONFIG;
-    Bun.env.BELLACLAW_MCP_CONFIG = configPath;
-    mcpService = new McpService();
-    const session = await mcpService.open({
+    previousConnectorsConfig = Bun.env.BELLACLAW_CONNECTORS_CONFIG;
+    Bun.env.BELLACLAW_CONNECTORS_CONFIG = configPath;
+    connectorService = new ConnectorService();
+    const session = await connectorService.open({
       ownerKey: chatId,
       conversationKey: chatId,
-      profileId: "logs",
+      connectorId: "logs",
       turnId: "diagnostic",
     });
     const cacheTool = session.tools.find((tool) => tool.label === "Cache hit rate");

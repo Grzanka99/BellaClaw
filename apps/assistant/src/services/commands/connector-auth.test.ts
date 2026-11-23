@@ -5,11 +5,11 @@ import { join } from "node:path";
 import { EEventType, eventsTable } from "@bellaclaw/database";
 import type { TOption } from "@bellaclaw/shared";
 import { asc, eq } from "drizzle-orm";
+import { setupMcpAuth } from "../connectors/mcp/auth";
 import { DatabaseConnector } from "../database";
 import { resetEventTables } from "../database/test-utils";
 import { EventBus } from "../events";
 import { testMessageOrigin } from "../events/test-utils";
-import { setupMcpAuth } from "../mcp/auth";
 import { EMessagePlatform } from "../messaging/types";
 import { Commands } from ".";
 
@@ -33,7 +33,7 @@ async function send(content: string) {
     type: EEventType.MessageAuthorized,
     source: "test",
     key: chatId,
-    trace: { turnId: "test:mcp-auth", chatId, platform: EMessagePlatform.Signal },
+    trace: { turnId: "test:connector-auth", chatId, platform: EMessagePlatform.Signal },
     payload: {
       ...testMessageOrigin(chatId, EMessagePlatform.Signal),
       content,
@@ -49,15 +49,15 @@ async function send(content: string) {
 }
 
 beforeEach(async () => {
-  directory = await mkdtemp(join(tmpdir(), "bellaclaw-mcp-auth-command-"));
-  previousConfig = Bun.env.BELLACLAW_MCP_CONFIG;
+  directory = await mkdtemp(join(tmpdir(), "bellaclaw-connector-auth-command-"));
+  previousConfig = Bun.env.BELLACLAW_CONNECTORS_CONFIG;
   previousCredentials = Bun.env.BELLACLAW_MCP_CREDENTIALS_PATH;
-  Bun.env.BELLACLAW_MCP_CONFIG = join(directory, "mcp.json");
+  Bun.env.BELLACLAW_CONNECTORS_CONFIG = join(directory, "connectors.json");
   Bun.env.BELLACLAW_MCP_CREDENTIALS_PATH = join(directory, "credentials.json");
   await Bun.write(
-    join(directory, "mcp.json"),
+    join(directory, "connectors.json"),
     JSON.stringify({
-      profiles: [
+      connectors: [
         {
           id: "vault",
           description: "Vault",
@@ -80,9 +80,9 @@ afterEach(async () => {
   await bus.idle();
   await bus.stop();
   if (previousConfig === undefined) {
-    delete Bun.env.BELLACLAW_MCP_CONFIG;
+    delete Bun.env.BELLACLAW_CONNECTORS_CONFIG;
   } else {
-    Bun.env.BELLACLAW_MCP_CONFIG = previousConfig;
+    Bun.env.BELLACLAW_CONNECTORS_CONFIG = previousConfig;
   }
   if (previousCredentials === undefined) {
     delete Bun.env.BELLACLAW_MCP_CREDENTIALS_PATH;
@@ -93,8 +93,8 @@ afterEach(async () => {
 });
 
 test("the token command saves through mcp-auth and loses its payload once handled", async () => {
-  expect(await send("!mcp-auth token vault secret-token")).toBe(
-    "Saved the token for MCP profile vault in this chat.",
+  expect(await send("!connector-auth token vault secret-token")).toBe(
+    "Saved the token for connector vault in this chat.",
   );
 
   const [command] = await rowsOf(EEventType.McpAuthTokenSaveRequested);
@@ -102,7 +102,7 @@ test("the token command saves through mcp-auth and loses its payload once handle
   expect((await rowsOf(EEventType.McpAuthCredentialsChanged)).map((row) => row.payload)).toEqual([
     { chatId, profileId: "vault" },
   ]);
-  expect(await send("!mcp-auth status vault")).toBe("MCP profile vault is connected.");
+  expect(await send("!connector-auth status vault")).toBe("Connector vault is connected.");
   // the token command is confidential: neither it nor its answer is carried for the history
   expect((await rowsOf(EEventType.ReplyReady)).map((row) => JSON.stringify(row.payload))).toEqual([
     expect.not.stringContaining("display"),
@@ -112,14 +112,14 @@ test("the token command saves through mcp-auth and loses its payload once handle
 
 test("a malformed command, a token in it or not, carries nothing for the history", async () => {
   for (const content of [
-    "!mcp-auth TOKEN vault secret-1",
-    "!mcp-auth Token vault secret-2 extra",
-    "!mcp-auth token vault",
-    "!MCP-AUTH token vault secret-3 extra",
-    "!mcp-auth connect vault secret-4",
+    "!connector-auth TOKEN vault secret-1",
+    "!connector-auth Token vault secret-2 extra",
+    "!connector-auth token vault",
+    "!CONNECTOR-AUTH token vault secret-3 extra",
+    "!connector-auth connect vault secret-4",
   ]) {
     expect(await send(content)).toBe(
-      "Usage: !mcp-auth connect|disconnect|status PROFILE or !mcp-auth token PROFILE TOKEN",
+      "Usage: !connector-auth connect|disconnect|status CONNECTOR or !connector-auth token CONNECTOR TOKEN",
     );
   }
 
@@ -134,10 +134,10 @@ test("a malformed command, a token in it or not, carries nothing for the history
 });
 
 test("disconnect replies from the outcome and announces the credential change", async () => {
-  await send("!mcp-auth token vault secret-token");
+  await send("!connector-auth token vault secret-token");
 
-  expect(await send("!mcp-auth disconnect vault")).toBe("Disconnected MCP profile vault.");
-  expect(await send("!mcp-auth disconnect vault")).toBe("MCP profile vault was not connected.");
+  expect(await send("!connector-auth disconnect vault")).toBe("Disconnected connector vault.");
+  expect(await send("!connector-auth disconnect vault")).toBe("Connector vault was not connected.");
   expect((await rowsOf(EEventType.McpAuthDisconnected)).map((row) => row.payload)).toEqual([
     { chatId, profileId: "vault", disconnected: true },
     { chatId, profileId: "vault", disconnected: false },
@@ -145,8 +145,8 @@ test("disconnect replies from the outcome and announces the credential change", 
 });
 
 test("a rejected command replies with its reason", async () => {
-  expect(await send("!mcp-auth connect vault")).toBe(
-    "MCP authentication failed: Error: MCP profile vault does not use OAuth",
+  expect(await send("!connector-auth connect vault")).toBe(
+    "Connector authentication failed: Error: Connector vault does not use OAuth",
   );
   expect(await rowsOf(EEventType.EventDeadLettered)).toEqual([]);
 });

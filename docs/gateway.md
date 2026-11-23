@@ -195,7 +195,7 @@ Conversations:
   and, for a plain chat only, `model: { provider, model, effort }`: answers `{ clientMessageId }` once the
   assistant accepted the message, before the reply. The model applies to this turn of the plain
   chat only: the turn runs on its provider, Main on its model and effort, compaction on its model,
-  and every other purpose, such as the MCP specialist's, on that provider's saved preference for
+  and every other purpose, such as the connector specialist's, on that provider's saved preference for
   it, else the provider's default. The assistant answers 400 for a plain chat's send without
   `model`, for a provider it does not offer or cannot use now (its API key is missing, its login
   is not connected or expired; the error names the reason), a model that provider does not list
@@ -207,7 +207,7 @@ Conversations:
   with the same id is the same message and is answered the same, for as long as the assistant
   keeps the message's event: 30 days. A client that still holds a pending send after that looks
   for its `clientMessageId` in history before sending again. The reply appears in history. A
-  command whose reply is confidential (`!ai-auth`, `!mcp-auth`) gets no history row for the
+  command whose reply is confidential (`!ai-auth`, `!connector-auth`) gets no history row for the
   command or the reply: the reply arrives only as the stream's `reply` event. `!app` and
   `!dashboard` sent from the app answer with a plain stored reply. An
   image that was not uploaded by this account to this conversation, or is named with another type,
@@ -243,7 +243,7 @@ Live stream, while the app is in the foreground:
   `typing`, on when a turn of the conversation is requested and again when it starts running, and
   off when it completes, fails or is dropped, whatever channel its message came from; `deleted`:
   `conversationKey` of a plain chat that is gone; `reply`: `conversationKey` and `text` of a
-  confidential reply (provider sign-in instructions, an MCP sign-in link) to a message sent from
+  confidential reply (provider sign-in instructions, a connector sign-in link) to a message sent from
   the app, sent to app sessions' streams only. The app shows a `reply` once in its conversation as a
   message that is not in history: it is never stored or pushed, and is gone after a reload. It
   reaches only a stream open when it is ready; the user asks again for one that was missed. A
@@ -269,7 +269,7 @@ does not exist, for reading, sending, deleting, uploading and downloading. The g
 assistant's conversation registry (`findOwnedConversation` in `@bellaclaw/database`); the
 assistant checks it again on a send and a delete.
 
-A plain chat is a side conversation of the app: web tools and MCP tools (the profiles that set
+A plain chat is a side conversation of the app: web tools and connector tools (the connectors that set
 `plainChats: true`; `vault` and `logs` stay closed), no memory, reminders, schedules, calendars, automations or settings, and `!` messages
 are plain text there. Its persona is the account's setting for all plain chats: Bella's persona,
 Bella's persona followed by the chats text, the chats text alone, or none when Bella's persona is

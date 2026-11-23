@@ -7,7 +7,7 @@ import {
   OAuthTokensSchema,
 } from "@modelcontextprotocol/sdk/shared/auth.js";
 import { z } from "zod";
-import { writeJsonAtomically } from "../../../lib/atomic-json";
+import { writeJsonAtomically } from "../../../../lib/atomic-json";
 
 const SStoredCredential = z.object({
   tokens: OAuthTokensSchema.optional(),

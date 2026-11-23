@@ -33,9 +33,9 @@ import { webSearch } from "../tools/web-search";
 import { EModelPurpose } from "../types";
 import automationsInstructions from "./automations.xml" with { type: "text" };
 import calendarInstructions from "./calendar.xml" with { type: "text" };
+import connectorInstructions from "./connector.xml" with { type: "text" };
 import listsInstructions from "./lists.xml" with { type: "text" };
 import mainInstructions from "./main.xml" with { type: "text" };
-import mcpInstructions from "./mcp.xml" with { type: "text" };
 import memoryInstructions from "./memory.xml" with { type: "text" };
 import plainInstructions from "./plain.xml" with { type: "text" };
 import scheduledTaskInstructions from "./scheduled-task.xml" with { type: "text" };
@@ -47,7 +47,7 @@ export enum EAgentName {
   Calendar = "calendar",
   Lists = "lists",
   Main = "main",
-  Mcp = "mcp",
+  Connector = "connector",
   Memory = "memory",
   Plain = "plain",
   Settings = "settings",
@@ -64,8 +64,8 @@ type TAgentDefinition = {
   instructions: string;
   tools: TTool[];
   delegates: EAgentName[];
-  // NOTE: the `delegate-mcp`, `resume-mcp` and `cancel-mcp` tools.
-  mcp: boolean;
+  // NOTE: the `delegate-connector`, `resume-connector` and `cancel-connector` tools.
+  connectors: boolean;
   // How a delegating agent sees this agent; undefined when nothing delegates to it.
   delegation: TOption<{ description: string; mode: ToolExecutionMode }>;
 };
@@ -89,7 +89,7 @@ export const AGENTS: Record<EAgentName, TAgentDefinition> = {
       ...WEB_TOOLS,
     ],
     delegates: [],
-    mcp: false,
+    connectors: false,
     delegation: {
       description: "Run the automations specialist for this focused task",
       mode: "sequential",
@@ -111,7 +111,7 @@ export const AGENTS: Record<EAgentName, TAgentDefinition> = {
       ...WEB_TOOLS,
     ],
     delegates: [],
-    mcp: false,
+    connectors: false,
     delegation: {
       description: "Run the calendar specialist for this focused task",
       mode: "sequential",
@@ -124,7 +124,7 @@ export const AGENTS: Record<EAgentName, TAgentDefinition> = {
     instructions: listsInstructions,
     tools: [listLists, updateLists],
     delegates: [],
-    mcp: false,
+    connectors: false,
     delegation: {
       description:
         "Required for the user's named to-do lists (shopping, packing, errands): reading them, creating one, adding, ticking, editing, moving or deleting items, renaming, setting an end time, or deleting a list. Pass the user's own words about the list and items.",
@@ -145,17 +145,17 @@ export const AGENTS: Record<EAgentName, TAgentDefinition> = {
       EAgentName.Automations,
       EAgentName.Lists,
     ],
-    mcp: true,
+    connectors: true,
     delegation: undefined,
   },
-  [EAgentName.Mcp]: {
+  [EAgentName.Connector]: {
     purpose: EModelPurpose.SpecialistAccurate,
     maxIterations: 12,
     base: true,
-    instructions: mcpInstructions,
+    instructions: connectorInstructions,
     tools: [],
     delegates: [],
-    mcp: false,
+    connectors: false,
     delegation: undefined,
   },
   [EAgentName.Memory]: {
@@ -165,15 +165,15 @@ export const AGENTS: Record<EAgentName, TAgentDefinition> = {
     instructions: memoryInstructions,
     tools: [searchMemory, rememberMemory, forgetMemory],
     delegates: [],
-    mcp: false,
+    connectors: false,
     delegation: {
       description:
         "Required for personal user facts and forget requests. Run the Memory specialist to retrieve or forget the relevant facts.",
       mode: "parallel",
     },
   },
-  // NOTE: a plain chat of the app: web tools and MCP, no delegates, so no memory, calendar,
-  // scheduling, settings or automations. Only MCP profiles with plainChats true are offered. Its
+  // NOTE: a plain chat of the app: web tools and connectors, no delegates, so no memory, calendar,
+  // scheduling, settings or automations. Only connectors with plainChats true are offered. Its
   // persona is the account's persona for plain chats, which AgentHarness adds
   [EAgentName.Plain]: {
     purpose: EModelPurpose.Main,
@@ -182,7 +182,7 @@ export const AGENTS: Record<EAgentName, TAgentDefinition> = {
     instructions: plainInstructions,
     tools: WEB_TOOLS,
     delegates: [],
-    mcp: true,
+    connectors: true,
     delegation: undefined,
   },
   [EAgentName.Settings]: {
@@ -192,7 +192,7 @@ export const AGENTS: Record<EAgentName, TAgentDefinition> = {
     instructions: settingsInstructions,
     tools: [getSettings, updateSettings],
     delegates: [],
-    mcp: false,
+    connectors: false,
     delegation: {
       description: "Run the settings specialist for this focused task",
       mode: "parallel",
@@ -213,7 +213,7 @@ export const AGENTS: Record<EAgentName, TAgentDefinition> = {
       ...WEB_TOOLS,
     ],
     delegates: [],
-    mcp: false,
+    connectors: false,
     delegation: {
       description: "Run the scheduling specialist for this focused task",
       mode: "sequential",
@@ -226,7 +226,7 @@ export const AGENTS: Record<EAgentName, TAgentDefinition> = {
     instructions: scheduledTaskInstructions,
     tools: [searchMemory, ...WEB_TOOLS, listCalendarEvents, findCalendarAvailability, listCronJobs],
     delegates: [],
-    mcp: true,
+    connectors: true,
     delegation: undefined,
   },
 };
