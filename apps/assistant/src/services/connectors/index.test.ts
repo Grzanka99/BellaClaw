@@ -73,9 +73,11 @@ describe("MCP runtime", () => {
   test("loads the default logs connector for local and Compose URLs", async () => {
     const configPath = Bun.env.BELLACLAW_CONNECTORS_CONFIG;
     const previousLogsUrl = Bun.env.BELLACLAW_LOGS_MCP_URL;
+    const previousLegacyConfig = Bun.env.BELLACLAW_MCP_CONFIG;
     const previousVaultUrl = Bun.env.BELLACLAW_VAULT_MCP_URL;
     delete Bun.env.BELLACLAW_CONNECTORS_CONFIG;
     delete Bun.env.BELLACLAW_LOGS_MCP_URL;
+    delete Bun.env.BELLACLAW_MCP_CONFIG;
     delete Bun.env.BELLACLAW_VAULT_MCP_URL;
     try {
       const localConnectors = await loadConnectors("account:a");
@@ -104,6 +106,9 @@ describe("MCP runtime", () => {
         delete Bun.env.BELLACLAW_LOGS_MCP_URL;
       } else {
         Bun.env.BELLACLAW_LOGS_MCP_URL = previousLogsUrl;
+      }
+      if (previousLegacyConfig !== undefined) {
+        Bun.env.BELLACLAW_MCP_CONFIG = previousLegacyConfig;
       }
       if (previousVaultUrl !== undefined) {
         Bun.env.BELLACLAW_VAULT_MCP_URL = previousVaultUrl;
