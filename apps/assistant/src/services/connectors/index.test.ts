@@ -140,6 +140,40 @@ describe("MCP runtime", () => {
     await expect(loadConnectors()).rejects.toThrow("cannot use both oauth and tokenAuth");
   });
 
+  test("a server set up before the rename keeps its config variable and profiles key", async () => {
+    const previousLegacyConfig = Bun.env.BELLACLAW_MCP_CONFIG;
+    const legacyPath = join(directory, "mcp.json");
+    await Bun.write(
+      legacyPath,
+      JSON.stringify({
+        profiles: [
+          {
+            id: "legacy",
+            description: "Legacy",
+            instructions: "Use legacy tools",
+            transport: { type: "stdio", command: "bun" },
+          },
+        ],
+      }),
+    );
+    try {
+      Bun.env.BELLACLAW_MCP_CONFIG = legacyPath;
+      expect((await loadConnectors()).map((connector) => connector.id)).toEqual([]);
+
+      delete Bun.env.BELLACLAW_CONNECTORS_CONFIG;
+      expect((await loadConnectors()).map((connector) => connector.id)).toEqual(["legacy"]);
+
+      Bun.env.BELLACLAW_MCP_CONFIG = join(directory, "missing.json");
+      expect((await loadConnectors()).map((connector) => connector.id)).toEqual(["logs", "vault"]);
+    } finally {
+      if (previousLegacyConfig === undefined) {
+        delete Bun.env.BELLACLAW_MCP_CONFIG;
+      } else {
+        Bun.env.BELLACLAW_MCP_CONFIG = previousLegacyConfig;
+      }
+    }
+  });
+
   test("stdio paginates tools, preserves schemas, isolates context and reports server errors", async () => {
     await configure({
       type: "stdio",

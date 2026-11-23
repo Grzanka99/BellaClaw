@@ -17,6 +17,9 @@ repository root. In Compose, mount `./connectors.local.json:/app/connectors.loca
 the assistant and set `BELLACLAW_CONNECTORS_CONFIG=/app/connectors.local.json`: a self-updated
 release resolves a relative path from its own directory. Local connector files are excluded from
 Git and container builds. An absent selected file disables connectors.
+A server set up before connectors were renamed keeps working: when `BELLACLAW_CONNECTORS_CONFIG`
+is not set, `BELLACLAW_MCP_CONFIG` names the file if that file exists, and a file may still list
+its connectors under the old `profiles` key.
 Configuration is read for each new delegation; an existing specialist keeps its current connector
 and connection until it finishes.
 

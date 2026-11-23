@@ -43,3 +43,4 @@ plans/
 reports/
 .secrets/
 connectors.*.json
+mcp.*.json
