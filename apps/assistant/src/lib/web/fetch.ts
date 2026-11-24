@@ -4,8 +4,8 @@ import { fetchTextWithLimit } from "./http";
 import type { TFetchWebArgs, TFetchWebResult, TWebContentFormat } from "./types";
 
 const FETCH_MAX_BYTES = 5_000_000;
-// One call returns this much of the formatted page; `start` reads a later part. It stays well
-// under the harness cap on a tool result, so the JSON around it is never cut.
+// One call returns this much of the formatted page; `start` reads a later part. Keep it well
+// under the harness cap on a tool result, which counts the longer JSON text of the result.
 const PART_MAX_CHARS = 20_000;
 
 export async function fetchWeb(

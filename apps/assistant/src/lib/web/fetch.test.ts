@@ -23,7 +23,7 @@ describe("fetchWeb", () => {
   });
 
   test("returns a long page in parts the caller reads with start", async () => {
-    // the limit counts decoded characters: 45,000 here, not the 270,000 of the source
+    // the limit counts decoded characters, so each &copy; is one
     const network = page(`<body><p>${"&copy;".repeat(20_000)}${"b".repeat(25_000)}</p></body>`);
     const first = await fetchWeb(
       { url: "https://example.com/long", format: "text" },
