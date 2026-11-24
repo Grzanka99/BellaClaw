@@ -13,10 +13,14 @@ import {
   fauxToolCall,
   getCurrentSystemPrompt,
   getCurrentTools,
+  type Message,
   type Model,
+  normalizeContext,
   type TranscriptContext,
 } from "@earendil-works/pi-ai";
 import { convertResponsesMessages } from "@earendil-works/pi-ai/api/openai-responses-shared";
+import { clampMaxTokensToContext } from "@earendil-works/pi-ai/api/simple-options";
+import { estimateMessageTokens } from "@earendil-works/pi-ai/utils/estimate";
 import { obj } from "@earendil-works/pi-schema";
 import type {
   CreateMessageRequest,
@@ -25,6 +29,7 @@ import type {
   ElicitRequest,
 } from "@modelcontextprotocol/sdk/types.js";
 import { ConnectorRunRegistry } from "../../connectors/runs";
+import { REMOVED_RESULT } from "../../conversation/compaction";
 import type { TConversation } from "../../conversation/types";
 import type { TEventRequester } from "../../events";
 import { testEventRequester } from "../../events/test-utils";
@@ -43,7 +48,7 @@ const OPENROUTER_MODELS = [
   "openrouter/free",
   "openai/gpt-5.4-mini",
   "google/gemini-3.1-pro-preview",
-].map((id) => ({ id, reasoning: true }));
+].map((id) => ({ id, reasoning: true, contextWindow: 1_000_000 }));
 
 const logDirectories: string[] = [];
 const TEST_TRACE: TBehaviorTraceContext = {
@@ -447,6 +452,182 @@ describe("AgentHarness", () => {
     expect(visibleTools).toEqual([["replacement-tool"]]);
     expect(result.text).toBe("refreshed");
     expect(result.toolCallCount).toBe(2);
+  });
+
+  test("a tool-heavy specialist run never sends more than its model's window, and still answers", async () => {
+    const window = 60_000;
+    const replyRoom = 16_384;
+    aiModels.setProvider(
+      fauxProvider({
+        provider: EAiProvider.Openrouter,
+        models: OPENROUTER_MODELS.map((model) => ({ ...model, contextWindow: window })),
+      }).provider,
+    );
+    const page = (index: number) => `page ${index} `.repeat(4_000);
+    const tools: AgentTool[] = [
+      {
+        name: "read-page",
+        label: "Read page",
+        description: "Read one page",
+        parameters: obj({}, { open: true }),
+        execute: async (_toolCallId, parameters) => {
+          const { index } = parameters as { index: number };
+          return { content: [{ type: "text", text: page(index) }], details: {} };
+        },
+      },
+    ];
+    const responses = [
+      ...Array.from({ length: 8 }, (_, index) =>
+        fauxAssistantMessage(fauxToolCall("read-page", { index }, { id: `page-${index}` })),
+      ),
+      fauxAssistantMessage("All eight pages read"),
+    ];
+    const requests: TranscriptContext[] = [];
+    const replyTokens: number[] = [];
+    // a provider whose tokenizer counts half again as many tokens as Pi estimates from the text
+    const count = (context: TranscriptContext) =>
+      Math.ceil(
+        1.5 * context.messages.reduce((sum, message) => sum + estimateMessageTokens(message), 0),
+      );
+    const stream = spyOn(aiModels, "streamSimple").mockImplementation((model, request) => {
+      const message = responses.shift();
+      if (message === undefined) {
+        throw new Error("Unexpected model request");
+      }
+      const context = normalizeContext(request);
+      requests.push(context);
+      replyTokens.push(clampMaxTokensToContext(model, context, model.maxTokens));
+      message.timestamp = Date.now();
+      message.provider = model.provider;
+      message.model = model.id;
+      message.api = model.api;
+      message.usage = {
+        input: count(context),
+        output: 20,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: count(context) + 20,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      };
+      const result = createAssistantMessageEventStream();
+      if (message.stopReason === "toolUse") {
+        result.push({ type: "done", reason: "toolUse", message });
+      } else {
+        result.push({ type: "done", reason: "stop", message });
+      }
+      return result;
+    });
+    const harness = AgentHarness.instance as unknown as {
+      run(
+        args: TAgentRunArgs & { delegationCount: TOption<() => void> },
+      ): Promise<TAgentRunResult & { messages: Message[] }>;
+    };
+
+    try {
+      const result = await harness.run({
+        name: EAgentName.Connector,
+        prompt: "Read every page",
+        conversationKey: "discord:1",
+        ownerKey: "discord:1",
+        settings: { ...DefaultConfigRecord, [EConfigKey.AiProvider]: EAiProvider.Openrouter },
+        currentTimeContext: undefined,
+        platform: EMessagePlatform.Discord,
+        trace: TEST_TRACE,
+        events: testEventRequester,
+        parentToolCallId: "delegate-call",
+        signal: undefined,
+        delegationCount: undefined,
+        connector: {
+          connector: {
+            id: "files",
+            kind: EConnectorKind.Mcp,
+            description: "Files",
+            instructions: "Use file tools",
+            transport: { type: "stdio", command: "fixture", args: [], env: {} },
+            contextArguments: {},
+            resources: true,
+            prompts: true,
+            sampling: true,
+            plainChats: true,
+            requestTimeoutMs: 1_000,
+            inputTimeoutMs: 1_000,
+          },
+          tools,
+          instructions: undefined,
+        },
+      });
+
+      expect(result.text).toBe("All eight pages read");
+      expect(requests).toHaveLength(9);
+      // the eight pages alone are above the window
+      expect(count(normalizeContext({ messages: result.messages }))).toBeGreaterThan(window);
+      for (const request of requests) {
+        expect(count(request) + replyRoom).toBeLessThanOrEqual(window);
+      }
+      // Pi leaves the reply its full room on every request
+      expect(Math.min(...replyTokens)).toBe(replyRoom);
+      const last = JSON.stringify(requests.at(-1)?.messages);
+      expect(last).toContain(page(7));
+      expect(last).not.toContain(page(0));
+      expect(last).toContain(REMOVED_RESULT);
+      // the transcript the caller stores keeps what the request left out
+      expect(JSON.stringify(result.messages)).toContain(page(0));
+    } finally {
+      stream.mockRestore();
+    }
+  });
+
+  test("a chat that is already above the window when a turn starts still gets a reply", async () => {
+    const window = 60_000;
+    const small = fauxProvider({
+      provider: EAiProvider.Openrouter,
+      models: OPENROUTER_MODELS.map((model) => ({ ...model, contextWindow: window })),
+    });
+    aiModels.setProvider(small.provider);
+    const turn = (index: number) => `turn ${index} `.repeat(4_000);
+    const conversation: TConversation = {
+      summary: "",
+      summaryTimestamp: 0,
+      summarizedThroughId: 0,
+      entries: Array.from({ length: 8 }, (_, index) => [
+        { role: "user" as const, content: turn(index), timestamp: index * 2 + 1 },
+        fauxAssistantMessage(`answer ${index}`, { timestamp: index * 2 + 2 }),
+      ])
+        .flat()
+        .map((message, index) => ({ id: index + 1, message })),
+    };
+    const requests: TranscriptContext[] = [];
+    small.setResponses([
+      (context) => {
+        requests.push(context);
+        return fauxAssistantMessage("Still here");
+      },
+    ]);
+
+    const result = await AgentHarness.instance.runMain({
+      prompt: "Are you still there?",
+      conversation,
+      conversationKey: "discord:1",
+      ownerKey: "discord:1",
+      settings: { ...DefaultConfigRecord, [EConfigKey.AiProvider]: EAiProvider.Openrouter },
+      currentTimeContext: undefined,
+      platform: EMessagePlatform.Discord,
+      trace: TEST_TRACE,
+      events: testEventRequester,
+      signal: undefined,
+    });
+
+    expect(result.text).toBe("Still here");
+    const request = requests[0]?.messages ?? [];
+    expect(
+      request.reduce((sum, message) => sum + estimateMessageTokens(message), 0) + 16_384,
+    ).toBeLessThanOrEqual(window);
+    const sent = JSON.stringify(request);
+    expect(sent).not.toContain(turn(0));
+    expect(sent).toContain(turn(7));
+    expect(sent).toContain("Are you still there?");
+    // the stored transcript is not cut
+    expect(result.messages).toHaveLength(conversation.entries.length + 2);
   });
 
   test.each([

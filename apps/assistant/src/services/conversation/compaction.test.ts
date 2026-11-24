@@ -8,6 +8,7 @@ import {
   fauxToolCall,
   type Message,
 } from "@earendil-works/pi-ai";
+import { estimateTextTokens } from "@earendil-works/pi-ai/utils/estimate";
 import { EMessagePlatform } from "../messaging/types";
 import { compactConversation } from "./compaction";
 import { attachmentBlock, type TConversation } from "./types";
@@ -118,6 +119,42 @@ describe("conversation compaction", () => {
     } else {
       expect(result).toMatchObject({ state: { summary: "Chose the train." } });
     }
+  });
+
+  test("cuts a summary request that is larger than the summary model's window", async () => {
+    const { state, models, model, faux } = fixture();
+    const page = (index: number) => `page ${index} `.repeat(30_000);
+    state.entries = (
+      [
+        { role: "user", content: "Read the five pages", timestamp: 1 },
+        ...Array.from({ length: 5 }, (_, index) => [
+          fauxAssistantMessage(fauxToolCall("read-page", { index }, { id: `page-${index}` })),
+          {
+            role: "toolResult" as const,
+            toolName: "read-page",
+            toolCallId: `page-${index}`,
+            content: [{ type: "text" as const, text: page(index) }],
+            isError: false,
+            timestamp: index + 2,
+          },
+        ]).flat(),
+        fauxAssistantMessage("All five pages read"),
+      ] satisfies Message[]
+    ).map((message, index) => ({ id: index + 1, message }));
+    let request = "";
+    faux.setResponses([
+      (context) => {
+        request = JSON.stringify(context.messages);
+        return fauxAssistantMessage("Read five pages.");
+      },
+    ]);
+
+    const result = await compactConversation(state, models, model, 3000, TEST_TRACE, false, model);
+
+    expect(result?.state.summary).toBe("Read five pages.");
+    expect(estimateTextTokens(request)).toBeLessThan(model.contextWindow);
+    expect(request).toContain(page(4));
+    expect(request).not.toContain(page(0));
   });
 
   test("counts stored images toward the trigger", async () => {

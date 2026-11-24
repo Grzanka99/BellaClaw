@@ -251,9 +251,8 @@ export class MessageHandler {
   // summary or a row of either chat would otherwise be skipped or replayed. The fusion is a model
   // call, so its result is saved as a checkpoint fact before it is applied, and a redelivery
   // applies that instead of calling the model again
-  // NOTE: accepted risk: the fusion is one request to the account's main model and, when that
-  // fails, one to the provider's default main model, so an input above both context windows
-  // fails on every retry
+  // NOTE: the fusion is one request to the account's main model and, when that fails, one to the
+  // provider's default main model; each is cut to its model's context window
   private async moveToBella(
     event: TEvent<EEventType.IdentityLinkMoved>,
     ctx: TEventContext,

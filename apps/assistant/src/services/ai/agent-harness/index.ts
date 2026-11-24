@@ -11,6 +11,7 @@ import {
   type Model,
   type TextContent,
 } from "@earendil-works/pi-ai";
+import { estimateMessageTokens } from "@earendil-works/pi-ai/utils/estimate";
 import {
   arr,
   bool,
@@ -35,7 +36,11 @@ import { loadConnectors } from "../../connectors/config";
 import { createMcpSamplingRequest, createMcpSamplingResult } from "../../connectors/mcp/sampling";
 import type { TMcpElicit, TMcpSampleParams, TMcpSampleResult } from "../../connectors/mcp/types";
 import { ConnectorRunRegistry, type TConnectorRunStatus } from "../../connectors/runs";
-import { compactConversation } from "../../conversation/compaction";
+import {
+  CONTEXT_SAFETY_TOKENS,
+  compactConversation,
+  fitContext,
+} from "../../conversation/compaction";
 import {
   attachmentBlock,
   conversationMessages,
@@ -59,6 +64,8 @@ const SEQUENTIAL: "sequential" = "sequential";
 const NO_VISION_NOTE = "[User sent an image; the current model cannot view images]";
 const TOO_LARGE_NOTE = "[User sent an image; it is larger than 5 MB and was not loaded]";
 const FETCH_FAILED_NOTE = "[User sent an image; it could not be loaded from the chat platform]";
+// the part of the context window every request leaves to the reply, thinking included
+const REPLY_RESERVE = 16_384;
 
 export class AgentHarness {
   private static _instance: TOption<AgentHarness>;
@@ -208,6 +215,10 @@ export class AgentHarness {
       purpose: agentDefinition.purpose,
     });
     let requestSpan: TOption<TBehaviorSpan>;
+    // NOTE: a request's size is Pi's estimate from its text. inflation is how far above that
+    // estimate the provider counted an earlier request of this run; it only grows
+    let inflation = 1;
+    let requestEstimate = 0;
     const sessionId = this.llm.createSessionId(modelConfig.model.provider, args.conversationKey);
 
     const toolSpans = new Map<string, TBehaviorSpan>();
@@ -247,8 +258,54 @@ export class AgentHarness {
         }
 
         iterations += 1;
+        // NOTE: the hard ceiling: no request is larger than the window less the reply's room.
+        // Only the request is cut; the run's transcript keeps every message
+        const fitted = fitContext(
+          context.messages,
+          (model.contextWindow - CONTEXT_SAFETY_TOKENS - REPLY_RESERVE) / inflation,
+          estimateMessageTokens,
+        );
+        requestEstimate = fitted.tokens;
+        let messages = fitted.messages;
+
+        if (fitted.tokens < fitted.tokensBefore) {
+          AppLogger.instance.record({
+            trace: args.trace,
+            event: "agent.context.trimmed",
+            component: "agent-harness",
+            level: EBehaviorLogLevel.Warning,
+            model: model.id,
+            summary: "Request trimmed to fit the context window",
+            metadata: {
+              agentName: args.name,
+              parentToolCallId: args.parentToolCallId ?? null,
+              tokensBefore: Math.ceil(fitted.tokensBefore * inflation),
+              tokensAfter: Math.ceil(fitted.tokens * inflation),
+            },
+          });
+          // Pi sizes the reply from the last response's usage, which counted what was cut
+          const last = messages.findLastIndex((message) => message.role === "assistant");
+          const response = messages[last];
+
+          if (response?.role === "assistant") {
+            const counted = messages
+              .slice(0, last + 1)
+              .reduce((sum, message) => sum + estimateMessageTokens(message), 0);
+            messages = messages.with(last, {
+              ...response,
+              usage: { ...response.usage, totalTokens: Math.ceil(counted * inflation) },
+            });
+          }
+        }
+
         requestSpan = startSpan(args.trace, "model.request.completed", "agent-harness");
-        return this.llm.stream(model, modelConfig, context, options ?? {}, sessionId);
+        return this.llm.stream(
+          model,
+          modelConfig,
+          { ...context, messages },
+          options ?? {},
+          sessionId,
+        );
       },
       getApiKey: (provider) => this.llm.resolveApiKey(provider),
       toolExecution: "parallel",
@@ -302,6 +359,8 @@ export class AgentHarness {
         event.message.role === "assistant" &&
         requestSpan !== undefined
       ) {
+        const { input, cacheRead, cacheWrite } = event.message.usage;
+        inflation = Math.max(inflation, (input + cacheRead + cacheWrite) / requestEstimate);
         this.llm.logModelRequestCompleted({
           span: requestSpan,
           purpose: agentDefinition.purpose,

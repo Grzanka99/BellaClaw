@@ -9,6 +9,7 @@ import {
 import {
   calculateContextTokens,
   estimateMessageTokens,
+  estimateTextTokens,
 } from "@earendil-works/pi-ai/utils/estimate";
 import { isContextOverflow } from "@earendil-works/pi-ai/utils/overflow";
 import compactionInstructions from "../ai/instructions/compaction.xml" with { type: "text" };
@@ -21,6 +22,62 @@ const SUMMARY_RESERVE = 4_096;
 // NOTE: a stored image is only the "[Image]" marker, but every turn sends the real picture
 const IMAGE_TOKENS = 1_500;
 
+// Pi keeps this many tokens of the window free when it sizes the reply
+export const CONTEXT_SAFETY_TOKENS = 4_096;
+export const REMOVED_RESULT = "[Tool result removed to fit the model's context window]";
+
+/**
+ * The messages a request can carry in `budget` tokens, as `estimate` counts them. The oldest tool
+ * results become a note first, so every call keeps its result; then whole turns before the last
+ * user message are left out, oldest first. The turn that message starts is never cut further.
+ */
+export function fitContext(
+  messages: Message[],
+  budget: number,
+  estimate: (message: Message) => number,
+) {
+  const estimates = messages.map(estimate);
+  const tokensBefore = estimates.reduce((sum, tokens) => sum + tokens, 0);
+  if (tokensBefore <= budget) {
+    return { messages, tokens: tokensBefore, tokensBefore };
+  }
+
+  let tokens = tokensBefore;
+  const noted = messages.map((message, index) => {
+    if (message.role !== "toolResult" || tokens <= budget) {
+      return message;
+    }
+    const note: Message = { ...message, content: [{ type: "text", text: REMOVED_RESULT }] };
+    const saved = (estimates[index] ?? 0) - estimate(note);
+    if (saved <= 0) {
+      return message;
+    }
+    estimates[index] = estimate(note);
+    tokens -= saved;
+    return note;
+  });
+
+  const prompt = noted.findLastIndex((message) => message.role === "user");
+  const fitted: Message[] = [];
+  let dropping = false;
+  for (const [index, message] of noted.entries()) {
+    // NOTE: a system message declares the tools, so it stays whatever turn it sits in
+    if (index >= prompt || message.role === "system") {
+      fitted.push(message);
+      continue;
+    }
+    if (message.role === "user") {
+      dropping = tokens > budget;
+    }
+    if (dropping) {
+      tokens -= estimates[index] ?? 0;
+    } else {
+      fitted.push(message);
+    }
+  }
+  return { messages: fitted, tokens, tokensBefore };
+}
+
 function estimateTokens(message: Message): number {
   let images = 0;
   if (message.role === "user" && typeof message.content !== "string") {
@@ -29,11 +86,46 @@ function estimateTokens(message: Message): number {
   return estimateMessageTokens(message) + images * IMAGE_TOKENS;
 }
 
+// how the summary request shows one message
+function summaryRecord(message: Message) {
+  let content: string;
+  if (typeof message.content === "string") {
+    content = message.content;
+  } else {
+    content = message.content
+      .map((block) => {
+        if (block.type === "text") {
+          return block.text;
+        }
+        if (block.type === "thinking") {
+          return block.thinking;
+        }
+        if (block.type === "toolCall") {
+          return `toolCallId=${block.id} ${block.name}(${JSON.stringify(block.arguments)})`;
+        }
+        return "[Image]";
+      })
+      .join("\n");
+  }
+  if (message.role === "toolResult") {
+    return {
+      role: message.role,
+      timestamp: message.timestamp,
+      toolCallId: message.toolCallId,
+      toolName: message.toolName,
+      isError: message.isError,
+      content,
+    };
+  }
+  return { role: message.role, timestamp: message.timestamp, content };
+}
+
 /**
  * Summarize older complete turns without mutating the stored conversation.
  * force: summarize the previous summary and every entry now, whatever their size, as when two
- * summaries are fused. A forced request that fails on `model` runs once more on `fallback`, since
- * its input is not bounded by the size trigger and can exceed `model`'s context window.
+ * summaries are fused. A forced request that fails on `model` runs once more on `fallback`.
+ * Each request is cut to the context window of the model it runs on, so the summary can miss the
+ * oldest tool results and turns of a conversation larger than that window.
  */
 export async function compactConversation(
   state: TConversation,
@@ -102,47 +194,25 @@ export async function compactConversation(
     return undefined;
   }
 
-  const conversation = state.entries.slice(0, cut).map(({ message }) => {
-    let content: string;
-    if (typeof message.content === "string") {
-      content = message.content;
-    } else {
-      content = message.content
-        .map((block) => {
-          if (block.type === "text") {
-            return block.text;
-          }
-          if (block.type === "thinking") {
-            return block.thinking;
-          }
-          if (block.type === "toolCall") {
-            return `toolCallId=${block.id} ${block.name}(${JSON.stringify(block.arguments)})`;
-          }
-          return "[Image]";
-        })
-        .join("\n");
-    }
-    if (message.role === "toolResult") {
-      return {
-        role: message.role,
-        timestamp: message.timestamp,
-        toolCallId: message.toolCallId,
-        toolName: message.toolName,
-        isError: message.isError,
-        content,
-      };
-    }
-    return { role: message.role, timestamp: message.timestamp, content };
-  });
-  const request = (target: Model<Api>) =>
-    models.completeSimple(
+  const summarized = state.entries.slice(0, cut).map(({ message }) => message);
+  const request = (target: Model<Api>) => {
+    // NOTE: the summary request must fit the window of the model it runs on, like any other
+    const fitted = fitContext(
+      summarized,
+      target.contextWindow -
+        CONTEXT_SAFETY_TOKENS -
+        SUMMARY_RESERVE -
+        estimateTextTokens(compactionInstructions + state.summary),
+      (message) => estimateTextTokens(JSON.stringify(summaryRecord(message))),
+    );
+    return models.completeSimple(
       target,
       {
         systemPrompt: compactionInstructions,
         messages: [
           {
             role: "user",
-            content: `Previous summary:\n${state.summary}\n\nConversation:\n${JSON.stringify(conversation)}`,
+            content: `Previous summary:\n${state.summary}\n\nConversation:\n${JSON.stringify(fitted.messages.map(summaryRecord))}`,
             timestamp: Date.now(),
           },
         ],
@@ -156,6 +226,7 @@ export async function compactConversation(
         sessionId: crypto.randomUUID(),
       },
     );
+  };
   let result = await request(model);
   if (
     force &&
