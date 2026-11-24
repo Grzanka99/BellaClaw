@@ -1,5 +1,5 @@
 import { AppLogger, type TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
-import type { TOption } from "@bellaclaw/shared";
+import { createLogger, type TOption } from "@bellaclaw/shared";
 import {
   type Api,
   type AssistantMessage,
@@ -8,6 +8,8 @@ import {
   hasApi,
   type Model,
   type ModelThinkingLevel,
+  type RetryPolicy,
+  retryAssistantCall,
   type SimpleStreamOptions,
   type ThinkingLevel,
   type Usage,
@@ -30,6 +32,9 @@ import {
 import { EAiProvider, type EModelPurpose, SAiProvider } from "../types";
 
 export type TLlmModelConfig = ReturnType<typeof getAiModelConfig>;
+
+// NOTE: sized for one person waiting on a reply: three more attempts, after 2s, 4s and 8s
+const RETRY_POLICY: RetryPolicy = { enabled: true, maxRetries: 3, baseDelayMs: 2_000 };
 
 export function emptyUsage(): Usage {
   return {
@@ -80,6 +85,7 @@ export class LlmResponseError extends Error {
 
 export class LlmClient {
   private static _instance: TOption<LlmClient>;
+  private logger = createLogger("LLM");
 
   public static get instance(): LlmClient {
     if (LlmClient._instance === undefined) {
@@ -160,39 +166,31 @@ export class LlmClient {
       config.serviceTier,
     );
 
-    if (streamOptions !== undefined) {
-      return aiModels.complete(config.model, context, streamOptions);
-    }
-
     let reasoning: TOption<ThinkingLevel>;
 
     if (config.effort !== "off") {
       reasoning = config.effort;
     }
 
-    return aiModels.completeSimple(config.model, context, { ...requestOptions, reasoning });
-  }
+    // NOTE: a failed call restarts whole, which also covers a reply that broke off mid-stream
+    return retryAssistantCall(
+      () => {
+        if (streamOptions !== undefined) {
+          return aiModels.complete(config.model, context, streamOptions);
+        }
 
-  public stream(
-    model: Model<Api>,
-    config: Pick<TLlmModelConfig, "effort" | "serviceTier">,
-    context: Context,
-    options: SimpleStreamOptions,
-    sessionId: string,
-  ) {
-    const requestOptions = this.withSession(options, model.provider, sessionId);
-    const streamOptions = createAiStreamOptions(
-      model,
-      requestOptions,
-      config.effort,
-      config.serviceTier,
+        return aiModels.completeSimple(config.model, context, { ...requestOptions, reasoning });
+      },
+      RETRY_POLICY,
+      options.signal,
+      {
+        onRetryScheduled: (attempt, maxAttempts, delayMs, errorMessage) => {
+          this.logger.warning(
+            `complete: retry ${attempt}/${maxAttempts} of ${config.model.id} in ${delayMs}ms after: ${errorMessage}`,
+          );
+        },
+      },
     );
-
-    if (streamOptions !== undefined) {
-      return aiModels.stream(model, context, streamOptions);
-    }
-
-    return aiModels.streamSimple(model, context, requestOptions);
   }
 
   public async completeText(args: {

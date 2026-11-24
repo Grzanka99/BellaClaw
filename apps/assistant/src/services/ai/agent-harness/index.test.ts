@@ -7,7 +7,6 @@ import { EConnectorKind } from "@bellaclaw/database";
 import { logger, type TOption } from "@bellaclaw/shared";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import {
-  createAssistantMessageEventStream,
   fauxAssistantMessage,
   fauxProvider,
   fauxToolCall,
@@ -135,6 +134,57 @@ describe("AgentHarness", () => {
       warnings.mockRestore();
       await rm(directory, { recursive: true, force: true });
     }
+  });
+
+  test("retries a model call that fails transiently and returns the reply", async () => {
+    const realSetTimeout = globalThis.setTimeout;
+    const timers = spyOn(globalThis, "setTimeout").mockImplementation(((handler: () => void) =>
+      realSetTimeout(handler, 0)) as typeof setTimeout);
+    faux.setResponses([
+      fauxAssistantMessage([], { stopReason: "error", errorMessage: "503 Service Unavailable" }),
+      fauxAssistantMessage("recovered"),
+    ]);
+
+    try {
+      const result = await AgentHarness.instance.runMain({
+        prompt: "hello",
+        conversationKey: "discord:1",
+        ownerKey: "discord:1",
+        settings: { ...DefaultConfigRecord, [EConfigKey.AiProvider]: EAiProvider.Openrouter },
+        currentTimeContext: undefined,
+        platform: EMessagePlatform.Discord,
+        trace: TEST_TRACE,
+        events: testEventRequester,
+        signal: undefined,
+      });
+
+      expect(result).toMatchObject({ text: "recovered", stopReason: "completed", iterations: 1 });
+      expect(timers).toHaveBeenCalledWith(expect.any(Function), 2_000);
+    } finally {
+      timers.mockRestore();
+    }
+  });
+
+  test("does not retry a model error that will not go away", async () => {
+    faux.setResponses([
+      fauxAssistantMessage([], { stopReason: "error", errorMessage: "401 Invalid API key" }),
+      fauxAssistantMessage("never requested"),
+    ]);
+
+    const result = await AgentHarness.instance.runMain({
+      prompt: "hello",
+      conversationKey: "discord:1",
+      ownerKey: "discord:1",
+      settings: { ...DefaultConfigRecord, [EConfigKey.AiProvider]: EAiProvider.Openrouter },
+      currentTimeContext: undefined,
+      platform: EMessagePlatform.Discord,
+      trace: TEST_TRACE,
+      events: testEventRequester,
+      signal: undefined,
+    });
+
+    expect(result).toMatchObject({ text: undefined, stopReason: "error" });
+    expect(faux.getPendingResponseCount()).toBe(1);
   });
 
   test("uses the configured model with stable conversation routing", async () => {
@@ -1761,43 +1811,32 @@ describe("AgentHarness", () => {
     const dbPath = join(directory, "behavior.db");
     const appLogger = new AppLogger({ dbPath, stdout: () => undefined });
     (AppLogger as unknown as { _instance: AppLogger })._instance = appLogger;
+    const usage = {
+      input: 100,
+      output: 20,
+      cacheRead: 800,
+      cacheWrite: 100,
+      totalTokens: 1020,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    };
     const responses = [
-      fauxAssistantMessage(
-        fauxToolCall("delegate-memory", { task: "Recall alpha" }, { id: "usage-delegate" }),
-      ),
-      fauxAssistantMessage("Alpha uses TypeBox"),
-      fauxAssistantMessage("Final answer"),
+      {
+        ...fauxAssistantMessage(
+          fauxToolCall("delegate-memory", { task: "Recall alpha" }, { id: "usage-delegate" }),
+        ),
+        usage,
+      },
+      { ...fauxAssistantMessage("Alpha uses TypeBox"), usage },
+      { ...fauxAssistantMessage("Final answer"), usage },
+      fauxAssistantMessage([], { stopReason: "aborted" }),
     ];
-    const stream = spyOn(aiModels, "streamSimple").mockImplementation((model) => {
+    const complete = spyOn(aiModels, "completeSimple").mockImplementation(async (model) => {
       const message = responses.shift();
       if (message === undefined) {
         throw new Error("Unexpected model request");
       }
-      message.provider = model.provider;
-      message.model = model.id;
-      message.api = model.api;
-      message.usage = {
-        input: 100,
-        output: 20,
-        cacheRead: 800,
-        cacheWrite: 100,
-        totalTokens: 1020,
-        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-      };
-      const result = createAssistantMessageEventStream();
-      if (message.stopReason === "toolUse") {
-        result.push({ type: "done", reason: "toolUse", message });
-      } else {
-        result.push({ type: "done", reason: "stop", message });
-      }
-      return result;
+      return { ...message, provider: model.provider, model: model.id, api: model.api };
     });
-    const complete = spyOn(aiModels, "completeSimple").mockImplementation(async (model) => ({
-      ...fauxAssistantMessage([], { stopReason: "aborted" }),
-      provider: model.provider,
-      model: model.id,
-      api: model.api,
-    }));
     const trace = {
       turnId: "turn-cache-usage",
       chatId: "discord:1",
@@ -1880,7 +1919,6 @@ describe("AgentHarness", () => {
         },
       });
     } finally {
-      stream.mockRestore();
       complete.mockRestore();
       await appLogger.close();
       (AppLogger as unknown as { _instance: undefined })._instance = undefined;
