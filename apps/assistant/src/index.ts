@@ -1,5 +1,8 @@
+import { mkdir, rename } from "node:fs/promises";
+import { join } from "node:path";
 import { AppLogger, EBehaviorLogLevel } from "@bellaclaw/behavior-logs";
 import { EEventType } from "@bellaclaw/database";
+import { UPDATER_READY_FILE } from "@bellaclaw/shared";
 import { setupAiAuth } from "./services/ai/auth";
 import { startAiOAuthKeepAlive } from "./services/ai/auth/oauth-keep-alive";
 import { AppChannel } from "./services/app";
@@ -112,7 +115,18 @@ async function init(): Promise<void> {
       durationMs: performance.now() - start,
       summary: "Application boot completed",
     });
-    process.send?.({ type: "ready" });
+
+    // only the container deployment shares this folder with the updater
+    const updaterDirectory = Bun.env.BELLACLAW_UPDATER_DIR;
+
+    if (updaterDirectory !== undefined) {
+      const temporary = join(updaterDirectory, `.${UPDATER_READY_FILE}.${crypto.randomUUID()}`);
+
+      await mkdir(updaterDirectory, { recursive: true });
+      await Bun.write(temporary, "");
+      await rename(temporary, join(updaterDirectory, UPDATER_READY_FILE));
+      Notices.instance.watchUpdaterNotices(updaterDirectory);
+    }
   } catch (error) {
     let serializedError = String(error);
 
@@ -154,9 +168,5 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
     });
   });
 }
-
-process.on("message", (message) => {
-  void Notices.instance.handleSupervisorMessage(message);
-});
 
 init();

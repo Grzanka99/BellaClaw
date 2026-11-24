@@ -1,4 +1,7 @@
 import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
+import { mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { appDevicesTable, EEventType, eventsTable } from "@bellaclaw/database";
 import { eq } from "drizzle-orm";
 import { AppChannel } from "../app";
@@ -97,73 +100,40 @@ describe("Notices", () => {
     expect(notices.map((row) => row.key)).toEqual(["signal:+100", "signal:+200"]);
   });
 
-  test("a supervisor notice fans out to every authorized chat", async () => {
-    const authorized = spyOn(
-      AuthorizationService.instance,
-      "listAuthorizedChatIds",
-    ).mockResolvedValue(["signal:+100", "signal:+200"]);
+  test("the updater's notices reach their chats in file-name order, once each", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "bellaclaw-notices-"));
 
     try {
-      await Notices.instance.handleSupervisorMessage({
-        type: "notice",
-        text: "Updated to abc1234",
-      });
+      await mkdir(join(directory, "notices"));
+      await Bun.write(
+        join(directory, "notices", "0002.json"),
+        JSON.stringify({ chatId: "signal:+100", text: "Updated to abc1234" }),
+      );
+      await Bun.write(
+        join(directory, "notices", "0001.json"),
+        JSON.stringify({ chatId: "signal:+100", text: "Updating to abc1234" }),
+      );
+      await Bun.write(
+        join(directory, "notices", "0003.json"),
+        JSON.stringify({ chatId: "signal:+200", text: "Already up to date" }),
+      );
+      await Notices.instance.deliverUpdaterNotices(directory);
+      await Notices.instance.deliverUpdaterNotices(directory);
       await bus.idle();
+
+      expect(await readdir(join(directory, "notices"))).toEqual([]);
     } finally {
-      authorized.mockRestore();
+      await rm(directory, { recursive: true, force: true });
     }
 
     expect(sendText.mock.calls).toEqual([
+      ["+100", "Updating to abc1234"],
       ["+100", "Updated to abc1234"],
-      ["+200", "Updated to abc1234"],
-    ]);
-    // a scheduled update belongs to no command run
-    const notices = await DatabaseConnector.instance.database
-      .select()
-      .from(eventsTable)
-      .where(eq(eventsTable.type, EEventType.NoticeReady));
-    expect(notices.map((row) => row.payload)).toEqual([
-      { chatId: "signal:+100", text: "Updated to abc1234" },
-      { chatId: "signal:+200", text: "Updated to abc1234" },
+      ["+200", "Already up to date"],
     ]);
   });
 
-  test("a supervisor notice of a requested update reaches only the chat that asked, as a step of its run", async () => {
-    const authorized = spyOn(
-      AuthorizationService.instance,
-      "listAuthorizedChatIds",
-    ).mockResolvedValue(["signal:+100", "signal:+200"]);
-
-    try {
-      await Notices.instance.handleSupervisorMessage({
-        type: "notice",
-        text: "Updated to abc1234",
-        chatId: "signal:+200",
-        command: { runId: "run-1", name: "update", state: "done", outcome: "updated to abc1234" },
-      });
-      await bus.idle();
-    } finally {
-      authorized.mockRestore();
-    }
-
-    expect(sendText.mock.calls).toEqual([["+200", "Updated to abc1234"]]);
-    const notices = await DatabaseConnector.instance.database
-      .select()
-      .from(eventsTable)
-      .where(eq(eventsTable.type, EEventType.NoticeReady));
-    expect(notices.map((row) => ({ key: row.key, payload: row.payload }))).toEqual([
-      {
-        key: "signal:+200",
-        payload: {
-          chatId: "signal:+200",
-          text: "Updated to abc1234",
-          command: { runId: "run-1", name: "update", state: "done", outcome: "updated to abc1234" },
-        },
-      },
-    ]);
-  });
-
-  test("a supervisor notice reaches an app-only account with a device and a linked account with a device in their Bella conversations, once each", async () => {
+  test("a global notice reaches an app-only account with a device and a linked account with a device in their Bella conversations, once each", async () => {
     await resetIdentityLinksTable();
     await linkTestAddress("+300", "acct-1");
     const device = { fcmToken: "token", publicKey: "key", authSecret: "secret" };
@@ -180,7 +150,9 @@ describe("Notices", () => {
     ).mockResolvedValue(["signal:+300"]);
 
     try {
-      await Notices.instance.handleSupervisorMessage({ type: "notice", text: "Updated" });
+      await bus.publish(
+        draft(EEventType.AiAuthLoginNeeded, "global", { problems: ["opencode-go: not connected"] }),
+      );
       await bus.idle();
     } finally {
       authorized.mockRestore();

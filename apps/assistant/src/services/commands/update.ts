@@ -1,4 +1,6 @@
-import { COMMAND_CATALOG } from "@bellaclaw/shared";
+import { mkdir, rename } from "node:fs/promises";
+import { join } from "node:path";
+import { COMMAND_CATALOG, type TUpdateRequest, UPDATER_REQUEST_FILE } from "@bellaclaw/shared";
 import { AuthorizationService } from "../authorization";
 import type { TCommand } from "./types";
 
@@ -15,17 +17,24 @@ export const updateCommand: TCommand = {
       };
     }
 
-    // only the supervisor in the container gives the app this channel
-    if (process.send === undefined) {
+    // only the container deployment shares this folder with the updater
+    const directory = Bun.env.BELLACLAW_UPDATER_DIR;
+
+    if (directory === undefined) {
       return {
-        text: "Self-update is unavailable: the bot is not running under its supervisor.",
+        text: "Self-update is unavailable: the bot is not running next to its updater.",
         state: "failed",
         outcome: "unavailable",
       };
     }
 
     // the update's notices go to this chat only, as later steps of this run
-    process.send({ type: "update", chatId: ownerKey, runId });
+    const request: TUpdateRequest = { chatId: ownerKey, runId };
+    const temporary = join(directory, `.${UPDATER_REQUEST_FILE}.${crypto.randomUUID()}`);
+
+    await mkdir(directory, { recursive: true });
+    await Bun.write(temporary, JSON.stringify(request));
+    await rename(temporary, join(directory, UPDATER_REQUEST_FILE));
     return { text: "Checking for an update.", state: "running", outcome: "checking" };
   },
 };

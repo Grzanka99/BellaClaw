@@ -113,6 +113,12 @@ const server = Bun.serve({
 
 logger.info(`Gateway listening on http://${hostname}:${server.port}`);
 
+// NOTE: this is its container's main process, which ignores a signal that has no handler: Podman
+// would wait out its stop timeout on every restart and update
+for (const signal of ["SIGINT", "SIGTERM"]) {
+  process.once(signal, () => process.exit(0));
+}
+
 // the process ends with the server, so the stream from the assistant is never closed
 void liveStream.follow(new AbortController().signal);
 

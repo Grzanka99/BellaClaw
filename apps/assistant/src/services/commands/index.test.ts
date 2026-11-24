@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { EEventType, eventsTable } from "@bellaclaw/database";
@@ -89,34 +89,41 @@ describe("commands consumer", () => {
     ]);
   });
 
-  test("!update asks the supervisor for an update, and says so when there is none", async () => {
-    const send = mock((_message: unknown) => true);
+  test("!update writes a request for the updater, and says so when there is no updater", async () => {
+    const originalUpdaterDir = Bun.env.BELLACLAW_UPDATER_DIR;
     const activated = spyOn(
       AuthorizationService.instance,
       "listAuthorizedChatIds",
     ).mockResolvedValue(["discord:100"]);
 
-    await authorized("discord:100", "!update", 1);
-    process.send = send;
+    delete Bun.env.BELLACLAW_UPDATER_DIR;
     try {
+      await authorized("discord:100", "!update", 1);
+      Bun.env.BELLACLAW_UPDATER_DIR = join(directory, "updater");
       await authorized("discord:100", "!update", 2);
       await authorized("discord:999", "!update", 3);
     } finally {
-      process.send = undefined;
+      if (originalUpdaterDir === undefined) {
+        delete Bun.env.BELLACLAW_UPDATER_DIR;
+      } else {
+        Bun.env.BELLACLAW_UPDATER_DIR = originalUpdaterDir;
+      }
       activated.mockRestore();
     }
 
     const runIds = (await rowsOf(EEventType.MessageAuthorized)).map((row) => row.id);
-    // the supervisor's notices come back as later steps of the same run
-    expect(send.mock.calls).toEqual([
-      [{ type: "update", chatId: "discord:100", runId: runIds[1] }],
-    ]);
+    // the updater's notices come back as later steps of the same run
+    expect(await readdir(join(directory, "updater"))).toEqual(["request.json"]);
+    expect(await Bun.file(join(directory, "updater", "request.json")).json()).toEqual({
+      chatId: "discord:100",
+      runId: runIds[1],
+    });
     expect(await payloadsOf(EEventType.ReplyReady)).toEqual([
       {
         ...testMessageOrigin("discord:100", EMessagePlatform.Discord),
-        text: "Self-update is unavailable: the bot is not running under its supervisor.",
+        text: "Self-update is unavailable: the bot is not running next to its updater.",
         display: {
-          text: "Self-update is unavailable: the bot is not running under its supervisor.",
+          text: "Self-update is unavailable: the bot is not running next to its updater.",
           request: { text: "!update", receivedAt: 1 },
           command: { runId: runIds[0], name: "update", state: "failed", outcome: "unavailable" },
         },
@@ -143,6 +150,8 @@ describe("commands consumer", () => {
   });
 
   test("!update checks the activation of the conversation, not of the owner", async () => {
+    const originalUpdaterDir = Bun.env.BELLACLAW_UPDATER_DIR;
+    Bun.env.BELLACLAW_UPDATER_DIR = directory;
     const activated = spyOn(
       AuthorizationService.instance,
       "listAuthorizedChatIds",
@@ -159,11 +168,7 @@ describe("commands consumer", () => {
             "run-1",
           ),
         ),
-      ).toMatchObject({
-        result: {
-          text: "Self-update is unavailable: the bot is not running under its supervisor.",
-        },
-      });
+      ).toMatchObject({ result: { text: "Checking for an update." } });
       expect(
         await withEventContext((ctx) =>
           runCommand(
@@ -178,8 +183,18 @@ describe("commands consumer", () => {
         result: { text: "Updating requires BELLACLAW_ACTIVATION_TOKEN and an activated chat." },
       });
     } finally {
+      if (originalUpdaterDir === undefined) {
+        delete Bun.env.BELLACLAW_UPDATER_DIR;
+      } else {
+        Bun.env.BELLACLAW_UPDATER_DIR = originalUpdaterDir;
+      }
       activated.mockRestore();
     }
+
+    expect(await Bun.file(join(directory, "request.json")).json()).toEqual({
+      chatId: "discord:owner",
+      runId: "run-1",
+    });
   });
 
   test("!dashboard signs the address the command came from, not the owner", async () => {

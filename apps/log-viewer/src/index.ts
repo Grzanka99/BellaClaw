@@ -12,3 +12,9 @@ Bun.serve({
 });
 
 logger.info(`Log viewer listening on http://${HOSTNAME}:${PORT}`);
+
+// NOTE: this is its container's main process, which ignores a signal that has no handler: Podman
+// would wait out its stop timeout on every restart and update
+for (const signal of ["SIGINT", "SIGTERM"]) {
+  process.once(signal, () => process.exit(0));
+}
