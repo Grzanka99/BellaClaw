@@ -8,9 +8,7 @@
     <name>web-fetch</name>
     <description>
       Fetches a public http or https URL, follows validated redirects, rejects unsupported or binary content,
-      and returns markdown, text, or HTML content. A long page comes in parts, one per call: totalChars is
-      the length of the whole page, truncated says whether more follows this part, and nextStart is the
-      start value that reads the next part.
+      and returns markdown, text, or HTML content, a long page in parts.
     </description>
   </tool>
 
@@ -19,8 +17,7 @@
     <rule>Prefer markdown for normal reading and summarization.</rule>
     <rule>Use text when the user wants plain extracted text.</rule>
     <rule>Use html only when raw markup is specifically useful.</rule>
-    <rule>If truncated is true and the answer may be in the rest of the page, call again with the same url and format and start set to nextStart. Stop as soon as you have what the answer needs.</rule>
-    <rule>Never describe or assume the part of a page you did not read. If you answer from part of a page, say so when relevant.</rule>
+    <rule>If truncated and the rest is needed, call again with start = nextStart. Use only parts read.</rule>
     <rule>Do not expose raw tool errors or JSON payloads to the user.</rule>
   </usage_rules>
 
@@ -39,15 +36,6 @@
         <url>https://example.com/docs</url>
         <format>html</format>
         <timeout>45</timeout>
-      </toolCall>
-    </example>
-
-    <example>
-      <context>The first call returned truncated: true and nextStart: 20000, and the section the user asked about is further down the page</context>
-      <toolCall>
-        <url>https://example.com/article</url>
-        <format>markdown</format>
-        <start>20000</start>
       </toolCall>
     </example>
   </examples>

@@ -16,8 +16,7 @@ export const SWebFetchArgs = obj({
   start: opt(
     int({
       minimum: 0,
-      description:
-        "Character offset to read from; pass the nextStart of a truncated result to read the next part",
+      description: "Offset to read from; the nextStart of a truncated result",
     }),
   ),
 });
@@ -38,7 +37,7 @@ export const webFetch = defineTool({
   name: "web-fetch",
   label: "Web fetch",
   description:
-    "Fetch a public http or https URL and return its content as markdown, plain text, or raw HTML. A long page comes in parts. Use after web-search when page content is needed.",
+    "Fetch a public http or https URL and return its content as markdown, plain text, or raw HTML. Use after web-search when page content is needed.",
   schema: SWebFetchArgs,
   instructions,
   mode: "parallel",
