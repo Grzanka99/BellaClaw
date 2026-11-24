@@ -6,7 +6,7 @@ import { DatabaseConnector } from "../src/services/database";
 try {
   await migrate(DatabaseConnector.instance.database, { migrationsFolder: MIGRATIONS_FOLDER });
 } catch (error) {
-  // only the message: the supervisor sends this output to chat
+  // only the message: the update runner sends this output to chat
   logger.error(String(error));
   process.exit(1);
 }

@@ -15,7 +15,7 @@
     "embeddings:rebuild": "bun run --cwd apps/assistant embeddings:rebuild",
     "logs:turn": "bun run --cwd packages/behavior-logs logs:turn",
     "logs:ui": "bun run --cwd apps/log-viewer start",
-    "server:down": "podman compose --profile signal down",
+    "server:down": "podman compose --profile signal --profile update down",
     "server:init": "podman compose --profile signal build && bun run server:rebuild-embeddings && podman compose --profile signal up -d",
     "server:migrate-to-gateway": "bun --no-env-file scripts/migrate-to-gateway.ts && bun run server:update",
     "server:rebuild-embeddings": "podman compose stop bellaclaw && podman compose run --rm bellaclaw bun run --cwd apps/assistant embeddings:rebuild && podman compose up -d --force-recreate bellaclaw",

@@ -15,9 +15,8 @@ MCP connections open when needed rather than occupying a permanent session for e
 To add your own connectors, copy the default file to `connectors.local.json`, edit it, and set
 `BELLACLAW_CONNECTORS_CONFIG=./connectors.local.json`; relative paths are resolved from the
 repository root. In Compose, mount `./connectors.local.json:/app/connectors.local.json:ro` into
-the assistant and set `BELLACLAW_CONNECTORS_CONFIG=/app/connectors.local.json`: a self-updated
-release resolves a relative path from its own directory. Local connector files are excluded from
-Git and container builds. An absent selected file disables connectors.
+the assistant and set `BELLACLAW_CONNECTORS_CONFIG=/app/connectors.local.json`. Local connector
+files are excluded from Git and container builds. An absent selected file disables connectors.
 A server set up before connectors were renamed keeps working: when `BELLACLAW_CONNECTORS_CONFIG`
 is not set, `BELLACLAW_MCP_CONFIG` names the file if that file exists, and a file may still list
 its connectors under the old `profiles` key.
