@@ -39,6 +39,8 @@ const INTERRUPTED_REPLY =
   "I was restarted while answering, so that reply is lost. Some actions may already be done. Check before asking again.";
 const INTERRUPTED_NOTICE =
   "System notice, not from the user: the previous turn was interrupted by a restart. Its tool calls may be partly applied. The next assistant message says so.";
+// what the model reads in place of the reply a stopped turn never wrote
+const STOPPED_NOTE = "The user stopped this turn before it finished.";
 // the lane prefix of an address's turns held while its account is being linked
 const LINK_HOLD_PREFIX = "link-hold|";
 // one auth check per OAuth provider, each up to 30 s, then the provider switch
@@ -50,6 +52,8 @@ export class MessageHandler {
   private ai = AgentHarness.instance;
   private llm = LlmClient.instance;
   private conversations = ConversationStore.instance;
+  // the abort controller of each conversation's running model turn; a lane runs one at a time
+  private running = new Map<string, AbortController>();
 
   private constructor() {}
 
@@ -245,6 +249,18 @@ export class MessageHandler {
     setupTitles(this.llm, this.conversations, (tx, emit, conversationKey, ownerKey) =>
       this.changed(tx, emit, conversationKey, ownerKey, false, undefined, undefined),
     );
+  }
+
+  // stops the model turn running in the conversation; false when none is running
+  public stop(conversationKey: string): boolean {
+    const controller = this.running.get(conversationKey);
+
+    if (controller === undefined) {
+      return false;
+    }
+
+    controller.abort();
+    return true;
   }
 
   // NOTE: the two summaries are fused into one before the rows mix, when both chats have a
@@ -583,6 +599,7 @@ export class MessageHandler {
       const chatStart = performance.now();
       // the turn's ended tool calls, stored with its reply
       const steps: THistoryStep[] = [];
+      const controller = new AbortController();
       const run: Parameters<AgentHarness["runMain"]>[0] = {
         prompt: content,
         conversation,
@@ -597,7 +614,7 @@ export class MessageHandler {
         platform: channel,
         trace,
         events: ctx,
-        signal: undefined,
+        signal: controller.signal,
         model: chosen,
         onStep: (step) => {
           AppStream.instance.step(ownerKey, conversationKey, step);
@@ -616,17 +633,62 @@ export class MessageHandler {
       };
       let aiRes: TOption<TMainAgentRunResult>;
 
-      if (unavailable !== undefined) {
-        this.logger.warning(`handleTurn: the chosen model cannot run: ${unavailable}`);
-      } else if (kind === EConversationKind.Plain) {
-        aiRes = await this.ai.runPlain(run);
-      } else {
-        aiRes = await this.ai.runMain(run);
+      this.running.set(conversationKey, controller);
+
+      try {
+        if (unavailable !== undefined) {
+          this.logger.warning(`handleTurn: the chosen model cannot run: ${unavailable}`);
+        } else if (kind === EConversationKind.Plain) {
+          aiRes = await this.ai.runPlain(run);
+        } else {
+          aiRes = await this.ai.runMain(run);
+        }
+      } finally {
+        this.running.delete(conversationKey);
       }
 
       this.logger.info(
         `handleTurn: AI chat completed (${(performance.now() - chatStart).toFixed(0)}ms)`,
       );
+
+      // NOTE: a stopped turn keeps what it did: its rows and steps are stored as a completed
+      // turn's, so the model knows which tool calls ran, and no reply is sent, since the command
+      // answered. Its last message is the aborted reply, which is never replayed to the model:
+      // a note that it was stopped takes its place
+      if (aiRes?.stopReason === "aborted") {
+        const messages = [...aiRes.messages];
+        const last = messages.at(-1);
+
+        if (last?.role === "assistant" && last.stopReason === "aborted") {
+          messages[messages.length - 1] = {
+            ...last,
+            content: [{ type: "text", text: STOPPED_NOTE }],
+            stopReason: "stop",
+            errorMessage: undefined,
+          };
+        }
+
+        await ctx.complete(async (tx, emit) => {
+          await this.conversations.saveTurn(
+            tx,
+            conversationKey,
+            channel,
+            messages,
+            savedMessage.id,
+            conversation,
+            steps,
+          );
+          emit(
+            EEventType.TurnCompleted,
+            { ...origin, userMessageId: savedMessage.id },
+            undefined,
+            undefined,
+          );
+          await this.changed(tx, emit, conversationKey, ownerKey, false, "completed", undefined);
+        });
+        span.ok("stopped", 0);
+        return;
+      }
 
       if (aiRes === undefined || aiRes.text === undefined) {
         this.logger.warning("handleTurn: AI returned no final response");

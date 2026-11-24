@@ -10,6 +10,7 @@ import { connectorCommand } from "./connector";
 import { connectorAuthCommand } from "./connector-auth";
 import { appCommand, dashboardCommand } from "./dashboard";
 import { mcpPromptCommand, mcpPromptsCommand } from "./mcp-prompts";
+import { stopCommand } from "./stop";
 import { COMMAND_PREFIX, type TCommand, type TCommandResult } from "./types";
 import { updateCommand } from "./update";
 
@@ -21,6 +22,7 @@ const REGISTERED_COMMANDS: TCommand[] = [
   mcpPromptsCommand,
   mcpPromptCommand,
   aiAuthCommand,
+  stopCommand,
   updateCommand,
   dashboardCommand,
   appCommand,

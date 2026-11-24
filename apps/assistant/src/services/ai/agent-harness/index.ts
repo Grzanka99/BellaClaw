@@ -530,8 +530,9 @@ export class AgentHarness {
     }
 
     // NOTE: an agent that ends without text still completed normally, so it stays at Info level.
+    // A stopped one did what was asked of it
     agentSpan.end(
-      finalText !== undefined,
+      finalText !== undefined || stopReason === "aborted",
       {
         level: EBehaviorLogLevel.Info,
         summary: `${args.name} agent completed`,
