@@ -96,8 +96,8 @@ The updater has no SSH key: a `git@github.com:` remote is read over HTTPS.
 ### How an Update Runs
 
 1. Read `main` of `origin`. Nothing happens when the checkout is already on it.
-2. Check the commit's CI on GitHub. Failed: skipped. Pending: checked again every 10 minutes.
-   No CI result: installed.
+2. Check the commit's CI on GitHub. Failed: skipped. Pending, or GitHub did not answer: checked
+   again every 10 minutes. No CI on the commit: installed.
 3. Fast-forward the server checkout to the commit.
 4. Tag the running image `bellaclaw:previous` and build `bellaclaw:local` with `--pull` and the
    layer cache. If the image does not hold the new commit, build once more without cache.

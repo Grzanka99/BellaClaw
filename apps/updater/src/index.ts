@@ -34,6 +34,7 @@ const UPDATE_HOUR = 4;
 const REQUEST_INTERVAL_MS = 2_000;
 const UNHEALTHY_INTERVAL_MS = 10 * 60_000;
 const CI_RETRY_MS = 10 * 60_000;
+const CI_REQUEST_TIMEOUT_MS = 30_000;
 const MAX_LISTED_COMMITS = 10;
 const CI_PASSED_CONCLUSIONS = ["success", "skipped", "neutral"];
 
@@ -54,21 +55,29 @@ async function ciState(repo: string, sha: string): Promise<ECiState> {
   try {
     const response = await fetch(
       `https://api.github.com/repos/${slug}/commits/${sha}/check-runs?per_page=100`,
+      { signal: AbortSignal.timeout(CI_REQUEST_TIMEOUT_MS) },
     );
 
-    if (!response.ok) {
+    // a repository GitHub does not show without a login has no CI to read
+    if (response.status === 404) {
       return ECiState.Passed;
+    }
+
+    // NOTE: a rate limit, an outage or an unreadable answer is asked again later, so a commit
+    // whose CI failed is not installed because GitHub did not answer
+    if (!response.ok) {
+      return ECiState.Pending;
     }
 
     body = await response.json();
   } catch {
-    return ECiState.Passed;
+    return ECiState.Pending;
   }
 
   const parsed = SCheckRuns.safeParse(body);
 
   if (!parsed.success) {
-    return ECiState.Passed;
+    return ECiState.Pending;
   }
 
   let state = ECiState.Passed;
@@ -212,7 +221,7 @@ export class Updater {
         await notify(
           this.stateDir,
           chatId,
-          `CI is still running for ${short}. Updating when it is green.`,
+          `CI has no result yet for ${short}. Updating when it is green.`,
         );
       }
 
