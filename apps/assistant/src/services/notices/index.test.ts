@@ -107,15 +107,32 @@ describe("Notices", () => {
       await mkdir(join(directory, "notices"));
       await Bun.write(
         join(directory, "notices", "0002.json"),
-        JSON.stringify({ chatId: "signal:+100", text: "Updated to abc1234" }),
+        JSON.stringify({
+          chatId: "signal:+100",
+          text: "Updated to abc1234",
+          command: { runId: "run-1", name: "update", state: "done", outcome: "updated to abc1234" },
+        }),
       );
       await Bun.write(
         join(directory, "notices", "0001.json"),
-        JSON.stringify({ chatId: "signal:+100", text: "Updating to abc1234" }),
+        JSON.stringify({
+          chatId: "signal:+100",
+          text: "Updating to abc1234",
+          command: {
+            runId: "run-1",
+            name: "update",
+            state: "running",
+            outcome: "updating to abc1234",
+          },
+        }),
       );
       await Bun.write(
         join(directory, "notices", "0003.json"),
-        JSON.stringify({ chatId: "signal:+200", text: "Already up to date" }),
+        JSON.stringify({
+          chatId: "signal:+200",
+          text: "Already up to date",
+          command: { runId: "run-2", name: "update", state: "done", outcome: "already on abc1234" },
+        }),
       );
       await Notices.instance.deliverUpdaterNotices(directory);
       await Notices.instance.deliverUpdaterNotices(directory);
@@ -130,6 +147,42 @@ describe("Notices", () => {
       ["+100", "Updating to abc1234"],
       ["+100", "Updated to abc1234"],
       ["+200", "Already up to date"],
+    ]);
+    // each notice is a step of the !update run that asked for it
+    const notices = await DatabaseConnector.instance.database
+      .select()
+      .from(eventsTable)
+      .where(eq(eventsTable.type, EEventType.NoticeReady));
+    expect(notices.map((row) => ({ key: row.key, payload: row.payload }))).toEqual([
+      {
+        key: "signal:+100",
+        payload: {
+          chatId: "signal:+100",
+          text: "Updating to abc1234",
+          command: {
+            runId: "run-1",
+            name: "update",
+            state: "running",
+            outcome: "updating to abc1234",
+          },
+        },
+      },
+      {
+        key: "signal:+100",
+        payload: {
+          chatId: "signal:+100",
+          text: "Updated to abc1234",
+          command: { runId: "run-1", name: "update", state: "done", outcome: "updated to abc1234" },
+        },
+      },
+      {
+        key: "signal:+200",
+        payload: {
+          chatId: "signal:+200",
+          text: "Already up to date",
+          command: { runId: "run-2", name: "update", state: "done", outcome: "already on abc1234" },
+        },
+      },
     ]);
   });
 

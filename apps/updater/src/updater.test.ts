@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { chmod, mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { TUpdateNotice, TUpdateRequest } from "@bellaclaw/shared";
 import { Updater } from "./index";
 import { runRunner } from "./runner";
 
@@ -24,6 +25,7 @@ esac
 exit 0
 `;
 const CHAT = "signal:+100";
+const REQUESTER: TUpdateRequest = { chatId: CHAT, runId: "run-1" };
 
 let directory: string;
 let origin: string;
@@ -58,7 +60,7 @@ async function commit(files: Record<string, string>, message: string): Promise<s
   return sh(origin, "git", "rev-parse", "HEAD");
 }
 
-async function notices(): Promise<{ chatId: string; text: string }[]> {
+async function notices(): Promise<TUpdateNotice[]> {
   const dir = join(stateDir, "notices");
   let names: string[] = [];
 
@@ -124,14 +126,14 @@ describe("updater", () => {
     const sha = await commit({ "a.txt": "a" }, "add a");
     const updater = new Updater(checkout, stateDir, 60_000);
 
-    await Bun.write(join(stateDir, "request.json"), JSON.stringify({ chatId: CHAT }));
+    await Bun.write(join(stateDir, "request.json"), JSON.stringify(REQUESTER));
     await updater.takeRequest();
 
     expect(await head()).toBe(sha);
     expect(await Bun.file(join(stateDir, "request.json")).exists()).toBe(false);
     expect(await calls()).toContain("podman build --pull -t bellaclaw:local -f Containerfile .");
     expect(await calls()).toContain(
-      `podman-compose --profile update run -d --no-deps --name bellaclaw-update-runner update-runner bun --no-env-file /app/apps/updater/src/runner.ts ${initial} ${sha} ${CHAT}`,
+      `podman-compose --profile update run -d --no-deps --name bellaclaw-update-runner update-runner bun --no-env-file /app/apps/updater/src/runner.ts ${initial} ${sha} ${CHAT} run-1`,
     );
 
     const sent = await notices();
@@ -141,13 +143,37 @@ describe("updater", () => {
       `Updating ${initial.slice(0, 7)} → ${sha.slice(0, 7)} (1 commit):\n• add a`,
     );
     expect(sent[1]?.text).toMatch(/^Built the image in \d+ s\.$/);
+    // both are progress steps of the !update run that asked
+    expect(sent.map((notice) => notice.command)).toEqual([
+      {
+        runId: "run-1",
+        name: "update",
+        state: "running",
+        outcome: `updating to ${sha.slice(0, 7)}`,
+      },
+      {
+        runId: "run-1",
+        name: "update",
+        state: "running",
+        outcome: `updating to ${sha.slice(0, 7)}`,
+      },
+    ]);
   });
 
   test("says when it is already up to date", async () => {
-    await new Updater(checkout, stateDir, 60_000).update(true, CHAT);
+    await new Updater(checkout, stateDir, 60_000).update(true, REQUESTER);
 
-    expect((await notices()).map((notice) => notice.text)).toEqual([
-      `Already on ${initial.slice(0, 7)}.`,
+    expect(await notices()).toEqual([
+      {
+        chatId: CHAT,
+        text: `Already on ${initial.slice(0, 7)}.`,
+        command: {
+          runId: "run-1",
+          name: "update",
+          state: "done",
+          outcome: `already on ${initial.slice(0, 7)}`,
+        },
+      },
     ]);
   });
 
@@ -155,10 +181,11 @@ describe("updater", () => {
     const sha = await commit({ "a.txt": "a" }, "add a");
 
     await Bun.write(join(checkout, "compose.yaml"), "services: { local: {} }\n");
-    await new Updater(checkout, stateDir, 60_000).update(true, CHAT);
+    await new Updater(checkout, stateDir, 60_000).update(true, REQUESTER);
 
     expect(await head()).toBe(initial);
     expect((await notices())[0]?.text).toContain("compose.yaml");
+    expect((await notices())[0]?.command).toMatchObject({ state: "failed", outcome: "held" });
     expect(await Bun.file(join(stateDir, "failed-sha")).text()).toBe(sha);
     expect(await calls()).toEqual([]);
   });
@@ -167,9 +194,13 @@ describe("updater", () => {
     const sha = await commit({ "a.txt": "a" }, "add a");
 
     await Bun.write(join(directory, "fail-build"), "");
-    await new Updater(checkout, stateDir, 60_000).update(true, CHAT);
+    await new Updater(checkout, stateDir, 60_000).update(true, REQUESTER);
 
     expect(await head()).toBe(initial);
+    expect((await notices()).at(-1)?.command).toMatchObject({
+      state: "failed",
+      outcome: "update failed",
+    });
     expect((await notices()).at(-1)?.text).toStartWith(
       `The update to ${sha.slice(0, 7)} failed, still on ${initial.slice(0, 7)}:`,
     );
@@ -184,6 +215,48 @@ describe("updater", () => {
 
     expect(await head()).toBe(sha);
     expect(await notices()).toEqual([]);
+  });
+
+  test("answers a second request while a CI wait is pending, and keeps the waiting one", async () => {
+    const updater = new Updater(checkout, stateDir, 60_000);
+    const waiting = setTimeout(() => undefined, 60_000);
+
+    // ciState reads GitHub, so the pending wait is put in place by hand
+    Object.assign(updater, { ciRetry: waiting });
+
+    try {
+      await updater.update(true, { chatId: "signal:+200", runId: "run-2" });
+
+      expect(await notices()).toEqual([
+        {
+          chatId: "signal:+200",
+          text: "An update is already running.",
+          command: { runId: "run-2", name: "update", state: "failed", outcome: "already running" },
+        },
+      ]);
+      expect(Object.entries(updater)).toContainEqual(["ciRetry", waiting]);
+    } finally {
+      clearTimeout(waiting);
+    }
+  });
+
+  test("installs the fix of an unhealthy version for the request that started it", async () => {
+    const sha = await commit({ "a.txt": "a" }, "fix");
+
+    await Bun.write(join(stateDir, "unhealthy"), JSON.stringify(REQUESTER));
+    await new Updater(checkout, stateDir, 60_000).checkUnhealthy();
+
+    expect(await head()).toBe(sha);
+    expect(
+      (await notices()).map((notice) => [
+        notice.chatId,
+        notice.command.runId,
+        notice.command.state,
+      ]),
+    ).toEqual([
+      [CHAT, "run-1", "running"],
+      [CHAT, "run-1", "running"],
+    ]);
   });
 });
 
@@ -202,7 +275,7 @@ describe("runner", () => {
       updatesDir,
       old: initial,
       sha,
-      chatId: CHAT,
+      requester: REQUESTER,
       readyTimeoutMs,
     });
   }
@@ -234,6 +307,10 @@ describe("runner", () => {
     expect((await notices()).at(-1)?.text).toBe(
       `The update to ${sha.slice(0, 7)} failed in update script 0001-bad.ts, restarted ${initial.slice(0, 7)}: boom`,
     );
+    expect((await notices()).at(-1)?.command).toMatchObject({
+      state: "failed",
+      outcome: "update failed",
+    });
   });
 
   test("restores the old version when the migration fails", async () => {
@@ -246,6 +323,10 @@ describe("runner", () => {
     expect(await calls()).toContain("podman start bellaclaw");
     expect(await Bun.file(join(stateDir, "migrated")).exists()).toBe(false);
     expect((await notices()).at(-1)?.text).toContain("failed in its database migration");
+    expect((await notices()).at(-1)?.command).toMatchObject({
+      state: "failed",
+      outcome: "update failed",
+    });
   });
 
   test("rolls back a version that does not start", async () => {
@@ -258,6 +339,10 @@ describe("runner", () => {
     expect((await notices()).at(-1)?.text).toBe(
       `The update to ${sha.slice(0, 7)} failed to start, rolled back to ${initial.slice(0, 7)}.`,
     );
+    expect((await notices()).at(-1)?.command).toMatchObject({
+      state: "failed",
+      outcome: "update failed",
+    });
   });
 
   test("reports a started version and replaces the updater last", async () => {
@@ -270,6 +355,12 @@ describe("runner", () => {
     expect((await notices()).at(-1)?.text).toMatch(
       new RegExp(`^Updated to ${sha.slice(0, 7)}: next\\. Down for \\d+ s\\.$`),
     );
+    expect((await notices()).at(-1)?.command).toEqual({
+      runId: "run-1",
+      name: "update",
+      state: "done",
+      outcome: `updated to ${sha.slice(0, 7)}`,
+    });
     expect((await calls()).at(-1)).toBe("podman-compose up -d --force-recreate --no-deps updater");
   });
 });

@@ -127,7 +127,8 @@ by hand hold the update; the chat is told which files. Untracked files, such as 
 ### Status and Outcomes
 
 Status lines go only to the chat that sent `!update`: the commits being installed, the build time,
-each update script, and the outcome with the downtime. A scheduled update reports to no chat. The
+each update script, and the outcome with the downtime. In the app they are the steps of the
+command's card, which ends on the outcome. A scheduled update reports to no chat. The
 outcome of an installed update is in `podman logs bellaclaw-update-runner`, which stays until the
 next update. `podman logs bellaclaw-updater` holds the checks and anything that stopped before the
 runner started; it starts empty after each installed update, because the updater is replaced.
