@@ -1,5 +1,7 @@
+import { mkdir, readdir, rm } from "node:fs/promises";
+import { join } from "node:path";
 import { EEventType } from "@bellaclaw/database";
-import type { TOption } from "@bellaclaw/shared";
+import { createLogger, SUpdateNotice, type TOption, UPDATER_NOTICES_DIR } from "@bellaclaw/shared";
 import { z } from "zod";
 import { AppChannel } from "../app";
 import { AuthorizationService } from "../authorization";
@@ -21,16 +23,12 @@ const NO_DEAD_LETTER_NOTICE: ReadonlySet<string> = new Set([
 // the user's request succeeded before these consumers ran, so their failure has nothing to retry
 const NO_DEAD_LETTER_NOTICE_CONSUMERS: ReadonlySet<string> = new Set(["conversation-title"]);
 const SEventType = z.enum(EEventType);
-// chatId: the chat that asked for the update; absent for a scheduled one, heard by every chat
-const SSupervisorNotice = z.object({
-  type: z.literal("notice"),
-  text: z.string(),
-  chatId: z.string().optional(),
-});
+const UPDATER_NOTICES_INTERVAL_MS = 2_000;
 
 export class Notices {
   private static _instance: TOption<Notices>;
   private backoffMs = [1_000, 5_000];
+  private logger = createLogger("NOTICES");
 
   private constructor() {}
 
@@ -125,24 +123,55 @@ export class Notices {
     });
   }
 
-  // message: what the supervisor sent the app over its IPC channel
-  public async handleSupervisorMessage(message: unknown): Promise<void> {
-    const notice = SSupervisorNotice.safeParse(message);
+  // directory: BELLACLAW_UPDATER_DIR; each pass starts 2 s after the previous one ends, so two
+  // never overlap
+  public watchUpdaterNotices(directory: string): void {
+    const pass = async () => {
+      try {
+        await this.deliverUpdaterNotices(directory);
+      } catch (error) {
+        this.logger.error(`Failed to deliver the updater's notices: ${String(error)}`);
+      }
 
-    if (!notice.success) {
-      return;
-    }
+      setTimeout(pass, UPDATER_NOTICES_INTERVAL_MS);
+    };
 
-    let chatIds: string[];
+    void pass();
+  }
 
-    if (notice.data.chatId === undefined) {
-      chatIds = await this.listGlobalRecipients();
-    } else {
-      chatIds = [await IdentityService.instance.conversationKeyOf(notice.data.chatId)];
-    }
+  // One pass over the updater's notice files, in name order. The dedupe key of each file's notice
+  // keeps a crash between the emit and the delete from sending the line twice.
+  public async deliverUpdaterNotices(directory: string): Promise<void> {
+    const noticesDirectory = join(directory, UPDATER_NOTICES_DIR);
 
-    await EventBus.instance.transact(async (_tx, emit) => {
-      for (const chatId of chatIds) {
+    await mkdir(noticesDirectory, { recursive: true });
+
+    const fileNames = (await readdir(noticesDirectory))
+      .filter((fileName) => fileName.endsWith(".json"))
+      .sort();
+
+    for (const fileName of fileNames) {
+      const path = join(noticesDirectory, fileName);
+      const text = await Bun.file(path).text();
+      let raw: unknown;
+
+      try {
+        raw = JSON.parse(text);
+      } catch {
+        raw = undefined;
+      }
+
+      const notice = SUpdateNotice.safeParse(raw);
+
+      if (!notice.success) {
+        this.logger.warning(`Deleting the updater's unreadable notice ${fileName}`);
+        await rm(path, { force: true });
+        continue;
+      }
+
+      const chatId = await IdentityService.instance.conversationKeyOf(notice.data.chatId);
+
+      await EventBus.instance.transact(async (_tx, emit) => {
         emit({
           type: EEventType.NoticeReady,
           source: "notices",
@@ -150,10 +179,11 @@ export class Notices {
           trace: { turnId: `update:${crypto.randomUUID()}`, chatId, platform: undefined },
           payload: { chatId, text: notice.data.text },
           causationId: undefined,
-          dedupeKey: undefined,
+          dedupeKey: `updater-notice:${fileName}`,
         });
-      }
-    });
+      });
+      await rm(path, { force: true });
+    }
   }
 
   private async notifyAll(ctx: TEventContext, text: string): Promise<void> {

@@ -105,3 +105,12 @@ export {
 export { createLogger, logger, type TLogger, writeJsonLog } from "./logger";
 export type { TOption } from "./option";
 export { REPOSITORY_ROOT, repositoryPath } from "./paths";
+export {
+  SUpdateNotice,
+  SUpdateRequest,
+  type TUpdateNotice,
+  type TUpdateRequest,
+  UPDATER_NOTICES_DIR,
+  UPDATER_READY_FILE,
+  UPDATER_REQUEST_FILE,
+} from "./updater";
