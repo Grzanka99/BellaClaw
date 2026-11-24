@@ -363,4 +363,20 @@ describe("runner", () => {
     });
     expect((await calls()).at(-1)).toBe("podman-compose up -d --force-recreate --no-deps updater");
   });
+
+  test("finishes the card of the run waiting for a fix when a later update succeeds", async () => {
+    const sha = await update({ "a.txt": "a" });
+
+    await Bun.write(join(stateDir, "unhealthy"), JSON.stringify({ chatId: CHAT, runId: "run-0" }));
+    await Bun.write(join(directory, "start-ready"), "");
+    await runner(sha);
+
+    expect((await notices()).map((notice) => [notice.command.runId, notice.command.state])).toEqual(
+      [
+        ["run-1", "done"],
+        ["run-0", "done"],
+      ],
+    );
+    expect(await Bun.file(join(stateDir, "unhealthy")).exists()).toBe(false);
+  });
 });

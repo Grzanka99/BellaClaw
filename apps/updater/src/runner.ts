@@ -2,6 +2,7 @@ import { appendFile, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import {
   createLogger,
+  SUpdateRequest,
   type TOption,
   type TUpdateRequest,
   UPDATER_READY_FILE,
@@ -168,13 +169,21 @@ export async function runRunner(options: TRunnerOptions): Promise<void> {
   if (ready) {
     const subject = await run(["git", "log", "-1", "--format=%s", sha], checkout);
 
-    await notify(
-      stateDir,
-      requester,
-      `Updated to ${short}: ${subject}. Down for ${Math.round((Date.now() - downSince) / 1000)} s.`,
-      "done",
-      `updated to ${short}`,
-    );
+    const text = `Updated to ${short}: ${subject}. Down for ${Math.round((Date.now() - downSince) / 1000)} s.`;
+
+    await notify(stateDir, requester, text, "done", `updated to ${short}`);
+
+    // a version waiting for a fix: its run's card ends with this update
+    const unhealthy = await readText(join(stateDir, UNHEALTHY_FILE));
+
+    if (unhealthy !== "") {
+      const parsed = SUpdateRequest.safeParse(JSON.parse(unhealthy));
+
+      if (parsed.success && parsed.data.runId !== requester?.runId) {
+        await notify(stateDir, parsed.data, text, "done", `updated to ${short}`);
+      }
+    }
+
     // after the report, so a crash before here still finds the migration marker
     await rm(migratedFile, { force: true });
     await rm(join(stateDir, UNHEALTHY_FILE), { force: true });
