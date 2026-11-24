@@ -15,6 +15,7 @@ import {
   type Usage,
 } from "@earendil-works/pi-ai";
 import type { z } from "zod";
+import { sanitizeErrorMessage } from "../../app-logger/sanitizers";
 import { startSpan, type TBehaviorSpan } from "../../app-logger/span";
 import { EConfigKey, type TConfigRecord } from "../../settings/schema";
 import {
@@ -33,8 +34,11 @@ import { EAiProvider, type EModelPurpose, SAiProvider } from "../types";
 
 export type TLlmModelConfig = ReturnType<typeof getAiModelConfig>;
 
-// NOTE: sized for one person waiting on a reply: three more attempts, after 2s, 4s and 8s
-const RETRY_POLICY: RetryPolicy = { enabled: true, maxRetries: 3, baseDelayMs: 2_000 };
+// NOTE: sized for one person waiting on a reply: a failed call restarts up to twice, after 2s and 4s
+const RETRY_POLICY: RetryPolicy = { enabled: true, maxRetries: 2, baseDelayMs: 2_000 };
+// NOTE: Pi's Codex adapter drops the HTTP status from its errors, so only its own request retry can
+// tell a passing 429 or 5xx from a lasting failure
+const CODEX_REQUEST_RETRIES = 2;
 
 export function emptyUsage(): Usage {
   return {
@@ -159,6 +163,11 @@ export class LlmClient {
       config.model.provider,
       sessionId,
     );
+
+    if (hasApi(config.model, "openai-codex-responses")) {
+      requestOptions.maxRetries = CODEX_REQUEST_RETRIES;
+    }
+
     const streamOptions = createAiStreamOptions(
       config.model,
       requestOptions,
@@ -186,7 +195,7 @@ export class LlmClient {
       {
         onRetryScheduled: (attempt, maxAttempts, delayMs, errorMessage) => {
           this.logger.warning(
-            `complete: retry ${attempt}/${maxAttempts} of ${config.model.id} in ${delayMs}ms after: ${errorMessage}`,
+            `complete: retry ${attempt}/${maxAttempts} of ${config.model.id} in ${delayMs}ms after: ${sanitizeErrorMessage(errorMessage)}`,
           );
         },
       },
