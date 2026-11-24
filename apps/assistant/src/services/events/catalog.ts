@@ -9,7 +9,7 @@ import {
   ECronJobType,
   EEventType,
 } from "@bellaclaw/database";
-import { SListOperations, SListSnapshot, type TOption } from "@bellaclaw/shared";
+import { SCommandRun, SListOperations, SListSnapshot, type TOption } from "@bellaclaw/shared";
 import { z } from "zod";
 import { SThinkingLevel } from "../ai/model-preferences";
 import { EAiProvider } from "../ai/types";
@@ -37,7 +37,7 @@ const STranscript = z
 export type TDeliveryTranscript = z.infer<typeof STranscript>;
 
 // a message shown in history and never replayed to the model; request: the command it answers,
-// stored before it
+// stored before it; command: the command run it belongs to
 const SDisplay = z
   .object({
     text: z.string(),
@@ -49,6 +49,7 @@ const SDisplay = z
       })
       .strict()
       .optional(),
+    command: SCommandRun.optional(),
   })
   .strict();
 
@@ -110,8 +111,8 @@ const STurnFailed = z
   .strict();
 
 // transcript and display: what Conversation stores once the reply is sent. A reply with neither
-// is stored already, as a turn's, or is confidential: it carries a secret or a one-time link, is
-// marked confidential and is never stored
+// is stored already, as a turn's. A confidential reply carries a secret or a one-time link and is
+// marked confidential: its text is never stored, and a command's has a display, the redacted card
 const SReplyReady = z
   .object({
     ...SMessageOrigin,
@@ -122,7 +123,10 @@ const SReplyReady = z
   })
   .strict();
 
-const SNoticeReady = z.object({ chatId: z.string(), text: z.string() }).strict();
+// command: the command run the notice belongs to
+const SNoticeReady = z
+  .object({ chatId: z.string(), text: z.string(), command: SCommandRun.optional() })
+  .strict();
 
 const SDeliveryReady = z
   .object({ chatId: z.string(), text: z.string(), transcript: STranscript })

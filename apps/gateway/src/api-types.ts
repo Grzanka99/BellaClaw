@@ -2,6 +2,8 @@
 // `import type`, so no server code reaches the client bundle.
 import type { THistoryMessage, TListedConversation } from "@bellaclaw/database";
 import type {
+  TCommandRun,
+  TGatewayCommands,
   TGatewayConversationCreated,
   TGatewayConversationDeleted,
   TGatewayLinkState,
@@ -128,12 +130,16 @@ export type THistoryResponse = TConversationRevision & {
   nextAfter?: number;
 };
 
+// GET /api/commands answer: the "!" commands the app lists, in palette order
+export type TCommandsResponse = TGatewayCommands;
+
 // GET /api/stream server-sent events, data as JSON, each of the signed-in account only. check:
 // compare revisions now, sent on connect and whenever the edge's stream to the assistant opens or
 // drops, and stop showing typing; changed: the conversation's transcript changed; typing: a turn of
 // the conversation started (true) or ended (false); deleted: the plain chat is gone; reply: a
 // confidential reply to a message sent from the app, shown once and never stored, sent to app
-// sessions' streams only; step: a tool call of the conversation's reply turn started, completed or
+// sessions' streams only, with the command run and the request's clientMessageId when it answers a
+// command; step: a tool call of the conversation's reply turn started, completed or
 // failed, stepId its tool call id, tool the tool's name, startedAt epoch ms, durationMs once it
 // ended; lists: the account's lists changed, read them again. A client that missed a delete finds
 // the chat gone from the list
@@ -142,7 +148,13 @@ export type TAppStreamEvent =
   | ({ type: "changed"; conversationKey: string } & TConversationRevision)
   | { type: "typing"; conversationKey: string; typing: boolean }
   | { type: "deleted"; conversationKey: string }
-  | { type: "reply"; conversationKey: string; text: string }
+  | {
+      type: "reply";
+      conversationKey: string;
+      text: string;
+      command?: TCommandRun;
+      clientMessageId?: string;
+    }
   | {
       type: "step";
       conversationKey: string;

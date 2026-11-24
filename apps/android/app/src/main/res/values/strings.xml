@@ -39,6 +39,8 @@
     <string name="activity_thinking">Thinking…</string>
     <string name="activity_duration">%1$.1fs</string>
     <string name="activity_failed">Failed</string>
+    <string name="command_show">Show result</string>
+    <string name="command_hide">Hide result</string>
     <string name="day_today">Today</string>
     <string name="day_yesterday">Yesterday</string>
 

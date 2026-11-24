@@ -3,12 +3,16 @@ package one.scary.bellaclaw.ui.chat
 import one.scary.bellaclaw.model.ActivityStep
 import one.scary.bellaclaw.model.ChatKind
 import one.scary.bellaclaw.model.ChatProvider
+import one.scary.bellaclaw.model.CommandEntry
+import one.scary.bellaclaw.model.CommandRow
+import one.scary.bellaclaw.model.CommandState
 import one.scary.bellaclaw.model.Effort
 import one.scary.bellaclaw.model.ImageRefusal
 import one.scary.bellaclaw.model.Loadable
 import one.scary.bellaclaw.model.Message
 import one.scary.bellaclaw.model.MessageImage
 import one.scary.bellaclaw.model.ModelChoice
+import one.scary.bellaclaw.model.SendState
 import one.scary.bellaclaw.model.TodoList
 import java.time.LocalDate
 
@@ -40,12 +44,14 @@ data class ChatUiState(
     val dictationLanguage: String? = null,
     /** The account's lists for BellaClaw's pill, the one it shows first. */
     val lists: List<TodoList> = emptyList(),
+    /** The command catalog, in BellaClaw's chat only; empty until read. */
+    val commands: List<CommandEntry> = emptyList(),
 ) {
     val canSend: Boolean
         get() = isReadyToSend && !isCheckingAttachment && (draft.isNotBlank() || attachmentUri != null)
 }
 
-/** One row of the conversation: a day label, a message or a reply's activity. */
+/** One row of the conversation: a day label, a message, a reply's activity or a command's run. */
 sealed interface ChatRow {
     val key: String
 
@@ -69,7 +75,33 @@ sealed interface ChatRow {
         val seconds: Long = 0,
         val isLive: Boolean = false,
     ) : ChatRow
+
+    /**
+     * A command's run in one card, in place of its request and reply rows: headed by the command as sent,
+     * with the [state] and [outcome] of its newest row and one of [lines] per reply or notice. Keyed by the
+     * request's client message id when it has one, so a send's pending card stays the same item once
+     * history has the run. A send that failed has [sendState] [SendState.FAILED], its [failure] text when
+     * the server gave one, and [retryId] to send it again.
+     */
+    data class Command(
+        override val key: String,
+        val header: String,
+        val state: CommandState,
+        val outcome: String?,
+        val lines: List<CommandLine>,
+        val isFolded: Boolean,
+        val sendState: SendState,
+        val failure: String?,
+        val retryId: String?,
+    ) : ChatRow
 }
+
+/** A reply or notice of a command's run: its [rows] when it listed any, else its [text]. */
+data class CommandLine(
+    val text: String,
+    val state: CommandState,
+    val rows: List<CommandRow>,
+)
 
 /** One row of a reply's activity. */
 sealed interface ActivityRow {

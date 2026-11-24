@@ -250,6 +250,27 @@ describe("MessagingAdapter main channel", () => {
     ]);
   });
 
+  test("a notice of a command run is stored with the run", async () => {
+    const command = {
+      runId: "run-1",
+      name: "update",
+      state: "done" as const,
+      outcome: "updated to abc1234",
+    };
+    await publish(
+      EEventType.NoticeReady,
+      { chatId: "bella:acct-1", text: "Updated to abc1234.", command },
+      "notice",
+    );
+    await EventBus.instance.idle();
+
+    const stored = await DatabaseConnector.instance.database
+      .select({ message: memoriesTable.message, command: memoriesTable.command })
+      .from(memoriesTable)
+      .where(eq(memoriesTable.chatId, "bella:acct-1"));
+    expect(stored).toEqual([{ message: "Updated to abc1234.", command: JSON.stringify(command) }]);
+  });
+
   test("once the device is unregistered, as at logout, the next reminder goes to Signal and still appears in the Bella history", async () => {
     await registerDevice();
     await reminder("Before");

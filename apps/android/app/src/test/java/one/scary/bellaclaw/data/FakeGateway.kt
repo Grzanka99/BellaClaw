@@ -3,6 +3,7 @@ package one.scary.bellaclaw.data
 import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
@@ -35,6 +36,7 @@ class FakeGateway : Dispatcher() {
         val imageIds: List<String?>,
         val steps: String?,
         val listFinished: String? = null,
+        val command: String? = null,
     )
 
     class Conversation(val key: String, val kind: String, var title: String? = null) {
@@ -56,6 +58,10 @@ class FakeGateway : Dispatcher() {
 
     /** Bodies of the sends that arrived, in order. */
     val sends = LinkedBlockingQueue<JsonObject>()
+
+    /** When set, sends are answered only once it is counted down. */
+    @Volatile
+    var sendHold: CountDownLatch? = null
 
     /** Answers of the next sends, before they are accepted: status and body. */
     val sendFailures = LinkedBlockingQueue<Pair<Int, String>>()
@@ -86,6 +92,13 @@ class FakeGateway : Dispatcher() {
     @Volatile
     var lists: String = """{"lists":[]}"""
 
+    /** The answer of `GET /api/commands`, as JSON. */
+    private val commands = """{"commands":[""" +
+        """{"name":"connector","group":"Connectors","description":"Manage connectors","usage":"!connector list | !connector approve|reject CONNECTOR"},""" +
+        """{"name":"mcp-prompt","group":"Connectors","description":"Run a prompt","usage":"!mcp-prompt CONNECTOR PROMPT [JSON_ARGUMENTS]"},""" +
+        """{"name":"ai-auth","group":"AI","description":"Sign in to a provider","usage":"!ai-auth login|status|logout PROVIDER"},""" +
+        """{"name":"update","group":"App","description":"Update the app","usage":"!update"}]}"""
+
     /** Bodies of the list changes that arrived, in order. */
     val listChanges = LinkedBlockingQueue<JsonObject>()
 
@@ -102,7 +115,10 @@ class FakeGateway : Dispatcher() {
         conversations.add(1, Conversation(key, "plain", title))
     }
 
-    /** Appends a row to [key] and answers its id; the conversation moves up as the latest active. [steps] is the row's `steps`, as JSON. */
+    /**
+     * Appends a row to [key] and answers its id; the conversation moves up as the latest active. [steps] is
+     * the row's `steps` and [command] its `command`, as JSON.
+     */
     @Synchronized
     fun addRow(
         key: String,
@@ -112,9 +128,10 @@ class FakeGateway : Dispatcher() {
         imageIds: List<String?> = emptyList(),
         steps: String? = null,
         listFinished: String? = null,
+        command: String? = null,
     ): Long {
         val conversation = conversation(key)
-        val row = Row(nextRowId++, author, text, CREATED_AT + nextRowId * 1000, clientMessageId, imageIds, steps, listFinished)
+        val row = Row(nextRowId++, author, text, CREATED_AT + nextRowId * 1000, clientMessageId, imageIds, steps, listFinished, command)
         conversation.rows.add(row)
         conversation.revision++
         if (conversation.kind == "plain") {
@@ -159,6 +176,7 @@ class FakeGateway : Dispatcher() {
             request.url.encodedPath == "/api/stream" -> stream()
             request.url.encodedPath == "/api/logout" -> json("""{"ok":true}""")
             request.url.encodedPath == "/api/lists" -> json(lists)
+            request.url.encodedPath == "/api/commands" -> json(commands)
             request.url.encodedPath == "/api/lists/changes" -> {
                 listChanges.put(request.json())
                 listChangeFailures.poll()?.let { (code, text) -> failure(code, text) } ?: json(lists)
@@ -179,6 +197,7 @@ class FakeGateway : Dispatcher() {
     private fun send(request: RecordedRequest): MockResponse {
         val body = request.json()
         sends.put(body)
+        sendHold?.await(5, TimeUnit.SECONDS)
         sendFailures.poll()?.let { (code, text) -> return failure(code, text) }
         return json("""{"clientMessageId":${body["clientMessageId"]}}""")
     }
@@ -279,7 +298,7 @@ class FakeGateway : Dispatcher() {
     private fun Row.toJson() = buildJsonObject {
         put("id", id)
         put("author", author)
-        put("kind", if (listFinished == null) "message" else "display")
+        put("kind", if (listFinished == null && command == null) "message" else "display")
         put("channel", "app")
         put("text", text)
         put("createdAt", createdAt)
@@ -287,6 +306,7 @@ class FakeGateway : Dispatcher() {
         clientMessageId?.let { put("clientMessageId", it) }
         steps?.let { put("steps", Json.parseToJsonElement(it)) }
         listFinished?.let { put("listFinished", Json.parseToJsonElement(it)) }
+        command?.let { put("command", Json.parseToJsonElement(it)) }
         if (imageIds.isNotEmpty()) {
             putJsonArray("images") {
                 imageIds.forEach { mediaId ->

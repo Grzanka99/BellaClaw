@@ -73,21 +73,29 @@ export class AppStream {
       },
     });
 
-    // a confidential reply to a message sent from the app is shown once and never stored; one ready
-    // while no app stream is open is lost
+    // a confidential reply to a message sent from the app is shown once and its text never stored;
+    // one ready while no app stream is open is lost. A command's carries its run and the request's
+    // clientMessageId
     bus.subscribe({
       consumer: "app-stream",
       type: EEventType.ReplyReady,
       mode: ESubscriptionMode.Live,
       backoffMs: [],
       handler: async (event) => {
-        const { conversationKey, ownerKey, channel, text, confidential } = event.payload;
+        const { conversationKey, ownerKey, channel, text, confidential, display } = event.payload;
 
         if (confidential !== true || channel !== EMessagePlatform.App) {
           return;
         }
 
-        this.send(ownerKey, (accountId) => ({ type: "reply", accountId, conversationKey, text }));
+        this.send(ownerKey, (accountId) => ({
+          type: "reply",
+          accountId,
+          conversationKey,
+          text,
+          command: display?.command,
+          clientMessageId: display?.request?.clientMessageId,
+        }));
       },
     });
 

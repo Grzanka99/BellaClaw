@@ -36,6 +36,7 @@ fun ChatScreen(
     onSend: () -> Unit,
     onOpenModelPicker: () -> Unit,
     onRetry: (String) -> Unit,
+    onToggleCard: (String) -> Unit,
     onLoadOlder: () -> Unit,
     pickerEvents: ModelPickerEvents,
     thumbnailLoader: ThumbnailLoader,
@@ -72,6 +73,7 @@ fun ChatScreen(
         bottomBar = {
             Composer(
                 draft = state.draft,
+                commands = state.commands,
                 placeholder = if (isBellaClaw) {
                     stringResource(R.string.composer_hint_bellaclaw)
                 } else {
@@ -95,6 +97,7 @@ fun ChatScreen(
         MessageList(
             rows = state.rows,
             onRetry = onRetry,
+            onToggleCard = onToggleCard,
             onLoadOlder = onLoadOlder,
             imageLoader = imageLoader,
             onOpenImage = onOpenImage,
@@ -149,6 +152,7 @@ private fun BellaClawChatPreview() {
             onSend = {},
             onOpenModelPicker = {},
             onRetry = {},
+            onToggleCard = {},
             onLoadOlder = {},
             pickerEvents = noPickerEvents,
             thumbnailLoader = noThumbnails,
@@ -187,6 +191,7 @@ private fun PlainChatPreview() {
             onSend = {},
             onOpenModelPicker = {},
             onRetry = {},
+            onToggleCard = {},
             onLoadOlder = {},
             pickerEvents = noPickerEvents,
             thumbnailLoader = noThumbnails,

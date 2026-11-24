@@ -1,4 +1,5 @@
 import { EEventType } from "@bellaclaw/database";
+import { COMMAND_CATALOG } from "@bellaclaw/shared";
 import { AI_OAUTH_PROVIDERS, findAiOAuthProvider, getAiAuthStatus } from "../ai/auth";
 import { AuthorizationService } from "../authorization";
 import type { TCommand } from "./types";
@@ -6,9 +7,7 @@ import type { TCommand } from "./types";
 const USAGE = `Usage: !ai-auth login|status|logout PROVIDER (${AI_OAUTH_PROVIDERS.join(", ")})`;
 
 export const aiAuthCommand: TCommand = {
-  name: "ai-auth",
-  description: "Log in to, check, or log out of an AI provider subscription.",
-  usage: "!ai-auth login|status|logout PROVIDER",
+  entry: COMMAND_CATALOG["ai-auth"],
   handler: async (chatId, args, ctx, address) => {
     const [action, provider, extra] = args.trim().split(/\s+/);
 
@@ -18,18 +17,22 @@ export const aiAuthCommand: TCommand = {
       extra !== undefined ||
       !["login", "status", "logout"].includes(action)
     ) {
-      return USAGE;
+      return { text: USAGE, state: "failed", outcome: "usage" };
     }
 
     const providerId = findAiOAuthProvider(provider);
 
     if (providerId === undefined) {
-      return USAGE;
+      return { text: USAGE, state: "failed", outcome: "usage" };
     }
 
     // The login is shared, so it must not be changeable while the activation gate is disabled.
     if (!(await AuthorizationService.instance.isActivated(address))) {
-      return "AI authentication requires BELLACLAW_ACTIVATION_TOKEN and an activated chat.";
+      return {
+        text: "AI authentication requires BELLACLAW_ACTIVATION_TOKEN and an activated chat.",
+        state: "failed",
+        outcome: "not activated",
+      };
     }
 
     try {
@@ -44,7 +47,11 @@ export const aiAuthCommand: TCommand = {
             timeoutMs: undefined,
           },
         );
-        return { confidential: started.payload.instructions };
+        return {
+          confidential: started.payload.instructions,
+          state: "done",
+          outcome: "login started",
+        };
       }
 
       if (action === "logout") {
@@ -58,12 +65,20 @@ export const aiAuthCommand: TCommand = {
             timeoutMs: undefined,
           },
         );
-        return `Logged out of ${providerId}.`;
+        return {
+          text: `Logged out of ${providerId}.`,
+          state: "done",
+          outcome: `logged out of ${providerId}`,
+        };
       }
 
-      return await getAiAuthStatus(providerId);
+      return { text: await getAiAuthStatus(providerId), state: "done", outcome: "status" };
     } catch (error) {
-      return `AI authentication failed: ${String(error)}`;
+      return {
+        text: `AI authentication failed: ${String(error)}`,
+        state: "failed",
+        outcome: "failed",
+      };
     }
   },
 };

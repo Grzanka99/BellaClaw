@@ -85,6 +85,9 @@ export const memoriesTable = sqliteTable(
     steps: text("steps"),
     // a list-finished card's list name and item count as JSON, on its display row only
     listFinished: text("listFinished"),
+    // a command run as JSON (SCommandRun), on the request row and each reply or notice row of the
+    // run; the request row's has no rows
+    command: text("command"),
   },
   (table) => [index("memories_chat_id_idx").on(table.chatId, table.id)],
 );

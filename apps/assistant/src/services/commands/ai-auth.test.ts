@@ -139,8 +139,9 @@ test("logs in with a device code through ai.auth.login.requested and confirms in
     "Open https://example.test/device and enter code ABCD-EFGH to connect openai-codex.",
   ]);
   // the device code is confidential: not carried for the history
-  expect(JSON.stringify((await rowsOf(EEventType.ReplyReady))[0]?.payload)).not.toContain(
-    "display",
+  const [reply] = await rowsOf(EEventType.ReplyReady);
+  expect(JSON.stringify((reply?.payload as { display: unknown }).display)).not.toContain(
+    "ABCD-EFGH",
   );
   expect((await rowsOf(EEventType.AiAuthLoginRequested))[0]?.key).toBe("global");
 
@@ -245,18 +246,20 @@ test("an app message passes the activation check exactly when an activation toke
   const originalToken = Bun.env.BELLACLAW_ACTIVATION_TOKEN;
   const app = { channel: EMessagePlatform.App, address: "acct-1" };
   const status = (ctx: TEventContext) =>
-    runCommand("account:acct-1", app, "!ai-auth status openai-codex", ctx);
+    runCommand("account:acct-1", app, "!ai-auth status openai-codex", ctx, "run-1");
 
   try {
     Bun.env.BELLACLAW_ACTIVATION_TOKEN = "";
     Object.assign(AuthorizationService, { _instance: undefined });
-    expect(await withEventContext(status)).toBe(
-      "AI authentication requires BELLACLAW_ACTIVATION_TOKEN and an activated chat.",
-    );
+    expect((await withEventContext(status))?.result).toMatchObject({
+      text: "AI authentication requires BELLACLAW_ACTIVATION_TOKEN and an activated chat.",
+    });
 
     Bun.env.BELLACLAW_ACTIVATION_TOKEN = "open-sesame";
     Object.assign(AuthorizationService, { _instance: undefined });
-    expect(await withEventContext(status)).toBe("openai-codex: not connected.");
+    expect((await withEventContext(status))?.result).toMatchObject({
+      text: "openai-codex: not connected.",
+    });
   } finally {
     Bun.env.BELLACLAW_ACTIVATION_TOKEN = originalToken;
     Object.assign(AuthorizationService, { _instance: undefined });

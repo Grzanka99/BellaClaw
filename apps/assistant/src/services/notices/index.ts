@@ -177,7 +177,7 @@ export class Notices {
           source: "notices",
           key: chatId,
           trace: { turnId: `update:${crypto.randomUUID()}`, chatId, platform: undefined },
-          payload: { chatId, text: notice.data.text },
+          payload: { chatId, text: notice.data.text, command: notice.data.command },
           causationId: undefined,
           dedupeKey: `updater-notice:${fileName}`,
         });

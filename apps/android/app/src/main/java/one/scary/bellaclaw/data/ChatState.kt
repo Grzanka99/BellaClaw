@@ -1,5 +1,6 @@
 package one.scary.bellaclaw.data
 
+import one.scary.bellaclaw.data.remote.CommandBody
 import one.scary.bellaclaw.data.remote.ConversationBody
 import one.scary.bellaclaw.data.remote.HistoryRowBody
 import one.scary.bellaclaw.data.remote.MediaBody
@@ -8,6 +9,11 @@ import one.scary.bellaclaw.model.FinishedList
 import one.scary.bellaclaw.model.Author
 import one.scary.bellaclaw.model.BELLACLAW_CHAT_ID
 import one.scary.bellaclaw.model.ChatIcon
+import one.scary.bellaclaw.model.CommandEntry
+import one.scary.bellaclaw.model.CommandRow
+import one.scary.bellaclaw.model.CommandRun
+import one.scary.bellaclaw.model.CommandState
+import one.scary.bellaclaw.model.CommandStatus
 import one.scary.bellaclaw.model.Message
 import one.scary.bellaclaw.model.MessageImage
 import one.scary.bellaclaw.model.ModelChoice
@@ -38,6 +44,8 @@ internal data class ChatState(
     val isStreamOpen: Boolean = false,
     /** New chat ids whose first send created their chat, to its conversation key. */
     val createdChats: Map<String, String> = emptyMap(),
+    /** The command catalog as last read; empty until read. */
+    val commands: List<CommandEntry> = emptyList(),
 ) {
     /**
      * The conversation key of the app's [chatId], or null while the list has none. A new chat's sends are
@@ -65,12 +73,22 @@ internal data class ChatState(
         steps = steps - key,
     )
 
-    /** History, replies and accepted sends by time, then the sends the server has not accepted. */
+    /**
+     * History, replies and accepted sends by time, then the sends the server has not accepted. A reply to a
+     * command stands in for the run's stored reply row, which holds only its outcome. In BellaClaw's chat a
+     * send of a catalog command is a pending run of it.
+     */
     fun messagesOf(chatId: String): List<Message> {
         val key = keyOf(chatId) ?: return emptyList()
-        val rows = histories[key]?.rows.orEmpty()
-        val (accepted, sending) = pending[key].orEmpty().map { it.toMessage(chatId) }.partition { it.sendState == SendState.STORED }
-        val stored = rows.map { it.toMessage(chatId) } + replies[key].orEmpty() + accepted
+        val chatReplies = replies[key].orEmpty()
+        val repliedRuns = chatReplies.mapNotNullTo(HashSet()) { it.command?.runId }
+        val rows = histories[key]?.rows.orEmpty().map { it.toMessage(chatId) }.filter { row ->
+            val runId = row.command?.runId
+            row.author == Author.USER || runId == null || runId !in repliedRuns
+        }
+        val catalog = if (chatId == BELLACLAW_CHAT_ID) commands else emptyList()
+        val (accepted, sending) = pending[key].orEmpty().map { it.toMessage(chatId, catalog) }.partition { it.sendState == SendState.STORED }
+        val stored = rows + chatReplies + accepted
         return stored.sortedBy { it.sentAt } + sending
     }
 
@@ -102,16 +120,32 @@ internal data class PendingSend(
     val state: SendState = SendState.PENDING,
     val failure: String? = null,
 ) {
-    fun toMessage(chatId: String) = Message(
-        clientMessageId,
-        chatId,
-        Author.USER,
-        text,
-        sentAt,
-        images = listOfNotNull(image?.let { MessageImage(null, it.mimeType, localUri = it.uri) }),
-        sendState = state,
-        failure = failure,
-    )
+    /** A send whose first word is a command of [commands] is a run of it until history has the send. */
+    fun toMessage(chatId: String, commands: List<CommandEntry>): Message {
+        val word = text.split(WHITESPACE, limit = 2).first()
+        val name = word.removePrefix("!").lowercase()
+        val command = if (word.startsWith("!") && commands.any { it.name == name }) {
+            CommandRun("pending-$clientMessageId", name, CommandState.RUNNING, null, emptyList())
+        } else {
+            null
+        }
+        return Message(
+            clientMessageId,
+            chatId,
+            Author.USER,
+            text,
+            sentAt,
+            images = listOfNotNull(image?.let { MessageImage(null, it.mimeType, localUri = it.uri) }),
+            sendState = state,
+            failure = failure,
+            command = command,
+            clientMessageId = clientMessageId,
+        )
+    }
+
+    private companion object {
+        val WHITESPACE = Regex("\\s")
+    }
 }
 
 /** The app's chat id of a conversation: the Bella conversation is always [BELLACLAW_CHAT_ID]. */
@@ -127,6 +161,16 @@ internal fun HistoryRowBody.toMessage(chatId: String) = Message(
     steps = steps.orEmpty().map { ActivityStep(it.tool, it.label, it.detail, Instant.ofEpochMilli(it.startedAt), it.durationMs, it.failed) },
     scheduled = scheduled,
     finishedList = listFinished?.let { FinishedList(it.name, it.total) },
+    command = command?.toRun(),
+    clientMessageId = clientMessageId,
+)
+
+internal fun CommandBody.toRun() = CommandRun(
+    runId = runId,
+    name = name,
+    state = state,
+    outcome = outcome,
+    rows = rows.orEmpty().map { row -> CommandRow(row.title, row.status?.let { CommandStatus(it.label, it.tone) }, row.detail) },
 )
 
 /** Derived from the key, so it stays the same across starts. */

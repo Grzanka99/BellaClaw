@@ -1,6 +1,7 @@
 package one.scary.bellaclaw.ui.chat
 
 import androidx.lifecycle.SavedStateHandle
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlin.time.Duration
 import kotlinx.coroutines.CompletableDeferred
@@ -27,6 +28,10 @@ import one.scary.bellaclaw.model.ActivityStep
 import one.scary.bellaclaw.model.Author
 import one.scary.bellaclaw.model.BELLACLAW_CHAT_ID
 import one.scary.bellaclaw.model.ChatKind
+import one.scary.bellaclaw.model.CommandRow
+import one.scary.bellaclaw.model.CommandState
+import one.scary.bellaclaw.model.CommandStatus
+import one.scary.bellaclaw.model.CommandTone
 import one.scary.bellaclaw.model.Effort
 import one.scary.bellaclaw.model.ImageRefusal
 import one.scary.bellaclaw.model.Loadable
@@ -87,6 +92,8 @@ class ChatViewModelTest {
     }
 
     private fun ChatUiState.messages() = rows.filterIsInstance<ChatRow.Item>().map { it.message }
+
+    private fun ChatUiState.cards() = rows.filterIsInstance<ChatRow.Command>()
 
     private fun ChatUiState.liveCard() = (rows.firstOrNull() as? ChatRow.Activity)?.takeIf { it.isLive }
 
@@ -402,17 +409,155 @@ class ChatViewModelTest {
     }
 
     @Test
-    fun `a confidential command settles once accepted, though history never has it`() = runTest {
+    fun `a command's rows are one folded card in place of the request, and a tap keeps it open`() = runTest {
+        gateway.addRow(BELLA_KEY, "user", "!status")
+        gateway.addRow(BELLA_KEY, "user", "!connector list", command = """{"runId":"r1","name":"connector","state":"done","outcome":"1 connector"}""")
+        gateway.addRow(
+            BELLA_KEY,
+            "assistant",
+            "github: Active",
+            command = """{"runId":"r1","name":"connector","state":"done","outcome":"1 connector","rows":[{"title":"github","status":{"label":"Active","tone":"good"},"detail":"https://api.example.com/mcp/"}]}""",
+        )
         val viewModel = viewModel(BELLACLAW_CHAT_ID, repository())
-        viewModel.uiState.first { it.isReadyToSend && it.isStreamOpen }
 
-        viewModel.onDraftChange("!ai-auth openai")
+        val state = viewModel.uiState.first { it.cards().size == 1 && it.commands.isNotEmpty() }
+
+        // A row without a run keeps its bubble.
+        assertEquals(listOf("!status"), state.messages().map { it.text })
+        val card = state.cards().single()
+        assertEquals("!connector list", card.header)
+        assertEquals(CommandState.DONE, card.state)
+        assertEquals("1 connector", card.outcome)
+        assertTrue(card.isFolded)
+        assertEquals(listOf(CommandRow("github", CommandStatus("Active", CommandTone.GOOD), "https://api.example.com/mcp/")), card.lines.single().rows)
+
+        viewModel.toggleCard(card.key)
+        viewModel.uiState.first { !it.cards().single().isFolded }
+        gateway.addRow(BELLA_KEY, "assistant", "Anything else?")
+        gateway.push("changed", """{"conversationKey":"$BELLA_KEY","revision":4,"rewriteRevision":0}""")
+
+        assertFalse(viewModel.uiState.first { it.messages().size == 2 }.cards().single().isFolded)
+    }
+
+    @Test
+    fun `a command send shows an open pending card that stays the same card as its run goes on, and folds once it finishes`() = runTest {
+        val viewModel = viewModel(BELLACLAW_CHAT_ID, repository())
+        viewModel.uiState.first { it.isReadyToSend && it.commands.isNotEmpty() }
+
+        viewModel.onDraftChange("!update")
         viewModel.send()
-        takeSend()
-        gateway.push("reply", """{"conversationKey":"$BELLA_KEY","text":"Open this link to sign in"}""")
 
-        val settled = viewModel.uiState.first { state -> state.messages().size == 2 && state.messages().none { it.sendState != SendState.STORED } }
-        assertEquals(listOf("Open this link to sign in", "!ai-auth openai"), settled.messages().map { it.text })
+        val sending = viewModel.uiState.first { it.cards().isNotEmpty() }
+        assertTrue(sending.messages().isEmpty())
+        val pending = sending.cards().single()
+        assertEquals("!update", pending.header)
+        assertEquals(CommandState.RUNNING, pending.state)
+        assertFalse(pending.isFolded)
+        val id = takeSend().clientMessageId()
+        gateway.addRow(BELLA_KEY, "user", "!update", clientMessageId = id, command = """{"runId":"r2","name":"update","state":"running","outcome":"checking"}""")
+        gateway.addRow(BELLA_KEY, "assistant", "Checking for an update.", command = """{"runId":"r2","name":"update","state":"running","outcome":"checking"}""")
+        gateway.push("changed", """{"conversationKey":"$BELLA_KEY","revision":2,"rewriteRevision":0}""")
+
+        val running = viewModel.uiState.first { it.cards().singleOrNull()?.lines?.size == 1 }.cards().single()
+        assertEquals(pending.key, running.key)
+        assertEquals("checking", running.outcome)
+        assertFalse(running.isFolded)
+
+        gateway.addRow(BELLA_KEY, "assistant", "Updated to 3f9c2a1.", command = """{"runId":"r2","name":"update","state":"done","outcome":"updated to 3f9c2a1"}""")
+        gateway.push("changed", """{"conversationKey":"$BELLA_KEY","revision":3,"rewriteRevision":0}""")
+
+        val done = viewModel.uiState.first { it.cards().single().state == CommandState.DONE }.cards().single()
+        assertEquals(listOf("Checking for an update.", "Updated to 3f9c2a1."), done.lines.map { it.text })
+        assertEquals(listOf(CommandState.DONE, CommandState.DONE), done.lines.map { it.state })
+        assertTrue(done.isFolded)
+        assertEquals(0, viewModel.uiState.value.rows.count { it is ChatRow.Item })
+    }
+
+    @Test
+    fun `a command send that starts a model turn becomes a bubble once history has it`() = runTest {
+        val viewModel = viewModel(BELLACLAW_CHAT_ID, repository())
+        viewModel.uiState.first { it.isReadyToSend && it.commands.isNotEmpty() }
+
+        viewModel.onDraftChange("!mcp-prompt github review")
+        viewModel.send()
+        viewModel.uiState.first { it.cards().isNotEmpty() }
+        gateway.addRow(BELLA_KEY, "user", "!mcp-prompt github review", clientMessageId = takeSend().clientMessageId())
+        gateway.push("changed", """{"conversationKey":"$BELLA_KEY","revision":1,"rewriteRevision":0}""")
+
+        val stored = viewModel.uiState.first { it.messages().isNotEmpty() }
+        assertTrue(stored.cards().isEmpty())
+        assertEquals(listOf("!mcp-prompt github review"), stored.messages().map { it.text })
+    }
+
+    @Test
+    fun `a refused command send shows the failure in its card and a retry sends it again`() = runTest {
+        gateway.sendFailures.put(400 to errorAnswer("Connectors are off"))
+        val viewModel = viewModel(BELLACLAW_CHAT_ID, repository())
+        viewModel.uiState.first { it.isReadyToSend && it.commands.isNotEmpty() }
+
+        viewModel.onDraftChange("!connector list")
+        viewModel.send()
+
+        val failed = viewModel.uiState.first { it.cards().singleOrNull()?.sendState == SendState.FAILED }.cards().single()
+        assertEquals(CommandState.FAILED, failed.state)
+        assertEquals("Connectors are off", failed.failure)
+        assertFalse(failed.isFolded)
+        val first = takeSend().clientMessageId()
+
+        viewModel.retry(checkNotNull(failed.retryId))
+
+        assertEquals(first, takeSend().clientMessageId())
+        viewModel.uiState.first { it.cards().single().sendState == SendState.STORED }
+    }
+
+    @Test
+    fun `a confidential command reply that arrives while the send is pending sets its card's state`() = runTest {
+        val hold = CountDownLatch(1)
+        gateway.sendHold = hold
+        val viewModel = viewModel(BELLACLAW_CHAT_ID, repository())
+        viewModel.uiState.first { it.isReadyToSend && it.commands.isNotEmpty() }
+
+        viewModel.onDraftChange("!ai-auth login openai")
+        viewModel.send()
+        val id = takeSend().clientMessageId()
+        val run = """{"runId":"r3","name":"ai-auth","state":"done","outcome":"login started"}"""
+        gateway.push("reply", """{"conversationKey":"$BELLA_KEY","text":"Open this link to sign in","command":$run,"clientMessageId":"$id"}""")
+
+        val card = viewModel.uiState.first { it.cards().singleOrNull()?.lines?.isNotEmpty() == true }.cards().single()
+        assertEquals(SendState.PENDING, card.sendState)
+        assertEquals(CommandState.DONE, card.state)
+        assertEquals("login started", card.outcome)
+        hold.countDown()
+    }
+
+    @Test
+    fun `a confidential command reply shows in its card until the chat is read again`() = runTest {
+        val viewModel = viewModel(BELLACLAW_CHAT_ID, repository())
+        viewModel.uiState.first { it.isReadyToSend && it.commands.isNotEmpty() }
+
+        viewModel.onDraftChange("!ai-auth login openai")
+        viewModel.send()
+        val id = takeSend().clientMessageId()
+        val run = """{"runId":"r3","name":"ai-auth","state":"done","outcome":"login started"}"""
+        gateway.push("reply", """{"conversationKey":"$BELLA_KEY","text":"Open this link to sign in","command":$run,"clientMessageId":"$id"}""")
+
+        val replied = viewModel.uiState.first { it.cards().singleOrNull()?.lines?.isNotEmpty() == true }.cards().single()
+        assertEquals(listOf("Open this link to sign in"), replied.lines.map { it.text })
+        assertEquals("!ai-auth login openai", replied.header)
+
+        gateway.addRow(BELLA_KEY, "user", "!ai-auth", clientMessageId = id, command = run)
+        gateway.addRow(BELLA_KEY, "assistant", "login started", command = run)
+        gateway.push("changed", """{"conversationKey":"$BELLA_KEY","revision":2,"rewriteRevision":0}""")
+
+        val history = viewModel.uiState.first { it.cards().singleOrNull()?.header == "!ai-auth" }
+        assertTrue(history.messages().isEmpty())
+        val stored = history.cards().single()
+        assertEquals(replied.key, stored.key)
+        assertEquals(listOf("Open this link to sign in"), stored.lines.map { it.text })
+
+        val reread = viewModel(BELLACLAW_CHAT_ID, repository()).uiState.first { it.cards().isNotEmpty() }.cards().single()
+        assertTrue(reread.lines.isEmpty())
+        assertEquals("login started", reread.outcome)
     }
 
     @Test

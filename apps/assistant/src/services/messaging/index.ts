@@ -105,7 +105,7 @@ export class MessagingAdapter {
           undefined,
           event.payload.text,
           undefined,
-          { text: event.payload.text },
+          { text: event.payload.text, command: event.payload.command },
           event,
           ctx,
         ),

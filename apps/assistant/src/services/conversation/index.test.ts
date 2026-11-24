@@ -273,3 +273,36 @@ test("after three kept compactions, saveSummary returns the images of the droppe
   // boundaries [b, c, d]: a was dropped, so (a, b] goes
   expect((await summarize(ids[3] ?? 0)).map((ref) => ref.id)).toEqual(["b"]);
 });
+
+test("a command's display stores its run on the reply row and, without rows, on the request row; history returns both", async () => {
+  const chatId = "conversation-command-run";
+  const database = DatabaseConnector.instance.database;
+  const rows = [{ title: "notes", status: { label: "active", tone: "good" as const } }];
+  await new ConversationStore().saveDisplayMessage(
+    database,
+    chatId,
+    EMessagePlatform.App,
+    {
+      text: "- notes (mcp, active)",
+      request: { text: "!connector list", receivedAt: Date.now(), clientMessageId: "client-1" },
+      command: { runId: "run-1", name: "connector", state: "done", outcome: "1 connectors", rows },
+    },
+    Date.now(),
+  );
+
+  const history = await listHistory(database, chatId, undefined, 50);
+  expect(history.map((row) => [row.author, row.text, row.clientMessageId, row.command])).toEqual([
+    [
+      "user",
+      "!connector list",
+      "client-1",
+      { runId: "run-1", name: "connector", state: "done", outcome: "1 connectors" },
+    ],
+    [
+      "assistant",
+      "- notes (mcp, active)",
+      undefined,
+      { runId: "run-1", name: "connector", state: "done", outcome: "1 connectors", rows },
+    ],
+  ]);
+});

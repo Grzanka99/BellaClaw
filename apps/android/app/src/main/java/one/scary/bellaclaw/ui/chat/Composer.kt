@@ -1,5 +1,6 @@
 package one.scary.bellaclaw.ui.chat
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -7,6 +8,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -18,6 +20,7 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
@@ -47,16 +50,19 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import dev.chrisbanes.haze.HazeState
 import one.scary.bellaclaw.R
+import one.scary.bellaclaw.model.CommandEntry
 import one.scary.bellaclaw.model.ImageRefusal
 
 /**
  * The message box: attach button, text, the picked image or why it was refused above them, and the send
  * button. An empty box has a mic ([onDictate]) instead of send; while [dictation] listens, the box
  * becomes [DictationBar]. Its box floats over the conversation as frosted glass from [hazeState].
+ * A draft starting with "!" offers the [commands] palette, and a recognised command its usage and choices.
  */
 @Composable
 fun Composer(
     draft: String,
+    commands: List<CommandEntry>,
     placeholder: String,
     attachmentUri: String?,
     attachmentRefusal: ImageRefusal?,
@@ -101,89 +107,129 @@ fun Composer(
         }
     }
     val isEmpty = draft.isEmpty() && attachmentUri == null
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = 8.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.Bottom,
-    ) {
-        Surface(
-            shape = BoxShape,
-            color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = GLASS_ALPHA),
-            modifier = Modifier.weight(1f).frosted(hazeState, BoxShape),
-        ) {
-            Column {
-                attachmentUri?.let { uri ->
-                    AttachmentPreview(uri = uri, loader = thumbnailLoader, onRemove = onRemoveAttachment)
-                }
-                attachmentRefusal?.let { reason ->
-                    Text(
-                        text = when (reason) {
-                            ImageRefusal.TOO_LARGE -> stringResource(R.string.error_image_too_large)
-                            ImageRefusal.UNSUPPORTED_TYPE -> stringResource(R.string.error_image_type)
-                        },
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.padding(start = 16.dp, top = 12.dp, end = 16.dp),
-                    )
-                }
-                Row(verticalAlignment = Alignment.Bottom) {
-                    IconButton(onClick = onAttach, modifier = Modifier.padding(vertical = 4.dp)) {
-                        Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.action_attach_image))
+    val command = commandComposerState(draft, commands)
+    val primary = MaterialTheme.colorScheme.primary
+    val commandWord = remember(primary) { CommandWordTransformation(primary) }
+    val visualTransformation = if (command is CommandComposerState.Recognised) {
+        commandWord
+    } else {
+        VisualTransformation.None
+    }
+    Column(modifier = modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp)) {
+        if (command is CommandComposerState.Recognised) {
+            CommandHints(
+                recognised = command,
+                onChoice = { choice ->
+                    if (draft.last().isWhitespace()) {
+                        onDraftChange("$draft$choice ")
+                    } else {
+                        onDraftChange("$draft $choice ")
                     }
-                    val colors = TextFieldDefaults.colors(
-                        focusedContainerColor = Color.Transparent,
-                        unfocusedContainerColor = Color.Transparent,
-                        focusedIndicatorColor = Color.Transparent,
-                        unfocusedIndicatorColor = Color.Transparent,
-                    )
-                    val interactionSource = remember { MutableInteractionSource() }
-                    BasicTextField(
-                        value = value,
-                        onValueChange = {
-                            field = it
-                            onDraftChange(it.text)
-                        },
-                        textStyle = LocalTextStyle.current.merge(color = colors.focusedTextColor),
-                        cursorBrush = SolidColor(colors.cursorColor),
-                        maxLines = 5,
-                        interactionSource = interactionSource,
-                        modifier = Modifier
-                            .weight(1f)
-                            .defaultMinSize(minHeight = TextFieldDefaults.MinHeight)
-                            .focusRequester(focusRequester),
-                    ) { innerTextField ->
-                        TextFieldDefaults.DecorationBox(
-                            value = value.text,
-                            innerTextField = innerTextField,
-                            enabled = true,
-                            singleLine = false,
-                            visualTransformation = VisualTransformation.None,
-                            interactionSource = interactionSource,
-                            placeholder = { Text(placeholder) },
-                            colors = colors,
-                            contentPadding = TextFieldDefaults.contentPaddingWithoutLabel(start = 0.dp),
+                },
+                hazeState = hazeState,
+            )
+            Spacer(Modifier.height(6.dp))
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.Bottom,
+        ) {
+            Surface(
+                shape = BoxShape,
+                color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = GLASS_ALPHA),
+                border = if (command is CommandComposerState.Recognised) {
+                    BorderStroke(2.dp, primary)
+                } else {
+                    null
+                },
+                modifier = Modifier.weight(1f).frosted(hazeState, BoxShape),
+            ) {
+                Column {
+                    if (command is CommandComposerState.Palette) {
+                        CommandPalette(palette = command, onPick = { entry -> onDraftChange("!${entry.name} ") })
+                    }
+                    attachmentUri?.let { uri ->
+                        AttachmentPreview(uri = uri, loader = thumbnailLoader, onRemove = onRemoveAttachment)
+                    }
+                    attachmentRefusal?.let { reason ->
+                        Text(
+                            text = when (reason) {
+                                ImageRefusal.TOO_LARGE -> stringResource(R.string.error_image_too_large)
+                                ImageRefusal.UNSUPPORTED_TYPE -> stringResource(R.string.error_image_type)
+                            },
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.padding(start = 16.dp, top = 12.dp, end = 16.dp),
                         )
                     }
-                    if (isEmpty) {
-                        IconButton(
-                            onClick = onDictate,
-                            modifier = Modifier.padding(vertical = 4.dp),
-                        ) {
-                            Icon(Icons.Filled.Mic, contentDescription = stringResource(R.string.action_dictate))
+                    Row(verticalAlignment = Alignment.Bottom) {
+                        if (command is CommandComposerState.Recognised) {
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier.padding(vertical = 4.dp).size(48.dp),
+                            ) {
+                                Icon(Icons.Outlined.Terminal, contentDescription = null, tint = primary)
+                            }
+                        } else {
+                            IconButton(onClick = onAttach, modifier = Modifier.padding(vertical = 4.dp)) {
+                                Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.action_attach_image))
+                            }
+                        }
+                        val colors = TextFieldDefaults.colors(
+                            focusedContainerColor = Color.Transparent,
+                            unfocusedContainerColor = Color.Transparent,
+                            focusedIndicatorColor = Color.Transparent,
+                            unfocusedIndicatorColor = Color.Transparent,
+                        )
+                        val interactionSource = remember { MutableInteractionSource() }
+                        BasicTextField(
+                            value = value,
+                            onValueChange = {
+                                field = it
+                                onDraftChange(it.text)
+                            },
+                            textStyle = LocalTextStyle.current.merge(color = colors.focusedTextColor),
+                            cursorBrush = SolidColor(colors.cursorColor),
+                            maxLines = 5,
+                            visualTransformation = visualTransformation,
+                            interactionSource = interactionSource,
+                            modifier = Modifier
+                                .weight(1f)
+                                .defaultMinSize(minHeight = TextFieldDefaults.MinHeight)
+                                .focusRequester(focusRequester),
+                        ) { innerTextField ->
+                            TextFieldDefaults.DecorationBox(
+                                value = value.text,
+                                innerTextField = innerTextField,
+                                enabled = true,
+                                singleLine = false,
+                                visualTransformation = visualTransformation,
+                                interactionSource = interactionSource,
+                                placeholder = { Text(placeholder) },
+                                colors = colors,
+                                contentPadding = TextFieldDefaults.contentPaddingWithoutLabel(start = 0.dp),
+                            )
+                        }
+                        if (isEmpty) {
+                            IconButton(
+                                onClick = onDictate,
+                                modifier = Modifier.padding(vertical = 4.dp),
+                            ) {
+                                Icon(Icons.Filled.Mic, contentDescription = stringResource(R.string.action_dictate))
+                            }
                         }
                     }
                 }
             }
-        }
-        if (!isEmpty) {
-            Spacer(Modifier.width(8.dp))
-            FilledIconButton(
-                onClick = onSend,
-                enabled = canSend,
-                modifier = Modifier.size(56.dp),
-            ) {
-                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = stringResource(R.string.action_send))
+            if (!isEmpty) {
+                Spacer(Modifier.width(8.dp))
+                FilledIconButton(
+                    onClick = onSend,
+                    enabled = canSend,
+                    modifier = Modifier.size(56.dp),
+                ) {
+                    Icon(Icons.AutoMirrored.Filled.Send, contentDescription = stringResource(R.string.action_send))
+                }
             }
         }
     }

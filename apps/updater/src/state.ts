@@ -1,6 +1,13 @@
 import { mkdir, rename } from "node:fs/promises";
 import { join } from "node:path";
-import { createLogger, type TOption, UPDATER_NOTICES_DIR } from "@bellaclaw/shared";
+import {
+  createLogger,
+  type TCommandState,
+  type TOption,
+  type TUpdateNotice,
+  type TUpdateRequest,
+  UPDATER_NOTICES_DIR,
+} from "@bellaclaw/shared";
 import { run } from "./command";
 
 // NOTE: the state files live in BELLACLAW_UPDATER_DIR next to the files shared with the assistant,
@@ -12,7 +19,7 @@ export const APPLIED_UPDATES_FILE = "applied-updates";
 export const FAILED_FILE = "failed-sha";
 // written before a database migration and deleted once the new version is ready
 export const MIGRATED_FILE = "migrated";
-// the new version did not start after its migration; holds the chat id of the update, or nothing
+// the new version did not start after its migration; holds the request of the update, or nothing
 export const UNHEALTHY_FILE = "unhealthy";
 
 export const RUNNER_CONTAINER = "bellaclaw-update-runner";
@@ -40,15 +47,18 @@ export async function readText(path: string): Promise<string> {
   return (await file.text()).trim();
 }
 
-// always logs; a notice file only when a chat is known, since no chat hears a scheduled update
+// always logs; a notice file only for a requester, since no chat hears a scheduled update. state,
+// outcome: the step of the requester's !update run this line is
 export async function notify(
   stateDir: string,
-  chatId: TOption<string>,
+  requester: TOption<TUpdateRequest>,
   text: string,
+  state: TCommandState,
+  outcome: string,
 ): Promise<void> {
   log.info(text);
 
-  if (chatId === undefined) {
+  if (requester === undefined) {
     return;
   }
 
@@ -58,8 +68,28 @@ export async function notify(
 
   noticeCount += 1;
   await mkdir(dir, { recursive: true });
-  await Bun.write(join(dir, `${name}.tmp`), JSON.stringify({ chatId, text }));
+  const notice: TUpdateNotice = {
+    chatId: requester.chatId,
+    text,
+    command: { runId: requester.runId, name: "update", state, outcome },
+  };
+
+  await Bun.write(join(dir, `${name}.tmp`), JSON.stringify(notice));
   await rename(join(dir, `${name}.tmp`), join(dir, `${name}.json`));
+}
+
+// marks the new version as waiting for a fix on main, for the requester of its update
+export async function writeUnhealthy(
+  stateDir: string,
+  requester: TOption<TUpdateRequest>,
+): Promise<void> {
+  let text = "";
+
+  if (requester !== undefined) {
+    text = JSON.stringify(requester);
+  }
+
+  await Bun.write(join(stateDir, UNHEALTHY_FILE), text);
 }
 
 // puts the old commit and image back and starts its containers with restart, before anything new

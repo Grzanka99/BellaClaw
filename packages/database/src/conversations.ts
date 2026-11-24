@@ -1,4 +1,4 @@
-import type { TOption } from "@bellaclaw/shared";
+import { SCommandRun, type TCommandRun, type TOption } from "@bellaclaw/shared";
 import { and, asc, desc, eq, gt, inArray, lt, sql } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import { z } from "zod";
@@ -55,7 +55,8 @@ export type THistoryListFinished = z.infer<typeof SStoredListFinished>;
 // images: those of a user message, in order, none when it has no image; steps: the tool calls of
 // a reply's turn, by start, none when the turn used no tools; scheduled: a delivery of a scheduled
 // job, such as a reminder or an automation's output; listFinished: on a finished list's card only,
-// the list's name and its item count
+// the list's name and its item count; command: on the request row and each reply or notice row of a
+// command run, the run
 export type THistoryMessage = {
   id: number;
   author: "user" | "assistant";
@@ -68,6 +69,7 @@ export type THistoryMessage = {
   steps: TOption<THistoryStep[]>;
   scheduled: boolean;
   listFinished: TOption<THistoryListFinished>;
+  command: TOption<TCommandRun>;
 };
 
 // NOTE: a user message's attachment references as the assistant stores them, as much of them as
@@ -253,6 +255,7 @@ export async function listHistory(
       attachments: memoriesTable.attachments,
       steps: memoriesTable.steps,
       listFinished: memoriesTable.listFinished,
+      command: memoriesTable.command,
       createdAt: memoriesTable.createdAt,
       clientMessageId: memoriesTable.clientMessageId,
       // NOTE: the scheduler saves a delivery with the model scheduled-delivery and a model text
@@ -346,6 +349,16 @@ export async function listHistory(
         }
       }
 
+      let command: TOption<TCommandRun>;
+
+      if (row.command !== null) {
+        const stored = SCommandRun.safeParse(JSON.parse(row.command));
+
+        if (stored.success) {
+          command = stored.data;
+        }
+      }
+
       messages.push({
         id: row.id,
         author: row.author,
@@ -358,6 +371,7 @@ export async function listHistory(
         steps,
         scheduled: row.scheduled === 1,
         listFinished,
+        command,
       });
     }
   }

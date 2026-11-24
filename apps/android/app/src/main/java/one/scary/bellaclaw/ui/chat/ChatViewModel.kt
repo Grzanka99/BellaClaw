@@ -69,7 +69,8 @@ class ChatViewModel(
     /**
      * What only this screen knows besides the draft: the picked image or why the last pick was refused,
      * whether a pick is being checked, the image open full screen, whether the picker is open and
-     * its selection as last set; the picker shows it made valid for the model list.
+     * its selection as last set; the picker shows it made valid for the model list. [cardFolds] holds,
+     * by row key, whether each command card the reader tapped is folded.
      */
     private data class LocalState(
         val attachment: PickedImage? = null,
@@ -79,6 +80,7 @@ class ChatViewModel(
         val viewedImage: MessageImage? = null,
         val isPickerOpen: Boolean = false,
         val pickerSelection: ModelChoice? = null,
+        val cardFolds: Map<String, Boolean> = emptyMap(),
     )
 
     /** The composer's text, kept in [savedStateHandle] across process death. */
@@ -160,15 +162,24 @@ class ChatViewModel(
         draft,
         local,
         settingsRepository.settings,
-        combine(chatRepository.dictationLanguage, listsRepository.lists, ::Pair),
-    ) { chat, draft, local, settings, (dictationLanguage, lists) ->
+        combine(chatRepository.dictationLanguage, listsRepository.lists, chatRepository.commands, ::Triple),
+    ) { chat, draft, local, settings, (dictationLanguage, lists, commands) ->
         val picker = if (local.isPickerOpen) {
             val usable = settings.chatModels.map { providers -> providers.filter { it.isUsable } }
             ModelPickerState(usable, validSelection(local.pickerSelection, settings.chatModels))
         } else {
             null
         }
+        // A card the reader tapped keeps their choice; any other folds once its run finishes.
+        val rows = chat.rows.map { row ->
+            if (row is ChatRow.Command) {
+                row.copy(isFolded = local.cardFolds[row.key] ?: row.isFolded)
+            } else {
+                row
+            }
+        }
         chat.copy(
+            rows = rows,
             draft = draft,
             attachmentUri = local.checkingUri ?: local.attachment?.uri,
             attachmentRefusal = local.attachmentRefusal,
@@ -177,6 +188,7 @@ class ChatViewModel(
             picker = picker,
             dictationLanguage = dictationLanguage,
             lists = lists.orEmpty(),
+            commands = if (chat.kind == ChatKind.BELLACLAW) commands else emptyList(),
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ChatUiState())
 
@@ -242,6 +254,12 @@ class ChatViewModel(
     /** Sends the failed message [messageId] again. */
     fun retry(messageId: String) {
         chatRepository.retry(chatId.value, messageId)
+    }
+
+    /** Folds or unfolds the command card [key], for as long as this screen lives. */
+    fun toggleCard(key: String) {
+        val card = uiState.value.rows.filterIsInstance<ChatRow.Command>().firstOrNull { it.key == key } ?: return
+        local.update { it.copy(cardFolds = it.cardFolds + (key to !card.isFolded)) }
     }
 
     /** The reader reached the oldest loaded row. */

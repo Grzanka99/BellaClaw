@@ -103,14 +103,21 @@ test("the token command saves through mcp-auth and loses its payload once handle
     { chatId, profileId: "vault" },
   ]);
   expect(await send("!connector-auth status vault")).toBe("Connector vault is connected.");
-  // the token command is confidential: neither it nor its answer is carried for the history
-  expect((await rowsOf(EEventType.ReplyReady)).map((row) => JSON.stringify(row.payload))).toEqual([
-    expect.not.stringContaining("display"),
-    expect.stringContaining('"display"'),
-  ]);
+  // the token command is confidential: the history gets its name and outcome, the token never
+  const [saved] = await rowsOf(EEventType.ReplyReady);
+  expect(saved?.payload).toMatchObject({
+    text: "Saved the token for connector vault in this chat.",
+    confidential: true,
+    display: {
+      text: "connector vault connected",
+      request: { text: "!connector-auth" },
+      command: { name: "connector-auth", state: "done", outcome: "connector vault connected" },
+    },
+  });
+  expect(JSON.stringify(saved?.payload)).not.toContain("secret-token");
 });
 
-test("a malformed command, a token in it or not, carries nothing for the history", async () => {
+test("a malformed command, a token in it or not, carries no token for the history", async () => {
   for (const content of [
     "!connector-auth TOKEN vault secret-1",
     "!connector-auth Token vault secret-2 extra",
@@ -126,7 +133,7 @@ test("a malformed command, a token in it or not, carries nothing for the history
   const replies = (await rowsOf(EEventType.ReplyReady)).map((row) => JSON.stringify(row.payload));
   expect(replies).toHaveLength(5);
   for (const reply of replies) {
-    expect(reply).not.toContain("display");
+    expect(reply).toContain('"request":{"text":"!connector-auth"');
     expect(reply).not.toContain("secret-");
   }
   expect(await rowsOf(EEventType.McpAuthTokenSaveRequested)).toEqual([]);

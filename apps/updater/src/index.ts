@@ -4,6 +4,7 @@ import {
   createLogger,
   SUpdateRequest,
   type TOption,
+  type TUpdateRequest,
   UPDATER_NOTICES_DIR,
   UPDATER_REQUEST_FILE,
 } from "@bellaclaw/shared";
@@ -18,6 +19,7 @@ import {
   readText,
   restore,
   UNHEALTHY_FILE,
+  writeUnhealthy,
 } from "./state";
 
 // NOTE: the updater always runs the code of the image it was started from. It builds the new
@@ -109,11 +111,18 @@ export class Updater {
     private ciRetryMs: number,
   ) {}
 
-  // manual: asked for in a chat; chatId: the chat that hears of it, undefined for none
-  public async update(manual: boolean, chatId: TOption<string>): Promise<void> {
-    if (this.updating) {
+  // manual: asked for in a chat; requester: the chat and run that hear of it, undefined for none
+  public async update(manual: boolean, requester: TOption<TUpdateRequest>): Promise<void> {
+    // a pending CI wait is an update in progress
+    if (this.updating || this.ciRetry !== undefined) {
       if (manual) {
-        await notify(this.stateDir, chatId, "An update is already running.");
+        await notify(
+          this.stateDir,
+          requester,
+          "An update is already running.",
+          "failed",
+          "already running",
+        );
       }
 
       return;
@@ -122,9 +131,15 @@ export class Updater {
     this.updating = true;
 
     try {
-      await this.runUpdate(manual, chatId);
+      await this.runUpdate(manual, requester);
     } catch (error) {
-      await notify(this.stateDir, chatId, `The update check failed: ${String(error)}`);
+      await notify(
+        this.stateDir,
+        requester,
+        `The update check failed: ${String(error)}`,
+        "failed",
+        "check failed",
+      );
     } finally {
       this.updating = false;
     }
@@ -158,7 +173,7 @@ export class Updater {
       return;
     }
 
-    await this.update(true, parsed.data.chatId);
+    await this.update(true, parsed.data);
   }
 
   // a version that does not start after its migration waits for a fix on main
@@ -169,17 +184,22 @@ export class Updater {
       return;
     }
 
-    let chatId: TOption<string>;
+    let requester: TOption<TUpdateRequest>;
     const text = (await file.text()).trim();
 
+    // empty for a scheduled update
     if (text !== "") {
-      chatId = text;
+      const parsed = SUpdateRequest.safeParse(JSON.parse(text));
+
+      if (parsed.success) {
+        requester = parsed.data;
+      }
     }
 
-    await this.update(false, chatId);
+    await this.update(false, requester);
   }
 
-  private async runUpdate(manual: boolean, chatId: TOption<string>): Promise<void> {
+  private async runUpdate(manual: boolean, requester: TOption<TUpdateRequest>): Promise<void> {
     const checkout = this.checkout;
     const failedFile = join(this.stateDir, FAILED_FILE);
 
@@ -204,7 +224,13 @@ export class Updater {
 
     if (sha === old) {
       if (manual) {
-        await notify(this.stateDir, chatId, `Already on ${short}.`);
+        await notify(
+          this.stateDir,
+          requester,
+          `Already on ${short}.`,
+          "done",
+          `already on ${short}`,
+        );
       }
 
       return;
@@ -220,20 +246,30 @@ export class Updater {
       if (manual) {
         await notify(
           this.stateDir,
-          chatId,
+          requester,
           `CI has no result yet for ${short}. Updating when it is green.`,
+          "running",
+          "waiting for CI",
         );
       }
 
-      // one timer, however many checks found CI pending
-      clearTimeout(this.ciRetry);
-      this.ciRetry = setTimeout(() => void this.update(false, chatId), this.ciRetryMs);
+      // one timer: no other check runs while it is pending
+      this.ciRetry = setTimeout(() => {
+        this.ciRetry = undefined;
+        void this.update(false, requester);
+      }, this.ciRetryMs);
       return;
     }
 
     if (ci === ECiState.Failed) {
       await Bun.write(failedFile, sha);
-      await notify(this.stateDir, chatId, `Skipped the update to ${short}: its CI failed.`);
+      await notify(
+        this.stateDir,
+        requester,
+        `Skipped the update to ${short}: its CI failed.`,
+        "failed",
+        "CI failed",
+      );
       return;
     }
 
@@ -246,8 +282,10 @@ export class Updater {
       await Bun.write(failedFile, sha);
       await notify(
         this.stateDir,
-        chatId,
+        requester,
         `The update to ${short} is held: files are edited in the server checkout: ${edited.join(", ")}`,
+        "failed",
+        "held",
       );
       return;
     }
@@ -280,8 +318,10 @@ export class Updater {
 
       await notify(
         this.stateDir,
-        chatId,
+        requester,
         [`Updating ${oldShort} → ${short} (${commits}):`, ...lines].join("\n"),
+        "running",
+        `updating to ${short}`,
       );
 
       const buildStart = Date.now();
@@ -329,8 +369,10 @@ export class Updater {
 
       await notify(
         this.stateDir,
-        chatId,
+        requester,
         `Built the image in ${Math.round((Date.now() - buildStart) / 1000)} s.`,
+        "running",
+        `updating to ${short}`,
       );
     } catch (error) {
       await run(["git", "reset", "--hard", old], checkout);
@@ -342,16 +384,18 @@ export class Updater {
       await Bun.write(failedFile, sha);
       await notify(
         this.stateDir,
-        chatId,
+        requester,
         `The update to ${short} failed, still on ${oldShort}: ${String(error)}`,
+        "failed",
+        "update failed",
       );
       return;
     }
 
     const runnerArgs = [old, sha];
 
-    if (chatId !== undefined) {
-      runnerArgs.push(chatId);
+    if (requester !== undefined) {
+      runnerArgs.push(requester.chatId, requester.runId);
     }
 
     let exitCode = "";
@@ -390,18 +434,27 @@ export class Updater {
     // the old code cannot use the migrated schema
     if (await Bun.file(join(this.stateDir, MIGRATED_FILE)).exists()) {
       await run(RECREATE_APPS, checkout);
-      await Bun.write(join(this.stateDir, UNHEALTHY_FILE), chatId ?? "");
+      await writeUnhealthy(this.stateDir, requester);
+      // still running: checkUnhealthy installs the fix for the same requester
       await notify(
         this.stateDir,
-        chatId,
+        requester,
         `The update to ${short} crashed after its database migration. Started ${short} without a rollback.`,
+        "running",
+        "waiting for a fix",
       );
       return;
     }
 
     // recreated, since the runner may have stopped or replaced any of them
     await restore(checkout, this.stateDir, old, sha, RECREATE_APPS);
-    await notify(this.stateDir, chatId, `The update to ${short} crashed, restored ${oldShort}.`);
+    await notify(
+      this.stateDir,
+      requester,
+      `The update to ${short} crashed, restored ${oldShort}.`,
+      "failed",
+      "update failed",
+    );
   }
 }
 

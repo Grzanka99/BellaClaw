@@ -1,6 +1,12 @@
 import { appendFile, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { createLogger, type TOption, UPDATER_READY_FILE } from "@bellaclaw/shared";
+import {
+  createLogger,
+  SUpdateRequest,
+  type TOption,
+  type TUpdateRequest,
+  UPDATER_READY_FILE,
+} from "@bellaclaw/shared";
 import { exec, run } from "./command";
 import {
   APPLIED_UPDATES_FILE,
@@ -11,21 +17,22 @@ import {
   readText,
   restore,
   UNHEALTHY_FILE,
+  writeUnhealthy,
 } from "./state";
 
 // NOTE: the runner is a one-off container started from the new image, with the checkout already on
 // the new commit. It switches the containers to the new version, or puts the old one back, and
 // exits 0 once it handled the outcome; any other exit makes the updater restore.
 
-// updatesDir: the update scripts of the image; old, sha: the running and the new commit; chatId:
-// the chat that hears of it, undefined for none
+// updatesDir: the update scripts of the image; old, sha: the running and the new commit;
+// requester: the chat and run that hear of it, undefined for none
 export type TRunnerOptions = {
   checkout: string;
   stateDir: string;
   updatesDir: string;
   old: string;
   sha: string;
-  chatId: TOption<string>;
+  requester: TOption<TUpdateRequest>;
   readyTimeoutMs: number;
 };
 
@@ -35,7 +42,7 @@ const START_OLD = ["podman", "start", "bellaclaw"];
 const log = createLogger("RUNNER");
 
 export async function runRunner(options: TRunnerOptions): Promise<void> {
-  const { checkout, stateDir, updatesDir, old, sha, chatId } = options;
+  const { checkout, stateDir, updatesDir, old, sha, requester } = options;
   const short = sha.slice(0, 7);
   const oldShort = old.slice(0, 7);
   const appliedFile = join(stateDir, APPLIED_UPDATES_FILE);
@@ -61,14 +68,22 @@ export async function runRunner(options: TRunnerOptions): Promise<void> {
       await restore(checkout, stateDir, old, sha, START_OLD);
       await notify(
         stateDir,
-        chatId,
+        requester,
         `The update to ${short} failed in update script ${name}, restarted ${oldShort}: ${result.output.slice(-500)}`,
+        "failed",
+        "update failed",
       );
       return;
     }
 
     await appendFile(appliedFile, `${name}\n`);
-    await notify(stateDir, chatId, `Update script ${name} done.`);
+    await notify(
+      stateDir,
+      requester,
+      `Update script ${name} done.`,
+      "running",
+      `updating to ${short}`,
+    );
   }
 
   const migrates =
@@ -102,8 +117,10 @@ export async function runRunner(options: TRunnerOptions): Promise<void> {
       await restore(checkout, stateDir, old, sha, START_OLD);
       await notify(
         stateDir,
-        chatId,
+        requester,
         `The update to ${short} failed in its database migration, restarted ${oldShort}: ${String(error)}`,
+        "failed",
+        "update failed",
       );
       return;
     }
@@ -152,11 +169,21 @@ export async function runRunner(options: TRunnerOptions): Promise<void> {
   if (ready) {
     const subject = await run(["git", "log", "-1", "--format=%s", sha], checkout);
 
-    await notify(
-      stateDir,
-      chatId,
-      `Updated to ${short}: ${subject}. Down for ${Math.round((Date.now() - downSince) / 1000)} s.`,
-    );
+    const text = `Updated to ${short}: ${subject}. Down for ${Math.round((Date.now() - downSince) / 1000)} s.`;
+
+    await notify(stateDir, requester, text, "done", `updated to ${short}`);
+
+    // a version waiting for a fix: its run's card ends with this update
+    const unhealthy = await readText(join(stateDir, UNHEALTHY_FILE));
+
+    if (unhealthy !== "") {
+      const parsed = SUpdateRequest.safeParse(JSON.parse(unhealthy));
+
+      if (parsed.success && parsed.data.runId !== requester?.runId) {
+        await notify(stateDir, parsed.data, text, "done", `updated to ${short}`);
+      }
+    }
+
     // after the report, so a crash before here still finds the migration marker
     await rm(migratedFile, { force: true });
     await rm(join(stateDir, UNHEALTHY_FILE), { force: true });
@@ -187,12 +214,15 @@ export async function runRunner(options: TRunnerOptions): Promise<void> {
   // NOTE: the old code cannot use the migrated schema, so the new version stays and waits for a
   // fix on main
   if (migrates) {
-    await Bun.write(join(stateDir, UNHEALTHY_FILE), chatId ?? "");
+    await writeUnhealthy(stateDir, requester);
     log.error(`${short} does not start after its database migration. Not rolling back.`);
     await notify(
       stateDir,
-      chatId,
+      requester,
       `${short} does not start after its database migration and cannot be rolled back. Push a fix to main: it is installed within 10 minutes.`,
+      // still running: the updater installs the fix for the same requester
+      "running",
+      "waiting for a fix",
     );
     return;
   }
@@ -204,17 +234,25 @@ export async function runRunner(options: TRunnerOptions): Promise<void> {
   await Bun.write(join(stateDir, FAILED_FILE), sha);
   await notify(
     stateDir,
-    chatId,
+    requester,
     `The update to ${short} failed to start, rolled back to ${oldShort}.`,
+    "failed",
+    "update failed",
   );
 }
 
 if (import.meta.main) {
   const stateDir = Bun.env.BELLACLAW_UPDATER_DIR;
-  const [old, sha, chatId] = Bun.argv.slice(2);
+  const [old, sha, chatId, runId] = Bun.argv.slice(2);
 
   if (!stateDir || !old || !sha) {
-    throw new Error("Usage: BELLACLAW_UPDATER_DIR=<dir> runner.ts <old> <sha> [chatId]");
+    throw new Error("Usage: BELLACLAW_UPDATER_DIR=<dir> runner.ts <old> <sha> [chatId runId]");
+  }
+
+  let requester: TOption<TUpdateRequest>;
+
+  if (chatId !== undefined && runId !== undefined) {
+    requester = { chatId, runId };
   }
 
   await runRunner({
@@ -223,7 +261,7 @@ if (import.meta.main) {
     updatesDir: join(import.meta.dir, "../updates"),
     old,
     sha,
-    chatId,
+    requester,
     readyTimeoutMs: 120_000,
   });
 }
