@@ -64,7 +64,7 @@ export const COMMAND_CATALOG = {
   stop: {
     name: "stop",
     group: "AI",
-    description: "Stop the reply the assistant is working on in this chat.",
+    description: "Stop the reply in progress.",
     usage: "!stop",
   },
   update: {

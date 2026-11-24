@@ -148,9 +148,7 @@ A call across services is allowed only when it changes no state:
   (the gateway's open streams), `AppStream.step` (a reply turn's tool calls as they run, which
   the turn sends straight to the open streams; its reply row stores them),
   `AppChannel.openEdgeConnection`, `reportPresence` and `hasOpenStream` (which accounts have an open stream at the gateway, in memory only),
-  `MessageHandler.stop` (the abort controller of a conversation's running turn: `!stop` runs on the
-  `commands` lane while the turn holds the conversation's, and the stopped turn stores what it did
-  and ends as `turn.completed` with no reply).
+  `MessageHandler.stop` (a running turn's abort controller, for `!stop`).
 - Bytes an event must not carry: the internal API hands an app upload to `AppChannel.store` and
   reads it back with `open`; `findAttachments` checks a send's named images.
 - Reads, including reads that prepare a command (`AutomationService.resolveNames`,

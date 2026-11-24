@@ -590,7 +590,7 @@ describe("MessageHandler", () => {
     }
   });
 
-  test("!stop ends the running turn and its delegated agent without a failure, and the next message is answered", async () => {
+  test("!stop ends a turn inside a delegated agent without a failure, and the next message is answered", async () => {
     const chatId = "discord:stop-turn";
     Commands.instance.setup();
     const { internals, settings } = await setupHandler(chatId);

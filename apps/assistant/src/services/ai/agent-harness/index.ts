@@ -470,6 +470,7 @@ export class AgentHarness {
           return message.role === "assistant";
         });
         if (
+          !args.signal?.aborted &&
           firstTerminalAssistant !== undefined &&
           isSerializedToolCall(contentText(firstTerminalAssistant.content), tools)
         ) {
@@ -530,9 +531,9 @@ export class AgentHarness {
     }
 
     // NOTE: an agent that ends without text still completed normally, so it stays at Info level.
-    // A stopped one did what was asked of it
+    // A root agent stopped by `!stop` is not a failure
     agentSpan.end(
-      finalText !== undefined || stopReason === "aborted",
+      finalText !== undefined || (stopReason === "aborted" && args.parentToolCallId === undefined),
       {
         level: EBehaviorLogLevel.Info,
         summary: `${args.name} agent completed`,

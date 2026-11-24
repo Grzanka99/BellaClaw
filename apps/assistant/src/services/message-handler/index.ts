@@ -653,18 +653,17 @@ export class MessageHandler {
 
       // NOTE: a stopped turn keeps what it did: its rows and steps are stored as a completed
       // turn's, so the model knows which tool calls ran, and no reply is sent, since the command
-      // answered. Its last message is the aborted reply, which is never replayed to the model:
-      // a note that it was stopped takes its place
+      // answered. Its last message, the aborted reply that is never replayed to the model, becomes
+      // a note that it was stopped
       if (aiRes?.stopReason === "aborted") {
         const messages = [...aiRes.messages];
         const last = messages.at(-1);
 
-        if (last?.role === "assistant" && last.stopReason === "aborted") {
+        if (last?.role === "assistant") {
           messages[messages.length - 1] = {
             ...last,
             content: [{ type: "text", text: STOPPED_NOTE }],
             stopReason: "stop",
-            errorMessage: undefined,
           };
         }
 
