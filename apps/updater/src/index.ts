@@ -189,14 +189,10 @@ export class Updater {
 
     // empty for a scheduled update
     if (text !== "") {
-      try {
-        const parsed = SUpdateRequest.safeParse(JSON.parse(text));
+      const parsed = SUpdateRequest.safeParse(JSON.parse(text));
 
-        if (parsed.success) {
-          requester = parsed.data;
-        }
-      } catch {
-        this.logger.warning(`Ignored an unhealthy file that is not JSON: ${text}`);
+      if (parsed.success) {
+        requester = parsed.data;
       }
     }
 

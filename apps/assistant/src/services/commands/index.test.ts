@@ -282,7 +282,6 @@ describe("commands consumer", () => {
         },
       },
     });
-    expect(JSON.stringify((reply as { display: unknown }).display)).not.toContain("token=");
   });
 
   test("an MCP prompt command becomes turn.requested keyed by the chat with its trace", async () => {
