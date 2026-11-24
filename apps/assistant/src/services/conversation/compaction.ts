@@ -24,6 +24,8 @@ const IMAGE_TOKENS = 1_500;
 
 // Pi keeps this many tokens of the window free when it sizes the reply
 export const CONTEXT_SAFETY_TOKENS = 4_096;
+// Pi's allowance for a provider that counts text above its estimate
+export const ESTIMATE_MARGIN = 1.15;
 export const REMOVED_RESULT = "[Tool result removed to fit the model's context window]";
 
 /**
@@ -124,8 +126,9 @@ function summaryRecord(message: Message) {
  * Summarize older complete turns without mutating the stored conversation.
  * force: summarize the previous summary and every entry now, whatever their size, as when two
  * summaries are fused. A forced request that fails on `model` runs once more on `fallback`.
- * Each request is cut to the context window of the model it runs on, so the summary can miss the
- * oldest tool results and turns of a conversation larger than that window.
+ * Unforced, it summarizes only the oldest turns that fit `model`'s window, and a later compaction
+ * takes the rest. A forced request is cut to the window of the model it runs on, so its summary
+ * can miss the oldest tool results and turns.
  */
 export async function compactConversation(
   state: TConversation,
@@ -190,6 +193,33 @@ export async function compactConversation(
       cut = i;
     }
   }
+  const budget = (target: Model<Api>) =>
+    (target.contextWindow - CONTEXT_SAFETY_TOKENS - SUMMARY_RESERVE) / ESTIMATE_MARGIN -
+    estimateTextTokens(compactionInstructions + state.summary);
+  const size = (message: Message) => estimateTextTokens(JSON.stringify(summaryRecord(message)));
+  let summarizedTokens = 0;
+  for (let i = 0; i < cut && !force; i += 1) {
+    const entry = state.entries[i];
+    if (entry === undefined) {
+      continue;
+    }
+    summarizedTokens += size(entry.message);
+    if (summarizedTokens > budget(model)) {
+      let next = state.entries
+        .slice(0, i + 1)
+        .findLastIndex(({ message }) => message.role === "user");
+      // an oldest turn above the window is summarized alone, with its tool results cut to fit
+      if (next <= 0) {
+        next = state.entries.findIndex(
+          ({ message }, index) => index > i && message.role === "user",
+        );
+      }
+      if (next > 0) {
+        cut = next;
+      }
+      break;
+    }
+  }
   if (cut === 0 && state.summary.length === 0) {
     return undefined;
   }
@@ -197,14 +227,10 @@ export async function compactConversation(
   const summarized = state.entries.slice(0, cut).map(({ message }) => message);
   const request = (target: Model<Api>) => {
     // NOTE: the summary request must fit the window of the model it runs on, like any other
-    const fitted = fitContext(
-      summarized,
-      target.contextWindow -
-        CONTEXT_SAFETY_TOKENS -
-        SUMMARY_RESERVE -
-        estimateTextTokens(compactionInstructions + state.summary),
-      (message) => estimateTextTokens(JSON.stringify(summaryRecord(message))),
-    );
+    const fitted = fitContext(summarized, budget(target), size);
+    if (fitted.tokens > budget(target)) {
+      return undefined;
+    }
     return models.completeSimple(
       target,
       {
@@ -231,12 +257,17 @@ export async function compactConversation(
   if (
     force &&
     fallback.id !== model.id &&
-    (result.stopReason === "error" ||
+    // a request that does not fit is not sent
+    (result === undefined ||
+      result.stopReason === "error" ||
       result.stopReason === "aborted" ||
       // a provider that reports an input above the window as a normal or length stop
       isContextOverflow(result, model.contextWindow))
   ) {
     result = await request(fallback);
+  }
+  if (result === undefined) {
+    throw new Error("Summary request is larger than the model's context window");
   }
   if (result.stopReason === "error" || result.stopReason === "aborted") {
     throw new Error(result.errorMessage ?? "Conversation summarization failed");

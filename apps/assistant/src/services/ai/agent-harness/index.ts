@@ -11,7 +11,7 @@ import {
   type Model,
   type TextContent,
 } from "@earendil-works/pi-ai";
-import { estimateMessageTokens } from "@earendil-works/pi-ai/utils/estimate";
+import { estimateContextTokens, estimateMessageTokens } from "@earendil-works/pi-ai/utils/estimate";
 import {
   arr,
   bool,
@@ -39,6 +39,7 @@ import { ConnectorRunRegistry, type TConnectorRunStatus } from "../../connectors
 import {
   CONTEXT_SAFETY_TOKENS,
   compactConversation,
+  ESTIMATE_MARGIN,
   fitContext,
 } from "../../conversation/compaction";
 import {
@@ -216,8 +217,8 @@ export class AgentHarness {
     });
     let requestSpan: TOption<TBehaviorSpan>;
     // NOTE: a request's size is Pi's estimate from its text. inflation is how far above that
-    // estimate the provider counted an earlier request of this run; it only grows
-    let inflation = 1;
+    // estimate the provider counted an earlier request, at least Pi's margin; it only grows
+    let inflation = ESTIMATE_MARGIN;
     let requestEstimate = 0;
     const sessionId = this.llm.createSessionId(modelConfig.model.provider, args.conversationKey);
 
@@ -254,17 +255,34 @@ export class AgentHarness {
       },
       streamFn: (model, context, options) => {
         if (iterations >= agentDefinition.maxIterations) {
-          return createHardLimitStream(model);
+          return createHardLimitStream(model, "Agent iteration limit reached");
         }
 
         iterations += 1;
         // NOTE: the hard ceiling: no request is larger than the window less the reply's room.
         // Only the request is cut; the run's transcript keeps every message
-        const fitted = fitContext(
-          context.messages,
-          (model.contextWindow - CONTEXT_SAFETY_TOKENS - REPLY_RESERVE) / inflation,
-          estimateMessageTokens,
-        );
+        const { lastUsageIndex } = estimateContextTokens(context.messages);
+        const counted = context.messages[lastUsageIndex ?? -1];
+        // a chat's earlier turn on this model tells how far above the estimate it counts
+        if (
+          lastUsageIndex !== null &&
+          counted?.role === "assistant" &&
+          counted.provider === model.provider &&
+          counted.model === model.id
+        ) {
+          const { input, cacheRead, cacheWrite } = counted.usage;
+          inflation = Math.max(
+            inflation,
+            (input + cacheRead + cacheWrite) /
+              estimateTokens(context.messages.slice(0, lastUsageIndex)),
+          );
+        }
+        const budget = (model.contextWindow - CONTEXT_SAFETY_TOKENS - REPLY_RESERVE) / inflation;
+        const fitted = fitContext(context.messages, budget, estimateMessageTokens);
+        // the current turn alone is above the window
+        if (fitted.tokens > budget) {
+          return createHardLimitStream(model, "Request is larger than the model's context window");
+        }
         requestEstimate = fitted.tokens;
         let messages = fitted.messages;
 
@@ -283,27 +301,34 @@ export class AgentHarness {
               tokensAfter: Math.ceil(fitted.tokens * inflation),
             },
           });
-          // Pi sizes the reply from the last response's usage, which counted what was cut
-          const last = messages.findLastIndex((message) => message.role === "assistant");
-          const response = messages[last];
-
-          if (response?.role === "assistant") {
-            const counted = messages
-              .slice(0, last + 1)
-              .reduce((sum, message) => sum + estimateMessageTokens(message), 0);
-            messages = messages.with(last, {
-              ...response,
-              usage: { ...response.usage, totalTokens: Math.ceil(counted * inflation) },
-            });
-          }
         }
 
+        // Pi sizes the reply from the last response's usage, which counted what was cut
+        const last = messages.findLastIndex((message) => message.role === "assistant");
+        const response = messages[last];
+
+        if (response?.role === "assistant" && fitted.tokens < fitted.tokensBefore) {
+          messages = messages.with(last, {
+            ...response,
+            usage: {
+              ...response.usage,
+              totalTokens: Math.ceil(estimateTokens(messages.slice(0, last + 1)) * inflation),
+            },
+          });
+        }
+
+        // NOTE: Pi's own reply sizing does not know the inflation. The output limit bounds it, on
+        // the model for the simple path and thinking, and in the options for the full one
+        const maxTokens = Math.min(
+          model.maxTokens,
+          model.contextWindow - CONTEXT_SAFETY_TOKENS - Math.ceil(fitted.tokens * inflation),
+        );
         requestSpan = startSpan(args.trace, "model.request.completed", "agent-harness");
         return this.llm.stream(
-          model,
+          { ...model, maxTokens },
           modelConfig,
           { ...context, messages },
-          options ?? {},
+          { ...options, maxTokens },
           sessionId,
         );
       },
@@ -1220,11 +1245,15 @@ export function stepDetail(toolName: string, args: unknown): string {
   return detail.replace(/\s+/g, " ").trim().slice(0, 120);
 }
 
+function estimateTokens(messages: Message[]): number {
+  return messages.reduce((sum, message) => sum + estimateMessageTokens(message), 0);
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function createHardLimitStream(model: Model<Api>) {
+function createHardLimitStream(model: Model<Api>, errorMessage: string) {
   const stream = createAssistantMessageEventStream();
   const message = {
     role: "assistant" as const,
@@ -1234,7 +1263,7 @@ function createHardLimitStream(model: Model<Api>) {
     model: model.id,
     usage: emptyUsage(),
     stopReason: "error" as const,
-    errorMessage: "Agent iteration limit reached",
+    errorMessage,
     timestamp: Date.now(),
   };
 

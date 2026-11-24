@@ -460,7 +460,11 @@ describe("AgentHarness", () => {
     aiModels.setProvider(
       fauxProvider({
         provider: EAiProvider.Openrouter,
-        models: OPENROUTER_MODELS.map((model) => ({ ...model, contextWindow: window })),
+        models: OPENROUTER_MODELS.map((model) => ({
+          ...model,
+          contextWindow: window,
+          maxTokens: 32_768,
+        })),
       }).provider,
     );
     const page = (index: number) => `page ${index} `.repeat(4_000);
@@ -484,10 +488,10 @@ describe("AgentHarness", () => {
     ];
     const requests: TranscriptContext[] = [];
     const replyTokens: number[] = [];
-    // a provider whose tokenizer counts half again as many tokens as Pi estimates from the text
+    // a provider whose tokenizer counts twice as many tokens as Pi estimates from the text
     const count = (context: TranscriptContext) =>
       Math.ceil(
-        1.5 * context.messages.reduce((sum, message) => sum + estimateMessageTokens(message), 0),
+        2 * context.messages.reduce((sum, message) => sum + estimateMessageTokens(message), 0),
       );
     const stream = spyOn(aiModels, "streamSimple").mockImplementation((model, request) => {
       const message = responses.shift();
@@ -561,11 +565,11 @@ describe("AgentHarness", () => {
       expect(requests).toHaveLength(9);
       // the eight pages alone are above the window
       expect(count(normalizeContext({ messages: result.messages }))).toBeGreaterThan(window);
-      for (const request of requests) {
-        expect(count(request) + replyRoom).toBeLessThanOrEqual(window);
+      for (const [index, request] of requests.entries()) {
+        expect(count(request) + (replyTokens[index] ?? 0)).toBeLessThanOrEqual(window);
       }
-      // Pi leaves the reply its full room on every request
-      expect(Math.min(...replyTokens)).toBe(replyRoom);
+      // Pi leaves the reply at least its reserved room on every request
+      expect(Math.min(...replyTokens)).toBeGreaterThanOrEqual(replyRoom);
       const last = JSON.stringify(requests.at(-1)?.messages);
       expect(last).toContain(page(7));
       expect(last).not.toContain(page(0));
@@ -596,6 +600,18 @@ describe("AgentHarness", () => {
         .flat()
         .map((message, index) => ({ id: index + 1, message })),
     };
+    const sum = (messages: Message[]) =>
+      messages.reduce((total, message) => total + estimateMessageTokens(message), 0);
+    const earlier = conversation.entries.slice(0, -1).map((entry) => entry.message);
+    // the provider counted the last turn's request at twice Pi's estimate
+    const counted = 2 * sum(earlier);
+    const last = conversation.entries.at(-1)?.message;
+    if (last?.role === "assistant") {
+      const { model } = getAiModelConfig(EAiProvider.Openrouter, EModelPurpose.Main, undefined);
+      last.provider = model.provider;
+      last.model = model.id;
+      last.usage = { ...last.usage, input: counted, totalTokens: counted };
+    }
     const requests: TranscriptContext[] = [];
     small.setResponses([
       (context) => {
@@ -619,9 +635,9 @@ describe("AgentHarness", () => {
 
     expect(result.text).toBe("Still here");
     const request = requests[0]?.messages ?? [];
-    expect(
-      request.reduce((sum, message) => sum + estimateMessageTokens(message), 0) + 16_384,
-    ).toBeLessThanOrEqual(window);
+    // that count covered the system prompt too
+    const rate = counted / (sum(earlier) + sum(request.slice(0, 1)));
+    expect(Math.ceil(rate * sum(request)) + 16_384).toBeLessThanOrEqual(window);
     const sent = JSON.stringify(request);
     expect(sent).not.toContain(turn(0));
     expect(sent).toContain(turn(7));

@@ -23,7 +23,7 @@ function fixture() {
   const faux = fauxProvider({
     models: [
       { id: "summary", contextWindow: 200_000, maxTokens: 8192 },
-      { id: "small", contextWindow: 8_000, maxTokens: 2_048 },
+      { id: "small", contextWindow: 32_000, maxTokens: 2_048 },
     ],
   });
   const models = createModels();
@@ -107,7 +107,7 @@ describe("conversation compaction", () => {
       state,
       models,
       small,
-      7_000,
+      23_000,
       TEST_TRACE,
       force,
       model,
@@ -121,7 +121,7 @@ describe("conversation compaction", () => {
     }
   });
 
-  test("cuts a summary request that is larger than the summary model's window", async () => {
+  test("summarizes a first turn larger than the window alone, with its oldest tool results cut", async () => {
     const { state, models, model, faux } = fixture();
     const page = (index: number) => `page ${index} `.repeat(30_000);
     state.entries = (
@@ -139,6 +139,8 @@ describe("conversation compaction", () => {
           },
         ]).flat(),
         fauxAssistantMessage("All five pages read"),
+        { role: "user", content: "next question ".repeat(10_000), timestamp: 8 },
+        fauxAssistantMessage("Next answer", { timestamp: 9 }),
       ] satisfies Message[]
     ).map((message, index) => ({ id: index + 1, message }));
     let request = "";
@@ -152,9 +154,38 @@ describe("conversation compaction", () => {
     const result = await compactConversation(state, models, model, 3000, TEST_TRACE, false, model);
 
     expect(result?.state.summary).toBe("Read five pages.");
+    expect(result?.state.entries.map(({ message }) => message.role)).toEqual(["user", "assistant"]);
     expect(estimateTextTokens(request)).toBeLessThan(model.contextWindow);
     expect(request).toContain(page(4));
     expect(request).not.toContain(page(0));
+  });
+
+  test("summarizes the oldest turns that fit the window and keeps the rest for later", async () => {
+    const { state, models, model, faux } = fixture();
+    const turn = (index: number) => `turn ${index} `.repeat(30_000);
+    state.summary = "";
+    state.entries = Array.from({ length: 5 }, (_, index): Message[] => [
+      { role: "user", content: turn(index), timestamp: index * 2 + 1 },
+      fauxAssistantMessage(`answer ${index}`, { timestamp: index * 2 + 2 }),
+    ])
+      .flat()
+      .map((message, index) => ({ id: index + 1, message }));
+    let request = "";
+    faux.setResponses([
+      (context) => {
+        request = JSON.stringify(context.messages);
+        return fauxAssistantMessage("Two turns.");
+      },
+    ]);
+
+    const result = await compactConversation(state, models, model, 3000, TEST_TRACE, false, model);
+
+    expect(estimateTextTokens(request)).toBeLessThan(model.contextWindow);
+    expect(request.includes(turn(0))).toBe(true);
+    expect(request.includes(turn(1))).toBe(true);
+    expect(request.includes(turn(2))).toBe(false);
+    expect(result?.state.summarizedThroughId).toBe(4);
+    expect(result?.state.entries[0]?.id).toBe(5);
   });
 
   test("counts stored images toward the trigger", async () => {
