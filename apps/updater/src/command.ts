@@ -7,12 +7,14 @@ export function hideCredentials(text: string): string {
   return text.replace(URL_CREDENTIALS, "//");
 }
 
-// NOTE: Compose interpolates ${PWD} from the client's environment, which a container does not set,
-// so every command gets it explicitly. output: stderr, or stdout when stderr is empty
+// NOTE: Compose interpolates from the client's environment before the .env file. ${PWD} is not set
+// in a container, so every command gets it explicitly. BELLACLAW_AUTO_UPDATE is set in this
+// container from the .env of its creation, and is removed so that a recreated updater gets the
+// file's current value. output: stderr, or stdout when stderr is empty
 export async function exec(command: string[], cwd: string): Promise<TCommandResult> {
   const proc = Bun.spawn(command, {
     cwd,
-    env: { ...Bun.env, PWD: cwd },
+    env: { ...Bun.env, PWD: cwd, BELLACLAW_AUTO_UPDATE: undefined },
     stdout: "pipe",
     stderr: "pipe",
   });
