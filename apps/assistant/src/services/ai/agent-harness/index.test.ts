@@ -449,6 +449,104 @@ describe("AgentHarness", () => {
     expect(result.toolCallCount).toBe(2);
   });
 
+  test("cuts an oversized tool result before the model reads it and leaves a normal one alone", async () => {
+    const schema = obj({}, { open: true });
+    const tools: AgentTool[] = [
+      {
+        name: "big-tool",
+        label: "Big tool",
+        description: "Big tool",
+        parameters: schema,
+        execute: async () => {
+          return {
+            content: [
+              { type: "text", text: "a".repeat(30_000) },
+              { type: "text", text: "b".repeat(30_000) },
+            ],
+            details: { rows: 60_000 },
+          };
+        },
+      },
+      {
+        name: "small-tool",
+        label: "Small tool",
+        description: "Small tool",
+        parameters: schema,
+        execute: async () => {
+          return { content: [{ type: "text", text: "small result" }], details: {} };
+        },
+      },
+    ];
+    const results = new Map<string, string[]>();
+    faux.setResponses([
+      fauxAssistantMessage([
+        fauxToolCall("big-tool", {}, { id: "big-call" }),
+        fauxToolCall("small-tool", {}, { id: "small-call" }),
+      ]),
+      (context) => {
+        for (const message of context.messages) {
+          if (message.role === "toolResult") {
+            results.set(
+              message.toolName,
+              message.content.map((part) => {
+                if (part.type === "text") {
+                  return part.text;
+                }
+                return "";
+              }),
+            );
+          }
+        }
+        return fauxAssistantMessage("done");
+      },
+    ]);
+    const harness = AgentHarness.instance as unknown as {
+      run(args: TAgentRunArgs & { delegationCount: TOption<() => void> }): Promise<TAgentRunResult>;
+    };
+
+    await harness.run({
+      name: EAgentName.Connector,
+      prompt: "Use the connector tools",
+      conversationKey: "discord:1",
+      ownerKey: "discord:1",
+      settings: { ...DefaultConfigRecord, [EConfigKey.AiProvider]: EAiProvider.Openrouter },
+      currentTimeContext: undefined,
+      platform: EMessagePlatform.Discord,
+      trace: TEST_TRACE,
+      events: testEventRequester,
+      parentToolCallId: "delegate-call",
+      signal: undefined,
+      delegationCount: undefined,
+      connector: {
+        connector: {
+          id: "files",
+          kind: EConnectorKind.Mcp,
+          description: "Files",
+          instructions: "Use file tools",
+          transport: { type: "stdio", command: "fixture", args: [], env: {} },
+          contextArguments: {},
+          resources: true,
+          prompts: true,
+          sampling: true,
+          plainChats: true,
+          requestTimeoutMs: 1_000,
+          inputTimeoutMs: 1_000,
+        },
+        tools,
+        instructions: undefined,
+      },
+    });
+
+    expect(results.get("small-tool")).toEqual(["small result"]);
+    expect(results.get("big-tool")).toEqual([
+      "a".repeat(30_000),
+      "b".repeat(10_000),
+      expect.stringContaining(
+        "[Tool result cut: it had 60000 characters and only the first 40000 are shown above.",
+      ),
+    ]);
+  });
+
   test.each([
     "required",
     "auto",

@@ -13,6 +13,13 @@ export const SWebFetchArgs = obj({
       description: "Timeout in seconds; defaults to 15 and cannot exceed 45",
     }),
   ),
+  start: opt(
+    int({
+      minimum: 0,
+      description:
+        "Character offset to read from; pass the nextStart of a truncated result to read the next part",
+    }),
+  ),
 });
 
 export function validateWebFetchArgs(
@@ -31,11 +38,11 @@ export const webFetch = defineTool({
   name: "web-fetch",
   label: "Web fetch",
   description:
-    "Fetch a public http or https URL and return its content as markdown, plain text, or raw HTML. Use after web-search when page content is needed.",
+    "Fetch a public http or https URL and return its content as markdown, plain text, or raw HTML. A long page comes in parts. Use after web-search when page content is needed.",
   schema: SWebFetchArgs,
   instructions,
   mode: "parallel",
-  logSafe: ["format", "timeout", "contentType", "truncated"],
+  logSafe: ["format", "timeout", "start", "contentType", "totalChars", "truncated", "nextStart"],
   execute: async (_context, args, signal) => {
     return fetchWeb(validateWebFetchArgs(args), signal);
   },
