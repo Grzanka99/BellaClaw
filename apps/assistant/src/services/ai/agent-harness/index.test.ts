@@ -43,7 +43,7 @@ const OPENROUTER_MODELS = [
   "openrouter/free",
   "openai/gpt-5.4-mini",
   "google/gemini-3.1-pro-preview",
-].map((id) => ({ id, reasoning: true }));
+].map((id) => ({ id, reasoning: true, contextWindow: 1_000_000 }));
 
 const logDirectories: string[] = [];
 const TEST_TRACE: TBehaviorTraceContext = {
@@ -1334,6 +1334,44 @@ describe("AgentHarness", () => {
     const partial = await AgentHarness.instance.runMain(args);
     expect(partial.text).toBeUndefined();
     expect(partial.stopReason).toBe("error");
+  });
+
+  test("stops before a request larger than the model's context window, and sends one that fits", async () => {
+    faux.setResponses([fauxAssistantMessage("fits"), fauxAssistantMessage("must not run")]);
+    const config = getAiModelConfig(EAiProvider.Openrouter, EModelPurpose.Main);
+    const args = {
+      prompt: "hello",
+      conversationKey: "discord:1",
+      ownerKey: "discord:1",
+      settings: { ...DefaultConfigRecord, [EConfigKey.AiProvider]: EAiProvider.Openrouter },
+      currentTimeContext: undefined,
+      platform: EMessagePlatform.Discord,
+      trace: TEST_TRACE,
+      events: testEventRequester,
+      signal: undefined,
+      model: { ...config, model: { ...config.model, contextWindow: 200_000, maxTokens: 32_000 } },
+    };
+    const record = spyOn(AppLogger.instance, "record");
+
+    try {
+      const normal = await AgentHarness.instance.runMain(args);
+      expect(normal.text).toBe("fits");
+      expect(normal.stopReason).toBe("completed");
+
+      const oversized = await AgentHarness.instance.runMain({
+        ...args,
+        prompt: "x".repeat(800_000),
+      });
+      expect(oversized.text).toContain("got too large");
+      expect(oversized.stopReason).toBe("context-window");
+      expect(faux.getPendingResponseCount()).toBe(1);
+      const stops = record.mock.calls.filter(([entry]) => {
+        return entry.event === "agent.context-window.exceeded";
+      });
+      expect(stops).toHaveLength(1);
+    } finally {
+      record.mockRestore();
+    }
   });
 
   test("does not start a provider stream for a pre-cancelled run", async () => {
