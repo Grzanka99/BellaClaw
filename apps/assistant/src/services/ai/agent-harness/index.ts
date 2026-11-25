@@ -256,7 +256,7 @@ export class AgentHarness {
         // NOTE: last resort for a runaway run; compaction keeps normal chats far below the window
         const contextTokens = estimateContextTokens(context).tokens;
         const replyTokens = Math.min(model.maxTokens, REPLY_RESERVE_TOKENS);
-        if (model.contextWindow > 0 && contextTokens + replyTokens > model.contextWindow) {
+        if (contextTokens + replyTokens > model.contextWindow) {
           stopReason = "context-window";
           AppLogger.instance.record({
             trace: args.trace,
