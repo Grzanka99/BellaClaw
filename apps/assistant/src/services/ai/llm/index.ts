@@ -1,5 +1,5 @@
 import { AppLogger, type TBehaviorTraceContext } from "@bellaclaw/behavior-logs";
-import type { TOption } from "@bellaclaw/shared";
+import { createLogger, type TOption } from "@bellaclaw/shared";
 import {
   type Api,
   type AssistantMessage,
@@ -8,11 +8,14 @@ import {
   hasApi,
   type Model,
   type ModelThinkingLevel,
+  type RetryPolicy,
+  retryAssistantCall,
   type SimpleStreamOptions,
   type ThinkingLevel,
   type Usage,
 } from "@earendil-works/pi-ai";
 import type { z } from "zod";
+import { sanitizeErrorMessage } from "../../app-logger/sanitizers";
 import { startSpan, type TBehaviorSpan } from "../../app-logger/span";
 import { EConfigKey, type TConfigRecord } from "../../settings/schema";
 import {
@@ -30,6 +33,12 @@ import {
 import { EAiProvider, type EModelPurpose, SAiProvider } from "../types";
 
 export type TLlmModelConfig = ReturnType<typeof getAiModelConfig>;
+
+// NOTE: sized for one person waiting on a reply: a failed call restarts up to twice, after 2s and 4s
+const RETRY_POLICY: RetryPolicy = { enabled: true, maxRetries: 2, baseDelayMs: 2_000 };
+// NOTE: Pi's Codex adapter drops the HTTP status from its errors, so only its own request retry can
+// tell a passing 429 or 5xx from a lasting failure
+const CODEX_REQUEST_RETRIES = 2;
 
 export function emptyUsage(): Usage {
   return {
@@ -80,6 +89,7 @@ export class LlmResponseError extends Error {
 
 export class LlmClient {
   private static _instance: TOption<LlmClient>;
+  private logger = createLogger("LLM");
 
   public static get instance(): LlmClient {
     if (LlmClient._instance === undefined) {
@@ -153,6 +163,11 @@ export class LlmClient {
       config.model.provider,
       sessionId,
     );
+
+    if (hasApi(config.model, "openai-codex-responses")) {
+      requestOptions.maxRetries = CODEX_REQUEST_RETRIES;
+    }
+
     const streamOptions = createAiStreamOptions(
       config.model,
       requestOptions,
@@ -160,39 +175,31 @@ export class LlmClient {
       config.serviceTier,
     );
 
-    if (streamOptions !== undefined) {
-      return aiModels.complete(config.model, context, streamOptions);
-    }
-
     let reasoning: TOption<ThinkingLevel>;
 
     if (config.effort !== "off") {
       reasoning = config.effort;
     }
 
-    return aiModels.completeSimple(config.model, context, { ...requestOptions, reasoning });
-  }
+    // NOTE: a failed call restarts whole, which also covers a reply that broke off mid-stream
+    return retryAssistantCall(
+      () => {
+        if (streamOptions !== undefined) {
+          return aiModels.complete(config.model, context, streamOptions);
+        }
 
-  public stream(
-    model: Model<Api>,
-    config: Pick<TLlmModelConfig, "effort" | "serviceTier">,
-    context: Context,
-    options: SimpleStreamOptions,
-    sessionId: string,
-  ) {
-    const requestOptions = this.withSession(options, model.provider, sessionId);
-    const streamOptions = createAiStreamOptions(
-      model,
-      requestOptions,
-      config.effort,
-      config.serviceTier,
+        return aiModels.completeSimple(config.model, context, { ...requestOptions, reasoning });
+      },
+      RETRY_POLICY,
+      options.signal,
+      {
+        onRetryScheduled: (attempt, maxAttempts, delayMs, errorMessage) => {
+          this.logger.warning(
+            `complete: retry ${attempt}/${maxAttempts} of ${config.model.id} in ${delayMs}ms after: ${sanitizeErrorMessage(errorMessage)}`,
+          );
+        },
+      },
     );
-
-    if (streamOptions !== undefined) {
-      return aiModels.stream(model, context, streamOptions);
-    }
-
-    return aiModels.streamSimple(model, context, requestOptions);
   }
 
   public async completeText(args: {

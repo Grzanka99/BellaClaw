@@ -102,7 +102,7 @@ fun MessageList(
                 is ChatRow.Day -> DayChip(row.date, animated)
                 is ChatRow.Item -> MessageItem(row.message, onRetry, imageLoader, onOpenImage, animated)
                 is ChatRow.Activity -> ActivityCard(row.rows, row.seconds, row.isLive, { listState.dispatchRawDelta(it) }, animated)
-                is ChatRow.Command -> CommandCard(row, { onToggleCard(row.key) }, onRetry, animated)
+                is ChatRow.Command -> CommandCard(row, { onToggleCard(row.key) }, onRetry, { listState.dispatchRawDelta(it) }, animated)
             }
         }
     }

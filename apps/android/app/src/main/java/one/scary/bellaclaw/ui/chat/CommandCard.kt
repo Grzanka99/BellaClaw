@@ -1,9 +1,9 @@
 package one.scary.bellaclaw.ui.chat
 
-import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -14,7 +14,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.ErrorOutline
-import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -23,10 +22,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -42,23 +39,30 @@ import one.scary.bellaclaw.ui.theme.BellaClawThemeTokens
 
 /**
  * A command's run: folded, a chip with the command and its outcome below it; open, the card with one step line per
- * reply or notice, rows as one item each. A tap on the header folds or unfolds it with [onToggle]; a failed
- * send retries on [onRetry].
+ * reply or notice, rows as one item each. A tap folds or unfolds it with [onToggle], and [onResize] follows that as
+ * in [FoldingCard]; a failed send retries on [onRetry].
  */
 @Composable
-fun CommandCard(card: ChatRow.Command, onToggle: () -> Unit, onRetry: (String) -> Unit, modifier: Modifier = Modifier) {
+fun CommandCard(
+    card: ChatRow.Command,
+    onToggle: () -> Unit,
+    onRetry: (String) -> Unit,
+    onResize: (Float) -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val open = !card.isFolded
-    val rotation by animateFloatAsState(if (open) 180f else 0f, label = "chevron")
-    val width = if (open) Modifier.fillMaxWidth() else Modifier
-    Surface(
-        shape = RoundedCornerShape(if (open) 18.dp else 14.dp),
-        color = MaterialTheme.colorScheme.surfaceContainer,
-        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = modifier.then(width).animateContentSize(),
-    ) {
-        Column {
+    val pending = card.sendState == SendState.PENDING && card.lines.isEmpty()
+    val failed = card.sendState == SendState.FAILED
+    FoldingCard(
+        open = open,
+        rowCount = card.lines.size + 1,
+        clickable = true,
+        onClick = onToggle,
+        onResize = onResize,
+        modifier = modifier,
+        header = {
             Row(
-                modifier = Modifier.clickable(onClick = onToggle).heightIn(min = 32.dp).padding(start = 10.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
+                modifier = Modifier.heightIn(min = 32.dp).padding(start = 10.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -75,43 +79,47 @@ fun CommandCard(card: ChatRow.Command, onToggle: () -> Unit, onRetry: (String) -
                         Text(text = it, style = MaterialTheme.typography.labelMedium, maxLines = 3, overflow = TextOverflow.Ellipsis)
                     }
                 }
-                if (card.state == CommandState.RUNNING) {
-                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                } else {
-                    Icon(
-                        Icons.Outlined.ExpandMore,
-                        contentDescription = stringResource(if (open) R.string.command_hide else R.string.command_show),
-                        modifier = Modifier.size(18.dp).rotate(rotation),
-                    )
+                AnimatedContent(targetState = card.state == CommandState.RUNNING, contentAlignment = Alignment.Center, label = "status") { running ->
+                    if (running) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                    } else {
+                        FoldChevron(open, stringResource(if (open) R.string.command_hide else R.string.command_show))
+                    }
                 }
             }
-            if (open) {
-                Column(
-                    modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    card.lines.forEach { line ->
+        },
+        body = { shown ->
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                card.lines.forEachIndexed { index, line ->
+                    Box(modifier = Modifier.foldingRow { shown(index) }) {
                         if (line.rows.isEmpty()) {
                             StepLine(line)
                         } else {
                             ResultRows(line.rows)
                         }
                     }
-                    if (card.sendState == SendState.PENDING && card.lines.isEmpty()) {
-                        Text(text = stringResource(R.string.message_sending), style = MaterialTheme.typography.bodySmall)
-                    }
-                    if (card.sendState == SendState.FAILED) {
-                        Column(modifier = Modifier.clickable { onRetry(checkNotNull(card.retryId)) }) {
-                            card.failure?.let {
-                                Text(text = it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
+                }
+                if (pending || failed) {
+                    Column(modifier = Modifier.foldingRow { shown(card.lines.size) }) {
+                        if (pending) {
+                            Text(text = stringResource(R.string.message_sending), style = MaterialTheme.typography.bodySmall)
+                        }
+                        if (failed) {
+                            Column(modifier = Modifier.clickable { onRetry(checkNotNull(card.retryId)) }) {
+                                card.failure?.let {
+                                    Text(text = it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
+                                }
+                                Text(text = stringResource(R.string.message_not_sent), style = MaterialTheme.typography.bodySmall)
                             }
-                            Text(text = stringResource(R.string.message_not_sent), style = MaterialTheme.typography.bodySmall)
                         }
                     }
                 }
             }
-        }
-    }
+        },
+    )
 }
 
 /** A reply or notice as text, after its state's icon. */

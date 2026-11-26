@@ -61,6 +61,12 @@ export const COMMAND_CATALOG = {
     description: "Log in to, check, or log out of an AI provider subscription.",
     usage: "!ai-auth login|status|logout PROVIDER",
   },
+  stop: {
+    name: "stop",
+    group: "AI",
+    description: "Stop the reply in progress.",
+    usage: "!stop",
+  },
   update: {
     name: "update",
     group: "App",

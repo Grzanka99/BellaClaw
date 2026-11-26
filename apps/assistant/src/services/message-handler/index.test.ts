@@ -26,6 +26,7 @@ import { setupAiAuth } from "../ai/auth";
 import { aiCredentials, aiModels } from "../ai/providers/registry";
 import { searchMemory } from "../ai/tools/search-memory";
 import { EAiProvider, ERole } from "../ai/types";
+import { Commands } from "../commands";
 import { ConversationStore } from "../conversation";
 import type { TConversation } from "../conversation/types";
 import { DatabaseConnector, type TDatabaseHandle } from "../database";
@@ -67,6 +68,7 @@ type TMemoryStub = {
 function reset() {
   Object.assign(EventBus, { _instance: undefined });
   Object.assign(MessageHandler, { _instance: undefined });
+  Object.assign(Commands, { _instance: undefined });
   Object.assign(MessagingAdapter, { _instance: undefined });
   (SettingsService as unknown as { _instance: unknown })._instance = undefined;
   (FactDistiller as unknown as { _instance: unknown })._instance = undefined;
@@ -588,6 +590,103 @@ describe("MessageHandler", () => {
     }
   });
 
+  test("!stop ends a turn inside a delegated agent without a failure, and the next message is answered", async () => {
+    const chatId = "discord:stop-turn";
+    Commands.instance.setup();
+    const { internals, settings } = await setupHandler(chatId);
+    settings[EConfigKey.AiProvider] = EAiProvider.Openrouter;
+    const previousApiKey = Bun.env.OPENROUTER_API_KEY;
+    const previousProvider = aiModels.getProvider(EAiProvider.Openrouter);
+    Bun.env.OPENROUTER_API_KEY = "stop-test-key";
+    const faux = fauxProvider({
+      provider: EAiProvider.Openrouter,
+      models: [
+        { id: "google/gemini-3.1-pro-preview", reasoning: true },
+        { id: "google/gemini-3-flash-preview", reasoning: true },
+      ],
+    });
+    let delegated = false;
+    const requests: TranscriptContext[] = [];
+    faux.setResponses([
+      fauxAssistantMessage(
+        fauxToolCall("delegate-memory", { task: "Recall the trip" }, { id: "delegate-1" }),
+      ),
+      // the delegated agent's request, open until the turn is stopped
+      async (_context, options) => {
+        delegated = true;
+        await new Promise((resolve) => options?.signal?.addEventListener("abort", resolve));
+        return fauxAssistantMessage("Never sent");
+      },
+      (context) => {
+        requests.push(structuredClone(context));
+        return fauxAssistantMessage("Hello again.");
+      },
+    ]);
+    aiModels.setProvider(faux.provider);
+    internals.conversations = ConversationStore.instance as never;
+    internals.ai.runMain = mock((args) => AgentHarness.instance.runMain(args));
+    const send = (content: string) =>
+      EventBus.instance.publish({
+        type: EEventType.MessageAuthorized,
+        source: "test",
+        key: chatId,
+        trace: { ...TEST_TRACE, chatId },
+        payload: {
+          ...testMessageOrigin(chatId, EMessagePlatform.Discord),
+          content,
+          attachments: [],
+          receivedAt: Date.now(),
+        },
+        causationId: undefined,
+        dedupeKey: undefined,
+      });
+
+    try {
+      await send("Where did I go?");
+      await waitFor(() => delegated);
+      await send("!stop");
+      await EventBus.instance.idle();
+      await send("Hi");
+      await EventBus.instance.idle();
+      await send("!stop");
+      await EventBus.instance.idle();
+
+      const replies = await payloadsOf(EEventType.ReplyReady);
+      expect(replies.map((reply) => (reply as { text: string }).text)).toEqual([
+        "Stopped.",
+        "Hello again.",
+        "Nothing is running.",
+      ]);
+      expect(await payloadsOf(EEventType.TurnFailed)).toEqual([]);
+      expect(await payloadsOf(EEventType.TurnCompleted)).toHaveLength(2);
+      // the next turn's model sees the stopped turn: its request, its tool call and the note
+      const replayed = JSON.stringify(requests[0]?.messages);
+      expect(replayed).toContain("Where did I go?");
+      expect(replayed).toContain("delegate-1");
+      expect(replayed).toContain("The user stopped this turn before it finished.");
+
+      const history = await listHistory(DatabaseConnector.instance.database, chatId, undefined, 10);
+      expect(
+        history.filter((row) => row.author === "assistant").map((row) => [row.text, row.steps]),
+      ).toEqual([
+        [
+          "The user stopped this turn before it finished.",
+          [expect.objectContaining({ tool: "delegate-memory", failed: true })],
+        ],
+        ["Hello again.", undefined],
+      ]);
+    } finally {
+      if (previousProvider !== undefined) {
+        aiModels.setProvider(previousProvider);
+      }
+      if (previousApiKey === undefined) {
+        delete Bun.env.OPENROUTER_API_KEY;
+      } else {
+        Bun.env.OPENROUTER_API_KEY = previousApiKey;
+      }
+    }
+  });
+
   test("reply.ready commits before compaction ends, and the next turn.requested starts after it", async () => {
     const chatId = "discord:compaction-order";
     const { internals } = await setupHandler(chatId);
@@ -854,7 +953,6 @@ describe("MessageHandler", () => {
 
   test.each([
     "error",
-    "aborted",
     "serialized-tool-call",
     "forced-finalization-failed",
   ])("does not persist or replay a rejected %s transcript", async (stopReason) => {
