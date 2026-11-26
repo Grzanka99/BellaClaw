@@ -17,7 +17,7 @@
     <rule>Prefer markdown for normal reading and summarization.</rule>
     <rule>Use text when the user wants plain extracted text.</rule>
     <rule>Use html only when raw markup is specifically useful.</rule>
-    <rule>If truncated and the rest is needed, call again with start = nextStart. Use only parts read.</rule>
+    <rule>If truncated and more is needed, repeat the call with start = nextStart. Use only parts read.</rule>
     <rule>Do not expose raw tool errors or JSON payloads to the user.</rule>
   </usage_rules>
 
