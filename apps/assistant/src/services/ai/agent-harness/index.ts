@@ -61,9 +61,6 @@ const SEQUENTIAL: "sequential" = "sequential";
 const NO_VISION_NOTE = "[User sent an image; the current model cannot view images]";
 const TOO_LARGE_NOTE = "[User sent an image; it is larger than 5 MB and was not loaded]";
 const FETCH_FAILED_NOTE = "[User sent an image; it could not be loaded from the chat platform]";
-// The most text one tool result adds to an agent's context, about 10,000 tokens. It bounds every
-// tool, built-in, delegate or MCP. web-fetch returns smaller parts, so its results pass uncut.
-const TOOL_RESULT_MAX_CHARS = 40_000;
 // room kept for the reply when checking a request against the model's context window
 const REPLY_RESERVE_TOKENS = 16_384;
 const CONTEXT_WINDOW_REPLY =
@@ -289,7 +286,6 @@ export class AgentHarness {
       },
       getApiKey: (provider) => this.llm.resolveApiKey(provider),
       toolExecution: "parallel",
-      afterToolCall: async (context) => capToolResult(context.result.content),
       prepareNextTurnWithContext: (context) => {
         let nextTools = context.context.tools;
         if (args.connector !== undefined) {
@@ -1097,49 +1093,6 @@ export class AgentHarness {
     }
     return createMcpSamplingResult(result, modelConfig.model.id);
   }
-}
-
-/**
- * Cuts the text of an oversized tool result and tells the model it was cut. Images are kept.
- */
-function capToolResult(content: (TextContent | ImageContent)[]) {
-  let totalChars = 0;
-
-  for (const part of content) {
-    if (part.type === "text") {
-      totalChars += part.text.length;
-    }
-  }
-
-  if (totalChars <= TOOL_RESULT_MAX_CHARS) {
-    return undefined;
-  }
-
-  let remaining = TOOL_RESULT_MAX_CHARS;
-  const capped: (TextContent | ImageContent)[] = [];
-
-  for (const part of content) {
-    if (part.type === "text") {
-      const text = part.text.slice(0, remaining);
-      remaining -= text.length;
-
-      if (text.length > 0) {
-        capped.push({ ...part, text });
-      }
-    } else {
-      capped.push(part);
-    }
-  }
-
-  capped.push({
-    type: "text",
-    text:
-      `[Tool result cut: it had ${totalChars} characters and only the first ${TOOL_RESULT_MAX_CHARS} are shown above. ` +
-      "You have not read the rest, so do not assume what it says. If you need it, call the tool again " +
-      "for a smaller result: a narrower query, a shorter range, a filter, or a later page.]",
-  });
-
-  return { content: capped };
 }
 
 function canonicalize(value: unknown): unknown {
