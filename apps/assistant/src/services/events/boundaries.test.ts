@@ -53,7 +53,10 @@ const ALLOWED: Record<string, string> = {
   "automation -> ai/tools/automation-summary": "pure mapper",
   "commands -> ai/auth": "status reads",
   "commands -> authorization": "listAuthorizedChatIds, a cached read model",
-  "commands -> identity": "IdentityService.addressKey, a pure function",
+  "commands -> identity":
+    "IdentityService.addressKey, a pure function, and conversationKeyOf, a cached read model",
+  "commands -> message-handler":
+    "MessageHandler.stop: a running turn's abort controller, live state an event cannot carry",
   "commands -> connectors":
     "status reads: lists a connector's prompts and the owner's stored connectors",
   "commands -> messaging": "deleteAttachment: a driver call, no stored state",
