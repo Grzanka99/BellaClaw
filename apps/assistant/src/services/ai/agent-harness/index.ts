@@ -4,6 +4,7 @@ import type { AgentMessage, AgentTool } from "@earendil-works/pi-agent-core";
 import { Agent } from "@earendil-works/pi-agent-core";
 import {
   type Api,
+  type AssistantMessage,
   contentText,
   createAssistantMessageEventStream,
   type ImageContent,
@@ -11,6 +12,7 @@ import {
   type Model,
   type TextContent,
 } from "@earendil-works/pi-ai";
+import { estimateContextTokens } from "@earendil-works/pi-ai/utils/estimate";
 import {
   arr,
   bool,
@@ -59,6 +61,11 @@ const SEQUENTIAL: "sequential" = "sequential";
 const NO_VISION_NOTE = "[User sent an image; the current model cannot view images]";
 const TOO_LARGE_NOTE = "[User sent an image; it is larger than 5 MB and was not loaded]";
 const FETCH_FAILED_NOTE = "[User sent an image; it could not be loaded from the chat platform]";
+// room kept for the reply when checking a request against the model's context window
+const REPLY_RESERVE_TOKENS = 16_384;
+const CONTEXT_WINDOW_REPLY =
+  "This conversation got too large for the model to continue, so I stopped. " +
+  "Please try again, asking for less at once.";
 
 export class AgentHarness {
   private static _instance: TOption<AgentHarness>;
@@ -244,6 +251,30 @@ export class AgentHarness {
       streamFn: async (model, context, options) => {
         if (iterations >= agentDefinition.maxIterations) {
           return createHardLimitStream(model);
+        }
+
+        // NOTE: last resort for a runaway run; compaction keeps normal chats far below the window
+        const contextTokens = estimateContextTokens(context).tokens;
+        const replyTokens = Math.min(model.maxTokens, REPLY_RESERVE_TOKENS);
+        if (contextTokens + replyTokens > model.contextWindow) {
+          stopReason = "context-window";
+          AppLogger.instance.record({
+            trace: args.trace,
+            event: "agent.context-window.exceeded",
+            component: "agent-harness",
+            level: EBehaviorLogLevel.Warning,
+            provider: model.provider,
+            model: model.id,
+            summary: `${args.name} agent stopped: request would exceed the model's context window`,
+            metadata: {
+              agentName: args.name,
+              parentToolCallId: args.parentToolCallId ?? null,
+              contextTokens,
+              replyTokens,
+              contextWindow: model.contextWindow,
+            },
+          });
+          return createContextWindowStream(model);
         }
 
         iterations += 1;
@@ -1186,6 +1217,28 @@ function createHardLimitStream(model: Model<Api>) {
 
   queueMicrotask(() => {
     stream.push({ type: "error", reason: "error", error: message });
+    stream.end(message);
+  });
+
+  return stream;
+}
+
+// ends the run with a reply saying the conversation got too large, without calling the provider
+function createContextWindowStream(model: Model<Api>) {
+  const stream = createAssistantMessageEventStream();
+  const message: AssistantMessage = {
+    role: "assistant",
+    content: [{ type: "text", text: CONTEXT_WINDOW_REPLY }],
+    api: model.api,
+    provider: model.provider,
+    model: model.id,
+    usage: emptyUsage(),
+    stopReason: "stop",
+    timestamp: Date.now(),
+  };
+
+  queueMicrotask(() => {
+    stream.push({ type: "done", reason: "stop", message });
     stream.end(message);
   });
 
