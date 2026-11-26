@@ -2,44 +2,24 @@ import { decodeHTML } from "entities";
 import TurndownService from "turndown";
 import type { TWebContentFormat } from "./types";
 
-export type TFormattedWebContent = {
-  content: string;
-  truncated: boolean;
-};
-
-const MAX_FORMATTED_CHARS = 80_000;
 const HIDDEN_ELEMENT_SELECTOR = "script, style, noscript, iframe, object, embed";
 const HIDDEN_TEXT_SELECTOR = `head, title, ${HIDDEN_ELEMENT_SELECTOR}`;
 
 export async function formatWebContent(args: {
   html: string;
   format: TWebContentFormat;
-}): Promise<TFormattedWebContent> {
-  let content: string;
-
+}): Promise<string> {
   switch (args.format) {
     case "html": {
-      content = args.html;
-      break;
+      return args.html;
     }
     case "text": {
-      content = await extractVisibleText(args.html);
-      break;
+      return extractVisibleText(args.html);
     }
     case "markdown": {
-      content = new TurndownService().turndown(await stripHiddenMarkup(args.html));
-      break;
+      return new TurndownService().turndown(await stripHiddenMarkup(args.html));
     }
   }
-
-  if (content.length <= MAX_FORMATTED_CHARS) {
-    return { content, truncated: false };
-  }
-
-  return {
-    content: content.slice(0, MAX_FORMATTED_CHARS),
-    truncated: true,
-  };
 }
 
 export async function extractVisibleText(html: string): Promise<string> {

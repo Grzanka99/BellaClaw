@@ -13,6 +13,12 @@ export const SWebFetchArgs = obj({
       description: "Timeout in seconds; defaults to 15 and cannot exceed 45",
     }),
   ),
+  start: opt(
+    int({
+      minimum: 0,
+      description: "Offset to read from; the nextStart of a truncated result",
+    }),
+  ),
 });
 
 export function validateWebFetchArgs(
@@ -35,7 +41,7 @@ export const webFetch = defineTool({
   schema: SWebFetchArgs,
   instructions,
   mode: "parallel",
-  logSafe: ["format", "timeout", "contentType", "truncated"],
+  logSafe: ["format", "timeout", "start", "contentType", "totalChars", "truncated", "nextStart"],
   execute: async (_context, args, signal) => {
     return fetchWeb(validateWebFetchArgs(args), signal);
   },

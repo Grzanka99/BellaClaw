@@ -8,7 +8,7 @@ describe("formatWebContent", () => {
       format: "text",
     });
 
-    expect(result).toEqual({ content: "Before Visible After", truncated: false });
+    expect(result).toBe("Before Visible After");
   });
 
   test("strips hidden markup before markdown conversion", async () => {
@@ -24,11 +24,10 @@ describe("formatWebContent", () => {
       format: "markdown",
     });
 
-    expect(result.content).toContain("Hello");
-    expect(result.content).toContain("World");
-    expect(result.content).not.toContain("hidden()");
-    expect(result.content).not.toContain(".hidden");
-    expect(result.truncated).toBe(false);
+    expect(result).toContain("Hello");
+    expect(result).toContain("World");
+    expect(result).not.toContain("hidden()");
+    expect(result).not.toContain(".hidden");
   });
 
   for (const { name, closingHead } of [
@@ -41,7 +40,7 @@ describe("formatWebContent", () => {
         format: "text",
       });
 
-      expect(result).toEqual({ content: "Visible After", truncated: false });
+      expect(result).toBe("Visible After");
     });
   }
 });
@@ -53,10 +52,7 @@ describe("HTML entity text formatting", () => {
       format: "text",
     });
 
-    expect(result).toEqual({
-      content: "Fish & chips <3 © 😀 © &lt;",
-      truncated: false,
-    });
+    expect(result).toBe("Fish & chips <3 © 😀 © &lt;");
   });
 
   test("preserves literal characters and normalizes whitespace", async () => {
@@ -65,7 +61,7 @@ describe("HTML entity text formatting", () => {
       format: "text",
     });
 
-    expect(result.content).toBe("Plain text with < 3 and > 2 & signs");
+    expect(result).toBe("Plain text with < 3 and > 2 & signs");
   });
 
   test("keeps entity references and words intact across rewriter chunks", async () => {
@@ -75,17 +71,6 @@ describe("HTML entity text formatting", () => {
       format: "text",
     });
 
-    expect(result.content).toBe(`${"x".repeat(1023)}&lt;${"y".repeat(2050)} next`);
-    expect(result.truncated).toBe(false);
-  });
-
-  test("applies the character limit after decoding", async () => {
-    const result = await formatWebContent({
-      html: `<body><p>${"&copy;".repeat(80_001)}</p></body>`,
-      format: "text",
-    });
-
-    expect(result.content).toBe("©".repeat(80_000));
-    expect(result.truncated).toBe(true);
+    expect(result).toBe(`${"x".repeat(1023)}&lt;${"y".repeat(2050)} next`);
   });
 });

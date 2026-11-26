@@ -1,17 +1,25 @@
+import type { TOption } from "@bellaclaw/shared";
+
 export type TWebContentFormat = "markdown" | "text" | "html";
 
 export type TFetchWebArgs = {
   url: string;
   format?: TWebContentFormat;
   timeout?: number;
+  start?: number;
 };
 
 export type TFetchWebResult = {
   url: string;
   contentType: string;
   format: TWebContentFormat;
-  content: string;
+  // length of the whole formatted page
+  totalChars: number;
+  // true when the page continues after `content`
   truncated: boolean;
+  // the `start` that reads the next part
+  nextStart: TOption<number>;
+  content: string;
 };
 
 export type TWebSearchTopic = "general" | "news" | "finance";

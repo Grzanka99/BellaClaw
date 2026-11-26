@@ -1,48 +1,52 @@
-import { formatWebContent, isSupportedTextContentType, type TFormattedWebContent } from "./html";
+import type { TOption } from "@bellaclaw/shared";
+import { formatWebContent, isSupportedTextContentType } from "./html";
 import { fetchTextWithLimit } from "./http";
 import type { TFetchWebArgs, TFetchWebResult, TWebContentFormat } from "./types";
 
 const FETCH_MAX_BYTES = 5_000_000;
-const MAX_FORMATTED_CHARS = 80_000;
+// One call returns this much of the formatted page; `start` reads a later part.
+const PART_MAX_CHARS = 20_000;
 
 export async function fetchWeb(
   args: TFetchWebArgs,
   signal?: AbortSignal,
+  network?: Parameters<typeof fetchTextWithLimit>[1],
 ): Promise<TFetchWebResult> {
   const format = args.format ?? "markdown";
   const timeoutSeconds = args.timeout ?? 15;
-  const { response, text, url } = await fetchTextWithLimit({
-    url: args.url,
-    timeoutMs: timeoutSeconds * 1000,
-    maxBytes: FETCH_MAX_BYTES,
-    signal,
-    headers: {
-      accept: acceptHeaderForFormat(format),
-    },
-    validateResponseHeaders(response) {
-      const contentType = response.headers.get("content-type") ?? "";
+  const { response, text, url } = await fetchTextWithLimit(
+    {
+      url: args.url,
+      timeoutMs: timeoutSeconds * 1000,
+      maxBytes: FETCH_MAX_BYTES,
+      signal,
+      headers: {
+        accept: acceptHeaderForFormat(format),
+      },
+      validateResponseHeaders(response) {
+        const contentType = response.headers.get("content-type") ?? "";
 
-      if (!isSupportedTextContentType(contentType)) {
-        let displayContentType = contentType;
+        if (!isSupportedTextContentType(contentType)) {
+          let displayContentType = contentType;
 
-        if (displayContentType === "") {
-          displayContentType = "unknown";
+          if (displayContentType === "") {
+            displayContentType = "unknown";
+          }
+
+          throw new Error(`Unsupported content type: ${displayContentType}`);
         }
-
-        throw new Error(`Unsupported content type: ${displayContentType}`);
-      }
+      },
     },
-  });
+    network,
+  );
   const contentType = response.headers.get("content-type") ?? "";
   const [mediaType = ""] = contentType.split(";");
   const normalizedContentType = mediaType.trim().toLowerCase();
   const isHtml =
     normalizedContentType === "text/html" || normalizedContentType === "application/xhtml+xml";
-  let formatted: TFormattedWebContent;
+  let formatted = text;
 
-  if (!isHtml && format === "text") {
-    formatted = truncatePlainText(text);
-  } else {
+  if (isHtml || format !== "text") {
     let html = text;
 
     if (!isHtml && format !== "html") {
@@ -55,12 +59,22 @@ export async function fetchWeb(
     });
   }
 
+  const start = args.start ?? 0;
+  const end = start + PART_MAX_CHARS;
+  let nextStart: TOption<number>;
+
+  if (end < formatted.length) {
+    nextStart = end;
+  }
+
   return {
     url,
     contentType,
     format,
-    content: formatted.content,
-    truncated: formatted.truncated,
+    totalChars: formatted.length,
+    truncated: nextStart !== undefined,
+    nextStart,
+    content: formatted.slice(start, end),
   };
 }
 
@@ -76,17 +90,6 @@ function acceptHeaderForFormat(format: TWebContentFormat): string {
       return "text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.5";
     }
   }
-}
-
-function truncatePlainText(text: string): { content: string; truncated: boolean } {
-  if (text.length <= MAX_FORMATTED_CHARS) {
-    return { content: text, truncated: false };
-  }
-
-  return {
-    content: text.slice(0, MAX_FORMATTED_CHARS),
-    truncated: true,
-  };
 }
 
 function escapePlainTextForFormatting(text: string): string {

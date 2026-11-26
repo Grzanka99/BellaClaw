@@ -8,7 +8,7 @@
     <name>web-fetch</name>
     <description>
       Fetches a public http or https URL, follows validated redirects, rejects unsupported or binary content,
-      and returns markdown, text, or HTML content with truncation metadata.
+      and returns markdown, text, or HTML content, a long page in parts.
     </description>
   </tool>
 
@@ -17,7 +17,7 @@
     <rule>Prefer markdown for normal reading and summarization.</rule>
     <rule>Use text when the user wants plain extracted text.</rule>
     <rule>Use html only when raw markup is specifically useful.</rule>
-    <rule>If content is truncated, say that the answer is based on the fetched portion when relevant.</rule>
+    <rule>If truncated and more is needed, repeat the call with start = nextStart. Use only parts read.</rule>
     <rule>Do not expose raw tool errors or JSON payloads to the user.</rule>
   </usage_rules>
 
