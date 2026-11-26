@@ -241,14 +241,17 @@ export class AgentHarness {
         tools,
         messages,
       },
-      streamFn: (model, context, options) => {
+      streamFn: async (model, context, options) => {
         if (iterations >= agentDefinition.maxIterations) {
           return createHardLimitStream(model);
         }
 
         iterations += 1;
         requestSpan = startSpan(args.trace, "model.request.completed", "agent-harness");
-        return this.llm.stream(model, modelConfig, context, options ?? {}, sessionId);
+        // NOTE: nothing reads the deltas, so the loop gets the finished message of a retried call
+        const stream = createAssistantMessageEventStream();
+        stream.end(await this.llm.complete(modelConfig, context, options ?? {}, sessionId));
+        return stream;
       },
       getApiKey: (provider) => this.llm.resolveApiKey(provider),
       toolExecution: "parallel",
